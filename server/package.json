@@ -1,0 +1,14 @@
+{
+  "name": "forart-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node forart-server.mjs",
+    "dev": "node forart-server.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {}
+}

@@ -1,0 +1,6 @@
+node_modules
+.forart-data
+data
+*.log
+*.err.log
+npm-debug.log*
