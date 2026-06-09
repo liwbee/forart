@@ -22,7 +22,9 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
     startY: number;
     startPanX: number;
     startPanY: number;
+    moved: boolean;
   } | null>(null);
+  const suppressBackdropClickRef = useRef(false);
 
   useEffect(() => {
     const loadToken = loadTokenRef.current + 1;
@@ -102,6 +104,7 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
       startY: event.clientY,
       startPanX: transform.x,
       startPanY: transform.y,
+      moved: false,
     };
     setIsDragging(true);
   }
@@ -110,8 +113,10 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
+    event.stopPropagation();
     const deltaX = event.clientX - drag.startX;
     const deltaY = event.clientY - drag.startY;
+    if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) drag.moved = true;
     setTransform((currentTransform) => ({
       ...currentTransform,
       x: drag.startPanX + deltaX,
@@ -122,13 +127,66 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
   function stopDrag(event: React.PointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    suppressBackdropClickRef.current = drag.moved;
+    if (drag.moved) {
+      window.setTimeout(() => {
+        suppressBackdropClickRef.current = false;
+      }, 0);
+    }
     dragRef.current = null;
     setIsDragging(false);
   }
 
+  function handleBlankClick(event: React.MouseEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    if (event.target !== event.currentTarget) return;
+    if (suppressBackdropClickRef.current) {
+      suppressBackdropClickRef.current = false;
+      return;
+    }
+    onClose();
+  }
+
+  function isolateViewerEvent(event: React.SyntheticEvent) {
+    event.stopPropagation();
+  }
+
+  function blockViewerWheel(event: React.WheelEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function blockViewerContextMenu(event: React.MouseEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
   return createPortal(
-    <div className="model-image-viewer-backdrop" role="dialog" aria-modal="true" aria-label={ariaLabel || t("shared.imagePreview")}>
-      <div className={`model-image-viewer-stage${isDragging ? " dragging" : ""}`} onClick={onClose}>
+    <div
+      className="model-image-viewer-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label={ariaLabel || t("shared.imagePreview")}
+      onPointerDown={isolateViewerEvent}
+      onPointerMove={isolateViewerEvent}
+      onPointerUp={isolateViewerEvent}
+      onPointerCancel={isolateViewerEvent}
+      onWheel={blockViewerWheel}
+      onContextMenu={blockViewerContextMenu}
+      onClick={handleBlankClick}
+    >
+      <div
+        className={`model-image-viewer-stage${isDragging ? " dragging" : ""}`}
+        onPointerDown={isolateViewerEvent}
+        onPointerMove={isolateViewerEvent}
+        onPointerUp={isolateViewerEvent}
+        onPointerCancel={isolateViewerEvent}
+        onWheel={blockViewerWheel}
+        onContextMenu={blockViewerContextMenu}
+        onClick={handleBlankClick}
+      >
         <div
           className="model-image-viewer"
           style={{

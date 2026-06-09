@@ -36,7 +36,7 @@ function renderView(activeView: AppView, appConfig: ForartAppConfig, onConfigCha
   if (activeView === "canvas") {
     return (
       <Suspense fallback={<div className="view-loading">{appConfig ? "Loading canvas..." : ""}</div>}>
-        <CanvasPage />
+        <CanvasPage imageDownloadPath={appConfig.imageDownloadPath} />
       </Suspense>
     );
   }

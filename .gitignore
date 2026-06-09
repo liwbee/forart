@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .forart-data/
+CanvasAssests/
 data/
 config.json
 *.log

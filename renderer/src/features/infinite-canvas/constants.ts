@@ -1,10 +1,9 @@
 import type { CanvasNodeType, CropAspectKey } from "./types";
 
 export const NODE_DEFAULTS: Record<CanvasNodeType, { w: number; h: number; title: string }> = {
-  image: { w: 260, h: 300, title: "Image" },
+  generator: { w: 300, h: 400, title: "Generate" },
+  image: { w: 300, h: 400, title: "Image" },
   prompt: { w: 310, h: 220, title: "Prompt" },
-  output: { w: 420, h: 300, title: "Output" },
-  group: { w: 340, h: 230, title: "Group" },
   loop: { w: 330, h: 270, title: "Loop" },
 };
 

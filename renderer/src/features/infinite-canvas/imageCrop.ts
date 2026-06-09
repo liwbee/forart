@@ -157,7 +157,7 @@ export function cropRectForAspect(rect: CropRect, node: CanvasNode, aspect: Crop
 }
 
 export function cropImageToRect(url: string, naturalWidth: number, naturalHeight: number, rect: CropRect, contentRect: CropRect) {
-  return new Promise<{ url: string; width: number; height: number } | null>((resolve) => {
+  return new Promise<{ dataUrl: string; width: number; height: number } | null>((resolve) => {
     const image = new window.Image();
     image.onload = () => {
       const scaleX = naturalWidth / Math.max(1, contentRect.w);
@@ -175,13 +175,7 @@ export function cropImageToRect(url: string, naturalWidth: number, naturalHeight
         return;
       }
       context.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          resolve(null);
-          return;
-        }
-        resolve({ url: URL.createObjectURL(blob), width: sw, height: sh });
-      }, "image/png");
+      resolve({ dataUrl: canvas.toDataURL("image/png"), width: sw, height: sh });
     };
     image.onerror = () => resolve(null);
     image.src = url;

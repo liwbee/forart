@@ -1,19 +1,20 @@
-import { ImagePlus, Play, Upload } from "lucide-react";
-import type { PointerEvent } from "react";
+import { Sparkles, UploadCloud } from "lucide-react";
+import { useEffect, useState, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { CanvasNode, CropRect } from "../types";
+
+function formatElapsedTime(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
 
 interface ImageNodeBodyProps {
   node: CanvasNode;
   cropRect: CropRect | null;
-  isPromptOpen: boolean;
   setFileInputRef: (input: HTMLInputElement | null) => void;
-  onFileChange: (file?: File) => void;
-  onPatch: (patch: Partial<CanvasNode>) => void;
-  onRun: () => void;
-  onUpload: () => void;
+  onFiles: (files: FileList | File[]) => void;
   onPreview: () => void;
-  onTogglePrompt: () => void;
   onStartCropInteraction: (event: PointerEvent<HTMLDivElement | HTMLButtonElement>, mode: "move" | "resize") => void;
   onCropPointerMove: (event: PointerEvent<HTMLElement>) => void;
   onStopCropInteraction: (event: PointerEvent<HTMLElement>) => void;
@@ -22,32 +23,39 @@ interface ImageNodeBodyProps {
 export function ImageNodeBody({
   node,
   cropRect,
-  isPromptOpen,
   setFileInputRef,
-  onFileChange,
-  onPatch,
-  onRun,
-  onUpload,
+  onFiles,
   onPreview,
-  onTogglePrompt,
   onStartCropInteraction,
   onCropPointerMove,
   onStopCropInteraction,
 }: ImageNodeBodyProps) {
   const { t } = useTranslation();
-  const isGenerator = node.imageMode !== "asset";
+  const hasImage = Boolean(node.url);
+  const isGenerator = node.type === "generator";
+  const isGenerating = isGenerator && Boolean(node.running);
+  const [loadedSize, setLoadedSize] = useState<{ width: number; height: number } | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const imageWidth = Math.round(node.imageNaturalWidth || loadedSize?.width || 0);
+  const imageHeight = Math.round(node.imageNaturalHeight || loadedSize?.height || 0);
+  const imageResolution = imageWidth > 0 && imageHeight > 0 ? `${imageWidth} x ${imageHeight}` : "";
 
-  function runFromPrompt() {
-    onRun();
-  }
+  useEffect(() => {
+    setLoadedSize(null);
+  }, [node.url]);
 
-  function activateImageNode() {
-    if (isGenerator) {
-      onTogglePrompt();
+  useEffect(() => {
+    if (!isGenerating) {
+      setElapsedSeconds(0);
       return;
     }
-    if (node.url) onPreview();
-  }
+    const startedAt = Date.now();
+    setElapsedSeconds(0);
+    const interval = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [isGenerating]);
 
   return (
     <div className="ic-node-body nowheel">
@@ -55,28 +63,65 @@ export function ImageNodeBody({
         ref={setFileInputRef}
         type="file"
         accept="image/*"
+        multiple
         hidden
-        onChange={(event) => onFileChange(event.target.files?.[0])}
+        onChange={(event) => {
+          if (event.target.files?.length) onFiles(event.target.files);
+          event.target.value = "";
+        }}
       />
       <div
-        className={`ic-image-drop${isGenerator ? " ic-image-prompt-trigger" : ""}${node.url ? " has-image" : ""}`}
-        role="button"
-        tabIndex={0}
-        aria-label={isGenerator ? t("infiniteCanvas.openImagePrompt") : t("infiniteCanvas.viewLargeImage")}
+        className={`ic-image-drop${hasImage ? " has-image" : ""}${isGenerating ? " is-generating" : ""}`}
+        role={hasImage ? "button" : undefined}
+        tabIndex={hasImage ? 0 : undefined}
+        aria-label={hasImage ? t("infiniteCanvas.viewLargeImage") : isGenerator ? t("infiniteCanvas.generatorNode") : t("infiniteCanvas.uploadNodeTitle")}
+        onClick={(event) => {
+          if (hasImage) return;
+          event.preventDefault();
+          event.stopPropagation();
+        }}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
-          activateImageNode();
-        }}
-        onClick={() => {
-          if (isGenerator) onTogglePrompt();
+          if (hasImage) onPreview();
         }}
         onDoubleClick={() => {
-          if (!isGenerator && node.url) onPreview();
+          if (hasImage) onPreview();
         }}
       >
-        {node.url ? <img src={node.url} alt={node.fileName || "canvas input"} draggable={false} /> : <ImagePlus size={34} aria-hidden="true" />}
-        {node.url ? null : <span>{t("infiniteCanvas.imageNodeEmptyAction")}</span>}
+        {node.url ? (
+          <>
+            <img
+              src={node.url}
+              alt={node.fileName || "canvas input"}
+              draggable={false}
+              onLoad={(event) => {
+                const image = event.currentTarget;
+                if (!image.naturalWidth || !image.naturalHeight) return;
+                setLoadedSize({ width: image.naturalWidth, height: image.naturalHeight });
+              }}
+            />
+            {imageResolution && !isGenerating ? <span className="ic-image-resolution-badge">{imageResolution}</span> : null}
+          </>
+        ) : (
+          <div className="ic-upload-node-card">
+            <span className="ic-upload-node-main" aria-hidden="true">
+              {isGenerator ? <Sparkles size={24} /> : <UploadCloud size={24} />}
+            </span>
+            <span className="ic-upload-node-title">{isGenerator ? t("infiniteCanvas.generatorNode") : t("infiniteCanvas.imageNode")}</span>
+            <span className="ic-upload-node-sub">{isGenerator ? t("infiniteCanvas.generatorNodeEmptyAction") : t("infiniteCanvas.imageNodeEmptyAction")}</span>
+          </div>
+        )}
+        {isGenerating ? (
+          <>
+            <span className="ic-generator-timer" aria-label={`Generation elapsed ${formatElapsedTime(elapsedSeconds)}`}>
+              {formatElapsedTime(elapsedSeconds)}
+            </span>
+            <div className="ic-generator-running" role="status" aria-live="polite">
+              <span>{node.generationStatus || t("infiniteCanvas.running")}</span>
+            </div>
+          </>
+        ) : null}
         {node.url && cropRect ? (
           <div
             className="ic-inline-crop nodrag nopan"
@@ -107,27 +152,6 @@ export function ImageNodeBody({
           </div>
         ) : null}
       </div>
-      {isGenerator && isPromptOpen ? (
-        <div className="ic-image-prompt-popover nodrag nopan nowheel" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
-          <textarea
-            className="nodrag nopan nowheel"
-            value={node.text || ""}
-            placeholder={t("infiniteCanvas.imagePromptPlaceholder")}
-            aria-label={t("infiniteCanvas.imagePrompt")}
-            onChange={(event) => onPatch({ text: event.target.value })}
-          />
-          <div className="ic-image-prompt-popover__actions">
-            <button className="ic-image-prompt-secondary nodrag nopan" type="button" onClick={onUpload}>
-              <Upload size={15} aria-hidden="true" />
-              {t("common.actions.uploadImage")}
-            </button>
-            <button className="ic-run-button nodrag nopan" type="button" onClick={runFromPrompt}>
-              <Play size={15} aria-hidden="true" />
-              {t("infiniteCanvas.runGenerator")}
-            </button>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

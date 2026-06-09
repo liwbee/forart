@@ -1,4 +1,4 @@
-import { Boxes, CircleDot, ImagePlus, Repeat2, TextCursorInput, type LucideIcon } from "lucide-react";
+import { ImageIcon, ImagePlus, Repeat2, TextCursorInput, type LucideIcon } from "lucide-react";
 import { NODE_DEFAULTS } from "../constants";
 import type { CanvasNode, CanvasNodeType } from "../types";
 
@@ -11,12 +11,19 @@ export interface CanvasNodeDefinition {
 }
 
 export const NODE_DEFINITIONS: Record<CanvasNodeType, CanvasNodeDefinition> = {
+  generator: {
+    type: "generator",
+    label: "Generator",
+    icon: ImagePlus,
+    defaultSize: NODE_DEFAULTS.generator,
+    init: (node) => ({ ...node, text: "", imageMode: "generator", imageSource: "generated" }),
+  },
   image: {
     type: "image",
     label: "Image",
-    icon: ImagePlus,
+    icon: ImageIcon,
     defaultSize: NODE_DEFAULTS.image,
-    init: (node) => ({ ...node, text: "", imageMode: "generator" }),
+    init: (node) => ({ ...node, text: "", imageMode: "asset", imageSource: "uploaded" }),
   },
   prompt: {
     type: "prompt",
@@ -24,20 +31,6 @@ export const NODE_DEFINITIONS: Record<CanvasNodeType, CanvasNodeDefinition> = {
     icon: TextCursorInput,
     defaultSize: NODE_DEFAULTS.prompt,
     init: (node) => ({ ...node, text: "" }),
-  },
-  output: {
-    type: "output",
-    label: "Output",
-    icon: CircleDot,
-    defaultSize: NODE_DEFAULTS.output,
-    init: (node) => ({ ...node, generated: [] }),
-  },
-  group: {
-    type: "group",
-    label: "Group",
-    icon: Boxes,
-    defaultSize: NODE_DEFAULTS.group,
-    init: (node) => ({ ...node, items: [] }),
   },
   loop: {
     type: "loop",
@@ -53,8 +46,6 @@ export const NODE_DEFINITIONS: Record<CanvasNodeType, CanvasNodeDefinition> = {
     }),
   },
 };
-
-export const NODE_TYPE_ORDER: CanvasNodeType[] = ["image", "prompt", "output", "loop", "group"];
 
 export function getNodeDefinition(type: CanvasNodeType) {
   return NODE_DEFINITIONS[type];

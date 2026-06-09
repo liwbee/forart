@@ -1,4 +1,4 @@
-export type CanvasNodeType = "image" | "prompt" | "output" | "group" | "loop";
+export type CanvasNodeType = "generator" | "image" | "prompt" | "loop";
 
 export interface CanvasNode {
   id: string;
@@ -14,21 +14,18 @@ export interface CanvasNode {
   imageNaturalHeight?: number;
   imageMode?: "generator" | "asset";
   imageSource?: "generated" | "uploaded";
+  imageProviderId?: string;
+  imageModel?: string;
+  imageResolution?: "1k" | "2k" | "4k";
+  imageAspectRatio?: "1:1" | "2:3" | "3:2" | "4:3" | "3:4" | "16:9" | "9:16";
+  generationError?: string;
+  generationStatus?: string;
   text?: string;
   count?: number;
   mode?: "serial" | "batch";
   fixedPrompt?: string;
   variablePrompt?: string;
-  generated?: OutputItem[];
-  items?: string[];
   running?: boolean;
-}
-
-export interface OutputItem {
-  id: string;
-  title: string;
-  prompt: string;
-  createdAt: number;
 }
 
 export interface CanvasConnection {
@@ -80,4 +77,25 @@ export interface CanvasSnapshot {
   nodes: CanvasNode[];
   connections: CanvasConnection[];
   viewport: Viewport;
+}
+
+export interface CanvasProject extends CanvasSnapshot {
+  id: string;
+  title: string;
+  icon?: string;
+  color?: string;
+  pinned?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CanvasProjectRecord {
+  id: string;
+  title: string;
+  icon?: string;
+  color?: string;
+  pinned?: boolean;
+  createdAt: number;
+  updatedAt: number;
+  nodeCount: number;
 }
