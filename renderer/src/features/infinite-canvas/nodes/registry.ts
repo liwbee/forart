@@ -1,4 +1,4 @@
-import { ImageIcon, ImagePlus, Repeat2, TextCursorInput, type LucideIcon } from "lucide-react";
+import { Bot, ImageIcon, ImagePlus, Palette, Repeat2, Tv, TextCursorInput, type LucideIcon } from "lucide-react";
 import { NODE_DEFAULTS } from "../constants";
 import type { CanvasNode, CanvasNodeType } from "../types";
 
@@ -11,12 +11,12 @@ export interface CanvasNodeDefinition {
 }
 
 export const NODE_DEFINITIONS: Record<CanvasNodeType, CanvasNodeDefinition> = {
-  generator: {
-    type: "generator",
-    label: "Generator",
+  imageGenerator: {
+    type: "imageGenerator",
+    label: "Image Generation",
     icon: ImagePlus,
-    defaultSize: NODE_DEFAULTS.generator,
-    init: (node) => ({ ...node, text: "", imageMode: "generator", imageSource: "generated" }),
+    defaultSize: NODE_DEFAULTS.imageGenerator,
+    init: (node) => ({ ...node, text: "", imageMode: "imageGenerator", imageSource: "generated" }),
   },
   image: {
     type: "image",
@@ -44,6 +44,64 @@ export const NODE_DEFINITIONS: Record<CanvasNodeType, CanvasNodeDefinition> = {
       fixedPrompt: "",
       variablePrompt: "",
     }),
+  },
+  llm: {
+    type: "llm",
+    label: "LLM Model",
+    icon: Bot,
+    defaultSize: NODE_DEFAULTS.llm,
+    init: (node) => ({
+      ...node,
+      text: "",
+      generationError: "",
+      generationStatus: "",
+    }),
+  },
+  lovart: {
+    type: "lovart",
+    label: "Lovart",
+    icon: Palette,
+    defaultSize: NODE_DEFAULTS.lovart,
+    init: (node) => ({
+      ...node,
+      text: "",
+      lovartMode: "fast",
+      lovartModel: "",
+      generationError: "",
+      generationStatus: "",
+      imageSource: "generated",
+    }),
+  },
+  libtvImage: {
+    type: "libtvImage",
+    label: "LibTV Image",
+    icon: Tv,
+    defaultSize: NODE_DEFAULTS.libtvImage,
+    init: (node) => ({
+      ...node,
+      text: "",
+      libtvModel: "",
+      libtvModelName: "",
+      libtvResolution: "1k",
+      libtvAspectRatio: "1:1",
+      generationError: "",
+      generationStatus: "",
+      imageSource: "generated",
+    }),
+  },
+  libtvPrompt: {
+    type: "libtvPrompt",
+    label: "LibTV Prompt",
+    icon: TextCursorInput,
+    defaultSize: NODE_DEFAULTS.libtvPrompt,
+    init: (node) => ({ ...node, text: "" }),
+  },
+  libtvUpload: {
+    type: "libtvUpload",
+    label: "LibTV Upload",
+    icon: ImageIcon,
+    defaultSize: NODE_DEFAULTS.libtvUpload,
+    init: (node) => ({ ...node, text: "", imageMode: "asset", imageSource: "uploaded" }),
   },
 };
 

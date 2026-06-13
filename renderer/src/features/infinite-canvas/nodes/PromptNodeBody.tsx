@@ -7,20 +7,29 @@ interface PromptNodeBodyProps {
   isEditing: boolean;
   onEditingChange: (editing: boolean) => void;
   onPatch: (patch: Partial<CanvasNode>) => void;
+  onCommit?: (text: string) => void;
 }
 
-export function PromptNodeBody({ node, isEditing, onEditingChange, onPatch }: PromptNodeBodyProps) {
+export function PromptNodeBody({ node, isEditing, onEditingChange, onPatch, onCommit }: PromptNodeBodyProps) {
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const committedRef = useRef(false);
 
   useEffect(() => {
     if (!isEditing) return;
+    committedRef.current = false;
     textareaRef.current?.focus();
     textareaRef.current?.select();
   }, [isEditing]);
 
   function enterEditing() {
     onEditingChange(true);
+  }
+
+  function commitText(text: string) {
+    if (committedRef.current) return;
+    committedRef.current = true;
+    onCommit?.(text);
   }
 
   return (
@@ -31,10 +40,14 @@ export function PromptNodeBody({ node, isEditing, onEditingChange, onPatch }: Pr
           className="nodrag nopan nowheel ic-prompt-textarea"
           value={node.text || ""}
           placeholder={t("infiniteCanvas.promptPlaceholder")}
-          onBlur={() => onEditingChange(false)}
+          onBlur={(event) => {
+            commitText(event.target.value);
+            onEditingChange(false);
+          }}
           onKeyDown={(event) => {
             if (event.key !== "Escape") return;
             event.preventDefault();
+            commitText(event.currentTarget.value);
             onEditingChange(false);
           }}
           onChange={(event) => onPatch({ text: event.target.value })}

@@ -22,7 +22,6 @@ No shared package is used. Generated or hand-written client types should stay in
 GET /api/health
 GET /api/settings/storage
 PATCH /api/settings/storage
-POST /api/model-library/import-legacy
 ```
 
 ## Assets

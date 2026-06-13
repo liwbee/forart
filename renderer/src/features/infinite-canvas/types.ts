@@ -1,4 +1,4 @@
-export type CanvasNodeType = "generator" | "image" | "prompt" | "loop";
+export type CanvasNodeType = "imageGenerator" | "image" | "prompt" | "loop" | "llm" | "lovart" | "libtvImage" | "libtvPrompt" | "libtvUpload";
 
 export interface CanvasNode {
   id: string;
@@ -10,14 +10,28 @@ export interface CanvasNode {
   title: string;
   url?: string;
   fileName?: string;
+  filePath?: string;
   imageNaturalWidth?: number;
   imageNaturalHeight?: number;
-  imageMode?: "generator" | "asset";
+  imageMode?: "imageGenerator" | "asset";
   imageSource?: "generated" | "uploaded";
   imageProviderId?: string;
   imageModel?: string;
   imageResolution?: "1k" | "2k" | "4k";
   imageAspectRatio?: "1:1" | "2:3" | "3:2" | "4:3" | "3:4" | "16:9" | "9:16";
+  chatProviderId?: string;
+  chatModel?: string;
+  lovartProjectId?: string;
+  lovartThreadId?: string;
+  lovartModel?: string;
+  lovartMode?: "fast" | "unlimited";
+  libtvProjectId?: string;
+  libtvNodeId?: string;
+  libtvModel?: string;
+  libtvModelName?: string;
+  libtvResolution?: "1k" | "2k" | "4k";
+  libtvAspectRatio?: "1:1" | "2:3" | "3:2" | "4:3" | "3:4" | "16:9" | "9:16";
+  libtvOriginalUrl?: string;
   generationError?: string;
   generationStatus?: string;
   text?: string;
@@ -32,6 +46,16 @@ export interface CanvasConnection {
   id: string;
   from: string;
   to: string;
+}
+
+export interface CanvasGroup {
+  id: string;
+  title: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  nodeIds: string[];
 }
 
 export interface Viewport {
@@ -76,6 +100,7 @@ export interface CropInteractionState {
 export interface CanvasSnapshot {
   nodes: CanvasNode[];
   connections: CanvasConnection[];
+  groups: CanvasGroup[];
   viewport: Viewport;
 }
 
@@ -83,6 +108,10 @@ export interface CanvasProject extends CanvasSnapshot {
   id: string;
   title: string;
   icon?: string;
+  canvasType?: "forart" | "forart-libtv";
+  source?: "forart" | "libtv";
+  libtvProjectId?: string;
+  libtvProjectName?: string;
   color?: string;
   pinned?: boolean;
   createdAt: number;
@@ -93,6 +122,10 @@ export interface CanvasProjectRecord {
   id: string;
   title: string;
   icon?: string;
+  canvasType?: "forart" | "forart-libtv";
+  source?: "forart" | "libtv";
+  libtvProjectId?: string;
+  libtvProjectName?: string;
   color?: string;
   pinned?: boolean;
   createdAt: number;

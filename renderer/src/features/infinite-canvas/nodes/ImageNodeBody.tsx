@@ -1,4 +1,4 @@
-import { Sparkles, UploadCloud } from "lucide-react";
+import { Download, Sparkles, UploadCloud } from "lucide-react";
 import { useEffect, useState, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { CanvasNode, CropRect } from "../types";
@@ -14,7 +14,10 @@ interface ImageNodeBodyProps {
   cropRect: CropRect | null;
   setFileInputRef: (input: HTMLInputElement | null) => void;
   onFiles: (files: FileList | File[]) => void;
+  onUploadClick: () => void;
   onPreview: () => void;
+  onDownload: () => void;
+  isDownloadBusy: boolean;
   onStartCropInteraction: (event: PointerEvent<HTMLDivElement | HTMLButtonElement>, mode: "move" | "resize") => void;
   onCropPointerMove: (event: PointerEvent<HTMLElement>) => void;
   onStopCropInteraction: (event: PointerEvent<HTMLElement>) => void;
@@ -25,15 +28,22 @@ export function ImageNodeBody({
   cropRect,
   setFileInputRef,
   onFiles,
+  onUploadClick,
   onPreview,
+  onDownload,
+  isDownloadBusy,
   onStartCropInteraction,
   onCropPointerMove,
   onStopCropInteraction,
 }: ImageNodeBodyProps) {
   const { t } = useTranslation();
   const hasImage = Boolean(node.url);
-  const isGenerator = node.type === "generator";
-  const isGenerating = isGenerator && Boolean(node.running);
+  const isImageGenerator = node.type === "imageGenerator";
+  const isLovart = node.type === "lovart";
+  const isLibtv = node.type === "libtvImage";
+  const isGeneratorLike = isImageGenerator || isLovart || isLibtv;
+  const isGenerating = isGeneratorLike && Boolean(node.running);
+  const showGeneratorDownload = hasImage && isGeneratorLike && !isGenerating;
   const [loadedSize, setLoadedSize] = useState<{ width: number; height: number } | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const imageWidth = Math.round(node.imageNaturalWidth || loadedSize?.width || 0);
@@ -74,7 +84,7 @@ export function ImageNodeBody({
         className={`ic-image-drop${hasImage ? " has-image" : ""}${isGenerating ? " is-generating" : ""}`}
         role={hasImage ? "button" : undefined}
         tabIndex={hasImage ? 0 : undefined}
-        aria-label={hasImage ? t("infiniteCanvas.viewLargeImage") : isGenerator ? t("infiniteCanvas.generatorNode") : t("infiniteCanvas.uploadNodeTitle")}
+        aria-label={hasImage ? t("infiniteCanvas.viewLargeImage") : isGeneratorLike ? t(isLovart ? "infiniteCanvas.lovart" : isLibtv ? "infiniteCanvas.libtvImage" : "infiniteCanvas.imageGeneratorNode") : t("infiniteCanvas.uploadNodeTitle")}
         onClick={(event) => {
           if (hasImage) return;
           event.preventDefault();
@@ -101,15 +111,68 @@ export function ImageNodeBody({
                 setLoadedSize({ width: image.naturalWidth, height: image.naturalHeight });
               }}
             />
+            {!isGeneratorLike ? (
+              <button
+                className="ic-image-replace-button nodrag nopan"
+                type="button"
+                aria-label={t("common.actions.uploadImage")}
+                title={t("common.actions.uploadImage")}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onUploadClick();
+                }}
+              >
+                <UploadCloud size={14} aria-hidden="true" />
+              </button>
+            ) : null}
+            {showGeneratorDownload ? (
+              <button
+                className="ic-image-download-button nodrag nopan"
+                type="button"
+                aria-label={t("infiniteCanvas.downloadImage")}
+                title={t("infiniteCanvas.downloadImage")}
+                disabled={isDownloadBusy}
+                onPointerDown={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onDownload();
+                }}
+              >
+                <Download size={14} aria-hidden="true" />
+              </button>
+            ) : null}
             {imageResolution && !isGenerating ? <span className="ic-image-resolution-badge">{imageResolution}</span> : null}
           </>
         ) : (
-          <div className="ic-upload-node-card">
+          <div className={`ic-upload-node-card${isGeneratorLike ? " is-generator" : " is-uploader"}`}>
             <span className="ic-upload-node-main" aria-hidden="true">
-              {isGenerator ? <Sparkles size={24} /> : <UploadCloud size={24} />}
+              {isGeneratorLike ? <Sparkles size={24} /> : <UploadCloud size={24} />}
             </span>
-            <span className="ic-upload-node-title">{isGenerator ? t("infiniteCanvas.generatorNode") : t("infiniteCanvas.imageNode")}</span>
-            <span className="ic-upload-node-sub">{isGenerator ? t("infiniteCanvas.generatorNodeEmptyAction") : t("infiniteCanvas.imageNodeEmptyAction")}</span>
+            {isGeneratorLike ? (
+              <>
+                <span className="ic-upload-node-title">{t(isLovart ? "infiniteCanvas.lovart" : isLibtv ? "infiniteCanvas.libtvImage" : "infiniteCanvas.imageGeneratorNode")}</span>
+                <span className="ic-upload-node-sub">{t(isLovart ? "infiniteCanvas.lovartPromptPlaceholder" : isLibtv ? "infiniteCanvas.libtvPromptPlaceholder" : "infiniteCanvas.imageGeneratorNodeEmptyAction")}</span>
+              </>
+            ) : (
+              <button
+                className="ic-upload-node-button nodrag nopan"
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onUploadClick();
+                }}
+              >
+                {t("infiniteCanvas.imageNode")}
+              </button>
+            )}
           </div>
         )}
         {isGenerating ? (

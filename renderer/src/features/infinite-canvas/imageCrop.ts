@@ -5,7 +5,7 @@ import {
   IMAGE_NODE_MIN_WIDTH,
   NODE_DEFAULTS,
 } from "./constants";
-import { clamp } from "./geometry";
+import { clamp } from "./canvasGeometry";
 import type { CanvasNode, CropAspectKey, CropRect } from "./types";
 
 export function fitImageNodeSize(naturalWidth: number, naturalHeight: number) {

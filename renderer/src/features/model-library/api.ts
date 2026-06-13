@@ -1,10 +1,6 @@
 import { apiRequest } from "../../lib/apiClient";
 import { AssetUploadPayload, ModelEntry, ModelFilters, ModelImage, ModelProject, ModelTag, StorageSettings } from "./types";
 
-const LEGACY_STORAGE_KEY = "forart_model_library_v1";
-const LEGACY_MIGRATION_KEY = "forart_model_library_v1_migrated_to_disk";
-let legacyMigrationPromise: Promise<void> | null = null;
-
 export const modelLibraryKeys = {
   projects: ["modelProjects"] as const,
   tags: ["modelTags"] as const,
@@ -22,22 +18,7 @@ function queryString(params: Record<string, string | undefined>) {
   return text ? `?${text}` : "";
 }
 
-async function ensureLegacyMigration() {
-  if (typeof window === "undefined") return;
-  const legacy = window.localStorage.getItem(LEGACY_STORAGE_KEY);
-  if (!legacy || window.localStorage.getItem(LEGACY_MIGRATION_KEY)) return;
-  legacyMigrationPromise ??= apiRequest<{ ok: true }>("/api/model-library/import-legacy", {
-    method: "POST",
-    body: legacy,
-  }).then(() => {
-    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
-    window.localStorage.setItem(LEGACY_MIGRATION_KEY, new Date().toISOString());
-  });
-  await legacyMigrationPromise;
-}
-
-export async function listModelProjects() {
-  await ensureLegacyMigration();
+export function listModelProjects() {
   return apiRequest<{ projects: ModelProject[] }>("/api/model-projects");
 }
 
@@ -94,8 +75,7 @@ export function deleteModel(modelId: string) {
   });
 }
 
-export async function listModelTags() {
-  await ensureLegacyMigration();
+export function listModelTags() {
   return apiRequest<{ tags: ModelTag[] }>("/api/libraries/model/tags");
 }
 

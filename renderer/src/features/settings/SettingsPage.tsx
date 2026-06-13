@@ -1,8 +1,8 @@
-import { FolderOpen, KeyRound, Plus, RefreshCw, Save, Server, Settings, TestTube2, Trash2 } from "lucide-react";
+﻿import { Download, FolderOpen, KeyRound, LogIn, LogOut, Plus, RefreshCw, Save, Server, Settings, TestTube2, Trash2 } from "lucide-react";
 import { FormEvent, PointerEvent, UIEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ForartAppConfig, ForartMode, normalizeConfig } from "../../app/appConfig";
-import { createApiProvider, loadApiSettings, normalizeApiProvider, readApiProviders, readDefaultImageProviderId, saveApiSettings, uniqueModels, type ApiProvider } from "./apiProviders";
+import { ForartAppConfig, ForartMode, normalizeConfig, type LibtvAccountRecord } from "../../app/appConfig";
+import { createApiProvider, getModelDisplayName, loadApiSettings, normalizeApiProvider, readApiProviders, readDefaultImageProviderId, saveApiSettings, uniqueModels, type ApiModelKind, type ApiProvider } from "./apiProviders";
 
 interface SettingsPageProps {
   config: ForartAppConfig;
@@ -15,13 +15,57 @@ interface StatusState {
 }
 
 type SettingsTab = "general" | "api";
-type ApiModelKind = "image" | "chat" | "video";
-type ApiAction = "verify" | "fetch" | "";
+type ApiSettingsPane = "provider" | "libtv";
+type ApiAction = "verify" | "fetch" | "lovart-test" | "libtv-check" | "libtv-install" | "libtv-login" | "libtv-logout" | "";
 
 interface FetchedModelEntry {
   id: string;
   kind: ApiModelKind;
   selected: boolean;
+}
+
+interface LibtvAccountSummary {
+  accountName: string;
+  memberName: string;
+  updatedAt: string;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function accountText(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return "";
+}
+
+function formatLibtvUpdatedAt(date = new Date()) {
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function summarizeLibtvAccount(account: unknown): LibtvAccountSummary {
+  const root = asRecord(account);
+  const user = asRecord(root?.user);
+  const activeAccount = asRecord(root?.activeAccount);
+  const memberAccount = asRecord(activeAccount?.memberAccount);
+  return {
+    accountName: accountText(activeAccount?.accountName, memberAccount?.memberName, user?.nickname),
+    memberName: accountText(memberAccount?.memberName, activeAccount?.memberName, root?.memberName),
+    updatedAt: formatLibtvUpdatedAt(),
+  };
+}
+
+function libtvAccountTypeLabel(account: LibtvAccountRecord, t: (key: string) => string) {
+  return account.accountType === 2 ? t("settings.libtvTeamAccount") : t("settings.libtvPersonalAccount");
 }
 
 function formatModelsUrl(provider: ApiProvider) {
@@ -67,6 +111,16 @@ function classifyModel(id: string): ApiModelKind {
   return "chat";
 }
 
+function LibtvLogo() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="77" height="17" fill="currentColor" viewBox="0 0 76.234 16.79" aria-hidden="true">
+      <path d="M16.576 16.616H0l.833-4.418H17.65z" />
+      <path d="m0 16.616 2.314-12.27h4.448l-2.316 12.27zM8.27 0h16.936l-.832 4.416H7.544z" />
+      <path d="m25.206 0-2.314 12.27-4.512.002L20.76 0zM30.857 14.816 33.09 2.217h2.7l-1.82 10.276h4.968l-.415 2.321h-7.666zM41.025 6.328h2.556l-1.639 8.488h-2.537l1.619-8.488zm.235-2.51c0-.882.701-1.547 1.566-1.547.81 0 1.367.54 1.367 1.315 0 .882-.702 1.547-1.566 1.547-.81 0-1.367-.54-1.367-1.314M53.696 9.488c0 3.077-2.232 5.435-4.933 5.435-1.458 0-2.268-.559-2.735-1.296l-.45 1.189h-2.232L45.56 2.217h2.538l-.738 4.265c.63-.63 1.44-1.025 2.555-1.025 2.214 0 3.78 1.71 3.78 4.03m-2.574.198c0-1.422-.756-2.16-1.87-2.16-1.657 0-2.7 1.547-2.7 3.168 0 1.421.774 2.16 1.89 2.16 1.638 0 2.682-1.548 2.682-3.168zM53.929 2.217h9.934l-.395 2.321H59.85L58.03 14.814h-2.699l1.819-10.276h-3.618zM72.934 2.217h2.879l-6.497 12.599h-3.222L64.042 2.217h2.772l1.368 9.322z" />
+    </svg>
+  );
+}
+
 export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
@@ -80,9 +134,16 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   const [saving, setSaving] = useState(false);
   const [apiProviders, setApiProviders] = useState<ApiProvider[]>(readApiProviders);
   const [selectedProviderId, setSelectedProviderId] = useState(() => readApiProviders()[0]?.id || "");
+  const [activeApiPane, setActiveApiPane] = useState<ApiSettingsPane>("provider");
   const [defaultImageProviderId, setDefaultImageProviderId] = useState(readDefaultImageProviderId);
   const [apiAction, setApiAction] = useState<ApiAction>("");
   const [apiStatus, setApiStatus] = useState<StatusState>({ tone: "idle", text: t("settings.apiActionReady") });
+  const [libtvStatus, setLibtvStatus] = useState<StatusState>({ tone: "idle", text: t("settings.libtvStatusIdle") });
+  const [libtvLoggedIn, setLibtvLoggedIn] = useState(false);
+  const [libtvAvailable, setLibtvAvailable] = useState(false);
+  const [libtvAccount, setLibtvAccount] = useState<LibtvAccountSummary | null>(null);
+  const [libtvAccounts, setLibtvAccounts] = useState<LibtvAccountRecord[]>([]);
+  const [activeLibtvAccountId, setActiveLibtvAccountId] = useState("");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelPickerFilter, setModelPickerFilter] = useState("");
   const [modelPickerTab, setModelPickerTab] = useState<ApiModelKind | "all">("all");
@@ -131,7 +192,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     }
     if (!apiProviders.length && selectedProviderId) setSelectedProviderId("");
     if (apiProviders.length && defaultImageProviderId && !apiProviders.some((provider) => provider.id === defaultImageProviderId)) {
-      const nextDefault = apiProviders.find((provider) => provider.imageModels.length)?.id || apiProviders[0].id;
+      const nextDefault = apiProviders.find((provider) => provider.protocol !== "lovart" && provider.imageModels.length)?.id || apiProviders.find((provider) => provider.protocol !== "lovart")?.id || "";
       setDefaultImageProviderId(nextDefault);
     }
     if (!apiProviders.length && defaultImageProviderId) {
@@ -156,6 +217,11 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
       });
     });
   }, [selectedProvider?.imageModels.length, selectedProvider?.chatModels.length, selectedProvider?.videoModels.length]);
+
+  useEffect(() => {
+    if (activeTab !== "api" || activeApiPane !== "libtv" || !window.libtv?.status) return;
+    void refreshLibtvStatus();
+  }, [activeTab, activeApiPane]);
 
   async function chooseDirectory() {
     const result = await window.forartConfig?.chooseDirectory();
@@ -222,6 +288,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     setApiProviders((current) => {
       const provider = createApiProvider(current);
       setSelectedProviderId(provider.id);
+      setActiveApiPane("provider");
       return [...current, provider];
     });
   }
@@ -234,6 +301,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   async function requestProviderModels(provider: ApiProvider) {
     const url = formatModelsUrl(provider);
     const headers: HeadersInit = { Accept: "application/json" };
+    if (provider.protocol === "lovart") return [];
     if (provider.protocol === "gemini" && provider.apiKey.trim()) {
       headers["x-goog-api-key"] = provider.apiKey.trim();
     } else if (provider.apiKey.trim()) {
@@ -285,6 +353,129 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
             ? t("settings.apiBaseUrlInvalid")
             : t("settings.apiVerifyFailed", { message }),
       });
+    } finally {
+      setApiAction("");
+    }
+  }
+
+  async function testLovartConnection() {
+    if (!selectedProvider || selectedProvider.protocol !== "lovart") return;
+    setApiAction("lovart-test");
+    setApiStatus({ tone: "busy", text: t("settings.lovartTesting") });
+    try {
+      if (!window.lovart?.test) throw new Error("Lovart bridge is not available.");
+      const result = await window.lovart.test({ providerId: selectedProvider.id });
+      setApiStatus({ tone: "ready", text: t("settings.lovartTestSuccess", { mode: result.mode || "fast" }) });
+    } catch (error) {
+      setApiStatus({ tone: "error", text: t("settings.lovartTestFailed", { message: error instanceof Error ? error.message : String(error) }) });
+    } finally {
+      setApiAction("");
+    }
+  }
+
+  async function refreshLibtvStatus() {
+    setApiAction("libtv-check");
+    setLibtvStatus({ tone: "busy", text: t("settings.libtvChecking") });
+    try {
+      if (!window.libtv?.status || !window.libtv.account) throw new Error("LibTV bridge is not available.");
+      const statusResult = await window.libtv.status();
+      setLibtvAvailable(Boolean(statusResult.available));
+      if (!statusResult.available) {
+        setLibtvLoggedIn(false);
+        setLibtvAccount(null);
+        setLibtvAccounts([]);
+        setActiveLibtvAccountId("");
+        setLibtvStatus({ tone: "error", text: statusResult.error || t("settings.libtvUnavailable") });
+        return;
+      }
+      const accountResult = await window.libtv.account();
+      setLibtvLoggedIn(Boolean(accountResult.loggedIn));
+      setLibtvAccount(accountResult.loggedIn ? summarizeLibtvAccount(accountResult.account) : null);
+      if (accountResult.loggedIn && window.libtv.accounts) {
+        const accountsResult = await window.libtv.accounts();
+        const accounts = accountsResult.accounts || [];
+        setLibtvAccounts(accounts);
+        const activeAccount = accounts.find((account) => account.isActive) || accounts[0];
+        setActiveLibtvAccountId(activeAccount?.accountId !== undefined ? String(activeAccount.accountId) : "");
+      } else {
+        setLibtvAccounts([]);
+        setActiveLibtvAccountId("");
+      }
+      setLibtvStatus({
+        tone: accountResult.loggedIn ? "ready" : "error",
+        text: accountResult.loggedIn ? t("settings.libtvLoggedIn") : t("settings.libtvNotLoggedIn"),
+      });
+    } catch (error) {
+      setLibtvLoggedIn(false);
+      setLibtvAvailable(false);
+      setLibtvAccount(null);
+      setLibtvAccounts([]);
+      setActiveLibtvAccountId("");
+      setLibtvStatus({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setApiAction("");
+    }
+  }
+
+  async function installLibtvCli() {
+    setApiAction("libtv-install");
+    setLibtvStatus({ tone: "busy", text: t("settings.libtvInstalling") });
+    try {
+      if (!window.libtv?.install) throw new Error("LibTV bridge is not available.");
+      await window.libtv.install();
+      setLibtvStatus({ tone: "ready", text: t("settings.libtvInstallSuccess") });
+      await refreshLibtvStatus();
+    } catch (error) {
+      setLibtvStatus({ tone: "error", text: t("settings.libtvInstallFailed", { message: error instanceof Error ? error.message : String(error) }) });
+    } finally {
+      setApiAction("");
+    }
+  }
+
+  async function loginLibtvWeb() {
+    setApiAction("libtv-login");
+    setLibtvStatus({ tone: "busy", text: t("settings.libtvOpeningLogin") });
+    try {
+      if (!window.libtv?.loginWeb) throw new Error("LibTV bridge is not available.");
+      await window.libtv.loginWeb();
+      await refreshLibtvStatus();
+    } catch (error) {
+      setLibtvStatus({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setApiAction("");
+    }
+  }
+
+  async function switchLibtvAccount(accountId: string) {
+    if (!accountId || accountId === activeLibtvAccountId) return;
+    setApiAction("libtv-check");
+    setActiveLibtvAccountId(accountId);
+    setLibtvStatus({ tone: "busy", text: t("settings.libtvSwitchingAccount") });
+    try {
+      if (!window.libtv?.useAccount) throw new Error("LibTV bridge is not available.");
+      await window.libtv.useAccount(accountId);
+      await refreshLibtvStatus();
+    } catch (error) {
+      setLibtvStatus({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      await refreshLibtvStatus();
+    } finally {
+      setApiAction("");
+    }
+  }
+
+  async function logoutLibtv() {
+    setApiAction("libtv-logout");
+    setLibtvStatus({ tone: "busy", text: t("settings.libtvLoggingOut") });
+    try {
+      if (!window.libtv?.logout) throw new Error("LibTV bridge is not available.");
+      await window.libtv.logout();
+      setLibtvLoggedIn(false);
+      setLibtvAccount(null);
+      setLibtvAccounts([]);
+      setActiveLibtvAccountId("");
+      setLibtvStatus({ tone: "idle", text: t("settings.libtvLoggedOut") });
+    } catch (error) {
+      setLibtvStatus({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     } finally {
       setApiAction("");
     }
@@ -397,8 +588,9 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     setApiProviders((current) => {
       const next = current.filter((provider) => provider.id !== selectedProvider.id);
       setSelectedProviderId(next[0]?.id || "");
+      if (!next.length) setActiveApiPane("libtv");
       if (defaultImageProviderId === selectedProvider.id) {
-        const nextDefault = next.find((provider) => provider.imageModels.length)?.id || next[0]?.id || "";
+        const nextDefault = next.find((provider) => provider.protocol !== "lovart" && provider.imageModels.length)?.id || next.find((provider) => provider.protocol !== "lovart")?.id || "";
         setDefaultImageProviderId(nextDefault);
       }
       return next;
@@ -406,6 +598,8 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   }
 
   function changeDefaultImageProvider(providerId: string) {
+    const provider = apiProviders.find((item) => item.id === providerId);
+    if (provider?.protocol === "lovart") return;
     setDefaultImageProviderId(providerId);
   }
 
@@ -421,10 +615,44 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     patchSelectedProvider({ [key]: selectedProvider[key].map((model, modelIndex) => (modelIndex === index ? value : model)) } as Partial<ApiProvider>);
   }
 
+  function updateModelAlias(kind: ApiModelKind, model: string, value: string) {
+    if (!selectedProvider || !model) return;
+    patchSelectedProvider({
+      modelAliases: {
+        ...selectedProvider.modelAliases,
+        [kind]: {
+          ...selectedProvider.modelAliases[kind],
+          [model]: value,
+        },
+      },
+    });
+  }
+
+  function clearEmptyModelAlias(kind: ApiModelKind, model: string) {
+    if (!selectedProvider || !model) return;
+    const current = selectedProvider.modelAliases[kind]?.[model];
+    if (current === undefined || current.trim()) return;
+    const { [model]: _removed, ...nextAliases } = selectedProvider.modelAliases[kind];
+    patchSelectedProvider({
+      modelAliases: {
+        ...selectedProvider.modelAliases,
+        [kind]: nextAliases,
+      },
+    });
+  }
+
   function deleteModel(kind: ApiModelKind, index: number) {
     if (!selectedProvider) return;
     const key = kind === "image" ? "imageModels" : kind === "chat" ? "chatModels" : "videoModels";
-    patchSelectedProvider({ [key]: selectedProvider[key].filter((_, modelIndex) => modelIndex !== index) } as Partial<ApiProvider>);
+    const model = selectedProvider[key][index];
+    const { [model]: _removed, ...nextAliases } = selectedProvider.modelAliases[kind];
+    patchSelectedProvider({
+      [key]: selectedProvider[key].filter((_, modelIndex) => modelIndex !== index),
+      modelAliases: {
+        ...selectedProvider.modelAliases,
+        [kind]: nextAliases,
+      },
+    } as Partial<ApiProvider>);
   }
 
   function updateModelScrollbar(kind: ApiModelKind, element: HTMLElement) {
@@ -491,14 +719,32 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
         </div>
         <div className="settings-api-model-list-wrap">
           <div className="settings-api-model-list" data-kind={kind} onScroll={(event) => handleModelListScroll(kind, event)} onMouseEnter={(event) => updateModelScrollbar(kind, event.currentTarget)}>
-            {models.length ? models.map((model, index) => (
+            {models.length ? models.map((model, index) => {
+              const alias = selectedProvider.modelAliases[kind]?.[model];
+              const displayName = alias ?? model;
+              return (
               <div className="settings-api-model-row" key={`${kind}-${index}`}>
-                <input value={model} onChange={(event) => updateModel(kind, index, event.target.value)} placeholder={t("settings.modelNamePlaceholder")} />
+                {model ? (
+                  <label className="settings-api-model-alias">
+                    <input
+                      value={displayName}
+                      onChange={(event) => updateModelAlias(kind, model, event.target.value)}
+                      onBlur={() => clearEmptyModelAlias(kind, model)}
+                      placeholder={model}
+                      title={model}
+                    />
+                    <small title={model}>{model}</small>
+                  </label>
+                ) : (
+                  <label className="settings-api-model-alias">
+                    <input value={model} onChange={(event) => updateModel(kind, index, event.target.value)} placeholder={t("settings.modelNamePlaceholder")} />
+                  </label>
+                )}
                 <button type="button" aria-label={t("settings.deleteModel")} title={t("settings.deleteModel")} onClick={() => deleteModel(kind, index)}>
                   <Trash2 size={15} aria-hidden="true" />
                 </button>
               </div>
-            )) : <div className="settings-api-empty-row">{t("settings.noModels")}</div>}
+            );}) : <div className="settings-api-empty-row">{t("settings.noModels")}</div>}
           </div>
           {modelScrollbars[kind].visible ? (
             <div className="settings-api-custom-scrollbar" aria-hidden="true">
@@ -654,38 +900,63 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
             <aside className="settings-api-sidebar" aria-label={t("settings.providerList")}>
               <div className="settings-api-sidebar-title">{t("settings.providerList")}</div>
               <div className="settings-api-provider-list">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className={`settings-api-provider-card settings-api-provider-card--libtv${activeApiPane === "libtv" ? " active" : ""}`}
+                  aria-label={t("settings.libtvCliSettings")}
+                  title={t("settings.libtvCliSettings")}
+                  onClick={() => setActiveApiPane("libtv")}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    setActiveApiPane("libtv");
+                  }}
+                >
+                  <span className="settings-api-provider-logo">
+                    <LibtvLogo />
+                  </span>
+                </div>
                 {apiProviders.length ? apiProviders.map((provider) => (
                   <div
                     key={provider.id}
                     role="button"
                     tabIndex={0}
-                    className={`settings-api-provider-card${provider.id === selectedProvider?.id ? " active" : ""}`}
-                    onClick={() => setSelectedProviderId(provider.id)}
+                    className={`settings-api-provider-card${activeApiPane === "provider" && provider.id === selectedProvider?.id ? " active" : ""}`}
+                    onClick={() => {
+                      setActiveApiPane("provider");
+                      setSelectedProviderId(provider.id);
+                    }}
                     onKeyDown={(event) => {
                       if (event.key !== "Enter" && event.key !== " ") return;
                       event.preventDefault();
+                      setActiveApiPane("provider");
                       setSelectedProviderId(provider.id);
                     }}
                   >
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      className={`settings-api-default-button${provider.id === defaultImageProviderId ? " active" : ""}`}
-                      aria-pressed={provider.id === defaultImageProviderId}
-                      aria-label={t("settings.defaultImageProvider")}
-                      title={t("settings.defaultImageProvider")}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        changeDefaultImageProvider(provider.id);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key !== "Enter" && event.key !== " ") return;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        changeDefaultImageProvider(provider.id);
-                      }}
-                    />
+                    {provider.protocol === "lovart" ? (
+                      <span className="settings-api-default-button disabled" title={t("settings.lovartSeparateProvider")} />
+                    ) : (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        className={`settings-api-default-button${provider.id === defaultImageProviderId ? " active" : ""}`}
+                        aria-pressed={provider.id === defaultImageProviderId}
+                        aria-label={t("settings.defaultImageProvider")}
+                        title={t("settings.defaultImageProvider")}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          changeDefaultImageProvider(provider.id);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          changeDefaultImageProvider(provider.id);
+                        }}
+                      />
+                    )}
                     <span className="settings-api-provider-mark">
                       <KeyRound size={15} aria-hidden="true" />
                     </span>
@@ -704,7 +975,83 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
             </aside>
 
             <main className="settings-api-content">
-              {selectedProvider ? (
+              {activeApiPane === "libtv" ? (
+                <section className="settings-api-block settings-libtv-card">
+                  <div className="settings-libtv-brand-panel">
+                    <span className="settings-api-provider-logo settings-api-provider-logo--head settings-libtv-brand-logo">
+                      <LibtvLogo />
+                    </span>
+                    <div className="settings-libtv-install-control">
+                      {libtvAvailable ? (
+                        <button
+                          type="button"
+                          className="settings-libtv-installed-button"
+                          disabled={apiAction !== ""}
+                          onClick={installLibtvCli}
+                          aria-label={t("settings.libtvUpdateCli")}
+                          title={t("settings.libtvUpdateCli")}
+                        >
+                          <RefreshCw size={15} aria-hidden="true" />
+                          <span className="settings-libtv-installed-button__divider" aria-hidden="true" />
+                          <span>{apiAction === "libtv-install" ? t("settings.libtvInstallingButton") : t("settings.libtvInstalled")}</span>
+                        </button>
+                      ) : (
+                        <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={apiAction !== ""} onClick={installLibtvCli}>
+                          <Download size={15} aria-hidden="true" />
+                          <span>{apiAction === "libtv-install" ? t("settings.libtvInstallingButton") : t("settings.libtvInstallCli")}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="settings-libtv-account-panel">
+                    <label className="settings-libtv-account-switcher">
+                      <span>{t("settings.libtvAccountName")}</span>
+                      <select
+                        value={activeLibtvAccountId}
+                        disabled={apiAction !== "" || !libtvAccounts.length}
+                        onChange={(event) => void switchLibtvAccount(event.target.value)}
+                      >
+                        {libtvAccounts.length ? libtvAccounts.map((account) => (
+                          <option key={account.accountId ?? account.accountName} value={String(account.accountId ?? "")}>
+                            {`${account.accountName || account.accountId || "-"} · ${libtvAccountTypeLabel(account, t)}`}
+                          </option>
+                        )) : (
+                          <option value="">{t("settings.libtvNoAccounts")}</option>
+                        )}
+                      </select>
+                    </label>
+                    <div className="settings-libtv-account-grid">
+                      <div className="settings-libtv-account-field">
+                        <span>{t("settings.libtvPlanInfo")}</span>
+                        <strong>{libtvAccount?.memberName || "-"}</strong>
+                      </div>
+                      <div className="settings-libtv-account-field">
+                        <span>{t("settings.libtvAccountUpdatedAt")}</span>
+                        <strong>{libtvAccount?.updatedAt || "-"}</strong>
+                      </div>
+                    </div>
+                    <div className="settings-api-test-actions">
+                      {libtvLoggedIn ? (
+                        <>
+                          <button type="button" className="settings-api-action-button settings-libtv-status-button settings-libtv-status-button--ready" disabled={apiAction !== ""} onClick={refreshLibtvStatus}>
+                            <RefreshCw size={15} aria-hidden="true" />
+                            <span>{apiAction === "libtv-check" ? t("settings.libtvCheckingButton") : t("settings.libtvLoggedInShort")}</span>
+                          </button>
+                          <button type="button" className="settings-api-action-button" disabled={apiAction !== ""} onClick={logoutLibtv}>
+                            <LogOut size={15} aria-hidden="true" />
+                            <span>{t("settings.libtvLogout")}</span>
+                          </button>
+                        </>
+                      ) : libtvAvailable ? (
+                        <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={apiAction !== ""} onClick={loginLibtvWeb}>
+                          <LogIn size={15} aria-hidden="true" />
+                          <span>{apiAction === "libtv-login" ? t("settings.libtvLoginWaiting") : t("settings.libtvLoginWeb")}</span>
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </section>
+              ) : selectedProvider ? (
                 <>
                   <header className="settings-api-content-head">
                     <div>
@@ -725,51 +1072,81 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                   <section className="settings-api-block">
                     <div className="settings-api-block-head">
                       <div>
-                        <h3>{t("settings.basicInfo")}</h3>
+                        <h3>{selectedProvider.protocol === "lovart" ? t("settings.lovartApiSettings") : t("settings.basicInfo")}</h3>
                       </div>
                     </div>
                     <div className="settings-api-form">
-                      <label className="settings-field">
-                        <span>{t("settings.providerName")}</span>
-                        <input value={selectedProvider.name} onChange={(event) => patchSelectedProvider({ name: event.target.value })} placeholder={t("settings.providerNamePlaceholder")} />
-                      </label>
-                      <label className="settings-field">
-                        <span>{t("settings.baseUrl")}</span>
-                        <input value={selectedProvider.baseUrl} onChange={(event) => patchSelectedProvider({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
-                      </label>
-                      <label className="settings-field">
-                        <span>{t("settings.apiKey")}</span>
-                        <input type="password" value={selectedProvider.apiKey} onChange={(event) => patchSelectedProvider({ apiKey: event.target.value })} placeholder={t("settings.apiKeyPlaceholder")} />
-                      </label>
-                      <label className="settings-field">
-                        <span>{t("settings.protocol")}</span>
-                        <select value={selectedProvider.protocol} onChange={(event) => patchSelectedProvider({ protocol: event.target.value as ApiProvider["protocol"] })}>
-                          <option value="openai">{t("settings.protocolOpenAI")}</option>
-                          <option value="async">{t("settings.protocolAsync")}</option>
-                          <option value="gemini">{t("settings.protocolGemini")}</option>
-                        </select>
-                      </label>
-                      <div className="settings-api-test-row">
-                        <div className="settings-inline-status settings-api-action-status" data-tone={apiStatus.tone}>
-                          {apiStatus.text}
-                        </div>
-                        <div className="settings-api-test-actions">
-                          <button type="button" className="settings-api-action-button" disabled={apiAction !== ""} onClick={verifyApiAddress}>
-                            <TestTube2 size={15} aria-hidden="true" />
-                            <span>{apiAction === "verify" ? t("settings.apiVerifying") : t("settings.verifyAddress")}</span>
-                          </button>
-                          <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={apiAction !== ""} onClick={fetchApiModels}>
-                            <RefreshCw size={15} aria-hidden="true" />
-                            <span>{apiAction === "fetch" ? t("settings.apiFetching") : t("settings.fetchModels")}</span>
-                          </button>
-                        </div>
-                      </div>
+                      {selectedProvider.protocol === "lovart" ? (
+                        <>
+                          <label className="settings-field">
+                            <span>{t("settings.accessKey")}</span>
+                            <input type="password" value={selectedProvider.accessKey} onChange={(event) => patchSelectedProvider({ accessKey: event.target.value })} placeholder={t("settings.accessKeyPlaceholder")} />
+                          </label>
+                          <label className="settings-field">
+                            <span>{t("settings.secretKey")}</span>
+                            <input type="password" value={selectedProvider.secretKey} onChange={(event) => patchSelectedProvider({ secretKey: event.target.value })} placeholder={t("settings.secretKeyPlaceholder")} />
+                          </label>
+                          <div className="settings-api-test-row">
+                            <div className="settings-inline-status settings-api-action-status" data-tone={apiStatus.tone}>
+                              {apiStatus.text}
+                            </div>
+                            <div className="settings-api-test-actions">
+                              <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={apiAction !== ""} onClick={testLovartConnection}>
+                                <TestTube2 size={15} aria-hidden="true" />
+                                <span>{apiAction === "lovart-test" ? t("settings.lovartTestingButton") : t("settings.lovartTestConnection")}</span>
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <label className="settings-field">
+                            <span>{t("settings.providerName")}</span>
+                            <input value={selectedProvider.name} onChange={(event) => patchSelectedProvider({ name: event.target.value })} placeholder={t("settings.providerNamePlaceholder")} />
+                          </label>
+                          <label className="settings-field">
+                            <span>{t("settings.baseUrl")}</span>
+                            <input value={selectedProvider.baseUrl} onChange={(event) => patchSelectedProvider({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
+                          </label>
+                          <label className="settings-field">
+                            <span>{t("settings.apiKey")}</span>
+                            <input type="password" value={selectedProvider.apiKey} onChange={(event) => patchSelectedProvider({ apiKey: event.target.value })} placeholder={t("settings.apiKeyPlaceholder")} />
+                          </label>
+                          <label className="settings-field">
+                            <span>{t("settings.protocol")}</span>
+                            <select value={selectedProvider.protocol} onChange={(event) => patchSelectedProvider({ protocol: event.target.value as ApiProvider["protocol"] })}>
+                              <option value="openai">{t("settings.protocolOpenAI")}</option>
+                              <option value="async">{t("settings.protocolAsync")}</option>
+                              <option value="gemini">{t("settings.protocolGemini")}</option>
+                            </select>
+                          </label>
+                          <div className="settings-api-test-row">
+                            <div className="settings-inline-status settings-api-action-status" data-tone={apiStatus.tone}>
+                              {apiStatus.text}
+                            </div>
+                            <div className="settings-api-test-actions">
+                              <button type="button" className="settings-api-action-button" disabled={apiAction !== ""} onClick={verifyApiAddress}>
+                                <TestTube2 size={15} aria-hidden="true" />
+                                <span>{apiAction === "verify" ? t("settings.apiVerifying") : t("settings.verifyAddress")}</span>
+                              </button>
+                              <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={apiAction !== ""} onClick={fetchApiModels}>
+                                <RefreshCw size={15} aria-hidden="true" />
+                                <span>{apiAction === "fetch" ? t("settings.apiFetching") : t("settings.fetchModels")}</span>
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </section>
 
-                  {renderModelList("image")}
-                  {renderModelList("chat")}
-                  {renderModelList("video")}
+                  {selectedProvider.protocol === "lovart" ? null : (
+                    <>
+                      {renderModelList("image")}
+                      {renderModelList("chat")}
+                      {renderModelList("video")}
+                    </>
+                  )}
                 </>
               ) : (
                 <section className="settings-section settings-section--api" aria-label={t("settings.apiSettings")}>

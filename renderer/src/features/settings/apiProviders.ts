@@ -1,19 +1,26 @@
-export type ApiProviderProtocol = "openai" | "async" | "gemini";
+export type ApiProviderProtocol = "openai" | "async" | "gemini" | "lovart";
+export type ApiModelKind = "image" | "chat" | "video";
+
+export interface ApiModelAliases {
+  image: Record<string, string>;
+  chat: Record<string, string>;
+  video: Record<string, string>;
+}
 
 export interface ApiProvider {
   id: string;
   name: string;
   baseUrl: string;
   apiKey: string;
+  accessKey: string;
+  secretKey: string;
   protocol: ApiProviderProtocol;
   imageModels: string[];
   chatModels: string[];
   videoModels: string[];
+  modelAliases: ApiModelAliases;
 }
 
-export const API_PROVIDER_STORAGE_KEY = "forart_api_providers_v1";
-export const DEFAULT_IMAGE_PROVIDER_STORAGE_KEY = "forart_default_image_provider_v1";
-export const API_SETTINGS_MIGRATION_STORAGE_KEY = "forart_api_settings_config_migrated_v1";
 export const API_PROVIDER_CHANGED_EVENT = "forart-api-providers-changed";
 
 export interface ApiSettings {
@@ -27,6 +34,43 @@ let apiSettingsCache: ApiSettings = {
 };
 let apiSettingsCacheLoaded = false;
 
+export const LOVART_PROVIDER_ID = "lovart";
+export const LOVART_IMAGE_MODELS = [
+  "generate_image_gpt_image_2",
+  "generate_image_gpt_image_2_low",
+  "generate_image_gpt_image_2_medium",
+  "generate_image_gpt_image_2_high",
+  "generate_image_nano_banana_pro",
+  "generate_image_nano_banana_2",
+  "generate_image_gpt_image_1_5",
+  "generate_image_seedream_v5",
+  "generate_image_luma_uni_1",
+  "generate_image_luma_uni_1_max",
+  "generate_image_flux_2_max",
+  "generate_image_flux_2_pro",
+  "generate_image_seedream_v4_5",
+  "generate_image_nano_banana",
+  "generate_image_seedream_v4",
+  "generate_image_midjourney",
+  "generate_image_ideogram_v4",
+];
+
+export function createLovartProvider(): ApiProvider {
+  return {
+    id: LOVART_PROVIDER_ID,
+    name: "Lovart",
+    baseUrl: "https://lgw.lovart.ai",
+    apiKey: "",
+    accessKey: "",
+    secretKey: "",
+    protocol: "lovart",
+    imageModels: LOVART_IMAGE_MODELS,
+    chatModels: [],
+    videoModels: [],
+    modelAliases: emptyModelAliases(),
+  };
+}
+
 export function notifyApiProvidersChanged() {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(API_PROVIDER_CHANGED_EVENT));
@@ -37,6 +81,33 @@ export function uniqueModels(values: string[]) {
   return values
     .map((value) => value.trim())
     .filter((value) => value && !seen.has(value) && seen.add(value));
+}
+
+function emptyModelAliases(): ApiModelAliases {
+  return { image: {}, chat: {}, video: {} };
+}
+
+function normalizeAliasBucket(input: unknown) {
+  if (!input || typeof input !== "object") return {};
+  return Object.entries(input as Record<string, unknown>).reduce<Record<string, string>>((result, [model, alias]) => {
+    const modelId = String(model || "").trim();
+    if (modelId && typeof alias === "string") result[modelId] = alias;
+    return result;
+  }, {});
+}
+
+export function normalizeModelAliases(input: unknown): ApiModelAliases {
+  const record = input && typeof input === "object" ? input as Partial<ApiModelAliases> : {};
+  return {
+    image: normalizeAliasBucket(record.image),
+    chat: normalizeAliasBucket(record.chat),
+    video: normalizeAliasBucket(record.video),
+  };
+}
+
+export function getModelDisplayName(provider: ApiProvider | null | undefined, kind: ApiModelKind, model: string) {
+  const alias = provider?.modelAliases?.[kind]?.[model]?.trim();
+  return alias || model;
 }
 
 export function createProviderId(name: string, providers: ApiProvider[]) {
@@ -61,10 +132,13 @@ export function createApiProvider(providers: ApiProvider[]): ApiProvider {
     name: "API",
     baseUrl: "",
     apiKey: "",
+    accessKey: "",
+    secretKey: "",
     protocol: "openai",
     imageModels: [],
     chatModels: [],
     videoModels: [],
+    modelAliases: emptyModelAliases(),
   };
 }
 
@@ -75,32 +149,14 @@ export function normalizeApiProvider(input: Partial<ApiProvider>, providers: Api
     name,
     baseUrl: String(input.baseUrl || "").trim(),
     apiKey: String(input.apiKey || ""),
-    protocol: input.protocol === "async" || input.protocol === "gemini" ? input.protocol : "openai",
+    accessKey: String(input.accessKey || ""),
+    secretKey: String(input.secretKey || ""),
+    protocol: input.protocol === "async" || input.protocol === "gemini" || input.protocol === "lovart" ? input.protocol : "openai",
     imageModels: Array.isArray(input.imageModels) ? input.imageModels.map(String).filter(Boolean) : [],
     chatModels: Array.isArray(input.chatModels) ? input.chatModels.map(String).filter(Boolean) : [],
     videoModels: Array.isArray(input.videoModels) ? input.videoModels.map(String).filter(Boolean) : [],
+    modelAliases: normalizeModelAliases(input.modelAliases),
   };
-}
-
-function readLegacyApiProviders(): ApiProvider[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(API_PROVIDER_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.reduce<ApiProvider[]>((providers, item) => {
-      const next = normalizeApiProvider(item, providers);
-      return providers.some((provider) => provider.id === next.id) ? providers : [...providers, next];
-    }, []);
-  } catch {
-    return [];
-  }
-}
-
-function readLegacyDefaultImageProviderId() {
-  if (typeof window === "undefined") return "";
-  return window.localStorage.getItem(DEFAULT_IMAGE_PROVIDER_STORAGE_KEY) || "";
 }
 
 function normalizeApiSettings(input: Partial<ApiSettings>): ApiSettings {
@@ -108,8 +164,22 @@ function normalizeApiSettings(input: Partial<ApiSettings>): ApiSettings {
     const next = normalizeApiProvider(item, result);
     return result.some((provider) => provider.id === next.id) ? result : [...result, next];
   }, []) : [];
-  const defaultImageProviderId = providers.some((provider) => provider.id === input.defaultImageProviderId) ? String(input.defaultImageProviderId) : "";
-  return { providers, defaultImageProviderId };
+  const lovartProvider = providers.find((provider) => provider.id === LOVART_PROVIDER_ID || provider.protocol === "lovart");
+  const normalizedProviders = lovartProvider
+    ? providers.map((provider) => (provider === lovartProvider
+      ? normalizeApiProvider({
+        ...createLovartProvider(),
+        ...provider,
+        id: LOVART_PROVIDER_ID,
+        name: provider.name || "Lovart",
+        baseUrl: provider.baseUrl || "https://lgw.lovart.ai",
+        protocol: "lovart",
+        imageModels: provider.imageModels.length ? provider.imageModels : LOVART_IMAGE_MODELS,
+      }, providers.filter((item) => item !== provider))
+      : provider))
+    : [createLovartProvider(), ...providers];
+  const defaultImageProviderId = normalizedProviders.some((provider) => provider.id === input.defaultImageProviderId && provider.protocol !== "lovart") ? String(input.defaultImageProviderId) : "";
+  return { providers: normalizedProviders, defaultImageProviderId };
 }
 
 function setApiSettingsCache(settings: Partial<ApiSettings>) {
@@ -117,27 +187,6 @@ function setApiSettingsCache(settings: Partial<ApiSettings>) {
   apiSettingsCacheLoaded = true;
   notifyApiProvidersChanged();
   return apiSettingsCache;
-}
-
-async function migrateLegacyApiSettingsIfNeeded(settings: ApiSettings) {
-  if (typeof window === "undefined" || !window.forartConfig?.saveApiSettings) return settings;
-  if (window.localStorage.getItem(API_SETTINGS_MIGRATION_STORAGE_KEY)) return settings;
-
-  const legacyProviders = readLegacyApiProviders();
-  const legacyDefaultImageProviderId = readLegacyDefaultImageProviderId();
-  if (!legacyProviders.length && !legacyDefaultImageProviderId) {
-    window.localStorage.setItem(API_SETTINGS_MIGRATION_STORAGE_KEY, new Date().toISOString());
-    return settings;
-  }
-  if (settings.providers.length) {
-    window.localStorage.setItem(API_SETTINGS_MIGRATION_STORAGE_KEY, new Date().toISOString());
-    return settings;
-  }
-
-  const migrated = normalizeApiSettings({ providers: legacyProviders, defaultImageProviderId: legacyDefaultImageProviderId });
-  await window.forartConfig.saveApiSettings(migrated);
-  window.localStorage.setItem(API_SETTINGS_MIGRATION_STORAGE_KEY, new Date().toISOString());
-  return migrated;
 }
 
 export function readApiProviders(): ApiProvider[] {
@@ -154,18 +203,17 @@ export function readApiSettings(): ApiSettings {
 
 export async function loadApiSettings(): Promise<ApiSettings> {
   if (!window.forartConfig?.loadApiSettings) {
-    if (apiSettingsCacheLoaded) return apiSettingsCache;
-    return setApiSettingsCache({ providers: readLegacyApiProviders(), defaultImageProviderId: readLegacyDefaultImageProviderId() });
+    return apiSettingsCacheLoaded ? apiSettingsCache : setApiSettingsCache({});
   }
-  const loaded = normalizeApiSettings(await window.forartConfig.loadApiSettings());
-  return setApiSettingsCache(await migrateLegacyApiSettingsIfNeeded(loaded));
+  const loaded: ApiSettings = normalizeApiSettings(await window.forartConfig.loadApiSettings() as Partial<ApiSettings>);
+  return setApiSettingsCache(loaded);
 }
 
 export async function saveApiSettings(settings: ApiSettings): Promise<ApiSettings> {
   const normalized = setApiSettingsCache(settings);
   if (window.forartConfig?.saveApiSettings) {
     const result = await window.forartConfig.saveApiSettings(normalized);
-    return setApiSettingsCache(result.apiSettings);
+    return setApiSettingsCache(normalizeApiSettings(result.apiSettings as Partial<ApiSettings>));
   }
   return normalized;
 }

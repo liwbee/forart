@@ -10,7 +10,6 @@ This server is a pure API service. It does not serve the Electron renderer, Vite
 GET /api/health
 GET /api/settings/storage
 PATCH /api/settings/storage
-POST /api/model-library/import-legacy
 ```
 
 ## Assets

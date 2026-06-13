@@ -1,7 +1,7 @@
 import type { CanvasConnection, CanvasNode } from "../types";
 
 export function collectPrompt(node: CanvasNode, nodes: CanvasNode[], connections: CanvasConnection[]): string {
-  if (node.type === "prompt") return node.text || "";
+  if (node.type === "prompt" || node.type === "libtvPrompt" || node.type === "llm" || node.type === "lovart") return node.text || "";
   if (node.type === "loop") {
     const variable = node.variablePrompt?.trim();
     const fixed = node.fixedPrompt?.trim();
@@ -14,6 +14,16 @@ export function collectPrompt(node: CanvasNode, nodes: CanvasNode[], connections
 
   return upstream
     .map((candidate) => collectPrompt(candidate, nodes, connections))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+export function collectUpstreamPrompt(node: CanvasNode, nodes: CanvasNode[], connections: CanvasConnection[]): string {
+  return connections
+    .filter((connection) => connection.to === node.id)
+    .map((connection) => nodes.find((candidate) => candidate.id === connection.from))
+    .filter(Boolean)
+    .map((candidate) => collectPrompt(candidate as CanvasNode, nodes, connections))
     .filter(Boolean)
     .join("\n\n");
 }
@@ -33,7 +43,7 @@ export function collectReferenceImages(node: CanvasNode, nodes: CanvasNode[], co
   function visit(candidate: CanvasNode | undefined) {
     if (!candidate || seenNodes.has(candidate.id)) return;
     seenNodes.add(candidate.id);
-    if ((candidate.type === "image" || candidate.type === "generator") && candidate.url) addUrl(candidate.url);
+    if ((candidate.type === "image" || candidate.type === "libtvUpload" || candidate.type === "imageGenerator" || candidate.type === "lovart" || candidate.type === "libtvImage") && candidate.url) addUrl(candidate.url);
     connections
       .filter((connection) => connection.to === candidate.id)
       .forEach((connection) => visit(nodes.find((item) => item.id === connection.from)));
