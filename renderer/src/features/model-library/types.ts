@@ -38,7 +38,7 @@ export interface ModelImage {
 export interface ModelTag {
   id: string;
   kind: "model";
-  project_id: string | null;
+  project_id: string;
   name: string;
   color: string;
   sort_order: number;

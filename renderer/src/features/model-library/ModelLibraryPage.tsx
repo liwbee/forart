@@ -1362,9 +1362,9 @@ export function ModelLibraryPage() {
   });
 
   const tagsQuery = useQuery({
-    queryKey: modelLibraryKeys.tags,
-    queryFn: listModelTags,
-    enabled: storageConfigured,
+    queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : ["modelTags", "empty"],
+    queryFn: () => listModelTags(activeProjectId),
+    enabled: storageConfigured && Boolean(activeProjectId),
   });
 
   const projects = useMemo(() => projectsQuery.data?.projects || [], [projectsQuery.data?.projects]);
@@ -1410,7 +1410,7 @@ export function ModelLibraryPage() {
       if (activeTagId) setActiveTagId("");
       setDeleteConfirmModelId("");
       await queryClient.invalidateQueries({ queryKey: ["models", activeProjectId] });
-      await queryClient.invalidateQueries({ queryKey: modelLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
       openEditor(model.id);
     },
   });
@@ -1428,7 +1428,7 @@ export function ModelLibraryPage() {
       setDeleteConfirmModelId("");
       closeEditor();
       await queryClient.invalidateQueries({ queryKey: ["models", activeProjectId] });
-      await queryClient.invalidateQueries({ queryKey: modelLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
     },
   });
 
@@ -1436,7 +1436,7 @@ export function ModelLibraryPage() {
     mutationFn: ({ modelId, tags }: { modelId: string; tags: string[] }) => updateModel(modelId, { tags }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["models", activeProjectId] });
-      await queryClient.invalidateQueries({ queryKey: modelLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
     },
   });
 
@@ -1477,25 +1477,34 @@ export function ModelLibraryPage() {
   });
 
   const createTagMutation = useMutation({
-    mutationFn: createModelTag,
+    mutationFn: (name: string) => {
+      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      return createModelTag(activeProjectId, name);
+    },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: modelLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
     },
   });
 
   const renameTagMutation = useMutation({
-    mutationFn: ({ tagId, name }: { tagId: string; name: string }) => updateModelTag(tagId, { name }),
+    mutationFn: ({ tagId, name }: { tagId: string; name: string }) => {
+      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      return updateModelTag(activeProjectId, tagId, { name });
+    },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: modelLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
     },
   });
 
   const deleteTagMutation = useMutation({
-    mutationFn: deleteModelTag,
+    mutationFn: (tagId: string) => {
+      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      return deleteModelTag(activeProjectId, tagId);
+    },
     onSuccess: async (result, tagId) => {
       setDeleteConfirmTagId("");
       if (activeTagId === tagId) setActiveTagId("");
-      await queryClient.invalidateQueries({ queryKey: modelLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
       await queryClient.invalidateQueries({ queryKey: ["models", activeProjectId] });
     },
   });
@@ -1517,7 +1526,7 @@ export function ModelLibraryPage() {
       if (activeProjectId === projectId) setActiveProjectId(remaining[0]?.id || "");
       await queryClient.invalidateQueries({ queryKey: modelLibraryKeys.projects });
       await queryClient.invalidateQueries({ queryKey: ["models"] });
-      await queryClient.invalidateQueries({ queryKey: modelLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
     },
   });
 
@@ -1616,9 +1625,8 @@ export function ModelLibraryPage() {
   ]);
 
   return (
-    <section className="model-library-page" aria-labelledby="model-library-title">
-      <div className="model-library-header">
-        <h1 id="model-library-title" className="model-library-title">{t("modelLibrary.title")}</h1>
+    <section className="model-library-page" aria-label={t("modelLibrary.title")}>
+      <div className="model-library-header model-library-header--search-only">
         <label className="model-library-search">
           <Search size={18} aria-hidden="true" />
           <input

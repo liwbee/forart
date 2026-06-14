@@ -315,13 +315,13 @@ function initDatabase() {
   CREATE TABLE IF NOT EXISTS library_tags (
     id TEXT PRIMARY KEY,
     kind TEXT NOT NULL,
-    project_id TEXT,
+    project_id TEXT NOT NULL,
     name TEXT NOT NULL,
     color TEXT NOT NULL DEFAULT '${DEFAULT_TAG_COLOR}',
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    UNIQUE(kind, name)
+    UNIQUE(kind, project_id, name)
   );
   CREATE TABLE IF NOT EXISTS library_entry_tags (
     id TEXT PRIMARY KEY,
@@ -1051,46 +1051,121 @@ function tagUsage(tagId) {
   return db.prepare("SELECT COUNT(*) AS total FROM library_entry_tags WHERE tag_id = ?").get(tagId)?.total || 0;
 }
 
-function listTags() {
+function deleteProjectTags(kind, projectId) {
+  const tags = db.prepare("SELECT id FROM library_tags WHERE kind = ? AND project_id = ?").all(kind, projectId);
+  for (const tag of tags) db.prepare("DELETE FROM library_entry_tags WHERE tag_id = ?").run(tag.id);
+  db.prepare("DELETE FROM library_tags WHERE kind = ? AND project_id = ?").run(kind, projectId);
+}
+
+function listTags(kind, projectId) {
   return db.prepare(
     `
     SELECT *
     FROM library_tags
-    WHERE kind = 'model'
+    WHERE kind = ? AND project_id = ?
     ORDER BY sort_order ASC, name ASC
     `
-  ).all().map((tag) => ({
+  ).all(kind, projectId).map((tag) => ({
     ...tag,
     usage_count: tagUsage(tag.id),
   }));
 }
 
-function listOutfitTags() {
-  return db.prepare(
-    `
-    SELECT *
-    FROM library_tags
-    WHERE kind = 'outfit'
-    ORDER BY sort_order ASC, name ASC
-    `
-  ).all().map((tag) => ({
-    ...tag,
-    usage_count: tagUsage(tag.id),
-  }));
+function projectExistsForKind(kind, projectId) {
+  if (kind === "model") return Boolean(loadProject(projectId));
+  if (kind === "outfit") return Boolean(loadOutfitProject(projectId));
+  if (kind === "action") return Boolean(loadActionProject(projectId));
+  return false;
 }
 
-function listActionTags() {
-  return db.prepare(
-    `
-    SELECT *
-    FROM library_tags
-    WHERE kind = 'action'
-    ORDER BY sort_order ASC, name ASC
-    `
-  ).all().map((tag) => ({
-    ...tag,
-    usage_count: tagUsage(tag.id),
-  }));
+function createProjectTag(kind, projectId, name) {
+  const existing = db.prepare("SELECT * FROM library_tags WHERE kind = ? AND project_id = ? AND name = ?").get(kind, projectId, name);
+  if (existing) return { ...existing, usage_count: tagUsage(existing.id) };
+  const timestamp = nowIso();
+  const id = newId("tag");
+  const sortOrder = db.prepare("SELECT COUNT(*) AS total FROM library_tags WHERE kind = ? AND project_id = ?").get(kind, projectId)?.total || 0;
+  db.prepare(
+    "INSERT INTO library_tags (id, kind, project_id, name, color, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(id, kind, projectId, name, DEFAULT_TAG_COLOR, sortOrder + 1, timestamp, timestamp);
+  const tag = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(id);
+  return { ...tag, usage_count: 0 };
+}
+
+function ensureProjectTag(kind, projectId, name) {
+  const tagName = String(name || "").trim().replace(/\s+/g, " ").slice(0, 24);
+  if (!tagName) return null;
+  return createProjectTag(kind, projectId, tagName);
+}
+
+function updateEntryTags(kind, entryId, projectId, names) {
+  const nextTags = normalizeTags(names);
+  db.prepare("DELETE FROM library_entry_tags WHERE kind = ? AND entry_id = ?").run(kind, entryId);
+  for (const name of nextTags) {
+    const tag = ensureProjectTag(kind, projectId, name);
+    if (!tag) continue;
+    db.prepare(
+      "INSERT OR IGNORE INTO library_entry_tags (id, kind, entry_id, tag_id, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(newId("entrytag"), kind, entryId, tag.id, nowIso());
+  }
+}
+
+function handleProjectTagApi(req, res, { kind, projectId, tagId }) {
+  if (!projectId) {
+    sendJson(res, 400, { detail: "project_id is required" });
+    return true;
+  }
+  if (!projectExistsForKind(kind, projectId)) {
+    sendJson(res, 404, { detail: "Project not found" });
+    return true;
+  }
+  const method = String(req.method || "GET").toUpperCase();
+  if (method === "GET" && !tagId) {
+    sendJson(res, 200, { tags: listTags(kind, projectId) });
+    return true;
+  }
+  if (method === "POST" && !tagId) {
+    parseJsonBody(req)
+      .then((payload) => {
+        const name = String(payload?.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
+        if (!name) return sendJson(res, 400, { detail: "Tag name is required" });
+        sendJson(res, 200, createProjectTag(kind, projectId, name));
+      })
+      .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+  if (method === "PATCH" && tagId) {
+    parseJsonBody(req)
+      .then((payload) => {
+        const tag = db.prepare("SELECT * FROM library_tags WHERE id = ? AND kind = ? AND project_id = ?").get(tagId, kind, projectId);
+        if (!tag) return sendJson(res, 404, { detail: "Tag not found" });
+        if (payload.name !== undefined) {
+          const nextName = String(payload.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
+          if (!nextName) return sendJson(res, 400, { detail: "Tag name is required" });
+          const exists = db.prepare("SELECT id FROM library_tags WHERE kind = ? AND project_id = ? AND name = ? AND id <> ?").get(kind, projectId, nextName, tagId);
+          if (exists) return sendJson(res, 400, { detail: "Tag already exists" });
+          db.prepare("UPDATE library_tags SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), tagId);
+        }
+        if (payload.sort_order !== undefined) {
+          db.prepare("UPDATE library_tags SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(payload.sort_order || 0), nowIso(), tagId);
+        }
+        const next = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
+        sendJson(res, 200, { ...next, usage_count: tagUsage(tagId) });
+      })
+      .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+  if (method === "DELETE" && tagId) {
+    const tag = db.prepare("SELECT * FROM library_tags WHERE id = ? AND kind = ? AND project_id = ?").get(tagId, kind, projectId);
+    if (!tag) {
+      sendJson(res, 200, { ok: true });
+      return true;
+    }
+    db.prepare("DELETE FROM library_entry_tags WHERE tag_id = ?").run(tagId);
+    db.prepare("DELETE FROM library_tags WHERE id = ?").run(tagId);
+    sendJson(res, 200, { ok: true });
+    return true;
+  }
+  return false;
 }
 
 function nextOutfitNameForIndex(projectName, index) {
@@ -1294,6 +1369,7 @@ function handleModelLibraryApi(req, res, url) {
       }
       const assetRows = db.prepare("SELECT asset_id FROM outfit_entries WHERE project_id = ?").all(projectId);
       const coverAssetRows = db.prepare("SELECT cover_asset_id AS asset_id FROM outfit_projects WHERE id = ?").all(projectId);
+      deleteProjectTags("outfit", projectId);
       db.prepare("DELETE FROM outfit_projects WHERE id = ?").run(projectId);
       for (const row of assetRows) removeAssetIfUnused(row.asset_id);
       for (const row of coverAssetRows) removeAssetIfUnused(row.asset_id);
@@ -1329,7 +1405,7 @@ function handleModelLibraryApi(req, res, url) {
       }
       const outfits = db.prepare("SELECT * FROM outfit_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
         .map(outfitWithAssetAndTags);
-      const activeTag = tagId ? db.prepare("SELECT * FROM library_tags WHERE kind = 'outfit' AND id = ?").get(tagId) : null;
+      const activeTag = tagId ? db.prepare("SELECT * FROM library_tags WHERE kind = 'outfit' AND project_id = ? AND id = ?").get(projectId, tagId) : null;
       const filtered = activeTag ? outfits.filter((outfit) => outfit.tags.includes(activeTag.name)) : outfits;
       sendJson(res, 200, { outfits: filtered });
       return true;
@@ -1372,21 +1448,7 @@ function handleModelLibraryApi(req, res, url) {
           const outfit = loadOutfit(outfitId);
           if (!outfit) return sendJson(res, 404, { detail: "Outfit not found" });
           if (payload.tags !== undefined) {
-            const nextTags = normalizeTags(payload.tags);
-            db.prepare("DELETE FROM library_entry_tags WHERE kind = 'outfit' AND entry_id = ?").run(outfitId);
-            for (const name of nextTags) {
-              let tag = db.prepare("SELECT * FROM library_tags WHERE kind = 'outfit' AND name = ?").get(name);
-              if (!tag) {
-                const tagId = newId("tag");
-                db.prepare(
-                  "INSERT INTO library_tags (id, kind, project_id, name, color, sort_order, created_at, updated_at) VALUES (?, 'outfit', NULL, ?, ?, ?, ?, ?)"
-                ).run(tagId, name, DEFAULT_TAG_COLOR, 0, nowIso(), nowIso());
-                tag = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
-              }
-              db.prepare(
-                "INSERT OR IGNORE INTO library_entry_tags (id, kind, entry_id, tag_id, created_at) VALUES (?, 'outfit', ?, ?, ?)"
-              ).run(newId("entrytag"), outfitId, tag.id, nowIso());
-            }
+            updateEntryTags("outfit", outfitId, outfit.project_id, payload.tags);
             db.prepare("UPDATE outfit_entries SET updated_at = ? WHERE id = ?").run(nowIso(), outfitId);
           }
           sendJson(res, 200, outfitWithAssetAndTags(loadOutfit(outfitId)));
@@ -1438,60 +1500,8 @@ function handleModelLibraryApi(req, res, url) {
   const outfitTagMatch = pathname.match(/^\/api\/libraries\/outfit\/tags(?:\/([^/]+))?$/);
   if (outfitTagMatch) {
     const tagId = outfitTagMatch[1] ? decodeURIComponent(outfitTagMatch[1]) : "";
-    if (method === "GET" && !tagId) {
-      sendJson(res, 200, { tags: listOutfitTags() });
-      return true;
-    }
-    if (method === "POST" && !tagId) {
-      parseJsonBody(req)
-        .then((payload) => {
-          const name = String(payload?.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
-          if (!name) return sendJson(res, 400, { detail: "Tag name is required" });
-          const existing = db.prepare("SELECT * FROM library_tags WHERE kind = 'outfit' AND name = ?").get(name);
-          if (existing) return sendJson(res, 200, { ...existing, usage_count: tagUsage(existing.id) });
-          const timestamp = nowIso();
-          const id = newId("tag");
-          db.prepare(
-            "INSERT INTO library_tags (id, kind, project_id, name, color, sort_order, created_at, updated_at) VALUES (?, 'outfit', NULL, ?, ?, ?, ?, ?)"
-          ).run(id, name, DEFAULT_TAG_COLOR, db.prepare("SELECT COUNT(*) AS total FROM library_tags WHERE kind = 'outfit'").get().total + 1, timestamp, timestamp);
-          const tag = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(id);
-          sendJson(res, 200, { ...tag, usage_count: 0 });
-        })
-        .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
-      return true;
-    }
-    if (method === "PATCH" && tagId) {
-      parseJsonBody(req)
-        .then((payload) => {
-          const tag = db.prepare("SELECT * FROM library_tags WHERE id = ? AND kind = 'outfit'").get(tagId);
-          if (!tag) return sendJson(res, 404, { detail: "Tag not found" });
-          if (payload.name !== undefined) {
-            const nextName = String(payload.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
-            if (!nextName) return sendJson(res, 400, { detail: "Tag name is required" });
-            const exists = db.prepare("SELECT id FROM library_tags WHERE kind = 'outfit' AND name = ? AND id <> ?").get(nextName, tagId);
-            if (exists) return sendJson(res, 400, { detail: "Tag already exists" });
-            db.prepare("UPDATE library_tags SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), tagId);
-          }
-          if (payload.sort_order !== undefined) {
-            db.prepare("UPDATE library_tags SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(payload.sort_order || 0), nowIso(), tagId);
-          }
-          const next = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
-          sendJson(res, 200, { ...next, usage_count: tagUsage(tagId) });
-        })
-        .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
-      return true;
-    }
-    if (method === "DELETE" && tagId) {
-      const tag = db.prepare("SELECT * FROM library_tags WHERE id = ? AND kind = 'outfit'").get(tagId);
-      if (!tag) {
-        sendJson(res, 200, { ok: true });
-        return true;
-      }
-      db.prepare("DELETE FROM library_entry_tags WHERE tag_id = ?").run(tagId);
-      db.prepare("DELETE FROM library_tags WHERE id = ?").run(tagId);
-      sendJson(res, 200, { ok: true });
-      return true;
-    }
+    const projectId = url.searchParams.get("project_id") || "";
+    if (handleProjectTagApi(req, res, { kind: "outfit", projectId, tagId })) return true;
   }
 
   if (method === "GET" && pathname === "/api/action-projects") {
@@ -1552,6 +1562,7 @@ function handleModelLibraryApi(req, res, url) {
       }
       const assetRows = db.prepare("SELECT asset_id FROM action_entries WHERE project_id = ?").all(projectId);
       const coverAssetRows = db.prepare("SELECT cover_asset_id AS asset_id FROM action_projects WHERE id = ?").all(projectId);
+      deleteProjectTags("action", projectId);
       db.prepare("DELETE FROM action_projects WHERE id = ?").run(projectId);
       for (const row of assetRows) removeAssetIfUnused(row.asset_id);
       for (const row of coverAssetRows) removeAssetIfUnused(row.asset_id);
@@ -1587,7 +1598,7 @@ function handleModelLibraryApi(req, res, url) {
       }
       const actions = db.prepare("SELECT * FROM action_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
         .map(actionWithAssetAndTags);
-      const activeTag = tagId ? db.prepare("SELECT * FROM library_tags WHERE kind = 'action' AND id = ?").get(tagId) : null;
+      const activeTag = tagId ? db.prepare("SELECT * FROM library_tags WHERE kind = 'action' AND project_id = ? AND id = ?").get(projectId, tagId) : null;
       const filtered = activeTag ? actions.filter((action) => action.tags.includes(activeTag.name)) : actions;
       sendJson(res, 200, { actions: filtered });
       return true;
@@ -1630,21 +1641,7 @@ function handleModelLibraryApi(req, res, url) {
           const action = loadAction(actionId);
           if (!action) return sendJson(res, 404, { detail: "Action not found" });
           if (payload.tags !== undefined) {
-            const nextTags = normalizeTags(payload.tags);
-            db.prepare("DELETE FROM library_entry_tags WHERE kind = 'action' AND entry_id = ?").run(actionId);
-            for (const name of nextTags) {
-              let tag = db.prepare("SELECT * FROM library_tags WHERE kind = 'action' AND name = ?").get(name);
-              if (!tag) {
-                const tagId = newId("tag");
-                db.prepare(
-                  "INSERT INTO library_tags (id, kind, project_id, name, color, sort_order, created_at, updated_at) VALUES (?, 'action', NULL, ?, ?, ?, ?, ?)"
-                ).run(tagId, name, DEFAULT_TAG_COLOR, 0, nowIso(), nowIso());
-                tag = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
-              }
-              db.prepare(
-                "INSERT OR IGNORE INTO library_entry_tags (id, kind, entry_id, tag_id, created_at) VALUES (?, 'action', ?, ?, ?)"
-              ).run(newId("entrytag"), actionId, tag.id, nowIso());
-            }
+            updateEntryTags("action", actionId, action.project_id, payload.tags);
             db.prepare("UPDATE action_entries SET updated_at = ? WHERE id = ?").run(nowIso(), actionId);
           }
           if (payload.prompt !== undefined) {
@@ -1699,60 +1696,8 @@ function handleModelLibraryApi(req, res, url) {
   const actionTagMatch = pathname.match(/^\/api\/libraries\/action\/tags(?:\/([^/]+))?$/);
   if (actionTagMatch) {
     const tagId = actionTagMatch[1] ? decodeURIComponent(actionTagMatch[1]) : "";
-    if (method === "GET" && !tagId) {
-      sendJson(res, 200, { tags: listActionTags() });
-      return true;
-    }
-    if (method === "POST" && !tagId) {
-      parseJsonBody(req)
-        .then((payload) => {
-          const name = String(payload?.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
-          if (!name) return sendJson(res, 400, { detail: "Tag name is required" });
-          const existing = db.prepare("SELECT * FROM library_tags WHERE kind = 'action' AND name = ?").get(name);
-          if (existing) return sendJson(res, 200, { ...existing, usage_count: tagUsage(existing.id) });
-          const timestamp = nowIso();
-          const id = newId("tag");
-          db.prepare(
-            "INSERT INTO library_tags (id, kind, project_id, name, color, sort_order, created_at, updated_at) VALUES (?, 'action', NULL, ?, ?, ?, ?, ?)"
-          ).run(id, name, DEFAULT_TAG_COLOR, db.prepare("SELECT COUNT(*) AS total FROM library_tags WHERE kind = 'action'").get().total + 1, timestamp, timestamp);
-          const tag = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(id);
-          sendJson(res, 200, { ...tag, usage_count: 0 });
-        })
-        .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
-      return true;
-    }
-    if (method === "PATCH" && tagId) {
-      parseJsonBody(req)
-        .then((payload) => {
-          const tag = db.prepare("SELECT * FROM library_tags WHERE id = ? AND kind = 'action'").get(tagId);
-          if (!tag) return sendJson(res, 404, { detail: "Tag not found" });
-          if (payload.name !== undefined) {
-            const nextName = String(payload.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
-            if (!nextName) return sendJson(res, 400, { detail: "Tag name is required" });
-            const exists = db.prepare("SELECT id FROM library_tags WHERE kind = 'action' AND name = ? AND id <> ?").get(nextName, tagId);
-            if (exists) return sendJson(res, 400, { detail: "Tag already exists" });
-            db.prepare("UPDATE library_tags SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), tagId);
-          }
-          if (payload.sort_order !== undefined) {
-            db.prepare("UPDATE library_tags SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(payload.sort_order || 0), nowIso(), tagId);
-          }
-          const next = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
-          sendJson(res, 200, { ...next, usage_count: tagUsage(tagId) });
-        })
-        .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
-      return true;
-    }
-    if (method === "DELETE" && tagId) {
-      const tag = db.prepare("SELECT * FROM library_tags WHERE id = ? AND kind = 'action'").get(tagId);
-      if (!tag) {
-        sendJson(res, 200, { ok: true });
-        return true;
-      }
-      db.prepare("DELETE FROM library_entry_tags WHERE tag_id = ?").run(tagId);
-      db.prepare("DELETE FROM library_tags WHERE id = ?").run(tagId);
-      sendJson(res, 200, { ok: true });
-      return true;
-    }
+    const projectId = url.searchParams.get("project_id") || "";
+    if (handleProjectTagApi(req, res, { kind: "action", projectId, tagId })) return true;
   }
 
   if (method === "GET" && pathname === "/api/model-projects") {
@@ -1817,6 +1762,7 @@ function handleModelLibraryApi(req, res, url) {
         "SELECT mi.asset_id FROM model_images mi JOIN model_entries me ON me.id = mi.model_id WHERE me.project_id = ?"
       ).all(projectId);
       const coverAssetRows = db.prepare("SELECT cover_asset_id AS asset_id FROM model_projects WHERE id = ?").all(projectId);
+      deleteProjectTags("model", projectId);
       db.prepare("DELETE FROM model_projects WHERE id = ?").run(projectId);
       for (const row of modelRows) {
         const imageAssets = db.prepare("SELECT asset_id FROM model_images WHERE model_id = ?").all(row.id);
@@ -1859,7 +1805,7 @@ function handleModelLibraryApi(req, res, url) {
       const models = db.prepare("SELECT * FROM model_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
         .map(modelWithCoverAndTags)
         .filter((model) => (gender ? model.gender === gender : true));
-      const activeTag = tagId ? db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId) : null;
+      const activeTag = tagId ? db.prepare("SELECT * FROM library_tags WHERE kind = 'model' AND project_id = ? AND id = ?").get(projectId, tagId) : null;
       const filtered = activeTag ? models.filter((model) => model.tags.includes(activeTag.name)) : models;
       sendJson(res, 200, { models: filtered });
       return true;
@@ -1903,21 +1849,7 @@ function handleModelLibraryApi(req, res, url) {
             }
           }
           if (payload.tags !== undefined) {
-            const nextTags = normalizeTags(payload.tags);
-            db.prepare("DELETE FROM library_entry_tags WHERE kind = 'model' AND entry_id = ?").run(modelId);
-            for (const name of nextTags) {
-              let tag = db.prepare("SELECT * FROM library_tags WHERE kind = 'model' AND name = ?").get(name);
-              if (!tag) {
-                const tagId = newId("tag");
-                db.prepare(
-                  "INSERT INTO library_tags (id, kind, project_id, name, color, sort_order, created_at, updated_at) VALUES (?, 'model', NULL, ?, ?, ?, ?, ?)"
-                ).run(tagId, name, DEFAULT_TAG_COLOR, 0, nowIso(), nowIso());
-                tag = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
-              }
-              db.prepare(
-                "INSERT OR IGNORE INTO library_entry_tags (id, kind, entry_id, tag_id, created_at) VALUES (?, 'model', ?, ?, ?)"
-              ).run(newId("entrytag"), modelId, tag.id, nowIso());
-            }
+            updateEntryTags("model", modelId, model.project_id, payload.tags);
           }
           if (payload.cover_image_id !== undefined) {
             const coverImageId = payload.cover_image_id ? String(payload.cover_image_id) : null;
@@ -1939,6 +1871,7 @@ function handleModelLibraryApi(req, res, url) {
         return true;
       }
       const imageRows = db.prepare("SELECT asset_id FROM model_images WHERE model_id = ?").all(modelId);
+      db.prepare("DELETE FROM library_entry_tags WHERE kind = 'model' AND entry_id = ?").run(modelId);
       db.prepare("DELETE FROM model_entries WHERE id = ?").run(modelId);
       for (const row of imageRows) removeAssetIfUnused(row.asset_id);
       sendJson(res, 200, { ok: true });
@@ -2054,60 +1987,8 @@ function handleModelLibraryApi(req, res, url) {
   const tagMatch = pathname.match(/^\/api\/libraries\/model\/tags(?:\/([^/]+))?$/);
   if (tagMatch) {
     const tagId = tagMatch[1] ? decodeURIComponent(tagMatch[1]) : "";
-    if (method === "GET" && !tagId) {
-      sendJson(res, 200, { tags: listTags() });
-      return true;
-    }
-    if (method === "POST" && !tagId) {
-      parseJsonBody(req)
-        .then((payload) => {
-          const name = String(payload?.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
-          if (!name) return sendJson(res, 400, { detail: "Tag name is required" });
-          const existing = db.prepare("SELECT * FROM library_tags WHERE kind = 'model' AND name = ?").get(name);
-          if (existing) return sendJson(res, 200, { ...existing, usage_count: tagUsage(existing.id) });
-          const timestamp = nowIso();
-          const id = newId("tag");
-          db.prepare(
-            "INSERT INTO library_tags (id, kind, project_id, name, color, sort_order, created_at, updated_at) VALUES (?, 'model', NULL, ?, ?, ?, ?, ?)"
-          ).run(id, name, DEFAULT_TAG_COLOR, db.prepare("SELECT COUNT(*) AS total FROM library_tags WHERE kind = 'model'").get().total + 1, timestamp, timestamp);
-          const tag = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(id);
-          sendJson(res, 200, { ...tag, usage_count: 0 });
-        })
-        .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
-      return true;
-    }
-    if (method === "PATCH" && tagId) {
-      parseJsonBody(req)
-        .then((payload) => {
-          const tag = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
-          if (!tag) return sendJson(res, 404, { detail: "Tag not found" });
-          if (payload.name !== undefined) {
-            const nextName = String(payload.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
-            if (!nextName) return sendJson(res, 400, { detail: "Tag name is required" });
-            const exists = db.prepare("SELECT id FROM library_tags WHERE kind = 'model' AND name = ? AND id <> ?").get(nextName, tagId);
-            if (exists) return sendJson(res, 400, { detail: "Tag already exists" });
-            db.prepare("UPDATE library_tags SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), tagId);
-          }
-          if (payload.sort_order !== undefined) {
-            db.prepare("UPDATE library_tags SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(payload.sort_order || 0), nowIso(), tagId);
-          }
-          const next = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
-          sendJson(res, 200, { ...next, usage_count: tagUsage(tagId) });
-        })
-        .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
-      return true;
-    }
-    if (method === "DELETE" && tagId) {
-      const tag = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
-      if (!tag) {
-        sendJson(res, 200, { ok: true });
-        return true;
-      }
-      db.prepare("DELETE FROM library_entry_tags WHERE tag_id = ?").run(tagId);
-      db.prepare("DELETE FROM library_tags WHERE id = ?").run(tagId);
-      sendJson(res, 200, { ok: true });
-      return true;
-    }
+    const projectId = url.searchParams.get("project_id") || "";
+    if (handleProjectTagApi(req, res, { kind: "model", projectId, tagId })) return true;
   }
 
   const assetMatch = pathname.match(/^\/api\/assets\/([^/]+)\/(file|download)$/);

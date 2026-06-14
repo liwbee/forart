@@ -53,6 +53,21 @@
     flex-wrap: wrap;
   }
 
+  .free-canvas-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .free-canvas-toolbar .outfit-view-switch,
+  .free-canvas-project-select {
+    width: 100%;
+  }
+
+  .free-canvas-toolbar .outfit-view-switch button,
+  .free-canvas-project-select select {
+    flex: 1;
+  }
+
   .outfit-composer {
     grid-template-columns: 1fr;
     grid-template-rows: 180px minmax(0, 1fr);

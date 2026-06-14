@@ -60,7 +60,10 @@ const ConnectionItem = memo(function ConnectionItem({
         role="button"
         tabIndex={0}
         aria-label={selectConnectionLabel}
-        onPointerDown={(event) => onSelectConnection(event, connection)}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          onSelectConnection(event, connection);
+        }}
         onPointerEnter={(event) => {
           if (selected) onMoveSelectedConnection(connection.id, event.clientX, event.clientY);
         }}

@@ -744,9 +744,9 @@ export function ActionLibraryPage() {
   });
 
   const tagsQuery = useQuery({
-    queryKey: actionLibraryKeys.tags,
-    queryFn: listActionTags,
-    enabled: storageConfigured,
+    queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : ["actionTags", "empty"],
+    queryFn: () => listActionTags(activeProjectId),
+    enabled: storageConfigured && Boolean(activeProjectId),
   });
 
   const projects = useMemo(() => projectsQuery.data?.projects || [], [projectsQuery.data?.projects]);
@@ -780,7 +780,7 @@ export function ActionLibraryPage() {
       setDeleteConfirmActionId("");
       await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.projects });
-      await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
     },
   });
 
@@ -790,7 +790,7 @@ export function ActionLibraryPage() {
       setDeleteConfirmActionId("");
       await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.projects });
-      await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
     },
   });
 
@@ -798,7 +798,7 @@ export function ActionLibraryPage() {
     mutationFn: ({ actionId, tags }: { actionId: string; tags: string[] }) => updateAction(actionId, { tags }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
-      await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
     },
   });
 
@@ -836,30 +836,39 @@ export function ActionLibraryPage() {
       if (activeProjectId === projectId) setActiveProjectId(remaining[0]?.id || "");
       await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.projects });
       await queryClient.invalidateQueries({ queryKey: ["actions"] });
-      await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
     },
   });
 
   const createTagMutation = useMutation({
-    mutationFn: createActionTag,
+    mutationFn: (name: string) => {
+      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      return createActionTag(activeProjectId, name);
+    },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
     },
   });
 
   const renameTagMutation = useMutation({
-    mutationFn: ({ tagId, name }: { tagId: string; name: string }) => updateActionTag(tagId, { name }),
+    mutationFn: ({ tagId, name }: { tagId: string; name: string }) => {
+      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      return updateActionTag(activeProjectId, tagId, { name });
+    },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
     },
   });
 
   const deleteTagMutation = useMutation({
-    mutationFn: deleteActionTag,
+    mutationFn: (tagId: string) => {
+      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      return deleteActionTag(activeProjectId, tagId);
+    },
     onSuccess: async (_result, tagId) => {
       setDeleteConfirmTagId("");
       if (activeTagId === tagId) setActiveTagId("");
-      await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
       await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
     },
   });
@@ -938,11 +947,7 @@ export function ActionLibraryPage() {
   ]);
 
   return (
-    <section className="model-library-page action-library-page" aria-labelledby="action-library-title">
-      <div className="model-library-header">
-        <h1 id="action-library-title" className="model-library-title">{t("actionLibrary.title")}</h1>
-      </div>
-
+    <section className="model-library-page action-library-page" aria-label={t("actionLibrary.title")}>
       <div className="model-library">
         <ActionProjectSidebar
           projects={projects}

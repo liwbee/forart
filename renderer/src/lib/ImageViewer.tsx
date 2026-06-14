@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -14,8 +14,11 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
   const { t } = useTranslation();
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
   const [transform, setTransform] = useState({ scale: 1, minScale: 0.5, x: 0, y: 0 });
+  const [isReady, setIsReady] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const loadTokenRef = useRef(0);
+  const closeTimerRef = useRef<number | null>(null);
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -26,9 +29,21 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
   } | null>(null);
   const suppressBackdropClickRef = useRef(false);
 
+  const requestClose = useCallback(() => {
+    if (isClosing) return;
+    setIsClosing(true);
+    if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      onClose();
+    }, 180);
+  }, [isClosing, onClose]);
+
   useEffect(() => {
     const loadToken = loadTokenRef.current + 1;
     loadTokenRef.current = loadToken;
+    setIsReady(false);
+    setIsClosing(false);
     setNaturalSize({ width: 0, height: 0 });
     setTransform({ scale: 1, minScale: 0.5, x: 0, y: 0 });
     setIsDragging(false);
@@ -48,27 +63,30 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
         x: Math.round((window.innerWidth - image.naturalWidth * fitScale) / 2),
         y: Math.round((window.innerHeight - image.naturalHeight * fitScale) / 2),
       });
+      setIsReady(true);
     };
     image.onerror = () => {
       if (loadTokenRef.current !== loadToken) return;
       setNaturalSize({ width: 0, height: 0 });
       setTransform({ scale: 1, minScale: 0.5, x: 0, y: 0 });
+      setIsReady(false);
     };
     image.src = src;
   }, [src]);
 
   useEffect(() => {
     function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") requestClose();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [requestClose]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
+      if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
       document.body.style.overflow = previousOverflow;
     };
   }, []);
@@ -146,7 +164,7 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
       suppressBackdropClickRef.current = false;
       return;
     }
-    onClose();
+    requestClose();
   }
 
   function isolateViewerEvent(event: React.SyntheticEvent) {
@@ -165,7 +183,7 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
 
   return createPortal(
     <div
-      className="model-image-viewer-backdrop"
+      className={`model-image-viewer-backdrop${isClosing ? " closing" : ""}`}
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel || t("shared.imagePreview")}
@@ -178,7 +196,7 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
       onClick={handleBlankClick}
     >
       <div
-        className={`model-image-viewer-stage${isDragging ? " dragging" : ""}`}
+        className={`model-image-viewer-stage${isDragging ? " dragging" : ""}${isClosing ? " closing" : ""}`}
         onPointerDown={isolateViewerEvent}
         onPointerMove={isolateViewerEvent}
         onPointerUp={isolateViewerEvent}
@@ -187,22 +205,24 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
         onContextMenu={blockViewerContextMenu}
         onClick={handleBlankClick}
       >
-        <div
-          className="model-image-viewer"
-          style={{
-            width: naturalSize.width || undefined,
-            height: naturalSize.height || undefined,
-            transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})`,
-          }}
-          onWheel={handleWheel}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={stopDrag}
-          onPointerCancel={stopDrag}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <img src={src} alt={alt} draggable={false} onDragStart={(event) => event.preventDefault()} />
-        </div>
+        {isReady ? (
+          <div
+            className="model-image-viewer"
+            style={{
+              width: naturalSize.width,
+              height: naturalSize.height,
+              transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})`,
+            }}
+            onWheel={handleWheel}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={stopDrag}
+            onPointerCancel={stopDrag}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <img src={src} alt={alt} draggable={false} onDragStart={(event) => event.preventDefault()} />
+          </div>
+        ) : null}
         <button
           className="model-image-viewer-close"
           type="button"
@@ -210,7 +230,7 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
-            onClose();
+            requestClose();
           }}
         >
           <ArrowLeft size={20} aria-hidden="true" />

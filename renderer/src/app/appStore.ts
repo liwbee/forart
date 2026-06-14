@@ -1,17 +1,17 @@
 import { create } from "zustand";
 
-export type AppView = "models" | "outfits" | "actions" | "image-review" | "canvas" | "settings";
+export type AppView = "library" | "free-canvas" | "image-review" | "canvas" | "settings";
 export type ThemeMode = "light" | "dark";
 
 const VIEW_KEY = "forart_active_view";
 const THEME_KEY = "forart_theme";
 const LEGACY_THEME_KEY = "studio_theme";
-const APP_VIEWS: AppView[] = ["models", "outfits", "actions", "image-review", "canvas", "settings"];
+const APP_VIEWS: AppView[] = ["library", "free-canvas", "image-review", "canvas", "settings"];
 
 function readStoredView(): AppView {
-  if (typeof window === "undefined") return "models";
+  if (typeof window === "undefined") return "library";
   const view = window.localStorage.getItem(VIEW_KEY);
-  return APP_VIEWS.includes(view as AppView) ? (view as AppView) : "models";
+  return APP_VIEWS.includes(view as AppView) ? (view as AppView) : "library";
 }
 
 function readStoredTheme(): ThemeMode {

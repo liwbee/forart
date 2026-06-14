@@ -487,7 +487,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   const {
     activeProject,
     showCanvasHome,
-    setShowCanvasHome,
+    returnToCanvasHome,
     canvasHomeMode,
     setCanvasHomeMode,
     selectedHomeCanvasId,
@@ -507,6 +507,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setLibtvProjectFilter,
     libtvImporting,
     libtvStatus,
+    libtvStatusTone,
     setLibtvStatus,
     selectedLibtvProjectUuid,
     setSelectedLibtvProjectUuid,
@@ -1873,6 +1874,17 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     );
   }
 
+  function renderLibtvHomeToast() {
+    if (!showCanvasHome || !libtvStatus) return null;
+    const Icon = libtvStatusTone === "busy" ? RefreshCw : libtvStatusTone === "error" ? X : Check;
+    return (
+      <div className={`ic-page-toast ic-page-toast--${libtvStatusTone}`} role={libtvStatusTone === "error" ? "alert" : "status"} aria-live={libtvStatusTone === "error" ? "assertive" : "polite"}>
+        <Icon size={14} aria-hidden="true" />
+        <span>{libtvStatus}</span>
+      </div>
+    );
+  }
+
   function renderCanvasHome() {
     return (
       <CanvasHomePanel
@@ -1887,7 +1899,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         libtvProjectResults={libtvProjectResults}
         libtvProjectFilter={libtvProjectFilter}
         libtvImporting={libtvImporting}
-        libtvStatus={libtvStatus}
         selectedLibtvProjectUuid={selectedLibtvProjectUuid}
         onModeChange={setCanvasHomeMode}
         onOpenLibtvHome={openLibtvHome}
@@ -1919,6 +1930,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   }
   return (
     <section className="infinite-canvas-page" aria-label={t("infiniteCanvas.title")}>
+      {renderLibtvHomeToast()}
       {showCanvasHome ? renderCanvasHome() : null}
       <div
         ref={stageRef}
@@ -1934,7 +1946,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         onDragLeave={handleStageDragLeave}
         onDrop={handleStageDrop}
       >
-        <button className="ic-back-to-projects nodrag" type="button" onClick={() => setShowCanvasHome(true)}>
+        <button className="ic-back-to-projects nodrag" type="button" onClick={returnToCanvasHome}>
           <ChevronDown size={16} aria-hidden="true" />
           <span>{t("infiniteCanvas.backToCanvases")}</span>
         </button>

@@ -22,7 +22,7 @@ export interface ActionEntry {
 export interface ActionTag {
   id: string;
   kind: "action";
-  project_id: string | null;
+  project_id: string;
   name: string;
   color: string;
   sort_order: number;

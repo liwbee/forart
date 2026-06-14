@@ -3,6 +3,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 function createLibtvAdapter({ rootDir }) {
+  const LIBTV_IMPORT_DETAIL_CONCURRENCY = 3;
   const LIBTV_DEFAULT_BINARY = process.platform === 'win32' && process.env.USERPROFILE
     ? path.join(process.env.USERPROFILE, '.libtv', 'libtv.exe')
     : 'libtv';

@@ -3,7 +3,8 @@ import { AssetUploadPayload, ModelEntry, ModelFilters, ModelImage, ModelProject,
 
 export const modelLibraryKeys = {
   projects: ["modelProjects"] as const,
-  tags: ["modelTags"] as const,
+  tagRoot: ["modelTags"] as const,
+  tags: (projectId: string) => ["modelTags", projectId] as const,
   models: (projectId: string, tagId = "", gender = "") => ["models", projectId, tagId, gender] as const,
   images: (modelId: string) => ["modelImages", modelId] as const,
   storageSettings: ["storageSettings"] as const,
@@ -75,26 +76,26 @@ export function deleteModel(modelId: string) {
   });
 }
 
-export function listModelTags() {
-  return apiRequest<{ tags: ModelTag[] }>("/api/libraries/model/tags");
+export function listModelTags(projectId: string) {
+  return apiRequest<{ tags: ModelTag[] }>(`/api/libraries/model/tags${queryString({ project_id: projectId })}`);
 }
 
-export function createModelTag(name: string) {
-  return apiRequest<ModelTag>("/api/libraries/model/tags", {
+export function createModelTag(projectId: string, name: string) {
+  return apiRequest<ModelTag>(`/api/libraries/model/tags${queryString({ project_id: projectId })}`, {
     method: "POST",
     body: JSON.stringify({ name }),
   });
 }
 
-export function updateModelTag(tagId: string, payload: Partial<Pick<ModelTag, "name" | "sort_order">>) {
-  return apiRequest<ModelTag>(`/api/libraries/model/tags/${encodeURIComponent(tagId)}`, {
+export function updateModelTag(projectId: string, tagId: string, payload: Partial<Pick<ModelTag, "name" | "sort_order">>) {
+  return apiRequest<ModelTag>(`/api/libraries/model/tags/${encodeURIComponent(tagId)}${queryString({ project_id: projectId })}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
 }
 
-export function deleteModelTag(tagId: string) {
-  return apiRequest<{ ok: true }>(`/api/libraries/model/tags/${encodeURIComponent(tagId)}`, {
+export function deleteModelTag(projectId: string, tagId: string) {
+  return apiRequest<{ ok: true }>(`/api/libraries/model/tags/${encodeURIComponent(tagId)}${queryString({ project_id: projectId })}`, {
     method: "DELETE",
   });
 }

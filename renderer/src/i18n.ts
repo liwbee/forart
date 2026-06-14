@@ -22,17 +22,21 @@ const resources = {
         settingsNavigation: "设置导航",
       },
       nav: {
+        library: "资源库",
         models: "模特库",
         outfits: "搭配库",
         actions: "动作库",
         imageReview: "图片审核",
+        freeCanvas: "自由画布",
         canvas: "无限画布",
         settings: "设置",
         short: {
+          library: "资",
           models: "模",
           outfits: "搭",
           actions: "动",
           imageReview: "审",
+          freeCanvas: "由",
           canvas: "画",
           settings: "设",
           light: "亮",
@@ -44,6 +48,13 @@ const resources = {
           switchToLight: "切换到亮色主题",
           switchToDark: "切换到深色主题",
         },
+      },
+      resourceLibrary: {
+        title: "资源库",
+        navigation: "资源库导航",
+        models: "模特库",
+        actions: "动作库",
+        outfits: "搭配库",
       },
       common: {
         actions: {
@@ -343,6 +354,12 @@ const resources = {
         filterModelTags: "筛选模特标签",
         filterOutfitTags: "筛选搭配标签",
       },
+      freeCanvas: {
+        title: "自由画布",
+        assetLibrary: "素材库",
+        project: "项目",
+        requestFailed: "自由画布请求失败：{{message}}",
+      },
       outfitComposer: {
         imageChoices: "{{name}} 图片选择",
         loadingImages: "正在加载图片...",
@@ -629,6 +646,7 @@ const resources = {
         settingsNavigation: "Settings navigation",
       },
       nav: {
+        library: "Asset Library",
         models: "Model Library",
         outfits: "Outfit Library",
         actions: "Action Library",
@@ -636,6 +654,7 @@ const resources = {
         canvas: "Infinite Canvas",
         settings: "Settings",
         short: {
+          library: "L",
           models: "M",
           outfits: "O",
           actions: "A",
@@ -651,6 +670,13 @@ const resources = {
           switchToLight: "Switch to light theme",
           switchToDark: "Switch to dark theme",
         },
+      },
+      resourceLibrary: {
+        title: "Asset Library",
+        navigation: "Asset library navigation",
+        models: "Model Library",
+        actions: "Action Library",
+        outfits: "Outfit Library",
       },
       common: {
         actions: {
@@ -912,7 +938,7 @@ const resources = {
         emptyImagesHint: "No images yet. Upload a few to get started.",
         createProjectDescription: "Create a separate project for new model profiles.",
         projectPlaceholder: "Example: Spring Summer Lookbook",
-        tagManagerDescription: "Tags are used for model filtering and card grouping. Created tags can be reused globally.",
+        tagManagerDescription: "Tags are used for model filtering and card grouping within the current project.",
         fetchModelsFailed: "Failed to fetch models",
         title: "Model Library",
         searchPlaceholder: "Search model names or tags",
@@ -949,6 +975,12 @@ const resources = {
         canvasEmptyOutfits: "Choose an outfit from the left to add it to the canvas",
         filterModelTags: "Filter model tags",
         filterOutfitTags: "Filter outfit tags",
+      },
+      freeCanvas: {
+        title: "Free Canvas",
+        assetLibrary: "Asset library",
+        project: "Project",
+        requestFailed: "Free canvas request failed: {{message}}",
       },
       outfitComposer: {
         imageChoices: "{{name}} image choices",

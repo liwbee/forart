@@ -41,15 +41,15 @@ The current remote API supports model, outfit, and action libraries:
 /api/model-projects
 /api/models
 /api/model-images
-/api/libraries/model/tags
+/api/libraries/model/tags?project_id=:projectId
 
 /api/outfit-projects
 /api/outfits
-/api/libraries/outfit/tags
+/api/libraries/outfit/tags?project_id=:projectId
 
 /api/action-projects
 /api/actions
-/api/libraries/action/tags
+/api/libraries/action/tags?project_id=:projectId
 ```
 
 See the server contract for the full route list.

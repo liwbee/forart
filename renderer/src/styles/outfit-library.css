@@ -50,6 +50,65 @@
   overflow: hidden;
 }
 
+.free-canvas-page {
+  gap: var(--space-3);
+}
+
+.free-canvas-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 44px;
+}
+
+.free-canvas-toolbar .outfit-view-switch {
+  order: 0;
+}
+
+.free-canvas-project-select {
+  min-width: 220px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 4px 6px 4px var(--space-3);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.free-canvas-project-select select {
+  min-width: 150px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 28px 0 10px;
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font: inherit;
+  outline: 0;
+}
+
+.free-canvas-project-select select:focus-visible {
+  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.1);
+}
+
+.free-canvas-body {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
 .outfit-composer {
   min-width: 0;
   min-height: 0;

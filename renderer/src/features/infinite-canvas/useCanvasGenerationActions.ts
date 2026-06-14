@@ -64,7 +64,6 @@ export function useCanvasGenerationActions({
     try {
       const result = await window.libtv.imageModels();
       setLibtvModels(result.models || []);
-      setLibtvStatus("");
     } catch (error) {
       setLibtvStatus(error instanceof Error ? error.message : String(error));
     } finally {

@@ -26,7 +26,6 @@ interface CanvasHomePanelProps {
   libtvProjectResults: LibtvProjectRecord[];
   libtvProjectFilter: string;
   libtvImporting: boolean;
-  libtvStatus: string;
   selectedLibtvProjectUuid: string;
   onModeChange: (mode: CanvasHomeMode) => void;
   onOpenLibtvHome: () => void;
@@ -100,7 +99,6 @@ export function CanvasHomePanel({
   libtvProjectResults,
   libtvProjectFilter,
   libtvImporting,
-  libtvStatus,
   selectedLibtvProjectUuid,
   onModeChange,
   onOpenLibtvHome,
@@ -131,7 +129,6 @@ export function CanvasHomePanel({
 
   const renderLibtvResults = () => (
     <>
-      {libtvStatus ? <div className="ic-project-status">{libtvStatus}</div> : null}
       {filteredLibtvProjects.length ? (
         <div className="ic-libtv-project-results ic-libtv-project-card-grid" aria-label={t("infiniteCanvas.libtvProjectResults")}>
           {filteredLibtvProjects.map((project) => (

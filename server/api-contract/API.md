@@ -39,10 +39,10 @@ POST   /api/models/:modelId/images
 POST   /api/models/:modelId/images/upload
 DELETE /api/model-images/:imageId
 
-GET    /api/libraries/model/tags
-POST   /api/libraries/model/tags
-PATCH  /api/libraries/model/tags/:tagId
-DELETE /api/libraries/model/tags/:tagId
+GET    /api/libraries/model/tags?project_id=:projectId
+POST   /api/libraries/model/tags?project_id=:projectId
+PATCH  /api/libraries/model/tags/:tagId?project_id=:projectId
+DELETE /api/libraries/model/tags/:tagId?project_id=:projectId
 ```
 
 ## Outfit Library
@@ -60,10 +60,10 @@ PATCH  /api/outfits/:outfitId
 DELETE /api/outfits/:outfitId
 POST   /api/outfits/:outfitId/image/upload
 
-GET    /api/libraries/outfit/tags
-POST   /api/libraries/outfit/tags
-PATCH  /api/libraries/outfit/tags/:tagId
-DELETE /api/libraries/outfit/tags/:tagId
+GET    /api/libraries/outfit/tags?project_id=:projectId
+POST   /api/libraries/outfit/tags?project_id=:projectId
+PATCH  /api/libraries/outfit/tags/:tagId?project_id=:projectId
+DELETE /api/libraries/outfit/tags/:tagId?project_id=:projectId
 ```
 
 ## Action Library
@@ -81,10 +81,10 @@ PATCH  /api/actions/:actionId
 DELETE /api/actions/:actionId
 POST   /api/actions/:actionId/image/upload
 
-GET    /api/libraries/action/tags
-POST   /api/libraries/action/tags
-PATCH  /api/libraries/action/tags/:tagId
-DELETE /api/libraries/action/tags/:tagId
+GET    /api/libraries/action/tags?project_id=:projectId
+POST   /api/libraries/action/tags?project_id=:projectId
+PATCH  /api/libraries/action/tags/:tagId?project_id=:projectId
+DELETE /api/libraries/action/tags/:tagId?project_id=:projectId
 ```
 
 ## Image Review

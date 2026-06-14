@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Grid3X3, ImagePlus, Images, LayoutTemplate, MoreHorizontal, Pencil, Plus, Tags, Trash2, Users } from "lucide-react";
+import { ImagePlus, Images, MoreHorizontal, Pencil, Plus, Tags, Trash2, Users } from "lucide-react";
 import { createPortal } from "react-dom";
 import { ImageViewer } from "../../lib/ImageViewer";
 import { sortByName } from "../../lib/sortByName";
@@ -21,12 +21,9 @@ import {
   updateOutfitProject,
   updateOutfitTag,
 } from "./api";
-import { listModelImages, listModelProjects, listModels, listModelTags, modelLibraryKeys } from "../model-library/api";
-import { useModelLibraryStore } from "../model-library/modelLibraryStore";
 import { useOutfitLibraryStore } from "./outfitLibraryStore";
 import { AssetUploadPayload, OutfitEntry, OutfitProject, OutfitTag } from "./types";
 import { normalizeTags, toggleTag } from "../model-library/tagUtils";
-import { OutfitComposer } from "./OutfitComposer";
 
 type ComposerLibrary = "models" | "outfits";
 type SidebarProject = Pick<OutfitProject, "id" | "name">;
@@ -705,8 +702,6 @@ function OutfitTagManager({
 export function OutfitLibraryPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const [viewMode, setViewMode] = useState<"library" | "composer">("library");
-  const [composerLibrary, setComposerLibrary] = useState<ComposerLibrary>("outfits");
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState("");
@@ -718,10 +713,6 @@ export function OutfitLibraryPage() {
   const activeTagId = useOutfitLibraryStore((state) => state.activeTagId);
   const setActiveProjectId = useOutfitLibraryStore((state) => state.setActiveProjectId);
   const setActiveTagId = useOutfitLibraryStore((state) => state.setActiveTagId);
-  const activeModelProjectId = useModelLibraryStore((state) => state.activeProjectId);
-  const activeModelTagId = useModelLibraryStore((state) => state.activeTagId);
-  const setActiveModelProjectId = useModelLibraryStore((state) => state.setActiveProjectId);
-  const setActiveModelTagId = useModelLibraryStore((state) => state.setActiveTagId);
 
   const storageSettingsQuery = useQuery({
     queryKey: outfitLibraryKeys.storageSettings,
@@ -737,26 +728,12 @@ export function OutfitLibraryPage() {
   });
 
   const tagsQuery = useQuery({
-    queryKey: outfitLibraryKeys.tags,
-    queryFn: listOutfitTags,
-    enabled: storageConfigured,
+    queryKey: activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : ["outfitTags", "empty"],
+    queryFn: () => listOutfitTags(activeProjectId),
+    enabled: storageConfigured && Boolean(activeProjectId),
   });
 
   const projects = useMemo(() => projectsQuery.data?.projects || [], [projectsQuery.data?.projects]);
-
-  const modelProjectsQuery = useQuery({
-    queryKey: modelLibraryKeys.projects,
-    queryFn: listModelProjects,
-    enabled: storageConfigured,
-  });
-
-  const modelTagsQuery = useQuery({
-    queryKey: modelLibraryKeys.tags,
-    queryFn: listModelTags,
-    enabled: storageConfigured,
-  });
-
-  const modelProjects = useMemo(() => modelProjectsQuery.data?.projects || [], [modelProjectsQuery.data?.projects]);
 
   useEffect(() => {
     if (!activeProjectId && projects.length) setActiveProjectId(projects[0].id);
@@ -770,28 +747,10 @@ export function OutfitLibraryPage() {
     if (activeTagId && !tags.some((tag) => tag.id === activeTagId)) setActiveTagId("");
   }, [activeTagId, setActiveTagId, tagsQuery.data?.tags]);
 
-  useEffect(() => {
-    if (!activeModelProjectId && modelProjects.length) setActiveModelProjectId(modelProjects[0].id);
-    if (activeModelProjectId && modelProjects.length && !modelProjects.some((project) => project.id === activeModelProjectId)) {
-      setActiveModelProjectId(modelProjects[0].id);
-    }
-  }, [activeModelProjectId, modelProjects, setActiveModelProjectId]);
-
-  useEffect(() => {
-    const tags = modelTagsQuery.data?.tags || [];
-    if (activeModelTagId && !tags.some((tag) => tag.id === activeModelTagId)) setActiveModelTagId("");
-  }, [activeModelTagId, modelTagsQuery.data?.tags, setActiveModelTagId]);
-
   const outfitsQuery = useQuery({
     queryKey: activeProjectId ? outfitLibraryKeys.outfits(activeProjectId, activeTagId) : ["outfits", "empty"],
     queryFn: () => listOutfits({ projectId: activeProjectId, tagId: activeTagId }),
     enabled: Boolean(activeProjectId),
-  });
-
-  const modelsQuery = useQuery({
-    queryKey: activeModelProjectId ? modelLibraryKeys.models(activeModelProjectId, activeModelTagId) : ["models", "empty"],
-    queryFn: () => listModels({ projectId: activeModelProjectId, tagId: activeModelTagId }),
-    enabled: storageConfigured && viewMode === "composer" && composerLibrary === "models" && Boolean(activeModelProjectId),
   });
 
   const createOutfitMutation = useMutation({
@@ -805,7 +764,7 @@ export function OutfitLibraryPage() {
       setDeleteConfirmOutfitId("");
       await queryClient.invalidateQueries({ queryKey: ["outfits", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.projects });
-      await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : outfitLibraryKeys.tagRoot });
     },
   });
 
@@ -815,7 +774,7 @@ export function OutfitLibraryPage() {
       setDeleteConfirmOutfitId("");
       await queryClient.invalidateQueries({ queryKey: ["outfits", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.projects });
-      await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : outfitLibraryKeys.tagRoot });
     },
   });
 
@@ -823,7 +782,7 @@ export function OutfitLibraryPage() {
     mutationFn: ({ outfitId, tags }: { outfitId: string; tags: string[] }) => updateOutfit(outfitId, { tags }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["outfits", activeProjectId] });
-      await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : outfitLibraryKeys.tagRoot });
     },
   });
 
@@ -854,30 +813,39 @@ export function OutfitLibraryPage() {
       if (activeProjectId === projectId) setActiveProjectId(remaining[0]?.id || "");
       await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.projects });
       await queryClient.invalidateQueries({ queryKey: ["outfits"] });
-      await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : outfitLibraryKeys.tagRoot });
     },
   });
 
   const createTagMutation = useMutation({
-    mutationFn: createOutfitTag,
+    mutationFn: (name: string) => {
+      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      return createOutfitTag(activeProjectId, name);
+    },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : outfitLibraryKeys.tagRoot });
     },
   });
 
   const renameTagMutation = useMutation({
-    mutationFn: ({ tagId, name }: { tagId: string; name: string }) => updateOutfitTag(tagId, { name }),
+    mutationFn: ({ tagId, name }: { tagId: string; name: string }) => {
+      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      return updateOutfitTag(activeProjectId, tagId, { name });
+    },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : outfitLibraryKeys.tagRoot });
     },
   });
 
   const deleteTagMutation = useMutation({
-    mutationFn: deleteOutfitTag,
+    mutationFn: (tagId: string) => {
+      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      return deleteOutfitTag(activeProjectId, tagId);
+    },
     onSuccess: async (_result, tagId) => {
       setDeleteConfirmTagId("");
       if (activeTagId === tagId) setActiveTagId("");
-      await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.tags });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : outfitLibraryKeys.tagRoot });
       await queryClient.invalidateQueries({ queryKey: ["outfits", activeProjectId] });
     },
   });
@@ -935,49 +903,14 @@ export function OutfitLibraryPage() {
     deleteTagMutation.mutate(tagId);
   }
 
-  async function loadModelImageChoices(modelId: string) {
-    const result = await queryClient.fetchQuery({
-      queryKey: modelLibraryKeys.images(modelId),
-      queryFn: () => listModelImages(modelId),
-    });
-    return result.images.map((image) => ({
-      id: image.id,
-      name: image.caption || image.filename || t("outfitLibrary.modelImage"),
-      asset_id: image.asset_id,
-      asset_url: image.asset_url,
-      updated_at: image.created_at,
-    }));
-  }
-
   const outfits = useMemo(() => sortByName(outfitsQuery.data?.outfits || [], (outfit) => outfit.name), [outfitsQuery.data?.outfits]);
-  const models = useMemo(() => sortByName(modelsQuery.data?.models || [], (model) => model.name), [modelsQuery.data?.models]);
   const tags = tagsQuery.data?.tags || [];
-  const modelTags = modelTagsQuery.data?.tags || [];
   const activeProject = projects.find((project) => project.id === activeProjectId) || null;
-  const activeModelProject = modelProjects.find((project) => project.id === activeModelProjectId) || null;
-  const sidebarLibrary: ComposerLibrary = viewMode === "composer" ? composerLibrary : "outfits";
-  const sidebarProjects = sidebarLibrary === "models" ? modelProjects : projects;
-  const sidebarProjectId = sidebarLibrary === "models" ? activeModelProjectId : activeProjectId;
-  const activeComposerProject = composerLibrary === "models" ? activeModelProject : activeProject;
-  const composerTags = composerLibrary === "models" ? modelTags : tags;
-  const composerTagId = composerLibrary === "models" ? activeModelTagId : activeTagId;
-  const composerAssets = composerLibrary === "models"
-    ? models.map((model) => ({
-      id: model.id,
-      name: model.name,
-      asset_id: model.cover_asset_id,
-      asset_url: model.cover_url,
-      updated_at: model.updated_at,
-    }))
-    : outfits;
   const errorMessage = getRequestError([
     storageSettingsQuery.error,
     projectsQuery.error,
-    modelProjectsQuery.error,
     tagsQuery.error,
-    modelTagsQuery.error,
     outfitsQuery.error,
-    modelsQuery.error,
     createOutfitMutation.error,
     deleteOutfitMutation.error,
     updateOutfitTagsMutation.error,
@@ -990,45 +923,26 @@ export function OutfitLibraryPage() {
   ]);
 
   return (
-    <section className="model-library-page outfit-library-page" aria-labelledby="outfit-library-title">
-      <div className="model-library-header">
-        <div className="outfit-view-switch" aria-label="Outfit library view">
-          <button className={viewMode === "library" ? "active" : ""} type="button" aria-pressed={viewMode === "library"} onClick={() => setViewMode("library")}>
-            <Grid3X3 size={18} aria-hidden="true" />
-            <span>{t("outfitLibrary.composerViewLibrary")}</span>
-          </button>
-          <button className={viewMode === "composer" ? "active" : ""} type="button" aria-pressed={viewMode === "composer"} onClick={() => setViewMode("composer")}>
-            <LayoutTemplate size={18} aria-hidden="true" />
-            <span>{t("outfitLibrary.composerViewCanvas")}</span>
-          </button>
-        </div>
-        <h1 id="outfit-library-title" className="model-library-title">{t("outfitLibrary.title")}</h1>
-      </div>
-
+    <section className="model-library-page outfit-library-page" aria-label={t("outfitLibrary.title")}>
       <div className="model-library">
         <OutfitProjectSidebar
-          projects={sidebarProjects}
-          activeProjectId={sidebarProjectId}
-          showLibrarySwitch={viewMode === "composer"}
-          activeLibrary={composerLibrary}
-          canManageProjects={sidebarLibrary === "outfits"}
+          projects={projects}
+          activeProjectId={activeProjectId}
+          showLibrarySwitch={false}
+          activeLibrary="outfits"
+          canManageProjects={true}
           renamingProjectId={renamingProjectId}
           deleteConfirmProjectId={deleteConfirmProjectId}
           onSelect={(projectId) => {
             setDeleteConfirmProjectId("");
             setRenamingProjectId("");
-            if (sidebarLibrary === "models") {
-              setActiveModelProjectId(projectId);
-            } else {
-              setActiveProjectId(projectId);
-            }
+            setActiveProjectId(projectId);
           }}
           onCreateProject={() => setCreateProjectOpen(true)}
-          onLibraryChange={(library) => {
+          onLibraryChange={() => {
             setDeleteConfirmProjectId("");
             setRenamingProjectId("");
             setCloseMenuToken((token) => token + 1);
-            setComposerLibrary(library);
           }}
           onRenameStart={(projectId) => {
             setDeleteConfirmProjectId("");
@@ -1041,22 +955,21 @@ export function OutfitLibraryPage() {
         />
 
         <main className="model-content-pane">
-          {viewMode === "library" ? <div className="model-content-head">
+          <div className="model-content-head">
             <OutfitToolbar
               tags={tags}
               activeTagId={activeTagId}
               onTagChange={setActiveTagId}
               onOpenTagManager={() => setTagManagerOpen(true)}
             />
-          </div> : null}
+          </div>
 
-          <div className={`model-lib-body${viewMode === "composer" ? " model-lib-body--composer" : ""}`}>
+          <div className="model-lib-body">
             {errorMessage ? <div className="model-lib-error">{t("outfitLibrary.requestFailed", { message: errorMessage })}</div> : null}
-            {storageSettingsQuery.isLoading || projectsQuery.isLoading || (viewMode === "composer" && composerLibrary === "models" && modelProjectsQuery.isLoading) ? <div className="model-lib-empty">{t("common.states.loadingProjects")}</div> : null}
+            {storageSettingsQuery.isLoading || projectsQuery.isLoading ? <div className="model-lib-empty">{t("common.states.loadingProjects")}</div> : null}
             {!storageConfigured ? <div className="model-lib-empty">{t("outfitLibrary.storageUnavailable")}</div> : null}
-            {storageConfigured && viewMode === "library" && !projectsQuery.isLoading && !projects.length ? <div className="model-lib-empty">{t("common.empty.noProjects")}</div> : null}
-            {storageConfigured && viewMode === "composer" && !modelProjectsQuery.isLoading && !sidebarProjects.length ? <div className="model-lib-empty">{t("common.empty.noProjects")}</div> : null}
-            {activeProject && viewMode === "library" ? (
+            {storageConfigured && !projectsQuery.isLoading && !projects.length ? <div className="model-lib-empty">{t("common.empty.noProjects")}</div> : null}
+            {activeProject ? (
               <OutfitGrid
                 outfits={outfits}
                 tags={tags}
@@ -1066,21 +979,6 @@ export function OutfitLibraryPage() {
                 onCreate={(file) => createOutfitMutation.mutate(file)}
                 onToggleTag={handleToggleOutfitTag}
                 onDelete={handleOutfitDelete}
-              />
-            ) : null}
-            {activeComposerProject && viewMode === "composer" ? (
-              <OutfitComposer
-                assets={composerAssets}
-                tags={composerTags}
-                activeTagId={composerTagId}
-                onTagChange={composerLibrary === "models" ? setActiveModelTagId : setActiveTagId}
-                onLoadAssetChoices={composerLibrary === "models" ? loadModelImageChoices : undefined}
-                assetTitle={composerLibrary === "models" ? t("outfitLibrary.modelAssets") : t("outfitLibrary.outfitAssets")}
-                assetAltText={composerLibrary === "models" ? t("outfitLibrary.modelImage") : t("outfitLibrary.outfitImage")}
-                emptyText={composerLibrary === "models" ? t("outfitLibrary.noFilteredModels") : t("outfitLibrary.noFilteredOutfits")}
-                canvasEmptyText={composerLibrary === "models" ? t("outfitLibrary.canvasEmptyModels") : t("outfitLibrary.canvasEmptyOutfits")}
-                tagFilterLabel={composerLibrary === "models" ? t("outfitLibrary.filterModelTags") : t("outfitLibrary.filterOutfitTags")}
-                cardVariant={composerLibrary === "models" ? "choice" : "direct"}
               />
             ) : null}
           </div>

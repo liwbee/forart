@@ -3,7 +3,8 @@ import { AssetUploadPayload, OutfitEntry, OutfitFilters, OutfitProject, OutfitTa
 
 export const outfitLibraryKeys = {
   projects: ["outfitProjects"] as const,
-  tags: ["outfitTags"] as const,
+  tagRoot: ["outfitTags"] as const,
+  tags: (projectId: string) => ["outfitTags", projectId] as const,
   outfits: (projectId: string, tagId = "") => ["outfits", projectId, tagId] as const,
   storageSettings: ["storageSettings"] as const,
 };
@@ -81,26 +82,26 @@ export function replaceOutfitImage(outfitId: string, payload: AssetUploadPayload
   });
 }
 
-export function listOutfitTags() {
-  return apiRequest<{ tags: OutfitTag[] }>("/api/libraries/outfit/tags");
+export function listOutfitTags(projectId: string) {
+  return apiRequest<{ tags: OutfitTag[] }>(`/api/libraries/outfit/tags${queryString({ project_id: projectId })}`);
 }
 
-export function createOutfitTag(name: string) {
-  return apiRequest<OutfitTag>("/api/libraries/outfit/tags", {
+export function createOutfitTag(projectId: string, name: string) {
+  return apiRequest<OutfitTag>(`/api/libraries/outfit/tags${queryString({ project_id: projectId })}`, {
     method: "POST",
     body: JSON.stringify({ name }),
   });
 }
 
-export function updateOutfitTag(tagId: string, payload: Partial<Pick<OutfitTag, "name" | "sort_order">>) {
-  return apiRequest<OutfitTag>(`/api/libraries/outfit/tags/${encodeURIComponent(tagId)}`, {
+export function updateOutfitTag(projectId: string, tagId: string, payload: Partial<Pick<OutfitTag, "name" | "sort_order">>) {
+  return apiRequest<OutfitTag>(`/api/libraries/outfit/tags/${encodeURIComponent(tagId)}${queryString({ project_id: projectId })}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
 }
 
-export function deleteOutfitTag(tagId: string) {
-  return apiRequest<{ ok: true }>(`/api/libraries/outfit/tags/${encodeURIComponent(tagId)}`, {
+export function deleteOutfitTag(projectId: string, tagId: string) {
+  return apiRequest<{ ok: true }>(`/api/libraries/outfit/tags/${encodeURIComponent(tagId)}${queryString({ project_id: projectId })}`, {
     method: "DELETE",
   });
 }

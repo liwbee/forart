@@ -1,11 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Images, Languages, Layers3, Moon, PersonStanding, ScanSearch, Settings, Sun, Users } from "lucide-react";
+import { Languages, Layers3, LayoutTemplate, LibraryBig, Moon, ScanSearch, Settings, Sun, Users } from "lucide-react";
 import { setActiveForartConfig } from "../data-source/runtime";
-import { ActionLibraryPage } from "../features/action-library/ActionLibraryPage";
 import { ImageReviewPage } from "../features/image-review/ImageReviewPage";
-import { ModelLibraryPage } from "../features/model-library/ModelLibraryPage";
-import { OutfitLibraryPage } from "../features/outfit-library/OutfitLibraryPage";
+import { ResourceLibraryPage } from "../features/resource-library/ResourceLibraryPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { AppView, useAppStore } from "./appStore";
 import { ForartAppConfig } from "./appConfig";
@@ -18,20 +16,25 @@ const navItems: Array<{
   shortKey: string;
   icon: typeof Users;
 }> = [
-  { id: "models", labelKey: "nav.models", shortKey: "nav.short.models", icon: Users },
-  { id: "outfits", labelKey: "nav.outfits", shortKey: "nav.short.outfits", icon: Images },
-  { id: "actions", labelKey: "nav.actions", shortKey: "nav.short.actions", icon: PersonStanding },
+  { id: "library", labelKey: "nav.library", shortKey: "nav.short.library", icon: LibraryBig },
+  { id: "free-canvas", labelKey: "nav.freeCanvas", shortKey: "nav.short.freeCanvas", icon: LayoutTemplate },
   { id: "image-review", labelKey: "nav.imageReview", shortKey: "nav.short.imageReview", icon: ScanSearch },
   { id: "canvas", labelKey: "nav.canvas", shortKey: "nav.short.canvas", icon: Layers3 },
 ];
 
 const VIEW_TRANSITION_MS = 500;
+const FreeCanvasPage = lazy(() => import("../features/free-canvas/FreeCanvasPage").then((module) => ({ default: module.FreeCanvasPage })));
 const CanvasPage = lazy(() => import("../features/infinite-canvas/CanvasPage"));
 
 function renderView(activeView: AppView, appConfig: ForartAppConfig, onConfigChange: (config: ForartAppConfig) => void) {
-  if (activeView === "models") return <ModelLibraryPage />;
-  if (activeView === "outfits") return <OutfitLibraryPage />;
-  if (activeView === "actions") return <ActionLibraryPage />;
+  if (activeView === "library") return <ResourceLibraryPage />;
+  if (activeView === "free-canvas") {
+    return (
+      <Suspense fallback={<div className="view-loading">{appConfig ? "Loading free canvas..." : ""}</div>}>
+        <FreeCanvasPage />
+      </Suspense>
+    );
+  }
   if (activeView === "image-review") return <ImageReviewPage />;
   if (activeView === "canvas") {
     return (
@@ -41,7 +44,7 @@ function renderView(activeView: AppView, appConfig: ForartAppConfig, onConfigCha
     );
   }
   if (activeView === "settings") return <SettingsPage config={appConfig} onConfigChange={onConfigChange} />;
-  return <ModelLibraryPage />;
+  return <ResourceLibraryPage />;
 }
 
 export function App() {

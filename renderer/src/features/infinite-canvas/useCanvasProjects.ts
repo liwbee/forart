@@ -269,6 +269,7 @@ export function useCanvasProjects({
   const [renamingTitle, setRenamingTitle] = useState("");
   const [projectStatus, setProjectStatus] = useState("");
   const [showCanvasHome, setShowCanvasHome] = useState(true);
+  const showCanvasHomeRef = useRef(true);
   const [canvasHomeMode, setCanvasHomeMode] = useState<CanvasHomeMode>("local");
   const [selectedHomeCanvasId, setSelectedHomeCanvasId] = useState("");
   const [libtvImportCards, setLibtvImportCards] = useState<LibtvImportCardRecord[]>([]);
@@ -277,6 +278,8 @@ export function useCanvasProjects({
   const [libtvProjectDraftId] = useState("");
   const [libtvImporting, setLibtvImporting] = useState(false);
   const [libtvStatus, setLibtvStatus] = useState("");
+  const [libtvStatusTone, setLibtvStatusTone] = useState<"busy" | "ready" | "error">("ready");
+  const libtvStatusTimeoutRef = useRef<number | null>(null);
   const [, setLibtvImportProgress] = useState<LibtvImportProgress | null>(null);
   const [libtvProjectResults, setLibtvProjectResults] = useState<LibtvProjectRecord[]>([]);
   const [libtvProjectFilter, setLibtvProjectFilter] = useState("");
@@ -294,6 +297,40 @@ export function useCanvasProjects({
   useEffect(() => {
     activeCanvasIdRef.current = activeCanvasId;
   }, [activeCanvasId]);
+
+  const showLibtvStatus = useCallback((status: string, tone: "busy" | "ready" | "error" = "ready", autoHideMs = 5500) => {
+    if (libtvStatusTimeoutRef.current) {
+      window.clearTimeout(libtvStatusTimeoutRef.current);
+      libtvStatusTimeoutRef.current = null;
+    }
+    setLibtvStatus(status);
+    setLibtvStatusTone(tone);
+    if (status && autoHideMs > 0) {
+      libtvStatusTimeoutRef.current = window.setTimeout(() => {
+        setLibtvStatus("");
+        libtvStatusTimeoutRef.current = null;
+      }, autoHideMs);
+    }
+  }, []);
+
+  useEffect(() => () => {
+    if (libtvStatusTimeoutRef.current) window.clearTimeout(libtvStatusTimeoutRef.current);
+  }, []);
+
+  useEffect(() => {
+    showCanvasHomeRef.current = showCanvasHome;
+  }, [showCanvasHome]);
+
+  const returnToCanvasHome = useCallback(() => {
+    showCanvasHomeRef.current = true;
+    setShowCanvasHome(true);
+    setProjectStatus("");
+    clearCanvasTransientState();
+  }, [clearCanvasTransientState]);
+
+  const setTransientLibtvStatus = useCallback((status: string) => {
+    showLibtvStatus(status, status ? "error" : "ready", status ? 7000 : 0);
+  }, [showLibtvStatus]);
 
   const applyCanvasProject = useCallback((project: CanvasProject) => {
     replaceCanvasDocument({ nodes: project.nodes, connections: project.connections, groups: project.groups });
@@ -332,7 +369,9 @@ export function useCanvasProjects({
     if (project.canvasType !== "forart-libtv" || !project.libtvProjectId || !importLibtvProject || !saveCanvasProject) return;
     try {
       flushLibtvPending();
-      setProjectStatus(t("infiniteCanvas.libtvRefreshingRemoteCanvas"));
+      if (!showCanvasHomeRef.current && activeCanvasIdRef.current === project.id) {
+        setProjectStatus(t("infiniteCanvas.libtvRefreshingRemoteCanvas"));
+      }
       const imported = await importLibtvProject(project.libtvProjectId);
       const merged = mergeLibtvRemoteSnapshot(project, imported, new Set(getPendingLibtvNodeIds()));
       const saved = await saveCanvasProject(project.id, {
@@ -349,12 +388,12 @@ export function useCanvasProjects({
       });
       const refreshedProject = normalizeCanvasProject(saved.canvas);
       updateCanvasProjectRecord(saved.record || saved.canvas);
-      if (refreshedProject && activeCanvasIdRef.current === project.id) {
+      if (refreshedProject && activeCanvasIdRef.current === project.id && !showCanvasHomeRef.current) {
         applyCanvasProject(refreshedProject);
         setProjectStatus(t("infiniteCanvas.canvasReady"));
       }
     } catch (error) {
-      if (activeCanvasIdRef.current === project.id) {
+      if (activeCanvasIdRef.current === project.id && !showCanvasHomeRef.current) {
         setProjectStatus(error instanceof Error ? error.message : String(error));
       }
     }
@@ -438,24 +477,24 @@ export function useCanvasProjects({
     if (directProjectId) {
       setSelectedLibtvProjectUuid(directProjectId);
       setLibtvProjectResults([{ uuid: directProjectId, name: directProjectId }]);
-      setLibtvStatus(t("infiniteCanvas.libtvDirectProjectReady"));
+      showLibtvStatus(t("infiniteCanvas.libtvDirectProjectReady"), "ready");
       return;
     }
     if (!window.libtv?.searchProjects || libtvImporting) return;
     setLibtvImporting(true);
     setLibtvImportProgress(null);
-    setLibtvStatus(t("infiniteCanvas.libtvSearchingProjects"));
+    showLibtvStatus(t("infiniteCanvas.libtvSearchingProjects"), "busy", 0);
     try {
       const result = await window.libtv.searchProjects({ pageSize: 100 });
       setLibtvProjectResults(result.projects || []);
       setSelectedLibtvProjectUuid(result.projects?.[0]?.uuid || "");
-      setLibtvStatus((result.projects || []).length ? t("infiniteCanvas.libtvSearchSuccess", { count: result.projects.length, total: result.total || result.projects.length }) : t("infiniteCanvas.libtvNoProjectsFound"));
+      showLibtvStatus((result.projects || []).length ? t("infiniteCanvas.libtvSearchSuccess", { count: result.projects.length, total: result.total || result.projects.length }) : t("infiniteCanvas.libtvNoProjectsFound"), "ready");
     } catch (error) {
-      setLibtvStatus(error instanceof Error ? error.message : String(error));
+      showLibtvStatus(error instanceof Error ? error.message : String(error), "error", 7000);
     } finally {
       setLibtvImporting(false);
     }
-  }, [libtvImporting, libtvProjectDraftId, t]);
+  }, [libtvImporting, libtvProjectDraftId, showLibtvStatus, t]);
 
   const importLibtvProjectFromDraft = useCallback(async (projectUuid?: string) => {
     const projectId = projectUuid || selectedLibtvProjectUuid || parseLibtvProjectInput(libtvProjectDraftId) || libtvProjectDraftId.trim();
@@ -467,7 +506,7 @@ export function useCanvasProjects({
     const startedAt = Date.now();
     setLibtvImporting(true);
     setLibtvImportProgress({ projectId, stage: "loadingProject" });
-    setLibtvStatus(t("infiniteCanvas.libtvImporting"));
+    showLibtvStatus(t("infiniteCanvas.libtvImporting"), "busy", 0);
     setCanvasHomeMode("local");
     setShowCanvasHome(true);
     setSelectedHomeCanvasId(temporaryCardId);
@@ -516,15 +555,15 @@ export function useCanvasProjects({
       setLibtvImportProgress((current) => mergeLibtvImportProgress(current, doneProgress));
       setLibtvImportCards((current) => current.filter((item) => item.libtvProjectId !== projectId));
       setSelectedHomeCanvasId(record?.id || project?.id || "");
-      setLibtvStatus(t("infiniteCanvas.libtvImportSuccess", { count: imported.nodes.length }));
+      showLibtvStatus(t("infiniteCanvas.libtvImportSuccess", { count: imported.nodes.length }), "ready");
     } catch (error) {
       setLibtvImportCards((current) => current.filter((item) => item.libtvProjectId !== projectId));
-      setLibtvStatus(error instanceof Error ? error.message : String(error));
+      showLibtvStatus(error instanceof Error ? error.message : String(error), "error", 7000);
     } finally {
       setLibtvImporting(false);
       setLibtvImportProgress(null);
     }
-  }, [libtvImporting, libtvProjectDraftId, libtvProjectResults, selectedLibtvProjectUuid, t, updateCanvasProjectRecord]);
+  }, [libtvImporting, libtvProjectDraftId, libtvProjectResults, selectedLibtvProjectUuid, showLibtvStatus, t, updateCanvasProjectRecord]);
 
   const openLibtvHome = useCallback(() => {
     setCanvasHomeMode("libtv");
@@ -586,16 +625,17 @@ export function useCanvasProjects({
           : project
       )));
       if (payload.message) {
-        setLibtvStatus(payload.message);
+        showLibtvStatus(payload.message, "busy", 0);
       }
     });
-  }, []);
+  }, [showLibtvStatus]);
 
   return {
     activeProject,
     projectStatus,
     showCanvasHome,
     setShowCanvasHome,
+    returnToCanvasHome,
     canvasHomeMode,
     setCanvasHomeMode,
     selectedHomeCanvasId,
@@ -614,7 +654,8 @@ export function useCanvasProjects({
     setLibtvProjectFilter,
     libtvImporting,
     libtvStatus,
-    setLibtvStatus,
+    libtvStatusTone,
+    setLibtvStatus: setTransientLibtvStatus,
     selectedLibtvProjectUuid,
     setSelectedLibtvProjectUuid,
     openLibtvHome,
