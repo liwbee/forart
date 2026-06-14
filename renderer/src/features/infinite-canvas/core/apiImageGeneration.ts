@@ -23,13 +23,22 @@ function joinApiPath(baseUrl: string, path: string) {
   return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
-function openAiImagesUrl(baseUrl: string) {
+function imageGenerationsUrl(baseUrl: string) {
   const normalized = baseUrl.replace(/\/+$/, "");
   if (/\/images\/generations$/i.test(normalized)) return normalized;
   for (const prefix of ["/api/v3", "/v1beta", "/v1", "/v2"]) {
     if (normalized.endsWith(prefix)) return joinApiPath(normalized, "images/generations");
   }
   return joinApiPath(normalized, "v1/images/generations");
+}
+
+function imageUploadsUrl(baseUrl: string) {
+  const normalized = baseUrl
+    .replace(/\/+$/, "")
+    .replace(/\/images\/generations$/i, "")
+    .replace(/\/images\/edits$/i, "");
+  if (/\/v\d(?:beta)?$/i.test(normalized) || /\/api\/v\d$/i.test(normalized)) return joinApiPath(normalized, "uploads/images");
+  return joinApiPath(normalized, "v1/uploads/images");
 }
 
 function taskUrlCandidates(baseUrl: string, taskId: string) {
@@ -46,66 +55,42 @@ function taskUrlCandidates(baseUrl: string, taskId: string) {
   return [...new Set(candidates)];
 }
 
-function geminiGenerateContentUrl(baseUrl: string, model: string, apiKey: string) {
-  const normalized = baseUrl.replace(/\/+$/, "");
-  const modelPath = model.replace(/^models\//, "");
-  const path = /\/models$/i.test(normalized)
-    ? `${encodeURIComponent(modelPath)}:generateContent`
-    : `models/${encodeURIComponent(modelPath)}:generateContent`;
-  return joinApiPath(normalized, `${path}${apiKey ? `?key=${encodeURIComponent(apiKey)}` : ""}`);
-}
-
-function imageDataUrl(mimeType: string, data: string) {
-  return `data:${mimeType || "image/png"};base64,${data}`;
-}
-
 function firstString(...values: unknown[]) {
   return values.find((value): value is string => typeof value === "string" && Boolean(value.trim())) || "";
 }
 
-function isLikelyBase64Image(value: string) {
-  const text = value.trim();
-  return text.length > 180 && /^[A-Za-z0-9+/=\r\n]+$/.test(text);
+function isHttpImageUrl(value: string) {
+  return /^https?:\/\/\S+/i.test(value.trim());
 }
 
-function isLikelyImageUrl(value: string) {
-  return /^data:image\//i.test(value) || /^https?:\/\/\S+/i.test(value) || /^blob:/i.test(value);
-}
-
-function valueToImage(value: unknown, key = ""): ImageGenerationResult | null {
+function valueToImage(value: unknown): ImageGenerationResult | null {
   if (typeof value !== "string") return null;
   const text = value.trim();
-  if (!text) return null;
-  if (/^data:image\//i.test(text) || /^https?:\/\/\S+/i.test(text) || /^blob:/i.test(text)) {
-    return { url: text, fileName: "generated-image.png" };
-  }
-  if (/(b64|base64|image|artifact|data)/i.test(key) && isLikelyBase64Image(text)) {
-    return { url: imageDataUrl("image/png", text), fileName: "generated-image.png" };
-  }
-  return null;
+  if (!isHttpImageUrl(text)) return null;
+  return { url: text, fileName: "generated-image.png" };
 }
 
 function findImageInPayload(payload: unknown): ImageGenerationResult | null {
-  const queue: Array<{ value: unknown; key: string }> = [{ value: payload, key: "" }];
+  const queue: unknown[] = [payload];
   const seen = new Set<unknown>();
   while (queue.length) {
-    const { value, key } = queue.shift() as { value: unknown; key: string };
-    const image = valueToImage(value, key);
+    const value = queue.shift();
+    const image = valueToImage(value);
     if (image) return image;
     if (!value || typeof value !== "object" || seen.has(value)) continue;
     seen.add(value);
     if (Array.isArray(value)) {
-      value.forEach((item) => queue.push({ value: item, key }));
+      value.forEach((item) => queue.push(item));
       continue;
     }
     const record = value as Record<string, unknown>;
     const imageUrl = record.image_url;
-    if (typeof imageUrl === "string" && isLikelyImageUrl(imageUrl)) return { url: imageUrl, fileName: "generated-image.png" };
+    if (typeof imageUrl === "string" && isHttpImageUrl(imageUrl)) return { url: imageUrl, fileName: "generated-image.png" };
     if (imageUrl && typeof imageUrl === "object") {
       const nestedUrl = firstString((imageUrl as Record<string, unknown>).url);
-      if (nestedUrl && isLikelyImageUrl(nestedUrl)) return { url: nestedUrl, fileName: "generated-image.png" };
+      if (nestedUrl && isHttpImageUrl(nestedUrl)) return { url: nestedUrl, fileName: "generated-image.png" };
     }
-    Object.entries(record).forEach(([childKey, childValue]) => queue.push({ value: childValue, key: childKey }));
+    Object.values(record).forEach((childValue) => queue.push(childValue));
   }
   return null;
 }
@@ -120,8 +105,6 @@ function summarizePayloadShape(payload: unknown) {
   if (data && typeof data === "object" && !Array.isArray(data)) hints.push(`data keys: ${Object.keys(data as Record<string, unknown>).slice(0, 8).join(", ") || "none"}`);
   const status = firstString(record.status, record.state);
   if (status) hints.push(`status: ${status}`);
-  const taskId = firstString(record.task_id, record.taskId, record.id, record.request_id);
-  if (taskId && /(pending|queued|running|processing|submitted|created)/i.test(status || "")) hints.push("this looks like an async task response");
   return [`top-level keys: ${topKeys.join(", ") || "none"}`, ...hints].join("; ");
 }
 
@@ -165,28 +148,6 @@ function readTaskError(payload: unknown) {
   const error = data?.error && typeof data.error === "object" ? data.error as Record<string, unknown> : null;
   const topError = record?.error && typeof record.error === "object" ? record.error as Record<string, unknown> : null;
   return firstString(error?.message, topError?.message, data?.error, record?.error, data?.message, record?.message);
-}
-
-function readOpenAiCompatibleImage(payload: unknown): ImageGenerationResult | null {
-  return findImageInPayload(payload);
-}
-
-function readGeminiImage(payload: unknown): ImageGenerationResult | null {
-  const record = payload && typeof payload === "object" ? payload as Record<string, unknown> : null;
-  const candidates = Array.isArray(record?.candidates) ? record.candidates : [];
-  for (const candidate of candidates) {
-    const candidateRecord = candidate && typeof candidate === "object" ? candidate as Record<string, unknown> : null;
-    const content = candidateRecord?.content && typeof candidateRecord.content === "object" ? candidateRecord.content as Record<string, unknown> : null;
-    const parts = Array.isArray(content?.parts) ? content.parts : [];
-    for (const part of parts) {
-      const partRecord = part && typeof part === "object" ? part as Record<string, unknown> : null;
-      const inlineData = partRecord?.inlineData || partRecord?.inline_data;
-      const inlineRecord = inlineData && typeof inlineData === "object" ? inlineData as Record<string, unknown> : null;
-      const data = firstString(inlineRecord?.data);
-      if (data) return { url: imageDataUrl(firstString(inlineRecord?.mimeType, inlineRecord?.mime_type) || "image/png", data), fileName: "generated-image.png" };
-    }
-  }
-  return null;
 }
 
 async function readErrorMessage(response: Response) {
@@ -234,37 +195,100 @@ async function wait(ms: number, signal?: AbortSignal) {
   });
 }
 
-function splitDataUrl(value: string) {
-  const match = value.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/s);
-  return match ? { mimeType: match[1], data: match[2] } : null;
+function looksLikeBase64Image(value: string) {
+  const text = value.trim();
+  return text.length > 180 && /^[A-Za-z0-9+/=\r\n]+$/.test(text);
 }
 
-async function imageUrlToDataUrl(url: string, signal?: AbortSignal) {
-  if (/^data:image\//i.test(url)) return url;
-  try {
-    const response = await fetch(url, { signal });
-    if (!response.ok) return url;
-    const blob = await response.blob();
-    return await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || url));
-      reader.onerror = () => reject(reader.error || new Error("Failed to read reference image."));
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return url;
+function rejectBase64Image(value: string) {
+  if (/^data:image\//i.test(value) || looksLikeBase64Image(value)) {
+    throw new Error("Base64 image input is disabled. Please use an uploaded image file or an http(s) image URL.");
   }
 }
 
-async function normalizeReferenceImages(referenceImages: string[] = [], signal?: AbortSignal) {
+function extensionFromContentType(contentType: string | null) {
+  const subtype = String(contentType || "").split("/")[1] || "";
+  if (!subtype) return "";
+  return `.${subtype.replace("jpeg", "jpg").replace(/[^a-z0-9.+-]/gi, "")}`;
+}
+
+function fileNameFromImageSource(source: string, contentType: string | null, index: number) {
+  try {
+    const parsed = new URL(source);
+    const name = decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() || "");
+    if (name && /\.[a-z0-9]+$/i.test(name)) return name;
+  } catch {
+    // Custom schemes such as blob: keep the generated filename.
+  }
+  return `reference-${index + 1}${extensionFromContentType(contentType) || ".png"}`;
+}
+
+async function readReferenceBlob(source: string, signal?: AbortSignal) {
+  try {
+    const response = await fetch(source, { signal });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
+    return {
+      blob: await response.blob(),
+      contentType: response.headers.get("content-type"),
+      source,
+    };
+  } catch (error) {
+    if (!isHttpImageUrl(source) || !window.easyTool?.saveCanvasAsset) throw error;
+    const saved = await window.easyTool.saveCanvasAsset({ url: source, defaultName: "reference-image.png", kind: "input" });
+    const response = await fetch(saved.url, { signal });
+    if (!response.ok) throw new Error(`Failed to read downloaded reference image: ${response.status} ${response.statusText}`.trim());
+    return {
+      blob: await response.blob(),
+      contentType: response.headers.get("content-type"),
+      source: saved.url,
+    };
+  }
+}
+
+async function uploadReferenceImage(uploadUrl: string, headers: Record<string, string>, source: string, index: number, signal?: AbortSignal) {
+  const { blob, contentType, source: readableSource } = await readReferenceBlob(source, signal);
+  const mimeType = blob.type || contentType || "image/png";
+  if (!/^image\//i.test(mimeType)) throw new Error(`Reference image must be an image file, received ${mimeType}.`);
+  const file = new File([blob], fileNameFromImageSource(readableSource, mimeType, index), { type: mimeType });
+  const formData = new FormData();
+  formData.append("file", file);
+  const payload = await requestJson(uploadUrl, {
+    method: "POST",
+    headers,
+    signal,
+    body: formData,
+  });
+  const record = payload && typeof payload === "object" ? payload as Record<string, unknown> : null;
+  const data = record?.data && typeof record.data === "object" ? record.data as Record<string, unknown> : null;
+  const uploadedUrl = firstString(record?.url, data?.url);
+  if (!uploadedUrl || !isHttpImageUrl(uploadedUrl)) throw new Error(`Image upload did not return a usable URL (${summarizePayloadShape(payload)}).`);
+  return uploadedUrl;
+}
+
+async function normalizeReferenceImages(
+  baseUrl: string,
+  uploadHeaders: Record<string, string>,
+  referenceImages: string[] = [],
+  onStatus?: (message: string) => void,
+  signal?: AbortSignal,
+) {
   const normalized: string[] = [];
   const seen = new Set<string>();
   for (const image of referenceImages) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const value = String(image || "").trim();
     if (!value || seen.has(value)) continue;
+    rejectBase64Image(value);
+    if (!/^https?:\/\/|^blob:|^forart-asset:/i.test(value)) {
+      throw new Error("Reference images must be http(s), blob, or Forart asset URLs. Base64 is not supported.");
+    }
     seen.add(value);
-    normalized.push(await imageUrlToDataUrl(value, signal));
+    if (/^https:\/\/upload\.apimart\.ai\//i.test(value)) {
+      normalized.push(value);
+    } else {
+      onStatus?.(`Uploading reference image ${normalized.length + 1}...`);
+      normalized.push(await uploadReferenceImage(imageUploadsUrl(baseUrl), uploadHeaders, value, normalized.length, signal));
+    }
     if (normalized.length >= 16) break;
   }
   return normalized;
@@ -280,6 +304,10 @@ function openAiSizeFor(resolution: string, aspectRatio: string) {
   return `${Math.round(shortEdge * ratioW / ratioH)}x${shortEdge}`;
 }
 
+function modelSupportsImageToImage(model: string) {
+  return !/(^z-image-turbo$|imagen-4\.0|grok-imagine-1\.5-apimart)/i.test(model.trim());
+}
+
 async function pollImageTask(
   baseUrl: string,
   headers: Record<string, string>,
@@ -289,7 +317,7 @@ async function pollImageTask(
   signal?: AbortSignal,
 ) {
   let lastPayload = initialPayload;
-  onStatus?.("等待生成结果...");
+  onStatus?.("Waiting for image result...");
   await wait(3000, signal);
   for (let attempt = 0; attempt < 120; attempt += 1) {
     const payload = await requestFirstJson(taskUrlCandidates(baseUrl, taskId), {
@@ -301,7 +329,7 @@ async function pollImageTask(
     const result = findImageInPayload(payload);
     if (result) return result;
     const status = readTaskStatus(payload).toLowerCase();
-    if (status) onStatus?.(`生成中：${status}`);
+    if (status) onStatus?.(`Generating: ${status}`);
     if (/(failure|failed|fail|error|errored|cancelled|canceled|rejected|expired|timeout)/i.test(status)) {
       throw new Error(readTaskError(payload) || `Image generation task failed (${summarizePayloadShape(payload)}).`);
     }
@@ -311,19 +339,20 @@ async function pollImageTask(
   throw new Error(`Image generation task timed out (${summarizePayloadShape(lastPayload)}).`);
 }
 
-async function generateAsyncImage(
+async function submitImageGeneration(
   baseUrl: string,
   headers: Record<string, string>,
   model: string,
   prompt: string,
+  size: string,
   resolution: string,
   aspectRatio: string,
   referenceImages: string[],
   onStatus?: (message: string) => void,
   signal?: AbortSignal,
 ) {
-  onStatus?.("提交生成任务...");
-  const submitPayload = await requestJson(openAiImagesUrl(baseUrl), {
+  onStatus?.("Submitting image generation...");
+  const payload = await requestJson(imageGenerationsUrl(baseUrl), {
     method: "POST",
     headers,
     signal,
@@ -331,94 +360,53 @@ async function generateAsyncImage(
       model,
       prompt,
       n: 1,
-      size: aspectRatio,
+      size,
       aspect_ratio: aspectRatio,
       resolution,
       ...(referenceImages.length ? { image_urls: referenceImages } : {}),
     }),
   });
-  const directResult = findImageInPayload(submitPayload);
+  const directResult = findImageInPayload(payload);
   if (directResult) return directResult;
 
-  const taskId = readTaskId(submitPayload);
-  if (!taskId) throw new Error(`The async image API did not return a task_id (${summarizePayloadShape(submitPayload)}).`);
-  return pollImageTask(baseUrl, headers, taskId, submitPayload, onStatus, signal);
+  const taskId = readTaskId(payload);
+  if (taskId) return pollImageTask(baseUrl, headers, taskId, payload, onStatus, signal);
+  throw new Error(`The image API response did not contain an image or task_id (${summarizePayloadShape(payload)}).`);
 }
 
-export async function generateImageWithProvider({ provider, model, prompt, referenceImages = [], size, resolution = "1k", aspectRatio = "1:1", onStatus, signal }: ImageGenerationRequest): Promise<ImageGenerationResult> {
+export async function generateImageWithProvider({
+  provider,
+  model,
+  prompt,
+  referenceImages = [],
+  size,
+  resolution = "1k",
+  aspectRatio = "1:1",
+  onStatus,
+  signal,
+}: ImageGenerationRequest): Promise<ImageGenerationResult> {
   const baseUrl = provider.baseUrl.trim();
+  const modelName = model.trim();
   if (!baseUrl) throw new Error("API provider base URL is empty.");
-  if (!model.trim()) throw new Error("No image model selected.");
-  const requestSize = size || openAiSizeFor(resolution, aspectRatio);
-  onStatus?.("正在处理参考图...");
-  const refs = await normalizeReferenceImages(referenceImages, signal);
-
+  if (!modelName) throw new Error("No image model selected.");
   if (provider.protocol === "gemini") {
-    onStatus?.("请求生成服务...");
-    const apiKey = provider.apiKey.trim();
-    const url = geminiGenerateContentUrl(baseUrl, model, apiKey);
-    const payload = await requestJson(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(apiKey ? { "x-goog-api-key": apiKey } : {}) },
-      signal,
-      body: JSON.stringify({
-        contents: [{ role: "user",
-          parts: [
-            { text: prompt },
-            ...refs
-              .map((ref) => splitDataUrl(ref))
-              .filter(Boolean)
-              .map((ref) => ({ inlineData: { mimeType: ref?.mimeType || "image/png", data: ref?.data || "" } })),
-          ],
-        }],
-        generationConfig: { responseModalities: ["TEXT", "IMAGE"], imageConfig: { aspectRatio, imageSize: resolution.toUpperCase() } },
-      }),
-    });
-    const result = readGeminiImage(payload);
-    if (result) return result;
-    throw new Error(`The Gemini response did not contain image data (${summarizePayloadShape(payload)}).`);
+    throw new Error("Gemini native image generation is disabled because it uses base64 image payloads. Use an APIMart/OpenAI-compatible image endpoint instead.");
+  }
+  if (/edit/i.test(modelName)) {
+    throw new Error("Image editing endpoints are disabled. Only text-to-image and image-to-image generation are supported.");
+  }
+  if (referenceImages.length && !modelSupportsImageToImage(modelName)) {
+    throw new Error(`${modelName} does not support image-to-image generation in the current configuration.`);
   }
 
-  const headers = {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(provider.apiKey.trim() ? { Authorization: `Bearer ${provider.apiKey.trim()}` } : {}),
   };
-  if (provider.protocol === "async") {
-    return generateAsyncImage(baseUrl, headers, model, prompt, resolution, aspectRatio, refs, onStatus, signal);
-  }
+  const uploadHeaders: Record<string, string> = provider.apiKey.trim() ? { Authorization: `Bearer ${provider.apiKey.trim()}` } : {};
+  onStatus?.(referenceImages.length ? "Preparing reference images..." : "Preparing text-to-image request...");
+  const refs = await normalizeReferenceImages(baseUrl, uploadHeaders, referenceImages, onStatus, signal);
+  const requestSize = provider.protocol === "async" ? aspectRatio : size || openAiSizeFor(resolution, aspectRatio);
 
-  onStatus?.("请求生成服务...");
-  const body = { model, prompt, n: 1, size: requestSize, resolution, aspect_ratio: aspectRatio, response_format: "b64_json", ...(refs.length ? { image_urls: refs } : {}) };
-  let payload: unknown;
-  try {
-    payload = await requestJson(openAiImagesUrl(baseUrl), {
-      method: "POST",
-      headers,
-      signal,
-      body: JSON.stringify(body),
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/response_format|unknown parameter|unsupported/i.test(message)) throw error;
-    payload = await requestJson(openAiImagesUrl(baseUrl), {
-      method: "POST",
-      headers,
-      signal,
-      body: JSON.stringify({ model, prompt, n: 1, size: requestSize, ...(refs.length ? { image_urls: refs } : {}) }),
-    }).catch((fallbackError) => {
-      const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-      if (!refs.length || !/image_urls|image|unknown parameter|unsupported/i.test(fallbackMessage)) throw fallbackError;
-      return requestJson(openAiImagesUrl(baseUrl), {
-        method: "POST",
-        headers,
-        signal,
-        body: JSON.stringify({ model, prompt, n: 1, size: requestSize }),
-      });
-    });
-  }
-  const result = readOpenAiCompatibleImage(payload);
-  if (result) return result;
-  const taskId = readTaskId(payload);
-  if (taskId) return pollImageTask(baseUrl, headers, taskId, payload, onStatus, signal);
-  throw new Error(`The image API response did not contain an image (${summarizePayloadShape(payload)}).`);
+  return submitImageGeneration(baseUrl, headers, modelName, prompt, requestSize, resolution, aspectRatio, refs, onStatus, signal);
 }

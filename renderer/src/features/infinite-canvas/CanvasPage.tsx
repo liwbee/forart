@@ -372,7 +372,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     width: selectedNodesBounds.width + GROUP_PADDING * 2,
     height: selectedNodesBounds.height + GROUP_PADDING * 2,
   }) : null, [selectedNodesBounds]);
-  const imageProviders = useMemo(() => apiProviders.filter((provider) => provider.protocol !== "lovart" && provider.imageModels.length), [apiProviders]);
+  const imageProviders = useMemo(() => apiProviders.filter((provider) => provider.protocol !== "lovart" && provider.protocol !== "gemini" && provider.imageModels.length), [apiProviders]);
   const lovartProvider = useMemo(() => apiProviders.find((provider) => provider.protocol === "lovart" || provider.id === "lovart") || null, [apiProviders]);
   const chatProviders = useMemo(() => apiProviders.filter((provider) => provider.chatModels.length), [apiProviders]);
   const fixedCanvasUiStyle = useMemo(() => ({
@@ -394,7 +394,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   }, [viewport]);
 
   const defaultImageProvider = useMemo(() => (
-    apiProviders.find((provider) => provider.id === defaultImageProviderId && provider.protocol !== "lovart")
+    apiProviders.find((provider) => provider.id === defaultImageProviderId && provider.protocol !== "lovart" && provider.protocol !== "gemini")
     || imageProviders[0]
     || null
   ), [apiProviders, defaultImageProviderId, imageProviders]);

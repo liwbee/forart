@@ -79,8 +79,8 @@ export function useCanvasGenerationActions({
   const runImageComposer = useCallback(async (nodeId: string) => {
     const node = nodeMap.get(nodeId);
     if (!node || node.type !== "imageGenerator" || node.running) return;
-    const provider = apiProviders.find((item) => item.id === node.imageProviderId && item.protocol !== "lovart")
-      || apiProviders.find((item) => item.id === defaultImageProviderId && item.protocol !== "lovart")
+    const provider = apiProviders.find((item) => item.id === node.imageProviderId && item.protocol !== "lovart" && item.protocol !== "gemini")
+      || apiProviders.find((item) => item.id === defaultImageProviderId && item.protocol !== "lovart" && item.protocol !== "gemini")
       || imageProviders[0]
       || null;
     const model = node.imageModel && provider?.imageModels.includes(node.imageModel) ? node.imageModel : provider?.imageModels[0] || "";

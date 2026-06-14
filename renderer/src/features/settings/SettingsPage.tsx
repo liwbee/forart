@@ -192,7 +192,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     }
     if (!apiProviders.length && selectedProviderId) setSelectedProviderId("");
     if (apiProviders.length && defaultImageProviderId && !apiProviders.some((provider) => provider.id === defaultImageProviderId)) {
-      const nextDefault = apiProviders.find((provider) => provider.protocol !== "lovart" && provider.imageModels.length)?.id || apiProviders.find((provider) => provider.protocol !== "lovart")?.id || "";
+      const nextDefault = apiProviders.find((provider) => provider.protocol !== "lovart" && provider.protocol !== "gemini" && provider.imageModels.length)?.id || apiProviders.find((provider) => provider.protocol !== "lovart" && provider.protocol !== "gemini")?.id || "";
       setDefaultImageProviderId(nextDefault);
     }
     if (!apiProviders.length && defaultImageProviderId) {
@@ -590,7 +590,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
       setSelectedProviderId(next[0]?.id || "");
       if (!next.length) setActiveApiPane("libtv");
       if (defaultImageProviderId === selectedProvider.id) {
-        const nextDefault = next.find((provider) => provider.protocol !== "lovart" && provider.imageModels.length)?.id || next.find((provider) => provider.protocol !== "lovart")?.id || "";
+        const nextDefault = next.find((provider) => provider.protocol !== "lovart" && provider.protocol !== "gemini" && provider.imageModels.length)?.id || next.find((provider) => provider.protocol !== "lovart" && provider.protocol !== "gemini")?.id || "";
         setDefaultImageProviderId(nextDefault);
       }
       return next;

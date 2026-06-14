@@ -242,11 +242,6 @@
     border-bottom: 0;
   }
 
-  .model-library-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
   .outfit-view-switch {
     width: 100%;
   }
@@ -260,6 +255,11 @@
     width: 100%;
     min-width: 0;
     flex-basis: auto;
+  }
+
+  .model-toolbar-search-slot {
+    width: 100%;
+    margin-left: 0;
   }
 
   .model-grid {

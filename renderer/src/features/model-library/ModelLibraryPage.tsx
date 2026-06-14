@@ -1,4 +1,4 @@
-﻿import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { MoreHorizontal, Pencil, Plus, Search, Star, Trash2, Upload, X } from "lucide-react";
@@ -259,6 +259,7 @@ function ModelToolbar({
   tags,
   activeTagId,
   activeGender,
+  searchSlot,
   onTagChange,
   onGenderToggle,
   onOpenTagManager,
@@ -266,6 +267,7 @@ function ModelToolbar({
   tags: ModelTag[];
   activeTagId: string;
   activeGender: "female" | "male" | "";
+  searchSlot?: ReactNode;
   onTagChange: (tagId: string) => void;
   onGenderToggle: (gender: "female" | "male") => void;
   onOpenTagManager: () => void;
@@ -444,6 +446,7 @@ function ModelToolbar({
           </div>
         </div>
       </div>
+      {searchSlot ? <div className="model-toolbar-search-slot">{searchSlot}</div> : null}
       {tagMenuState.open && hiddenTags.length
         ? createPortal(
             <div
@@ -1626,23 +1629,6 @@ export function ModelLibraryPage() {
 
   return (
     <section className="model-library-page" aria-label={t("modelLibrary.title")}>
-      <div className="model-library-header model-library-header--search-only">
-        <label className="model-library-search">
-          <Search size={18} aria-hidden="true" />
-          <input
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder={t("modelLibrary.searchPlaceholder")}
-            aria-label={t("modelLibrary.searchPlaceholder")}
-          />
-          {searchQuery ? (
-            <button type="button" aria-label={t("modelLibrary.clearSearch")} onClick={() => setSearchQuery("")}>
-              <X size={16} aria-hidden="true" />
-            </button>
-          ) : null}
-        </label>
-      </div>
-
       <div className="model-library">
         <ModelProjectSidebar
           projects={projects}
@@ -1674,6 +1660,22 @@ export function ModelLibraryPage() {
               onTagChange={setActiveTagId}
               onGenderToggle={toggleGender}
               onOpenTagManager={() => setTagManagerOpen(true)}
+              searchSlot={
+                <label className="model-library-search">
+                  <Search size={18} aria-hidden="true" />
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder={t("modelLibrary.searchPlaceholder")}
+                    aria-label={t("modelLibrary.searchPlaceholder")}
+                  />
+                  {searchQuery ? (
+                    <button type="button" aria-label={t("modelLibrary.clearSearch")} onClick={() => setSearchQuery("")}>
+                      <X size={16} aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </label>
+              }
             />
           </div>
 
