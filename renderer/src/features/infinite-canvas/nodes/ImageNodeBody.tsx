@@ -39,9 +39,8 @@ export function ImageNodeBody({
   const { t } = useTranslation();
   const hasImage = Boolean(node.url);
   const isImageGenerator = node.type === "imageGenerator";
-  const isLovart = node.type === "lovart";
   const isLibtv = node.type === "libtvImage";
-  const isGeneratorLike = isImageGenerator || isLovart || isLibtv;
+  const isGeneratorLike = isImageGenerator || isLibtv;
   const isGenerating = isGeneratorLike && Boolean(node.running);
   const showGeneratorDownload = hasImage && isGeneratorLike && !isGenerating;
   const [loadedSize, setLoadedSize] = useState<{ width: number; height: number } | null>(null);
@@ -84,7 +83,7 @@ export function ImageNodeBody({
         className={`ic-image-drop${hasImage ? " has-image" : ""}${isGenerating ? " is-generating" : ""}`}
         role={hasImage ? "button" : undefined}
         tabIndex={hasImage ? 0 : undefined}
-        aria-label={hasImage ? t("infiniteCanvas.viewLargeImage") : isGeneratorLike ? t(isLovart ? "infiniteCanvas.lovart" : isLibtv ? "infiniteCanvas.libtvImage" : "infiniteCanvas.imageGeneratorNode") : t("infiniteCanvas.uploadNodeTitle")}
+        aria-label={hasImage ? t("infiniteCanvas.viewLargeImage") : isGeneratorLike ? t(isLibtv ? "infiniteCanvas.libtvImage" : "infiniteCanvas.imageGeneratorNode") : t("infiniteCanvas.uploadNodeTitle")}
         onClick={(event) => {
           if (hasImage) return;
           event.preventDefault();
@@ -157,8 +156,8 @@ export function ImageNodeBody({
             </span>
             {isGeneratorLike ? (
               <>
-                <span className="ic-upload-node-title">{t(isLovart ? "infiniteCanvas.lovart" : isLibtv ? "infiniteCanvas.libtvImage" : "infiniteCanvas.imageGeneratorNode")}</span>
-                <span className="ic-upload-node-sub">{t(isLovart ? "infiniteCanvas.lovartPromptPlaceholder" : isLibtv ? "infiniteCanvas.libtvPromptPlaceholder" : "infiniteCanvas.imageGeneratorNodeEmptyAction")}</span>
+                <span className="ic-upload-node-title">{t(isLibtv ? "infiniteCanvas.libtvImage" : "infiniteCanvas.imageGeneratorNode")}</span>
+                <span className="ic-upload-node-sub">{t(isLibtv ? "infiniteCanvas.libtvPromptPlaceholder" : "infiniteCanvas.imageGeneratorNodeEmptyAction")}</span>
               </>
             ) : (
               <button

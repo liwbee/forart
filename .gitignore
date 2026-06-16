@@ -13,3 +13,6 @@ Thumbs.db
 server/node_modules/
 server/.forart-data/
 server/data/
+
+scripts/launcher/bin/
+scripts/launcher/obj/

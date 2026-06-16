@@ -10,7 +10,6 @@ import { clamp, getGroupBounds, linkMidpoint, WORLD_CENTER } from "./canvasGeome
 import { useLibtvNodeSync } from "./libtv/useLibtvNodeSync";
 import { ImageGeneratorComposer } from "./composers/ImageGeneratorComposer";
 import { LibtvComposer } from "./composers/LibtvComposer";
-import { LovartComposer } from "./composers/LovartComposer";
 import type { ImageGeneratorInputPreview } from "./composers/composerTypes";
 import { getImageGenerationReadiness } from "./core/imageGenerationReadiness";
 import { ConnectionLayer } from "./layers/ConnectionLayer";
@@ -48,28 +47,8 @@ const NODE_DRAG_START_THRESHOLD = 8;
 const GROUP_PADDING = 32;
 const EMPTY_GROUP_DEFAULT_WIDTH = 360;
 const EMPTY_GROUP_DEFAULT_HEIGHT = 240;
-const LOVART_IMAGE_MODEL_OPTIONS = [
-  { value: "", label: "Auto", hint: "Let Lovart choose" },
-  { value: "generate_image_gpt_image_2", label: "GPT Image 2 Auto" },
-  { value: "generate_image_gpt_image_2_low", label: "GPT Image 2 Low" },
-  { value: "generate_image_gpt_image_2_medium", label: "GPT Image 2 Medium" },
-  { value: "generate_image_gpt_image_2_high", label: "GPT Image 2 High" },
-  { value: "generate_image_nano_banana_pro", label: "Nano Banana Pro" },
-  { value: "generate_image_nano_banana_2", label: "Nano Banana 2" },
-  { value: "generate_image_gpt_image_1_5", label: "GPT Image 1.5" },
-  { value: "generate_image_seedream_v5", label: "Seedream 5.0 Lite" },
-  { value: "generate_image_luma_uni_1", label: "Luma uni-1" },
-  { value: "generate_image_luma_uni_1_max", label: "Luma uni-1-max" },
-  { value: "generate_image_flux_2_max", label: "Flux.2 Max" },
-  { value: "generate_image_flux_2_pro", label: "Flux.2 Pro" },
-  { value: "generate_image_seedream_v4_5", label: "Seedream 4.5" },
-  { value: "generate_image_nano_banana", label: "Nano Banana" },
-  { value: "generate_image_seedream_v4", label: "Seedream 4" },
-  { value: "generate_image_midjourney", label: "Midjourney" },
-  { value: "generate_image_ideogram_v4", label: "Ideogram 4" },
-] as const;
 const LIBTV_CREATABLE_NODE_TYPES = ["libtvImage", "libtvPrompt"] as const satisfies readonly CanvasNodeType[];
-const LOCAL_CONTEXT_MENU_NODE_TYPES = ["lovart", "imageGenerator", "image", "llm", "prompt", "loop"] as const satisfies readonly CanvasNodeType[];
+const LOCAL_CONTEXT_MENU_NODE_TYPES = ["imageGenerator", "image", "llm", "prompt", "loop"] as const satisfies readonly CanvasNodeType[];
 type LibtvCreatableNodeType = typeof LIBTV_CREATABLE_NODE_TYPES[number];
 
 function isLibtvCreatableNodeType(type: CanvasNodeType): type is LibtvCreatableNodeType {
@@ -374,8 +353,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     width: selectedNodesBounds.width + GROUP_PADDING * 2,
     height: selectedNodesBounds.height + GROUP_PADDING * 2,
   }) : null, [selectedNodesBounds]);
-  const imageProviders = useMemo(() => apiProviders.filter((provider) => provider.protocol !== "lovart" && provider.protocol !== "gemini" && provider.imageModels.length), [apiProviders]);
-  const lovartProvider = useMemo(() => apiProviders.find((provider) => provider.protocol === "lovart" || provider.id === "lovart") || null, [apiProviders]);
+  const imageProviders = useMemo(() => apiProviders.filter((provider) => provider.protocol !== "gemini" && provider.imageModels.length), [apiProviders]);
   const chatProviders = useMemo(() => apiProviders.filter((provider) => provider.chatModels.length), [apiProviders]);
   const fixedCanvasUiStyle = useMemo(() => ({
     "--ic-fixed-ui-scale": `${1 / viewport.scale}`,
@@ -396,7 +374,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   }, [viewport]);
 
   const defaultImageProvider = useMemo(() => (
-    apiProviders.find((provider) => provider.id === defaultImageProviderId && provider.protocol !== "lovart" && provider.protocol !== "gemini")
+    apiProviders.find((provider) => provider.id === defaultImageProviderId && provider.protocol !== "gemini")
     || imageProviders[0]
     || null
   ), [apiProviders, defaultImageProviderId, imageProviders]);
@@ -607,9 +585,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     resumeImageGenerationTasks,
     runImageComposer,
     stopImageComposer,
-    runLovartNode,
-    stopLovartNode,
-    checkLovartNodeStatus,
     runLibtvImageNode,
     stopLibtvImageNode,
     syncLibtvImageNode,
@@ -625,7 +600,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     imageProviders,
     defaultChatProvider,
     chatProviders,
-    lovartProvider,
     activeCanvasId,
     activeCanvasTitle,
     activeProject,
@@ -1116,7 +1090,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
       const imageInputIds = imageGeneratorInputs
         .filter((connection) => {
           const source = nodeMap.get(connection.from);
-          return Boolean(source && (source.type === "image" || source.type === "imageGenerator" || source.type === "lovart") && source.url);
+          return Boolean(source && (source.type === "image" || source.type === "imageGenerator") && source.url);
         })
         .map((connection) => connection.id);
       const fromImageIndex = imageInputIds.indexOf(fromConnectionId);
@@ -1130,8 +1104,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
       const nextImageGeneratorInputs = [...imageGeneratorInputs].sort((a, b) => {
         const sourceA = nodeMap.get(a.from);
         const sourceB = nodeMap.get(b.from);
-        const imageA = Boolean(sourceA && (sourceA.type === "image" || sourceA.type === "imageGenerator" || sourceA.type === "lovart") && sourceA.url);
-        const imageB = Boolean(sourceB && (sourceB.type === "image" || sourceB.type === "imageGenerator" || sourceB.type === "lovart") && sourceB.url);
+        const imageA = Boolean(sourceA && (sourceA.type === "image" || sourceA.type === "imageGenerator") && sourceA.url);
+        const imageB = Boolean(sourceB && (sourceB.type === "image" || sourceB.type === "imageGenerator") && sourceB.url);
         if (imageA && imageB) return (imageOrder.get(a.id) || 0) - (imageOrder.get(b.id) || 0);
         if (imageA !== imageB) return imageA ? 1 : -1;
         return (imageGeneratorInputOrder.get(a.id) || 0) - (imageGeneratorInputOrder.get(b.id) || 0);
@@ -1821,43 +1795,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     );
   }
 
-  function renderLovartComposer() {
-    const node = selectedId ? nodeMap.get(selectedId) : null;
-    if (!node || node.type !== "lovart" || imageCrop?.nodeId === node.id) return null;
-    const configured = Boolean(lovartProvider?.accessKey.trim() && lovartProvider?.secretKey.trim());
-    const mode = node.lovartMode === "unlimited" ? "unlimited" : "fast";
-    const selectedModel = LOVART_IMAGE_MODEL_OPTIONS.find((option) => option.value === (node.lovartModel || "")) ? node.lovartModel || "" : "";
-    const lovartModelOptions = LOVART_IMAGE_MODEL_OPTIONS.map((option) => ({
-      value: option.value,
-      label: option.value ? option.label : t("infiniteCanvas.auto"),
-    }));
-    return (
-      <LovartComposer
-        node={node}
-        viewport={viewport}
-        configured={configured}
-        modelOptions={lovartModelOptions}
-        selectedModel={selectedModel}
-        mode={mode}
-        inputPreviews={getImageGeneratorInputPreviews(node.id)}
-        openSelectId={openImageComposerSelect}
-        draggedInputConnectionId={draggedInputConnectionId}
-        inputInsertIndex={inputInsertIndex}
-        onOpenSelectChange={setOpenImageComposerSelect}
-        onPatchNode={patchNode}
-        onCheckStatus={checkLovartNodeStatus}
-        onRun={runLovartNode}
-        onStop={stopLovartNode}
-        onRemoveInput={removeImageGeneratorInput}
-        onReorderInput={reorderImageGeneratorInput}
-        onDraggedInputConnectionIdChange={setDraggedInputConnectionId}
-        onInputInsertIndexChange={setInputInsertIndex}
-        getInputInsertIndex={getImageInputInsertIndex}
-        t={t}
-      />
-    );
-  }
-
   function renderLibtvComposer() {
     const node = selectedId ? nodeMap.get(selectedId) : null;
     if (!node || node.type !== "libtvImage" || imageCrop?.nodeId === node.id) return null;
@@ -2081,7 +2018,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             t={t}
           />
           {renderImageComposer()}
-          {renderLovartComposer()}
           {renderLibtvComposer()}
         </div>
         {showConnections && connectionAction && selectedConnectionId === connectionAction.id ? (

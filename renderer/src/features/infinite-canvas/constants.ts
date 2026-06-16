@@ -6,7 +6,6 @@ export const NODE_DEFAULTS: Record<CanvasNodeType, { w: number; h: number; title
   prompt: { w: 310, h: 220, title: "Prompt" },
   loop: { w: 330, h: 270, title: "Loop" },
   llm: { w: 340, h: 300, title: "LLM Model" },
-  lovart: { w: 300, h: 400, title: "Lovart" },
   libtvImage: { w: 300, h: 400, title: "LibTV Image" },
   libtvPrompt: { w: 310, h: 220, title: "LibTV Prompt" },
   libtvUpload: { w: 300, h: 400, title: "LibTV Upload" },

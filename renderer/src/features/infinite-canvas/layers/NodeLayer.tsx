@@ -77,7 +77,7 @@ const CanvasNodeItem = memo(function CanvasNodeItem({
   });
 
   if (!node) return null;
-  const hasCustomNodeBody = ["image", "libtvUpload", "imageGenerator", "lovart", "libtvImage", "prompt", "libtvPrompt"].includes(node.type);
+  const hasCustomNodeBody = ["image", "libtvUpload", "imageGenerator", "libtvImage", "prompt", "libtvPrompt"].includes(node.type);
 
   return (
     <div

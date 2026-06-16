@@ -5,7 +5,7 @@ export function acceptsIncomingConnections(node: CanvasNode) {
 }
 
 export function isImageLikeNode(node: CanvasNode | undefined | null) {
-  return node?.type === "image" || node?.type === "libtvUpload" || node?.type === "imageGenerator" || node?.type === "lovart" || node?.type === "libtvImage";
+  return node?.type === "image" || node?.type === "libtvUpload" || node?.type === "imageGenerator" || node?.type === "libtvImage";
 }
 
 export function isLibtvBoundCanvasNode(node: CanvasNode | undefined | null): node is CanvasNode & { libtvProjectId: string; libtvNodeId: string } {

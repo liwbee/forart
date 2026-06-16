@@ -254,7 +254,7 @@ export function LibtvComposer({
         </div>
         <button
           type="button"
-          className="ic-image-composer__run ic-lovart-composer__status"
+          className="ic-image-composer__run ic-libtv-composer__status"
           aria-label={t("infiniteCanvas.libtvRefreshModels")}
           title={t("infiniteCanvas.libtvRefreshModels")}
           disabled={modelsLoading}
@@ -264,7 +264,7 @@ export function LibtvComposer({
         </button>
         <button
           type="button"
-          className="ic-image-composer__run ic-lovart-composer__status"
+          className="ic-image-composer__run ic-libtv-composer__status"
           aria-label={t("infiniteCanvas.libtvSyncNode")}
           title={t("infiniteCanvas.libtvSyncNode")}
           disabled={!node.libtvProjectId || !node.libtvNodeId}

@@ -1143,7 +1143,6 @@
 .ic-node--image,
 .ic-node--libtvUpload,
 .ic-node--imageGenerator,
-.ic-node--lovart,
 .ic-node--libtvImage,
 .ic-node--generator {
   grid-template-rows: minmax(0, 1fr);
@@ -1153,7 +1152,6 @@
 }
 
 .ic-node--imageGenerator.is-running,
-.ic-node--lovart.is-running,
 .ic-node--libtvImage.is-running,
 .ic-node--generator.is-running {
   padding: 0;
@@ -1165,7 +1163,6 @@
 .ic-node--image.has-image,
 .ic-node--libtvUpload.has-image,
 .ic-node--imageGenerator.has-image,
-.ic-node--lovart.has-image,
 .ic-node--libtvImage.has-image,
 .ic-node--generator.has-image {
   border: 0;
@@ -1176,8 +1173,6 @@
 
 .ic-node--imageGenerator.is-running,
 .ic-node--imageGenerator.is-running.has-image,
-.ic-node--lovart.is-running,
-.ic-node--lovart.is-running.has-image,
 .ic-node--libtvImage.is-running,
 .ic-node--libtvImage.is-running.has-image,
 .ic-node--generator.is-running,
@@ -1191,14 +1186,12 @@
 .ic-node--image:not(.has-image),
 .ic-node--libtvUpload:not(.has-image),
 .ic-node--imageGenerator:not(.has-image),
-.ic-node--lovart:not(.has-image),
 .ic-node--libtvImage:not(.has-image),
 .ic-node--generator:not(.has-image) {
   box-shadow: var(--shadow-ui);
 }
 
 .ic-node--imageGenerator.is-running::after,
-.ic-node--lovart.is-running::after,
 .ic-node--libtvImage.is-running::after,
 .ic-node--generator.is-running::after {
   content: "";
@@ -1214,7 +1207,6 @@
 }
 
 .ic-node--imageGenerator.is-running > :not(.ic-node-hover-toolbar):not(.ic-port),
-.ic-node--lovart.is-running > :not(.ic-node-hover-toolbar):not(.ic-port),
 .ic-node--libtvImage.is-running > :not(.ic-node-hover-toolbar):not(.ic-port),
 .ic-node--generator.is-running > :not(.ic-node-hover-toolbar):not(.ic-port) {
   position: relative;
@@ -1230,9 +1222,6 @@
 .ic-node--imageGenerator:not(.has-image):hover,
 .ic-node--imageGenerator:not(.has-image).selected,
 .ic-node--imageGenerator:not(.has-image).hovered,
-.ic-node--lovart:not(.has-image):hover,
-.ic-node--lovart:not(.has-image).selected,
-.ic-node--lovart:not(.has-image).hovered,
 .ic-node--libtvImage:not(.has-image):hover,
 .ic-node--libtvImage:not(.has-image).selected,
 .ic-node--libtvImage:not(.has-image).hovered,
@@ -1246,7 +1235,6 @@
 .ic-node--image.has-image.selected,
 .ic-node--libtvUpload.has-image.selected,
 .ic-node--imageGenerator.has-image.selected,
-.ic-node--lovart.has-image.selected,
 .ic-node--libtvImage.has-image.selected,
 .ic-node--generator.has-image.selected {
   box-shadow: none;
@@ -1255,7 +1243,6 @@
 .ic-node--image.has-image.selected .ic-image-drop img,
 .ic-node--libtvUpload.has-image.selected .ic-image-drop img,
 .ic-node--imageGenerator.has-image.selected .ic-image-drop img,
-.ic-node--lovart.has-image.selected .ic-image-drop img,
 .ic-node--libtvImage.has-image.selected .ic-image-drop img,
 .ic-node--generator.has-image.selected .ic-image-drop img {
   border-color: var(--canvas-state-active-border);
@@ -1265,7 +1252,6 @@
 .ic-node--image .ic-node-body,
 .ic-node--libtvUpload .ic-node-body,
 .ic-node--imageGenerator .ic-node-body,
-.ic-node--lovart .ic-node-body,
 .ic-node--libtvImage .ic-node-body,
 .ic-node--generator .ic-node-body {
   grid-row: 1;
@@ -1587,7 +1573,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ic-node--imageGenerator.is-running::after,
-  .ic-node--lovart.is-running::after,
   .ic-node--libtvImage.is-running::after,
   .ic-node--generator.is-running::after {
     animation: none;
@@ -2035,10 +2020,6 @@
   gap: 8px;
 }
 
-.ic-lovart-composer__params {
-  grid-template-columns: minmax(220px, 1.4fr) minmax(128px, 0.8fr);
-}
-
 .ic-composer-select {
   position: relative;
   width: 100%;
@@ -2362,7 +2343,7 @@
   background: var(--danger) !important;
 }
 
-.ic-lovart-composer__status {
+.ic-libtv-composer__status {
   border-color: var(--canvas-node-border) !important;
   color: var(--canvas-node-text) !important;
   background: var(--canvas-node-bg) !important;

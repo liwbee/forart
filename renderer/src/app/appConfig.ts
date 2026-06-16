@@ -8,7 +8,7 @@ export interface ForartAppConfig {
   imageDownloadPath: string;
 }
 
-export type ForartApiProviderProtocol = "openai" | "async" | "gemini" | "lovart";
+export type ForartApiProviderProtocol = "openai" | "async" | "gemini";
 
 export interface ForartApiProviderConfig {
   id: string;
@@ -36,6 +36,35 @@ export interface ForartApiSettingsConfig {
   defaultImageProviderId: string;
 }
 
+export interface ForartAppInfo {
+  name: string;
+  repoUrl: string;
+  updateUrl: string;
+  canGitUpdate: boolean;
+  currentRevision: string;
+  currentUpdatedAt: string;
+}
+
+export interface ForartUpdateCheckResult {
+  ok: boolean;
+  currentRevision: string;
+  latestRevision: string;
+  currentUpdatedAt: string;
+  latestUpdatedAt: string;
+  updateAvailable: boolean;
+  canGitUpdate: boolean;
+  repoUrl: string;
+  error?: string;
+}
+
+export interface ForartUpdateRunResult {
+  ok: boolean;
+  stdout?: string;
+  stderr?: string;
+  restartRequired?: boolean;
+  error?: string;
+}
+
 export interface ForartConfigApi {
   load: () => Promise<ForartAppConfig | null>;
   save: (config: ForartAppConfig) => Promise<{ ok: true; config: ForartAppConfig }>;
@@ -44,6 +73,10 @@ export interface ForartConfigApi {
   chooseDirectory: () => Promise<{ canceled: boolean; path: string }>;
   testServer: (serverUrl: string) => Promise<{ ok: boolean; status?: number; error?: string; payload?: unknown }>;
   localServerStatus: () => Promise<{ ok: boolean; managed?: boolean; localLibraryPath?: string; status?: number; error?: string; payload?: unknown }>;
+  appInfo: () => Promise<ForartAppInfo>;
+  checkUpdate: () => Promise<ForartUpdateCheckResult>;
+  runUpdate: () => Promise<ForartUpdateRunResult>;
+  openUpdatePage: () => Promise<{ ok: true }>;
 }
 
 export interface EasyToolApi {
@@ -178,46 +211,10 @@ export interface LibtvApi {
   syncNode: (payload: { projectId: string; nodeId: string }) => Promise<LibtvGenerateResult>;
 }
 
-export interface LovartGeneratePayload {
-  providerId?: string;
-  baseUrl?: string;
-  accessKey?: string;
-  secretKey?: string;
-  projectId?: string;
-  threadId?: string;
-  prompt: string;
-  model?: string;
-  referenceImages?: string[];
-  unlimited?: boolean;
-}
-
-export interface LovartGenerateResult {
-  url: string;
-  fileName: string;
-  projectId?: string;
-  threadId?: string;
-  finalStatus?: string;
-}
-
-export interface LovartStatusResult {
-  threadId: string;
-  status: string;
-  imageUrl?: string;
-  finalStatus?: string;
-  pendingConfirmation?: boolean;
-}
-
-export interface LovartApi {
-  generate: (payload: LovartGeneratePayload) => Promise<LovartGenerateResult>;
-  test: (payload?: { providerId?: string; baseUrl?: string; accessKey?: string; secretKey?: string }) => Promise<{ ok: true; mode?: string }>;
-  status: (payload: { providerId?: string; baseUrl?: string; accessKey?: string; secretKey?: string; threadId: string }) => Promise<LovartStatusResult>;
-}
-
 declare global {
   interface Window {
     forartConfig?: ForartConfigApi;
     easyTool?: EasyToolApi;
-    lovart?: LovartApi;
     libtv?: LibtvApi;
   }
 }

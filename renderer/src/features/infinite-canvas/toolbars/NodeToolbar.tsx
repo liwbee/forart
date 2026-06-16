@@ -104,7 +104,7 @@ export const NodeToolbar = memo(function NodeToolbar({
               <button type="button" aria-label={t("infiniteCanvas.viewLargeImage")} title={t("infiniteCanvas.viewLargeImage")} onClick={() => onPreviewImage(node.id)}>
                 <Eye size={14} aria-hidden="true" />
               </button>
-              {node.type === "imageGenerator" || node.type === "lovart" || node.type === "libtvImage" ? (
+              {node.type === "imageGenerator" || node.type === "libtvImage" ? (
                 <button type="button" aria-label={t("infiniteCanvas.downloadImage")} title={t("infiniteCanvas.downloadImage")} disabled={downloadStatus?.nodeId === node.id && downloadStatus.tone === "busy"} onClick={() => onDownloadImage(node.id)}>
                   <Download size={14} aria-hidden="true" />
                 </button>

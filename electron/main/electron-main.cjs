@@ -1,4 +1,4 @@
-const { app, ipcMain, dialog, protocol, net } = require('electron');
+const { app, ipcMain, dialog, protocol, net, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -7,13 +7,11 @@ const { createWindow } = require('./app-window.cjs');
 const { registerCanvasIpc } = require('./ipc/canvas-ipc.cjs');
 const { registerConfigIpc } = require('./ipc/config-ipc.cjs');
 const { registerLibtvIpc } = require('./ipc/libtv-ipc.cjs');
-const { registerLovartIpc } = require('./ipc/lovart-ipc.cjs');
 const { createAssetStore } = require('./modules/asset-store.cjs');
 const { createCanvasStore } = require('./modules/canvas-store.cjs');
 const { createConfigStore } = require('./modules/config-store.cjs');
 const { createLibtvAdapter } = require('./modules/libtv-adapter.cjs');
 const { createLocalServerManager } = require('./modules/local-server-manager.cjs');
-const { createLovartClient } = require('./modules/lovart-client.cjs');
 
 const rootDir = path.resolve(__dirname, '..', '..');
 const isDev = !app.isPackaged;
@@ -27,11 +25,6 @@ const canvasStore = createCanvasStore({ rootDir });
 const configStore = createConfigStore({ app });
 const localServer = createLocalServerManager({ app, rootDir });
 const libtv = createLibtvAdapter({ rootDir });
-const lovartClient = createLovartClient({
-  net,
-  getProvider: configStore.getProvider,
-  readImageSource: assetStore.readImageSource,
-});
 
 function registerCanvasAssetProtocol() {
   protocol.handle('forart-asset', (request) => {
@@ -44,9 +37,8 @@ function registerCanvasAssetProtocol() {
 }
 
 registerCanvasIpc({ ipcMain, app, canvasStore, assetStore });
-registerLovartIpc({ ipcMain, lovartClient });
 registerLibtvIpc({ ipcMain, libtv });
-registerConfigIpc({ ipcMain, dialog, configStore, localServer });
+registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, rootDir, net, shell });
 
 app.whenReady().then(() => {
   registerCanvasAssetProtocol();

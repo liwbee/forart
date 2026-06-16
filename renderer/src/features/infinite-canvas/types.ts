@@ -1,4 +1,4 @@
-export type CanvasNodeType = "imageGenerator" | "image" | "prompt" | "loop" | "llm" | "lovart" | "libtvImage" | "libtvPrompt" | "libtvUpload";
+export type CanvasNodeType = "imageGenerator" | "image" | "prompt" | "loop" | "llm" | "libtvImage" | "libtvPrompt" | "libtvUpload";
 
 export interface CanvasNode {
   id: string;
@@ -21,10 +21,6 @@ export interface CanvasNode {
   imageAspectRatio?: "1:1" | "2:3" | "3:2" | "4:3" | "3:4" | "16:9" | "9:16";
   chatProviderId?: string;
   chatModel?: string;
-  lovartProjectId?: string;
-  lovartThreadId?: string;
-  lovartModel?: string;
-  lovartMode?: "fast" | "unlimited";
   libtvProjectId?: string;
   libtvNodeId?: string;
   libtvModel?: string;

@@ -18,7 +18,7 @@ interface StatusState {
 
 type SettingsTab = "general" | "api";
 type ApiSettingsPane = "provider" | "libtv";
-type ApiAction = "verify" | "fetch" | "lovart-test" | "libtv-check" | "libtv-install" | "libtv-login" | "libtv-logout" | "";
+type ApiAction = "verify" | "fetch" | "libtv-check" | "libtv-install" | "libtv-login" | "libtv-logout" | "";
 
 interface FetchedModelEntry {
   id: string;
@@ -194,7 +194,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     }
     if (!apiProviders.length && selectedProviderId) setSelectedProviderId("");
     if (apiProviders.length && defaultImageProviderId && !apiProviders.some((provider) => provider.id === defaultImageProviderId)) {
-      const nextDefault = apiProviders.find((provider) => provider.protocol !== "lovart" && provider.protocol !== "gemini" && provider.imageModels.length)?.id || apiProviders.find((provider) => provider.protocol !== "lovart" && provider.protocol !== "gemini")?.id || "";
+      const nextDefault = apiProviders.find((provider) => provider.protocol !== "gemini" && provider.imageModels.length)?.id || apiProviders.find((provider) => provider.protocol !== "gemini")?.id || "";
       setDefaultImageProviderId(nextDefault);
     }
     if (!apiProviders.length && defaultImageProviderId) {
@@ -303,7 +303,6 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   async function requestProviderModels(provider: ApiProvider) {
     const url = formatModelsUrl(provider);
     const headers: HeadersInit = { Accept: "application/json" };
-    if (provider.protocol === "lovart") return [];
     if (provider.protocol === "gemini" && provider.apiKey.trim()) {
       headers["x-goog-api-key"] = provider.apiKey.trim();
     } else if (provider.apiKey.trim()) {
@@ -355,21 +354,6 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
             ? t("settings.apiBaseUrlInvalid")
             : t("settings.apiVerifyFailed", { message }),
       });
-    } finally {
-      setApiAction("");
-    }
-  }
-
-  async function testLovartConnection() {
-    if (!selectedProvider || selectedProvider.protocol !== "lovart") return;
-    setApiAction("lovart-test");
-    setApiStatus({ tone: "busy", text: t("settings.lovartTesting") });
-    try {
-      if (!window.lovart?.test) throw new Error("Lovart bridge is not available.");
-      const result = await window.lovart.test({ providerId: selectedProvider.id });
-      setApiStatus({ tone: "ready", text: t("settings.lovartTestSuccess", { mode: result.mode || "fast" }) });
-    } catch (error) {
-      setApiStatus({ tone: "error", text: t("settings.lovartTestFailed", { message: error instanceof Error ? error.message : String(error) }) });
     } finally {
       setApiAction("");
     }
@@ -601,7 +585,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
       setSelectedProviderId(next[0]?.id || "");
       if (!next.length) setActiveApiPane("libtv");
       if (defaultImageProviderId === selectedProvider.id) {
-        const nextDefault = next.find((provider) => provider.protocol !== "lovart" && provider.protocol !== "gemini" && provider.imageModels.length)?.id || next.find((provider) => provider.protocol !== "lovart" && provider.protocol !== "gemini")?.id || "";
+        const nextDefault = next.find((provider) => provider.protocol !== "gemini" && provider.imageModels.length)?.id || next.find((provider) => provider.protocol !== "gemini")?.id || "";
         setDefaultImageProviderId(nextDefault);
       }
       return next;
@@ -610,7 +594,6 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
 
   function changeDefaultImageProvider(providerId: string) {
     const provider = apiProviders.find((item) => item.id === providerId);
-    if (provider?.protocol === "lovart") return;
     setDefaultImageProviderId(providerId);
   }
 
@@ -992,29 +975,25 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                       setSelectedProviderId(provider.id);
                     }}
                   >
-                    {provider.protocol === "lovart" ? (
-                      <span className="settings-api-default-button disabled" title={t("settings.lovartSeparateProvider")} />
-                    ) : (
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        className={`settings-api-default-button${provider.id === defaultImageProviderId ? " active" : ""}`}
-                        aria-pressed={provider.id === defaultImageProviderId}
-                        aria-label={t("settings.defaultImageProvider")}
-                        title={t("settings.defaultImageProvider")}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          changeDefaultImageProvider(provider.id);
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter" && event.key !== " ") return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          changeDefaultImageProvider(provider.id);
-                        }}
-                      />
-                    )}
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className={`settings-api-default-button${provider.id === defaultImageProviderId ? " active" : ""}`}
+                      aria-pressed={provider.id === defaultImageProviderId}
+                      aria-label={t("settings.defaultImageProvider")}
+                      title={t("settings.defaultImageProvider")}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        changeDefaultImageProvider(provider.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        changeDefaultImageProvider(provider.id);
+                      }}
+                    />
                     <span className="settings-api-provider-mark">
                       <KeyRound size={15} aria-hidden="true" />
                     </span>
@@ -1129,88 +1108,58 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                   <section className="settings-api-block">
                     <div className="settings-api-block-head">
                       <div>
-                        <h3>{selectedProvider.protocol === "lovart" ? t("settings.lovartApiSettings") : t("settings.basicInfo")}</h3>
+                        <h3>{t("settings.basicInfo")}</h3>
                       </div>
                     </div>
                     <div className="settings-api-form">
-                      {selectedProvider.protocol === "lovart" ? (
-                        <>
-                          <label className="settings-field">
-                            <span>{t("settings.accessKey")}</span>
-                            <input type="password" value={selectedProvider.accessKey} onChange={(event) => patchSelectedProvider({ accessKey: event.target.value })} placeholder={t("settings.accessKeyPlaceholder")} />
-                          </label>
-                          <label className="settings-field">
-                            <span>{t("settings.secretKey")}</span>
-                            <input type="password" value={selectedProvider.secretKey} onChange={(event) => patchSelectedProvider({ secretKey: event.target.value })} placeholder={t("settings.secretKeyPlaceholder")} />
-                          </label>
-                          <div className="settings-api-test-row">
-                            <div className="settings-inline-status settings-api-action-status" data-tone={apiStatus.tone}>
-                              {apiStatus.text}
-                            </div>
-                            <div className="settings-api-test-actions">
-                              <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={apiAction !== ""} onClick={testLovartConnection}>
-                                <TestTube2 size={15} aria-hidden="true" />
-                                <span>{apiAction === "lovart-test" ? t("settings.lovartTestingButton") : t("settings.lovartTestConnection")}</span>
-                              </button>
-                            </div>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <label className="settings-field">
-                            <span>{t("settings.providerName")}</span>
-                            <input value={selectedProvider.name} onChange={(event) => patchSelectedProvider({ name: event.target.value })} placeholder={t("settings.providerNamePlaceholder")} />
-                          </label>
-                          <label className="settings-field">
-                            <span>{t("settings.baseUrl")}</span>
-                            <input value={selectedProvider.baseUrl} onChange={(event) => patchSelectedProvider({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
-                          </label>
-                          <label className="settings-field">
-                            <span>{t("settings.apiKey")}</span>
-                            <input type="password" value={selectedProvider.apiKey} onChange={(event) => patchSelectedProvider({ apiKey: event.target.value })} placeholder={t("settings.apiKeyPlaceholder")} />
-                          </label>
-                          <label className="settings-field">
-                            <span>{t("settings.protocol")}</span>
-                            <Select
-                              value={selectedProvider.protocol}
-                              options={[
-                                { value: "openai", label: t("settings.protocolOpenAI") },
-                                { value: "async", label: t("settings.protocolAsync") },
-                                { value: "gemini", label: t("settings.protocolGemini") },
-                              ]}
-                              onChange={(protocol) => patchSelectedProvider({ protocol: protocol as ApiProvider["protocol"] })}
-                              ariaLabel={t("settings.protocol")}
-                              portal
-                              menuPlacement="bottom"
-                            />
-                          </label>
-                          <div className="settings-api-test-row">
-                            <div className="settings-inline-status settings-api-action-status" data-tone={apiStatus.tone}>
-                              {apiStatus.text}
-                            </div>
-                            <div className="settings-api-test-actions">
-                              <button type="button" className="settings-api-action-button" disabled={apiAction !== ""} onClick={verifyApiAddress}>
-                                <TestTube2 size={15} aria-hidden="true" />
-                                <span>{apiAction === "verify" ? t("settings.apiVerifying") : t("settings.verifyAddress")}</span>
-                              </button>
-                              <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={apiAction !== ""} onClick={fetchApiModels}>
-                                <RefreshCw size={15} aria-hidden="true" />
-                                <span>{apiAction === "fetch" ? t("settings.apiFetching") : t("settings.fetchModels")}</span>
-                              </button>
-                            </div>
-                          </div>
-                        </>
-                      )}
+                      <label className="settings-field">
+                        <span>{t("settings.providerName")}</span>
+                        <input value={selectedProvider.name} onChange={(event) => patchSelectedProvider({ name: event.target.value })} placeholder={t("settings.providerNamePlaceholder")} />
+                      </label>
+                      <label className="settings-field">
+                        <span>{t("settings.baseUrl")}</span>
+                        <input value={selectedProvider.baseUrl} onChange={(event) => patchSelectedProvider({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
+                      </label>
+                      <label className="settings-field">
+                        <span>{t("settings.apiKey")}</span>
+                        <input type="password" value={selectedProvider.apiKey} onChange={(event) => patchSelectedProvider({ apiKey: event.target.value })} placeholder={t("settings.apiKeyPlaceholder")} />
+                      </label>
+                      <label className="settings-field">
+                        <span>{t("settings.protocol")}</span>
+                        <Select
+                          value={selectedProvider.protocol}
+                          options={[
+                            { value: "openai", label: t("settings.protocolOpenAI") },
+                            { value: "async", label: t("settings.protocolAsync") },
+                            { value: "gemini", label: t("settings.protocolGemini") },
+                          ]}
+                          onChange={(protocol) => patchSelectedProvider({ protocol: protocol as ApiProvider["protocol"] })}
+                          ariaLabel={t("settings.protocol")}
+                          portal
+                          menuPlacement="bottom"
+                        />
+                      </label>
+                      <div className="settings-api-test-row">
+                        <div className="settings-inline-status settings-api-action-status" data-tone={apiStatus.tone}>
+                          {apiStatus.text}
+                        </div>
+                        <div className="settings-api-test-actions">
+                          <button type="button" className="settings-api-action-button" disabled={apiAction !== ""} onClick={verifyApiAddress}>
+                            <TestTube2 size={15} aria-hidden="true" />
+                            <span>{apiAction === "verify" ? t("settings.apiVerifying") : t("settings.verifyAddress")}</span>
+                          </button>
+                          <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={apiAction !== ""} onClick={fetchApiModels}>
+                            <RefreshCw size={15} aria-hidden="true" />
+                            <span>{apiAction === "fetch" ? t("settings.apiFetching") : t("settings.fetchModels")}</span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </section>
 
-                  {selectedProvider.protocol === "lovart" ? null : (
-                    <>
-                      {renderModelList("image")}
-                      {renderModelList("chat")}
-                      {renderModelList("video")}
-                    </>
-                  )}
+                  {renderModelList("image")}
+                  {renderModelList("chat")}
+                  {renderModelList("video")}
                 </>
               ) : (
                 <section className="settings-section settings-section--api" aria-label={t("settings.apiSettings")}>

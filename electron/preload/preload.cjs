@@ -19,12 +19,10 @@ contextBridge.exposeInMainWorld('forartConfig', {
   chooseDirectory: () => ipcRenderer.invoke('dialog:choose-directory'),
   testServer: (serverUrl) => ipcRenderer.invoke('server:test-remote', serverUrl),
   localServerStatus: () => ipcRenderer.invoke('server:local-status'),
-});
-
-contextBridge.exposeInMainWorld('lovart', {
-  generate: (payload) => ipcRenderer.invoke('lovart:generate', payload),
-  test: (payload) => ipcRenderer.invoke('lovart:test', payload),
-  status: (payload) => ipcRenderer.invoke('lovart:status', payload),
+  appInfo: () => ipcRenderer.invoke('app:info'),
+  checkUpdate: () => ipcRenderer.invoke('app:check-update'),
+  runUpdate: () => ipcRenderer.invoke('app:run-update'),
+  openUpdatePage: () => ipcRenderer.invoke('app:open-update-page'),
 });
 
 contextBridge.exposeInMainWorld('libtv', {

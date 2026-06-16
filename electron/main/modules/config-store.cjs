@@ -1,27 +1,6 @@
 const path = require('path');
 const fs = require('fs');
 
-const LOVART_PROVIDER_ID = 'lovart';
-const LOVART_IMAGE_MODELS = [
-  'generate_image_gpt_image_2',
-  'generate_image_gpt_image_2_low',
-  'generate_image_gpt_image_2_medium',
-  'generate_image_gpt_image_2_high',
-  'generate_image_nano_banana_pro',
-  'generate_image_nano_banana_2',
-  'generate_image_gpt_image_1_5',
-  'generate_image_seedream_v5',
-  'generate_image_luma_uni_1',
-  'generate_image_luma_uni_1_max',
-  'generate_image_flux_2_max',
-  'generate_image_flux_2_pro',
-  'generate_image_seedream_v4_5',
-  'generate_image_nano_banana',
-  'generate_image_seedream_v4',
-  'generate_image_midjourney',
-  'generate_image_ideogram_v4',
-];
-
 function normalizeConfig(payload = {}) {
   const mode = payload.mode === 'remote' ? 'remote' : 'local';
   return {
@@ -53,29 +32,12 @@ function normalizeApiProvider(input = {}, providers = []) {
     apiKey: String(input.apiKey || ''),
     accessKey: String(input.accessKey || ''),
     secretKey: String(input.secretKey || ''),
-    protocol: input.protocol === 'async' || input.protocol === 'gemini' || input.protocol === 'lovart' ? input.protocol : 'openai',
+    protocol: input.protocol === 'async' || input.protocol === 'gemini' ? input.protocol : 'openai',
     imageModels: Array.isArray(input.imageModels) ? input.imageModels.map(String).filter(Boolean) : [],
     chatModels: Array.isArray(input.chatModels) ? input.chatModels.map(String).filter(Boolean) : [],
     videoModels: Array.isArray(input.videoModels) ? input.videoModels.map(String).filter(Boolean) : [],
     modelAliases: normalizeModelAliases(input.modelAliases),
     modelRules: normalizeModelRules(input.modelRules),
-  };
-}
-
-function createLovartProvider() {
-  return {
-    id: LOVART_PROVIDER_ID,
-    name: 'Lovart',
-    baseUrl: 'https://lgw.lovart.ai',
-    apiKey: '',
-    accessKey: '',
-    secretKey: '',
-    protocol: 'lovart',
-    imageModels: LOVART_IMAGE_MODELS,
-    chatModels: [],
-    videoModels: [],
-    modelAliases: normalizeModelAliases({}),
-    modelRules: normalizeModelRules({}),
   };
 }
 
@@ -120,24 +82,10 @@ function normalizeApiSettings(payload = {}) {
       return result.some((current) => current.id === provider.id) ? result : [...result, provider];
     }, [])
     : [];
-  const lovartProvider = providers.find((provider) => provider.id === LOVART_PROVIDER_ID || provider.protocol === 'lovart');
-  const normalizedProviders = lovartProvider
-    ? providers.map((provider) => (provider === lovartProvider
-      ? normalizeApiProvider({
-        ...createLovartProvider(),
-        ...provider,
-        id: LOVART_PROVIDER_ID,
-        name: provider.name || 'Lovart',
-        baseUrl: provider.baseUrl || 'https://lgw.lovart.ai',
-        protocol: 'lovart',
-        imageModels: provider.imageModels.length ? provider.imageModels : LOVART_IMAGE_MODELS,
-      }, providers.filter((item) => item !== provider))
-      : provider))
-    : [createLovartProvider(), ...providers];
-  const defaultImageProviderId = normalizedProviders.some((provider) => provider.id === payload.defaultImageProviderId && provider.protocol !== 'lovart')
+  const defaultImageProviderId = providers.some((provider) => provider.id === payload.defaultImageProviderId)
     ? String(payload.defaultImageProviderId)
     : '';
-  return { providers: normalizedProviders, defaultImageProviderId };
+  return { providers, defaultImageProviderId };
 }
 
 function createConfigStore({ app }) {
@@ -187,10 +135,7 @@ function createConfigStore({ app }) {
 }
 
 module.exports = {
-  LOVART_PROVIDER_ID,
-  LOVART_IMAGE_MODELS,
   createConfigStore,
-  createLovartProvider,
   normalizeApiSettings,
   normalizeConfig,
 };

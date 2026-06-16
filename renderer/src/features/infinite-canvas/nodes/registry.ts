@@ -1,4 +1,4 @@
-import { Bot, ImageIcon, ImagePlus, Palette, Repeat2, Tv, TextCursorInput, type LucideIcon } from "lucide-react";
+import { Bot, ImageIcon, ImagePlus, Repeat2, Tv, TextCursorInput, type LucideIcon } from "lucide-react";
 import { NODE_DEFAULTS } from "../constants";
 import type { CanvasNode, CanvasNodeType } from "../types";
 
@@ -55,21 +55,6 @@ export const NODE_DEFINITIONS: Record<CanvasNodeType, CanvasNodeDefinition> = {
       text: "",
       generationError: "",
       generationStatus: "",
-    }),
-  },
-  lovart: {
-    type: "lovart",
-    label: "Lovart",
-    icon: Palette,
-    defaultSize: NODE_DEFAULTS.lovart,
-    init: (node) => ({
-      ...node,
-      text: "",
-      lovartMode: "fast",
-      lovartModel: "",
-      generationError: "",
-      generationStatus: "",
-      imageSource: "generated",
     }),
   },
   libtvImage: {

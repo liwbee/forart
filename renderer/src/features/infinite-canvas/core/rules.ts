@@ -7,12 +7,11 @@ function isLibtvNode(node: CanvasNode) {
 export function canConnect(from: CanvasNode, to: CanvasNode, canvasType: "forart" | "forart-libtv" = "forart") {
   if (from.id === to.id) return false;
   if (canvasType !== "forart-libtv" && (isLibtvNode(from) || isLibtvNode(to))) return false;
-  const forartSources = ["imageGenerator", "image", "prompt", "loop", "llm", "lovart", "libtvImage"];
+  const forartSources = ["imageGenerator", "image", "prompt", "loop", "llm", "libtvImage"];
   const libtvSources = ["libtvImage", "libtvPrompt", "libtvUpload"];
   if (to.type === "imageGenerator") return forartSources.includes(from.type);
-  if (to.type === "lovart") return forartSources.includes(from.type);
   if (to.type === "libtvImage") return libtvSources.includes(from.type);
-  if (to.type === "loop") return ["imageGenerator", "image", "prompt", "llm", "lovart", "libtvImage"].includes(from.type);
+  if (to.type === "loop") return ["imageGenerator", "image", "prompt", "llm", "libtvImage"].includes(from.type);
   if (to.type === "llm") return forartSources.includes(from.type);
   return false;
 }
