@@ -34,12 +34,30 @@ export interface CanvasNode {
   libtvOriginalUrl?: string;
   generationError?: string;
   generationStatus?: string;
+  generationTask?: CanvasGenerationTask;
   text?: string;
   count?: number;
   mode?: "serial" | "batch";
   fixedPrompt?: string;
   variablePrompt?: string;
   running?: boolean;
+}
+
+export interface CanvasGenerationTask {
+  id: string;
+  canvasId: string;
+  nodeId: string;
+  providerId: string;
+  model: string;
+  upstreamTaskId?: string;
+  status: "submitting" | "running" | "succeeded" | "failed" | "interrupted";
+  startedAt: number;
+  updatedAt: number;
+  prompt?: string;
+  referenceImages?: string[];
+  resolution?: "1k" | "2k" | "4k";
+  aspectRatio?: string;
+  error?: string;
 }
 
 export interface CanvasConnection {

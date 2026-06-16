@@ -1892,6 +1892,21 @@ input[type="color"]:focus-visible {
   z-index: 1;
 }
 
+.workspace-view--keepalive {
+  z-index: 1;
+}
+
+.workspace-view--keepalive.workspace-view--active {
+  z-index: 2;
+}
+
+.workspace-view--hidden {
+  opacity: 0;
+  filter: blur(4px);
+  pointer-events: none;
+  visibility: hidden;
+}
+
 @keyframes workspace-view-enter {
   from {
     opacity: 0;

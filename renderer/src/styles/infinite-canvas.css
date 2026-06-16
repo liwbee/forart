@@ -688,6 +688,7 @@
   top: 14px;
   z-index: 34;
   height: 38px;
+  max-width: min(360px, calc(100% - 28px));
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -700,7 +701,15 @@
   cursor: pointer;
 }
 
+.ic-back-to-projects span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ic-back-to-projects svg {
+  flex: 0 0 auto;
   transform: rotate(90deg);
 }
 

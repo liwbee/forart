@@ -486,8 +486,14 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     dragHistoryRef.current = null;
   }, []);
 
+  const flushLibtvPendingStable = useStableEvent(() => libtvSyncRef.current.flushAll());
+  const getPendingLibtvNodeIdsStable = useStableEvent(() => libtvSyncRef.current.getPendingNodeIds());
+
   const {
     activeProject,
+    activeCanvasTitle,
+    activeCanvasId,
+    activeCanvasIdRef,
     showCanvasHome,
     returnToCanvasHome,
     canvasHomeMode,
@@ -530,8 +536,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setViewport,
     setZoomInput,
     clearCanvasTransientState,
-    flushLibtvPending: () => libtvSyncRef.current.flushAll(),
-    getPendingLibtvNodeIds: () => libtvSyncRef.current.getPendingNodeIds(),
+    flushLibtvPending: flushLibtvPendingStable,
+    getPendingLibtvNodeIds: getPendingLibtvNodeIdsStable,
     t,
   });
 
@@ -598,6 +604,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     libtvModels,
     libtvModelsLoading,
     refreshLibtvModels,
+    resumeImageGenerationTasks,
     runImageComposer,
     stopImageComposer,
     runLovartNode,
@@ -611,18 +618,29 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   } = useCanvasGenerationActions({
     nodes,
     connections,
+    groups,
+    viewport,
     apiProviders,
     defaultImageProviderId,
     imageProviders,
     defaultChatProvider,
     chatProviders,
     lovartProvider,
+    activeCanvasId,
+    activeCanvasTitle,
+    activeProject,
+    activeCanvasIdRef,
     patchNode,
     setNodes,
     saveCanvasImageAsset,
     setLibtvStatus,
     t,
   });
+
+  useEffect(() => {
+    if (!activeProject || showCanvasHome) return;
+    resumeImageGenerationTasks(nodes);
+  }, [activeProject?.id, nodes, showCanvasHome, resumeImageGenerationTasks]);
 
   const toolbarNode = imageCrop?.nodeId ? nodeMap.get(imageCrop.nodeId) || null : selectedId ? nodeMap.get(selectedId) || null : null;
   const previewNode = imagePreview ? nodeMap.get(imagePreview.nodeId) : null;
@@ -1958,9 +1976,9 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         onDragLeave={handleStageDragLeave}
         onDrop={handleStageDrop}
       >
-        <button className="ic-back-to-projects nodrag" type="button" onClick={returnToCanvasHome}>
+        <button className="ic-back-to-projects nodrag" type="button" title={t("infiniteCanvas.backToCanvases")} aria-label={`${t("infiniteCanvas.backToCanvases")}: ${activeCanvasTitle}`} onClick={returnToCanvasHome}>
           <ChevronDown size={16} aria-hidden="true" />
-          <span>{t("infiniteCanvas.backToCanvases")}</span>
+          <span>{activeCanvasTitle || t("infiniteCanvas.untitledCanvas")}</span>
         </button>
         <div
           className="ic-canvas-grid"

@@ -9,6 +9,8 @@ import type { CanvasHomeMode, CanvasSortMode, HomeCanvasRecord, LibtvImportCardR
 const uid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 9)}_${Date.now().toString(36)}`;
 const GROUP_PADDING = 32;
 const CANVAS_NODE_TYPES = ["imageGenerator", "image", "prompt", "loop", "llm", "lovart", "libtvImage", "libtvPrompt", "libtvUpload"] as const;
+const LAST_CANVAS_ID_KEY = "forart_infinite_canvas_last_canvas_id";
+const LAST_CANVAS_HOME_KEY = "forart_infinite_canvas_show_home";
 
 type StoredCanvasNode = Omit<CanvasNode, "type" | "imageMode"> & {
   type: CanvasNodeType | "generator" | "output" | "group";
@@ -30,6 +32,20 @@ interface UseCanvasProjectsOptions {
 
 function isCanvasNodeType(type: string): type is CanvasNodeType {
   return CANVAS_NODE_TYPES.includes(type as CanvasNodeType);
+}
+
+function readLastCanvasState() {
+  if (typeof window === "undefined") return { canvasId: "", showHome: true };
+  return {
+    canvasId: window.localStorage.getItem(LAST_CANVAS_ID_KEY) || "",
+    showHome: window.localStorage.getItem(LAST_CANVAS_HOME_KEY) !== "false",
+  };
+}
+
+function writeLastCanvasState(canvasId: string, showHome: boolean) {
+  if (typeof window === "undefined") return;
+  if (canvasId) window.localStorage.setItem(LAST_CANVAS_ID_KEY, canvasId);
+  window.localStorage.setItem(LAST_CANVAS_HOME_KEY, showHome ? "true" : "false");
 }
 
 function nodeDefaults(type: CanvasNodeType): CanvasNode {
@@ -260,6 +276,7 @@ export function useCanvasProjects({
   getPendingLibtvNodeIds,
   t,
 }: UseCanvasProjectsOptions) {
+  const [initialLastCanvasState] = useState(readLastCanvasState);
   const [canvasProjects, setCanvasProjects] = useState<CanvasProjectRecord[]>([]);
   const [activeCanvasId, setActiveCanvasId] = useState("");
   const activeCanvasIdRef = useRef("");
@@ -268,10 +285,10 @@ export function useCanvasProjects({
   const [renamingCanvasId, setRenamingCanvasId] = useState("");
   const [renamingTitle, setRenamingTitle] = useState("");
   const [projectStatus, setProjectStatus] = useState("");
-  const [showCanvasHome, setShowCanvasHome] = useState(true);
-  const showCanvasHomeRef = useRef(true);
+  const [showCanvasHome, setShowCanvasHome] = useState(initialLastCanvasState.showHome);
+  const showCanvasHomeRef = useRef(initialLastCanvasState.showHome);
   const [canvasHomeMode, setCanvasHomeMode] = useState<CanvasHomeMode>("local");
-  const [selectedHomeCanvasId, setSelectedHomeCanvasId] = useState("");
+  const [selectedHomeCanvasId, setSelectedHomeCanvasId] = useState(initialLastCanvasState.canvasId);
   const [libtvImportCards, setLibtvImportCards] = useState<LibtvImportCardRecord[]>([]);
   const [canvasSortMode, setCanvasSortMode] = useState<CanvasSortMode>("recent");
   const [confirmingDeleteCanvasId, setConfirmingDeleteCanvasId] = useState("");
@@ -324,6 +341,7 @@ export function useCanvasProjects({
   const returnToCanvasHome = useCallback(() => {
     showCanvasHomeRef.current = true;
     setShowCanvasHome(true);
+    writeLastCanvasState(activeCanvasIdRef.current, true);
     setProjectStatus("");
     clearCanvasTransientState();
   }, [clearCanvasTransientState]);
@@ -340,6 +358,7 @@ export function useCanvasProjects({
     setActiveCanvasId(project.id);
     setActiveCanvasTitle(project.title);
     setShowCanvasHome(false);
+    writeLastCanvasState(project.id, false);
     clearCanvasTransientState();
   }, [clearCanvasTransientState, setViewport, setZoomInput]);
 
@@ -582,17 +601,25 @@ export function useCanvasProjects({
       try {
         const projects = await refreshCanvasProjects();
         if (canceled) return;
+        const lastCanvas = readLastCanvasState();
+        if (!lastCanvas.showHome && lastCanvas.canvasId && projects.some((project) => project.id === lastCanvas.canvasId)) {
+          await openCanvasProject(lastCanvas.canvasId);
+          return;
+        }
         setShowCanvasHome(true);
         if (!projects.length) setProjectStatus(t("infiniteCanvas.noCanvases"));
       } catch (error) {
-        if (!canceled) setProjectStatus(error instanceof Error ? error.message : String(error));
+        if (!canceled) {
+          setShowCanvasHome(true);
+          setProjectStatus(error instanceof Error ? error.message : String(error));
+        }
       }
     }
     void loadDiskCanvasProjects();
     return () => {
       canceled = true;
     };
-  }, [refreshCanvasProjects, t]);
+  }, [openCanvasProject, refreshCanvasProjects, t]);
 
   useEffect(() => {
     if (!activeCanvasId) return;
@@ -632,6 +659,9 @@ export function useCanvasProjects({
 
   return {
     activeProject,
+    activeCanvasTitle,
+    activeCanvasId,
+    activeCanvasIdRef,
     projectStatus,
     showCanvasHome,
     setShowCanvasHome,

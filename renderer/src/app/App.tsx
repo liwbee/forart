@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Languages, Layers3, LayoutTemplate, LibraryBig, Moon, ScanSearch, Settings, Sun, Users } from "lucide-react";
 import { setActiveForartConfig } from "../data-source/runtime";
@@ -25,25 +25,38 @@ const navItems: Array<{
 const VIEW_TRANSITION_MS = 500;
 const FreeCanvasPage = lazy(() => import("../features/free-canvas/FreeCanvasPage").then((module) => ({ default: module.FreeCanvasPage })));
 const CanvasPage = lazy(() => import("../features/infinite-canvas/CanvasPage"));
+const KEEP_ALIVE_VIEWS = new Set<AppView>(["free-canvas", "canvas"]);
 
-function renderView(activeView: AppView, appConfig: ForartAppConfig, onConfigChange: (config: ForartAppConfig) => void) {
-  if (activeView === "library") return <ResourceLibraryPage />;
-  if (activeView === "free-canvas") {
+function isKeepAliveView(view: AppView) {
+  return KEEP_ALIVE_VIEWS.has(view);
+}
+
+function KeepAliveWorkspaceView({ active, children }: { active: boolean; children: ReactNode }) {
+  return (
+    <div className={`workspace-view workspace-view--keepalive${active ? " workspace-view--active" : " workspace-view--hidden"}`} aria-hidden={!active}>
+      {children}
+    </div>
+  );
+}
+
+function renderView(view: AppView, appConfig: ForartAppConfig, onConfigChange: (config: ForartAppConfig) => void) {
+  if (view === "library") return <ResourceLibraryPage />;
+  if (view === "free-canvas") {
     return (
       <Suspense fallback={<div className="view-loading">{appConfig ? "Loading free canvas..." : ""}</div>}>
         <FreeCanvasPage />
       </Suspense>
     );
   }
-  if (activeView === "image-review") return <ImageReviewPage />;
-  if (activeView === "canvas") {
+  if (view === "image-review") return <ImageReviewPage />;
+  if (view === "canvas") {
     return (
       <Suspense fallback={<div className="view-loading">{appConfig ? "Loading canvas..." : ""}</div>}>
         <CanvasPage imageDownloadPath={appConfig.imageDownloadPath} />
       </Suspense>
     );
   }
-  if (activeView === "settings") return <SettingsPage config={appConfig} onConfigChange={onConfigChange} />;
+  if (view === "settings") return <SettingsPage config={appConfig} onConfigChange={onConfigChange} />;
   return <ResourceLibraryPage />;
 }
 
@@ -60,6 +73,7 @@ export function App() {
   const nextLanguageLabel = nextLanguage === "zh-CN" ? t("settings.chinese") : t("settings.english");
   const previousViewRef = useRef(activeView);
   const [exitingView, setExitingView] = useState<AppView | null>(null);
+  const [mountedKeepAliveViews, setMountedKeepAliveViews] = useState<Set<AppView>>(() => (isKeepAliveView(activeView) ? new Set([activeView]) : new Set()));
   const [appConfig, setAppConfig] = useState<ForartAppConfig | null>(null);
   const [configLoaded, setConfigLoaded] = useState(false);
 
@@ -87,6 +101,14 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (!isKeepAliveView(activeView)) return;
+    setMountedKeepAliveViews((current) => {
+      if (current.has(activeView)) return current;
+      return new Set([...current, activeView]);
+    });
+  }, [activeView]);
+
+  useEffect(() => {
     if (previousViewRef.current === activeView) return;
     const previousView = previousViewRef.current;
     previousViewRef.current = activeView;
@@ -107,6 +129,10 @@ export function App() {
   function toggleLanguage() {
     void i18n.changeLanguage(nextLanguage);
   }
+
+  const keepAliveViewsToRender = isKeepAliveView(activeView)
+    ? new Set([...mountedKeepAliveViews, activeView])
+    : mountedKeepAliveViews;
 
   if (!configLoaded) {
     return (
@@ -197,14 +223,21 @@ export function App() {
 
       <main className="workspace" id="main-workspace">
         <div className="workspace-stage">
-          {exitingView ? (
+          {exitingView && !isKeepAliveView(exitingView) ? (
             <div key={`exit-${exitingView}`} className="workspace-view workspace-view--exit" aria-hidden="true">
               {renderView(exitingView, appConfig, updateConfig)}
             </div>
           ) : null}
-          <div key={`active-${activeView}`} className="workspace-view workspace-view--active">
-            {renderView(activeView, appConfig, updateConfig)}
-          </div>
+          {[...keepAliveViewsToRender].map((view) => (
+            <KeepAliveWorkspaceView key={view} active={activeView === view}>
+              {renderView(view, appConfig, updateConfig)}
+            </KeepAliveWorkspaceView>
+          ))}
+          {!isKeepAliveView(activeView) ? (
+            <div key={`active-${activeView}`} className="workspace-view workspace-view--active">
+              {renderView(activeView, appConfig, updateConfig)}
+            </div>
+          ) : null}
         </div>
       </main>
     </div>

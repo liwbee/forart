@@ -10,6 +10,7 @@ export interface ImageGenerationRequest {
   resolution?: "1k" | "2k" | "4k";
   aspectRatio?: string;
   onStatus?: (message: string) => void;
+  onTaskId?: (taskId: string) => void;
   signal?: AbortSignal;
 }
 
@@ -349,6 +350,7 @@ async function submitImageGeneration(
   aspectRatio: string,
   referenceImages: string[],
   onStatus?: (message: string) => void,
+  onTaskId?: (taskId: string) => void,
   signal?: AbortSignal,
 ) {
   onStatus?.("Submitting image generation...");
@@ -370,7 +372,10 @@ async function submitImageGeneration(
   if (directResult) return directResult;
 
   const taskId = readTaskId(payload);
-  if (taskId) return pollImageTask(baseUrl, headers, taskId, payload, onStatus, signal);
+  if (taskId) {
+    onTaskId?.(taskId);
+    return pollImageTask(baseUrl, headers, taskId, payload, onStatus, signal);
+  }
   throw new Error(`The image API response did not contain an image or task_id (${summarizePayloadShape(payload)}).`);
 }
 
@@ -383,6 +388,7 @@ export async function generateImageWithProvider({
   resolution = "1k",
   aspectRatio = "1:1",
   onStatus,
+  onTaskId,
   signal,
 }: ImageGenerationRequest): Promise<ImageGenerationResult> {
   const baseUrl = provider.baseUrl.trim();
@@ -411,5 +417,25 @@ export async function generateImageWithProvider({
   const requestSize = rule.sizeMode === "ratio" || provider.protocol === "async" ? aspectRatio : size || openAiSizeFor(resolution, aspectRatio);
   const requestResolution = rule.resolutionCase === "upper" ? resolution.toUpperCase() : resolution.toLowerCase();
 
-  return submitImageGeneration(baseUrl, headers, modelName, prompt, requestSize, requestResolution, aspectRatio, refs, onStatus, signal);
+  return submitImageGeneration(baseUrl, headers, modelName, prompt, requestSize, requestResolution, aspectRatio, refs, onStatus, onTaskId, signal);
+}
+
+export async function recoverImageGenerationTask({
+  provider,
+  taskId,
+  onStatus,
+  signal,
+}: {
+  provider: ApiProvider;
+  taskId: string;
+  onStatus?: (message: string) => void;
+  signal?: AbortSignal;
+}): Promise<ImageGenerationResult> {
+  const baseUrl = provider.baseUrl.trim();
+  if (!baseUrl) throw new Error("API provider base URL is empty.");
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(provider.apiKey.trim() ? { Authorization: `Bearer ${provider.apiKey.trim()}` } : {}),
+  };
+  return pollImageTask(baseUrl, headers, taskId, {}, onStatus, signal);
 }
