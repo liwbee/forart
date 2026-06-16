@@ -1,5 +1,6 @@
 import {
   DragEvent,
+  ReactNode,
   KeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent,
@@ -71,14 +72,15 @@ export interface ComposerTag {
   name: string;
 }
 
-interface OutfitComposerProps {
+interface FreeCanvasComposerProps {
   assets: ComposerAsset[];
   tags: ComposerTag[];
   activeTagId: string;
   onTagChange: (tagId: string) => void;
   onOpenTagManager?: () => void;
   onLoadAssetChoices?: (assetId: string) => Promise<ComposerAssetChoice[]>;
-  assetTitle: string;
+  assetTitle?: string;
+  railControls?: ReactNode;
   assetAltText: string;
   emptyText: string;
   canvasEmptyText: string;
@@ -228,7 +230,7 @@ function AssetChoicePopover({
   );
 }
 
-export function OutfitComposer({
+export function FreeCanvasComposer({
   assets,
   tags,
   activeTagId,
@@ -236,12 +238,13 @@ export function OutfitComposer({
   onOpenTagManager,
   onLoadAssetChoices,
   assetTitle,
+  railControls,
   assetAltText,
   emptyText,
   canvasEmptyText,
   tagFilterLabel,
   cardVariant = "direct",
-}: OutfitComposerProps) {
+}: FreeCanvasComposerProps) {
   const { t } = useTranslation();
   const [items, setItems] = useState<ComposerItem[]>([]);
   const [selectedItemId, setSelectedItemId] = useState("");
@@ -810,15 +813,19 @@ export function OutfitComposer({
       onDragLeave={handleStageDragLeave}
       onDrop={handleStageDrop}
     >
-      <aside className="outfit-composer__asset-rail" aria-label={assetTitle}>
-        <div className="outfit-composer__rail-head">
-          <strong>{assetTitle}</strong>
-          {onOpenTagManager ? (
-            <button type="button" aria-label={t("common.labels.manageTags")} title={t("common.labels.manageTags")} onClick={onOpenTagManager}>
-              <SlidersHorizontal size={18} aria-hidden="true" />
-            </button>
-          ) : null}
-        </div>
+      <aside className="outfit-composer__asset-rail" aria-label={assetTitle || tagFilterLabel}>
+        {assetTitle || onOpenTagManager ? (
+          <div className="outfit-composer__rail-head">
+            {assetTitle ? <strong>{assetTitle}</strong> : <span />}
+            {onOpenTagManager ? (
+              <button type="button" aria-label={t("common.labels.manageTags")} title={t("common.labels.manageTags")} onClick={onOpenTagManager}>
+                <SlidersHorizontal size={18} aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {railControls ? <div className="outfit-composer__rail-controls">{railControls}</div> : null}
 
         <div className="outfit-composer__tag-row" aria-label={tagFilterLabel}>
           <button className={activeTagId ? "" : "active"} type="button" onClick={() => onTagChange("")}>
@@ -868,13 +875,14 @@ export function OutfitComposer({
           })}
           {!assets.length ? <div className="outfit-composer__empty">{emptyText}</div> : null}
         </div>
+
       </aside>
 
       <button
         className="outfit-composer__rail-resizer"
         type="button"
         role="separator"
-        aria-label={t("outfitComposer.resizeRail", { title: assetTitle })}
+        aria-label={t("outfitComposer.resizeRail", { title: assetTitle || tagFilterLabel })}
         aria-orientation="vertical"
         aria-valuemin={ASSET_RAIL_MIN}
         aria-valuemax={ASSET_RAIL_MAX}

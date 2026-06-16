@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Select } from "../../../components/Select";
 import type { CanvasNode } from "../types";
 
 interface LoopNodeBodyProps {
@@ -18,10 +19,16 @@ export function LoopNodeBody({ node, onPatch }: LoopNodeBodyProps) {
         </label>
         <label>
           <span>{t("infiniteCanvas.mode")}</span>
-          <select className="nodrag nopan" value={node.mode || "serial"} onChange={(event) => onPatch({ mode: event.target.value as "serial" | "batch" })}>
-            <option value="serial">{t("infiniteCanvas.serial")}</option>
-            <option value="batch">{t("infiniteCanvas.batch")}</option>
-          </select>
+          <Select
+            className="nodrag nopan"
+            value={node.mode || "serial"}
+            options={[
+              { value: "serial", label: t("infiniteCanvas.serial") },
+              { value: "batch", label: t("infiniteCanvas.batch") },
+            ]}
+            onChange={(mode) => onPatch({ mode: mode as "serial" | "batch" })}
+            ariaLabel={t("infiniteCanvas.mode")}
+          />
         </label>
       </div>
       <textarea className="nodrag nopan nowheel" value={node.variablePrompt || ""} placeholder={t("infiniteCanvas.loopVariablePrompt")} onChange={(event) => onPatch({ variablePrompt: event.target.value })} />

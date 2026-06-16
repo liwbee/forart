@@ -14,7 +14,7 @@
   display: grid;
   gap: var(--space-5);
   border: 1px solid var(--border-subtle);
-  border-radius: 24px;
+  border-radius: 20px;
   padding: var(--space-5);
   background: var(--surface-card);
   box-shadow: var(--shadow-popover);
@@ -46,11 +46,11 @@
 .dialog-field input {
   min-height: 44px;
   width: 100%;
-  border: 1px solid var(--border-subtle);
-  border-radius: 20px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
   padding: 0 var(--space-3);
-  background: var(--surface-control);
-  color: var(--text-primary);
+  background: var(--input-bg);
+  color: var(--input-text);
 }
 
 .dialog__actions {
@@ -76,18 +76,19 @@
 .button:hover:not(:disabled) {
   border-color: var(--button-functional-hover-border);
   background: var(--button-functional-hover-bg);
+  color: var(--state-hover-text);
 }
 
 .button.primary {
-  border-color: #111827;
-  background: #111827;
-  color: #ffffff;
+  border-color: var(--state-active-border);
+  background: var(--state-active-bg);
+  color: var(--state-active-text);
 }
 
 .button.primary:hover:not(:disabled) {
-  border-color: #111827;
-  background: #111827;
-  color: #ffffff;
+  border-color: var(--state-active-border);
+  background: var(--state-active-hover-bg);
+  color: var(--state-active-text);
 }
 
 :root.theme-dark .side-nav-item.active,
@@ -101,9 +102,9 @@
 :root.theme-dark .library-tag-overflow-menu button.active,
 :root.theme-dark .model-tag-manager__list button.active,
 :root.theme-dark .library-modal-tags button.selected {
-  color: #0f172a;
-  background: #f8fafc;
-  border-color: #f8fafc;
+  color: var(--state-active-text);
+  background: var(--state-active-bg);
+  border-color: var(--state-active-border);
 }
 
 :root.theme-dark .gender-icon-filter.female:not(.active) {
@@ -123,33 +124,33 @@
 :root.theme-dark .library-tag-overflow-menu button.active:hover,
 :root.theme-dark .model-tag-manager__list button.active:hover,
 :root.theme-dark .library-modal-tags button.selected:hover {
-  background: #ffffff;
+  background: var(--state-active-hover-bg);
 }
 
 :root.theme-dark .side-nav-item.active,
 :root.theme-dark .model-project-row.active {
-  box-shadow: 0 12px 26px rgba(255, 255, 255, 0.08);
+  box-shadow: var(--shadow-ui);
 }
 
 :root.theme-dark .model-project-row.active .model-project-menu-button {
-  color: #0f172a;
+  color: var(--state-active-text);
 }
 
 :root.theme-dark .model-project-row.active .model-project-menu-button:hover,
 :root.theme-dark .model-project-row.active .model-project-menu-button[aria-expanded="true"] {
-  background: rgba(15, 23, 42, 0.08);
+  background: color-mix(in srgb, var(--state-active-text) 8%, transparent);
 }
 
 :root.theme-dark .button.primary {
-  border-color: #f8fafc;
-  background: #f8fafc;
-  color: #0f172a;
+  border-color: var(--state-active-border);
+  background: var(--state-active-bg);
+  color: var(--state-active-text);
 }
 
 :root.theme-dark .button.primary:hover:not(:disabled) {
-  border-color: #f8fafc;
-  background: #f8fafc;
-  color: #0f172a;
+  border-color: var(--state-active-border);
+  background: var(--state-active-hover-bg);
+  color: var(--state-active-text);
 }
 
 :root.theme-dark .outfit-composer__stage-scroll {
@@ -185,11 +186,11 @@
   min-width: 0;
   flex: 1;
   min-height: 44px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 18px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
   padding: 0 var(--space-3);
-  background: var(--surface-control);
-  color: var(--text-primary);
+  background: var(--input-bg);
+  color: var(--input-text);
 }
 
 .model-tag-manager__body {
@@ -240,9 +241,9 @@
 }
 
 .model-tag-manager__list button.active {
-  border-color: #111827;
-  background: #111827;
-  color: #ffffff;
+  border-color: var(--state-active-border);
+  background: var(--state-active-bg);
+  color: var(--state-active-text);
 }
 
 .model-tag-manager__empty {

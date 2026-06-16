@@ -39,24 +39,28 @@ const GroupItem = memo(function GroupItem({
   if (!bounds) return null;
   const isEditing = editingGroupId === group.id;
 
+  const frameStyle = {
+    left: WORLD_CENTER + bounds.x,
+    top: WORLD_CENTER + bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+  };
+
   return (
-    <div
-      className={`ic-group-frame${selected ? " selected" : ""}`}
-      style={{
-        left: WORLD_CENTER + bounds.x,
-        top: WORLD_CENTER + bounds.y,
-        width: bounds.width,
-        height: bounds.height,
-      }}
-      onPointerDown={(event) => onStartGroupDrag(event, group)}
-      onDoubleClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        setSelectedGroupId(group.id);
-        onEditingGroupChange(group.id);
-      }}
-    >
-      <div className="ic-group-frame__head nodrag" onPointerDown={(event) => onStartGroupDrag(event, group)}>
+    <>
+      <div
+        className={`ic-group-frame${selected ? " selected" : ""}`}
+        style={frameStyle}
+        onPointerDown={(event) => onStartGroupDrag(event, group)}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setSelectedGroupId(group.id);
+          onEditingGroupChange(group.id);
+        }}
+      />
+      <div className={`ic-group-controls${selected ? " selected" : ""}`} style={frameStyle}>
+        <div className="ic-group-frame__head nodrag" onPointerDown={(event) => onStartGroupDrag(event, group)}>
         {isEditing ? (
           <input
             value={group.title}
@@ -91,28 +95,29 @@ const GroupItem = memo(function GroupItem({
             <span>{group.title}</span>
           </button>
         )}
+          {selected ? (
+            <button
+              type="button"
+              className="ic-group-frame__action"
+              aria-label={t("infiniteCanvas.ungroup")}
+              title={t("infiniteCanvas.ungroup")}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => onUngroup(group.id)}
+            >
+              <Ungroup size={14} aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
         {selected ? (
           <button
+            className="ic-group-resize-handle nodrag"
             type="button"
-            className="ic-group-frame__action"
-            aria-label={t("infiniteCanvas.ungroup")}
-            title={t("infiniteCanvas.ungroup")}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => onUngroup(group.id)}
-          >
-            <Ungroup size={14} aria-hidden="true" />
-          </button>
+            aria-label={t("infiniteCanvas.resizeNode")}
+            onPointerDown={(event) => onStartGroupResize(event, group)}
+          />
         ) : null}
       </div>
-      {selected ? (
-        <button
-          className="ic-group-resize-handle nodrag"
-          type="button"
-          aria-label={t("infiniteCanvas.resizeNode")}
-          onPointerDown={(event) => onStartGroupResize(event, group)}
-        />
-      ) : null}
-    </div>
+    </>
   );
 });
 

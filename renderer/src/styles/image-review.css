@@ -47,7 +47,7 @@
   align-items: center;
   gap: var(--space-3);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: var(--space-2);
   background: var(--surface-card);
 }
@@ -65,7 +65,7 @@
 .review-folder-current {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-primary);
+  color: var(--state-hover-text);
   font-size: 13px;
   font-weight: 900;
   text-overflow: ellipsis;
@@ -87,17 +87,17 @@
   min-width: 0;
   width: 100%;
   min-height: 38px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
   padding: 0 var(--space-3);
-  background: var(--surface-control);
-  color: var(--text-primary);
+  background: var(--input-bg);
+  color: var(--input-text);
   outline: 0;
 }
 
 .review-folder-rule input:focus,
 .review-pane-folder-rule input:focus {
-  border-color: var(--border-strong);
+  border-color: var(--input-focus-border);
 }
 
 .review-folder-picker div {
@@ -128,7 +128,7 @@
 }
 
 .review-folder-picker strong {
-  color: var(--text-primary);
+  color: var(--state-hover-text);
   font-size: 13px;
 }
 
@@ -149,7 +149,7 @@
   display: grid;
   gap: var(--space-3);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: var(--space-3);
   background: var(--surface-card);
   box-shadow: var(--shadow-popover);
@@ -168,7 +168,7 @@
   flex: 0 0 auto;
   min-height: 34px;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 0 var(--space-3);
   background: var(--surface-control);
   color: var(--text-secondary);
@@ -177,8 +177,8 @@
 }
 
 .review-directory-breadcrumb button:hover {
-  border-color: var(--border-strong);
-  color: var(--text-primary);
+  border-color: var(--state-hover-border);
+  color: var(--state-hover-text);
 }
 
 .review-directory-list {
@@ -189,7 +189,7 @@
   align-content: start;
   gap: var(--space-2);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: var(--space-2);
   background: var(--surface-panel);
 }
@@ -201,16 +201,16 @@
   align-items: center;
   gap: var(--space-2);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 0 var(--space-3);
   background: var(--surface-card);
-  color: var(--text-primary);
+  color: var(--state-hover-text);
   font-weight: 800;
   text-align: left;
 }
 
 .review-directory-list button:hover {
-  border-color: var(--border-strong);
+  border-color: var(--state-hover-border);
   background: var(--surface-control);
 }
 
@@ -243,8 +243,8 @@
   min-height: 44px;
   padding: 3px;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background: var(--surface-card-muted);
+  border-radius: 12px;
+  background: var(--state-hover-bg);
 }
 
 .review-segment button {
@@ -260,12 +260,12 @@
 }
 
 .review-segment button:hover {
-  color: var(--text-primary);
+  color: var(--state-hover-text);
 }
 
 .review-segment button.active {
   background: var(--surface-card);
-  color: var(--text-primary);
+  color: var(--state-hover-text);
   box-shadow: var(--shadow-card);
 }
 
@@ -298,27 +298,29 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
   padding: 0 var(--space-2) 0 var(--space-3);
-  background: var(--surface-control);
-  color: var(--text-muted);
+  background: var(--input-bg);
+  color: var(--input-muted-text);
 }
 
 .review-product-search:focus-within {
-  border-color: var(--border-strong);
-  color: var(--text-primary);
+  border-color: var(--input-focus-border);
+  color: var(--input-text);
 }
 
 .review-product-search input {
   min-width: 0;
   width: 100%;
   min-height: 38px;
-  border: 0;
+  border: 0 !important;
+  border-radius: 0;
   padding: 0;
   outline: 0;
   background: transparent;
-  color: var(--text-primary);
+  color: var(--input-text);
+  box-shadow: none;
 }
 
 .review-product-search button {
@@ -335,8 +337,8 @@
 }
 
 .review-product-search button:hover {
-  background: var(--surface-card-muted);
-  color: var(--text-primary);
+  background: var(--state-hover-bg);
+  color: var(--state-hover-text);
 }
 
 .review-product-list-head {
@@ -351,7 +353,7 @@
 }
 
 .review-product-list-head strong {
-  color: var(--text-primary);
+  color: var(--state-hover-text);
 }
 
 .review-product-items {
@@ -368,21 +370,21 @@
   display: grid;
   gap: 3px;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: var(--space-2) var(--space-3);
   background: var(--surface-card);
-  color: var(--text-primary);
+  color: var(--state-hover-text);
   text-align: left;
 }
 
 .review-product-items button:hover {
-  border-color: var(--border-strong);
+  border-color: var(--state-hover-border);
 }
 
 .review-product-items button.active {
-  border-color: #111827;
-  background: #111827;
-  color: #ffffff;
+  border-color: var(--state-active-border);
+  background: var(--state-active-bg);
+  color: var(--state-active-text);
 }
 
 .review-product-items button strong,
@@ -451,7 +453,7 @@
 .review-product-head strong {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-primary);
+  color: var(--state-hover-text);
   font-size: 18px;
   font-weight: 900;
   text-overflow: ellipsis;
@@ -519,7 +521,7 @@
 
 .review-pane-folder-rule input {
   min-height: 34px;
-  border-radius: 7px;
+  border-radius: 6px;
   font-size: 13px;
   font-weight: 900;
 }
@@ -622,7 +624,7 @@
 }
 
 .review-thumb-nav-button:hover:not(:disabled) {
-  color: var(--text-primary);
+  color: var(--state-hover-text);
   background-color: var(--surface-card-muted);
 }
 
@@ -647,17 +649,17 @@
   height: 58px;
   overflow: hidden;
   border: 2px solid transparent;
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 0;
-  background: var(--surface-card-muted);
+  background: var(--state-hover-bg);
 }
 
 .review-thumb-strip button:hover {
-  border-color: var(--border-strong);
+  border-color: var(--state-hover-border);
 }
 
 .review-thumb-strip button.active {
-  border-color: #111827;
+  border-color: var(--state-active-border);
 }
 
 .review-thumb-strip img {
@@ -703,7 +705,7 @@
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  color: var(--text-primary);
+  color: var(--state-hover-text);
   font-size: 12px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -731,22 +733,22 @@
   width: 100%;
   min-height: 78px;
   resize: vertical;
-  border: 1px solid var(--border-subtle);
-  border-radius: 7px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
   padding: var(--space-3) 88px 42px var(--space-3);
-  background: color-mix(in srgb, var(--surface-card) 94%, transparent);
-  color: var(--text-primary);
+  background: var(--input-bg);
+  color: var(--input-text);
   font: inherit;
   font-size: 13px;
   font-weight: 700;
   line-height: 1.5;
-  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.18);
+  box-shadow: none;
 }
 
 .review-check-panel textarea:focus {
-  border-color: var(--accent);
+  border-color: var(--input-focus-border);
   outline: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: var(--input-focus-shadow);
 }
 
 .review-issue-save-button {
@@ -760,11 +762,11 @@
   border: 1px solid #111827;
   border-radius: 999px;
   padding: 0 var(--space-2);
-  background: #111827;
-  color: #ffffff;
+  background: var(--state-active-bg);
+  color: var(--state-active-text);
   font-size: 12px;
   font-weight: 900;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.22);
+  box-shadow: var(--shadow-ui);
   transition:
     background 160ms ease,
     border-color 160ms ease,
@@ -773,9 +775,9 @@
 }
 
 .review-issue-save-button:hover:not(:disabled) {
-  border-color: #0f172a;
-  background: #0f172a;
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.28);
+  border-color: var(--state-active-hover-bg);
+  background: var(--state-active-hover-bg);
+  box-shadow: var(--shadow-ui);
   transform: translateY(-1px);
 }
 
@@ -784,7 +786,7 @@
 }
 
 .review-issue-save-button:disabled {
-  opacity: 0.62;
+  opacity: var(--state-disabled-opacity);
 }
 
 .review-report-error {
@@ -810,7 +812,7 @@
   align-items: center;
   gap: var(--space-1);
   border-radius: 999px;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+  box-shadow: var(--shadow-ui);
   transform: translateY(0);
   transition:
     background 160ms ease,
@@ -829,12 +831,12 @@
 .review-check-actions .review-check-button--approve {
   border-color: #15803d;
   background: #15803d;
-  color: #ffffff;
+  color: var(--state-active-text);
 }
 
 .review-check-actions .review-check-button:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.2);
+  box-shadow: var(--shadow-ui);
 }
 
 .review-check-actions .review-check-button--issue:hover:not(:disabled) {
@@ -846,12 +848,12 @@
 .review-check-actions .review-check-button--approve:hover:not(:disabled) {
   border-color: #166534;
   background: #166534;
-  color: #ffffff;
+  color: var(--state-active-text);
 }
 
 .review-check-actions .review-check-button:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.16);
+  box-shadow: var(--shadow-ui);
 }
 
 .review-side-list {
@@ -899,21 +901,21 @@
   grid-template-columns: 34px minmax(0, 1fr);
   gap: 2px var(--space-2);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: var(--space-2);
   background: var(--surface-card);
-  color: var(--text-primary);
+  color: var(--state-hover-text);
   text-align: left;
 }
 
 .review-pair-list button:hover {
-  border-color: var(--border-strong);
+  border-color: var(--state-hover-border);
 }
 
 .review-pair-list button.active {
-  border-color: #111827;
-  background: #111827;
-  color: #ffffff;
+  border-color: var(--state-active-border);
+  background: var(--state-active-bg);
+  color: var(--state-active-text);
 }
 
 .review-pair-list button span {
@@ -953,7 +955,7 @@
   display: grid;
   place-items: center;
   border: 1px dashed var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: var(--space-4);
   color: var(--text-muted);
   text-align: center;

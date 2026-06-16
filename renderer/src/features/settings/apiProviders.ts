@@ -7,6 +7,10 @@ export interface ApiModelAliases {
   video: Record<string, string>;
 }
 
+export interface ApiModelRules {
+  image: Record<string, string>;
+}
+
 export interface ApiProvider {
   id: string;
   name: string;
@@ -19,6 +23,7 @@ export interface ApiProvider {
   chatModels: string[];
   videoModels: string[];
   modelAliases: ApiModelAliases;
+  modelRules: ApiModelRules;
 }
 
 export const API_PROVIDER_CHANGED_EVENT = "forart-api-providers-changed";
@@ -68,6 +73,7 @@ export function createLovartProvider(): ApiProvider {
     chatModels: [],
     videoModels: [],
     modelAliases: emptyModelAliases(),
+    modelRules: emptyModelRules(),
   };
 }
 
@@ -87,6 +93,10 @@ function emptyModelAliases(): ApiModelAliases {
   return { image: {}, chat: {}, video: {} };
 }
 
+function emptyModelRules(): ApiModelRules {
+  return { image: {} };
+}
+
 function normalizeAliasBucket(input: unknown) {
   if (!input || typeof input !== "object") return {};
   return Object.entries(input as Record<string, unknown>).reduce<Record<string, string>>((result, [model, alias]) => {
@@ -102,6 +112,23 @@ export function normalizeModelAliases(input: unknown): ApiModelAliases {
     image: normalizeAliasBucket(record.image),
     chat: normalizeAliasBucket(record.chat),
     video: normalizeAliasBucket(record.video),
+  };
+}
+
+function normalizeRuleBucket(input: unknown) {
+  if (!input || typeof input !== "object") return {};
+  return Object.entries(input as Record<string, unknown>).reduce<Record<string, string>>((result, [model, ruleId]) => {
+    const modelId = String(model || "").trim();
+    const value = String(ruleId || "").trim();
+    if (modelId && value) result[modelId] = value;
+    return result;
+  }, {});
+}
+
+export function normalizeModelRules(input: unknown): ApiModelRules {
+  const record = input && typeof input === "object" ? input as Partial<ApiModelRules> : {};
+  return {
+    image: normalizeRuleBucket(record.image),
   };
 }
 
@@ -139,6 +166,7 @@ export function createApiProvider(providers: ApiProvider[]): ApiProvider {
     chatModels: [],
     videoModels: [],
     modelAliases: emptyModelAliases(),
+    modelRules: emptyModelRules(),
   };
 }
 
@@ -156,6 +184,7 @@ export function normalizeApiProvider(input: Partial<ApiProvider>, providers: Api
     chatModels: Array.isArray(input.chatModels) ? input.chatModels.map(String).filter(Boolean) : [],
     videoModels: Array.isArray(input.videoModels) ? input.videoModels.map(String).filter(Boolean) : [],
     modelAliases: normalizeModelAliases(input.modelAliases),
+    modelRules: normalizeModelRules(input.modelRules),
   };
 }
 

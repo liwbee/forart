@@ -58,6 +58,7 @@ function normalizeApiProvider(input = {}, providers = []) {
     chatModels: Array.isArray(input.chatModels) ? input.chatModels.map(String).filter(Boolean) : [],
     videoModels: Array.isArray(input.videoModels) ? input.videoModels.map(String).filter(Boolean) : [],
     modelAliases: normalizeModelAliases(input.modelAliases),
+    modelRules: normalizeModelRules(input.modelRules),
   };
 }
 
@@ -74,6 +75,7 @@ function createLovartProvider() {
     chatModels: [],
     videoModels: [],
     modelAliases: normalizeModelAliases({}),
+    modelRules: normalizeModelRules({}),
   };
 }
 
@@ -92,6 +94,22 @@ function normalizeModelAliases(input = {}) {
     image: normalizeAliasBucket(input.image),
     chat: normalizeAliasBucket(input.chat),
     video: normalizeAliasBucket(input.video),
+  };
+}
+
+function normalizeRuleBucket(input = {}) {
+  if (!input || typeof input !== 'object') return {};
+  return Object.entries(input).reduce((result, [model, ruleId]) => {
+    const modelId = String(model || '').trim();
+    const value = String(ruleId || '').trim();
+    if (modelId && value) result[modelId] = value;
+    return result;
+  }, {});
+}
+
+function normalizeModelRules(input = {}) {
+  return {
+    image: normalizeRuleBucket(input.image),
   };
 }
 

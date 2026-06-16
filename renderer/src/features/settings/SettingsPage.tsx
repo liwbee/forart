@@ -2,7 +2,9 @@
 import { FormEvent, PointerEvent, UIEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ForartAppConfig, ForartMode, normalizeConfig, type LibtvAccountRecord } from "../../app/appConfig";
+import { Select } from "../../components/Select";
 import { createApiProvider, getModelDisplayName, loadApiSettings, normalizeApiProvider, readApiProviders, readDefaultImageProviderId, saveApiSettings, uniqueModels, type ApiModelKind, type ApiProvider } from "./apiProviders";
+import { detectImageModelRuleId, IMAGE_MODEL_RULES, normalizeImageModelRuleId } from "./imageModelRules";
 
 interface SettingsPageProps {
   config: ForartAppConfig;
@@ -554,10 +556,19 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
       result[model.kind].push(model.id);
       return result;
     }, { image: [], chat: [], video: [] });
+    const nextImageModels = uniqueModels([...(selectedProvider.imageModels || []), ...grouped.image]);
+    const nextImageRules = grouped.image.reduce<Record<string, string>>((result, model) => {
+      result[model] = selectedProvider.modelRules.image[model] || detectImageModelRuleId(model);
+      return result;
+    }, { ...selectedProvider.modelRules.image });
     patchSelectedProvider({
-      imageModels: uniqueModels([...(selectedProvider.imageModels || []), ...grouped.image]),
+      imageModels: nextImageModels,
       chatModels: uniqueModels([...(selectedProvider.chatModels || []), ...grouped.chat]),
       videoModels: uniqueModels([...(selectedProvider.videoModels || []), ...grouped.video]),
+      modelRules: {
+        ...selectedProvider.modelRules,
+        image: Object.fromEntries(Object.entries(nextImageRules).filter(([model]) => nextImageModels.includes(model))),
+      },
     });
     setModelPickerOpen(false);
     setApiStatus({
@@ -612,7 +623,21 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   function updateModel(kind: ApiModelKind, index: number, value: string) {
     if (!selectedProvider) return;
     const key = kind === "image" ? "imageModels" : kind === "chat" ? "chatModels" : "videoModels";
-    patchSelectedProvider({ [key]: selectedProvider[key].map((model, modelIndex) => (modelIndex === index ? value : model)) } as Partial<ApiProvider>);
+    const previousModel = selectedProvider[key][index];
+    const nextModels = selectedProvider[key].map((model, modelIndex) => (modelIndex === index ? value : model));
+    if (kind !== "image") {
+      patchSelectedProvider({ [key]: nextModels } as Partial<ApiProvider>);
+      return;
+    }
+    const { [previousModel]: previousRule, ...restRules } = selectedProvider.modelRules.image;
+    const nextModel = value.trim();
+    patchSelectedProvider({
+      imageModels: nextModels,
+      modelRules: {
+        ...selectedProvider.modelRules,
+        image: nextModel ? { ...restRules, [nextModel]: previousRule || detectImageModelRuleId(nextModel) } : restRules,
+      },
+    });
   }
 
   function updateModelAlias(kind: ApiModelKind, model: string, value: string) {
@@ -646,13 +671,33 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     const key = kind === "image" ? "imageModels" : kind === "chat" ? "chatModels" : "videoModels";
     const model = selectedProvider[key][index];
     const { [model]: _removed, ...nextAliases } = selectedProvider.modelAliases[kind];
+    const { [model]: _removedRule, ...nextImageRules } = selectedProvider.modelRules.image;
     patchSelectedProvider({
       [key]: selectedProvider[key].filter((_, modelIndex) => modelIndex !== index),
       modelAliases: {
         ...selectedProvider.modelAliases,
         [kind]: nextAliases,
       },
+      ...(kind === "image" ? {
+        modelRules: {
+          ...selectedProvider.modelRules,
+          image: nextImageRules,
+        },
+      } : {}),
     } as Partial<ApiProvider>);
+  }
+
+  function updateImageModelRule(model: string, ruleId: string) {
+    if (!selectedProvider || !model) return;
+    patchSelectedProvider({
+      modelRules: {
+        ...selectedProvider.modelRules,
+        image: {
+          ...selectedProvider.modelRules.image,
+          [model]: normalizeImageModelRuleId(ruleId),
+        },
+      },
+    });
   }
 
   function updateModelScrollbar(kind: ApiModelKind, element: HTMLElement) {
@@ -722,6 +767,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
             {models.length ? models.map((model, index) => {
               const alias = selectedProvider.modelAliases[kind]?.[model];
               const displayName = alias ?? model;
+              const imageRuleId = kind === "image" && model ? normalizeImageModelRuleId(selectedProvider.modelRules.image[model] || detectImageModelRuleId(model)) : "generic-image";
               return (
               <div className="settings-api-model-row" key={`${kind}-${index}`}>
                 {model ? (
@@ -740,6 +786,18 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                     <input value={model} onChange={(event) => updateModel(kind, index, event.target.value)} placeholder={t("settings.modelNamePlaceholder")} />
                   </label>
                 )}
+                {kind === "image" && model ? (
+                  <label className="settings-api-model-rule">
+                    <Select
+                      value={imageRuleId}
+                      options={IMAGE_MODEL_RULES.map((rule) => ({ value: rule.id, label: rule.label }))}
+                      onChange={(nextRuleId) => updateImageModelRule(model, nextRuleId)}
+                      ariaLabel="Rule"
+                      portal
+                      menuPlacement="bottom"
+                    />
+                  </label>
+                ) : null}
                 <button type="button" aria-label={t("settings.deleteModel")} title={t("settings.deleteModel")} onClick={() => deleteModel(kind, index)}>
                   <Trash2 size={15} aria-hidden="true" />
                 </button>
@@ -1006,19 +1064,18 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                   <div className="settings-libtv-account-panel">
                     <label className="settings-libtv-account-switcher">
                       <span>{t("settings.libtvAccountName")}</span>
-                      <select
+                      <Select
                         value={activeLibtvAccountId}
                         disabled={apiAction !== "" || !libtvAccounts.length}
-                        onChange={(event) => void switchLibtvAccount(event.target.value)}
-                      >
-                        {libtvAccounts.length ? libtvAccounts.map((account) => (
-                          <option key={account.accountId ?? account.accountName} value={String(account.accountId ?? "")}>
-                            {`${account.accountName || account.accountId || "-"} · ${libtvAccountTypeLabel(account, t)}`}
-                          </option>
-                        )) : (
-                          <option value="">{t("settings.libtvNoAccounts")}</option>
-                        )}
-                      </select>
+                        onChange={(accountId) => void switchLibtvAccount(accountId)}
+                        options={libtvAccounts.length ? libtvAccounts.map((account) => ({
+                          value: String(account.accountId ?? ""),
+                          label: `${account.accountName || account.accountId || "-"} · ${libtvAccountTypeLabel(account, t)}`,
+                        })) : [{ value: "", label: t("settings.libtvNoAccounts") }]}
+                        ariaLabel={t("settings.libtvAccountName")}
+                        portal
+                        menuPlacement="bottom"
+                      />
                     </label>
                     <div className="settings-libtv-account-grid">
                       <div className="settings-libtv-account-field">
@@ -1114,11 +1171,18 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                           </label>
                           <label className="settings-field">
                             <span>{t("settings.protocol")}</span>
-                            <select value={selectedProvider.protocol} onChange={(event) => patchSelectedProvider({ protocol: event.target.value as ApiProvider["protocol"] })}>
-                              <option value="openai">{t("settings.protocolOpenAI")}</option>
-                              <option value="async">{t("settings.protocolAsync")}</option>
-                              <option value="gemini">{t("settings.protocolGemini")}</option>
-                            </select>
+                            <Select
+                              value={selectedProvider.protocol}
+                              options={[
+                                { value: "openai", label: t("settings.protocolOpenAI") },
+                                { value: "async", label: t("settings.protocolAsync") },
+                                { value: "gemini", label: t("settings.protocolGemini") },
+                              ]}
+                              onChange={(protocol) => patchSelectedProvider({ protocol: protocol as ApiProvider["protocol"] })}
+                              ariaLabel={t("settings.protocol")}
+                              portal
+                              menuPlacement="bottom"
+                            />
                           </label>
                           <div className="settings-api-test-row">
                             <div className="settings-inline-status settings-api-action-status" data-tone={apiStatus.tone}>
@@ -1209,11 +1273,18 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                       <input type="checkbox" checked={model.selected} onChange={() => toggleFetchedModel(model.id)} />
                       <span title={model.id}>{model.id}</span>
                     </label>
-                    <select value={model.kind} onChange={(event) => patchFetchedModelKind(model.id, event.target.value as ApiModelKind)}>
-                      <option value="image">{t("settings.imageModels")}</option>
-                      <option value="chat">{t("settings.chatModels")}</option>
-                      <option value="video">{t("settings.videoModels")}</option>
-                    </select>
+                    <Select
+                      value={model.kind}
+                      options={[
+                        { value: "image", label: t("settings.imageModels") },
+                        { value: "chat", label: t("settings.chatModels") },
+                        { value: "video", label: t("settings.videoModels") },
+                      ]}
+                      onChange={(kind) => patchFetchedModelKind(model.id, kind as ApiModelKind)}
+                      ariaLabel={t("settings.selectModels")}
+                      portal
+                      menuPlacement="bottom"
+                    />
                   </div>
                 )) : <div className="settings-api-picker-empty">{t("settings.noMatchingModels")}</div>}
               </div>

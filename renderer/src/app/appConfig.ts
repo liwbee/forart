@@ -26,6 +26,9 @@ export interface ForartApiProviderConfig {
     chat?: Record<string, string>;
     video?: Record<string, string>;
   };
+  modelRules?: {
+    image?: Record<string, string>;
+  };
 }
 
 export interface ForartApiSettingsConfig {

@@ -1,6 +1,7 @@
-import { Check, ChevronDown, Download, Play, RefreshCw, Square, X } from "lucide-react";
+import { ChevronDown, Download, Play, RefreshCw, Square, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { useTranslation } from "react-i18next";
+import { Select } from "../../../components/Select";
 import { clamp, WORLD_CENTER } from "../canvasGeometry";
 import { IMAGE_ASPECT_RATIO_OPTIONS, IMAGE_RESOLUTION_OPTIONS } from "../constants";
 import type { CanvasNode, Viewport } from "../types";
@@ -83,53 +84,16 @@ export function LibtvComposer({
     disabled = false,
   ) => {
     const id = selectId(name);
-    const selectedOption = options.find((option) => option.value === value) || options[0] || { value: "", label };
-    const isOpen = openSelectId === id && !disabled;
     return (
-      <div className={`ic-composer-select${isOpen ? " open" : ""}${disabled ? " disabled" : ""}`}>
-        <button
-          type="button"
-          className="ic-composer-select__trigger"
-          aria-label={label}
-          aria-haspopup="listbox"
-          aria-expanded={isOpen}
-          disabled={disabled}
-          onClick={() => onOpenSelectChange((current) => (current === id ? "" : id))}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") onOpenSelectChange("");
-          }}
-        >
-          <span>{selectedOption.label}</span>
-          <ChevronDown size={18} aria-hidden="true" />
-        </button>
-        {isOpen ? (
-          <div className="ic-composer-select__menu" role="listbox" aria-label={label}>
-            {options.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={option.value === selectedOption.value ? "selected" : ""}
-                role="option"
-                aria-selected={option.value === selectedOption.value}
-                onClick={() => {
-                  onChange(option.value);
-                  onOpenSelectChange("");
-                }}
-              >
-                <span className={option.hint ? "ic-composer-select__option-text" : ""} title={option.hint || option.value || undefined}>
-                  {option.hint ? (
-                    <>
-                      <strong>{option.label}</strong>
-                      <small>{option.hint}</small>
-                    </>
-                  ) : option.label}
-                </span>
-                {option.value === selectedOption.value ? <Check size={14} aria-hidden="true" /> : null}
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </div>
+      <Select
+        value={value}
+        options={options}
+        ariaLabel={label}
+        disabled={disabled}
+        open={openSelectId === id && !disabled}
+        onOpenChange={(nextOpen) => onOpenSelectChange((current) => (nextOpen ? id : current === id ? "" : current))}
+        onChange={onChange}
+      />
     );
   };
 

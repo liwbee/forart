@@ -1,6 +1,7 @@
-import { Check, ChevronDown, Play, RefreshCw, Square, X } from "lucide-react";
+import { Play, RefreshCw, Square, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { useTranslation } from "react-i18next";
+import { Select } from "../../../components/Select";
 import { clamp, WORLD_CENTER } from "../canvasGeometry";
 import type { CanvasNode, Viewport } from "../types";
 import type { ImageGeneratorInputPreview } from "./composerTypes";
@@ -69,52 +70,15 @@ export function LovartComposer({
     onChange: (value: string) => void,
   ) => {
     const id = selectId(name);
-    const selectedOption = options.find((option) => option.value === value) || options[0] || { value: "", label };
-    const isOpen = openSelectId === id;
     return (
-      <div className={`ic-composer-select${isOpen ? " open" : ""}`}>
-        <button
-          type="button"
-          className="ic-composer-select__trigger"
-          aria-label={label}
-          aria-haspopup="listbox"
-          aria-expanded={isOpen}
-          onClick={() => onOpenSelectChange((current) => (current === id ? "" : id))}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") onOpenSelectChange("");
-          }}
-        >
-          <span>{selectedOption.label}</span>
-          <ChevronDown size={18} aria-hidden="true" />
-        </button>
-        {isOpen ? (
-          <div className="ic-composer-select__menu" role="listbox" aria-label={label}>
-            {options.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={option.value === selectedOption.value ? "selected" : ""}
-                role="option"
-                aria-selected={option.value === selectedOption.value}
-                onClick={() => {
-                  onChange(option.value);
-                  onOpenSelectChange("");
-                }}
-              >
-                <span className={option.hint ? "ic-composer-select__option-text" : ""} title={option.hint || option.value || undefined}>
-                  {option.hint ? (
-                    <>
-                      <strong>{option.label}</strong>
-                      <small>{option.hint}</small>
-                    </>
-                  ) : option.label}
-                </span>
-                {option.value === selectedOption.value ? <Check size={14} aria-hidden="true" /> : null}
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </div>
+      <Select
+        value={value}
+        options={options}
+        ariaLabel={label}
+        open={openSelectId === id}
+        onOpenChange={(nextOpen) => onOpenSelectChange((current) => (nextOpen ? id : current === id ? "" : current))}
+        onChange={onChange}
+      />
     );
   };
 

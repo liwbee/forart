@@ -2,11 +2,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Images, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Select } from "../../components/Select";
 import { sortByName } from "../../lib/sortByName";
 import { listModelImages, listModelProjects, listModels, listModelTags, modelLibraryKeys } from "../model-library/api";
 import { useModelLibraryStore } from "../model-library/modelLibraryStore";
 import { getStorageSettings, listOutfitProjects, listOutfits, listOutfitTags, outfitLibraryKeys } from "../outfit-library/api";
-import { OutfitComposer } from "../outfit-library/OutfitComposer";
+import { FreeCanvasComposer } from "../outfit-library/OutfitComposer";
 import { useOutfitLibraryStore } from "../outfit-library/outfitLibraryStore";
 
 type FreeCanvasAssetLibrary = "models" | "outfits";
@@ -22,12 +23,12 @@ export function FreeCanvasPage() {
   const queryClient = useQueryClient();
   const [assetLibrary, setAssetLibrary] = useState<FreeCanvasAssetLibrary>("outfits");
   const activeOutfitProjectId = useOutfitLibraryStore((state) => state.activeProjectId);
-  const activeOutfitTagId = useOutfitLibraryStore((state) => state.activeTagId);
   const setActiveOutfitProjectId = useOutfitLibraryStore((state) => state.setActiveProjectId);
+  const activeOutfitTagId = useOutfitLibraryStore((state) => state.activeTagId);
   const setActiveOutfitTagId = useOutfitLibraryStore((state) => state.setActiveTagId);
   const activeModelProjectId = useModelLibraryStore((state) => state.activeProjectId);
-  const activeModelTagId = useModelLibraryStore((state) => state.activeTagId);
   const setActiveModelProjectId = useModelLibraryStore((state) => state.setActiveProjectId);
+  const activeModelTagId = useModelLibraryStore((state) => state.activeTagId);
   const setActiveModelTagId = useModelLibraryStore((state) => state.setActiveTagId);
 
   const storageSettingsQuery = useQuery({
@@ -43,45 +44,51 @@ export function FreeCanvasPage() {
     enabled: storageConfigured,
   });
 
-  const outfitTagsQuery = useQuery({
-    queryKey: activeOutfitProjectId ? outfitLibraryKeys.tags(activeOutfitProjectId) : ["outfitTags", "empty"],
-    queryFn: () => listOutfitTags(activeOutfitProjectId),
-    enabled: storageConfigured && Boolean(activeOutfitProjectId),
-  });
-
   const modelProjectsQuery = useQuery({
     queryKey: modelLibraryKeys.projects,
     queryFn: listModelProjects,
     enabled: storageConfigured,
   });
 
-  const modelTagsQuery = useQuery({
-    queryKey: activeModelProjectId ? modelLibraryKeys.tags(activeModelProjectId) : ["modelTags", "empty"],
-    queryFn: () => listModelTags(activeModelProjectId),
-    enabled: storageConfigured && Boolean(activeModelProjectId),
-  });
-
   const outfitProjects = useMemo(() => outfitProjectsQuery.data?.projects || [], [outfitProjectsQuery.data?.projects]);
   const modelProjects = useMemo(() => modelProjectsQuery.data?.projects || [], [modelProjectsQuery.data?.projects]);
 
   useEffect(() => {
-    if (!activeOutfitProjectId && outfitProjects.length) setActiveOutfitProjectId(outfitProjects[0].id);
-    if (activeOutfitProjectId && outfitProjects.length && !outfitProjects.some((project) => project.id === activeOutfitProjectId)) {
-      setActiveOutfitProjectId(outfitProjects[0].id);
+    if (!outfitProjects.length) {
+      if (activeOutfitProjectId) setActiveOutfitProjectId("");
+      return;
+    }
+    if (!activeOutfitProjectId || !outfitProjects.some((project) => project.id === activeOutfitProjectId)) {
+      setActiveOutfitProjectId(outfitProjects[0]?.id || "");
     }
   }, [activeOutfitProjectId, outfitProjects, setActiveOutfitProjectId]);
+
+  useEffect(() => {
+    if (!modelProjects.length) {
+      if (activeModelProjectId) setActiveModelProjectId("");
+      return;
+    }
+    if (!activeModelProjectId || !modelProjects.some((project) => project.id === activeModelProjectId)) {
+      setActiveModelProjectId(modelProjects[0]?.id || "");
+    }
+  }, [activeModelProjectId, modelProjects, setActiveModelProjectId]);
+
+  const outfitTagsQuery = useQuery({
+    queryKey: activeOutfitProjectId ? outfitLibraryKeys.tags(activeOutfitProjectId) : ["outfitTags", "empty"],
+    queryFn: () => listOutfitTags(activeOutfitProjectId),
+    enabled: storageConfigured && assetLibrary === "outfits" && Boolean(activeOutfitProjectId),
+  });
 
   useEffect(() => {
     const tags = outfitTagsQuery.data?.tags || [];
     if (activeOutfitTagId && !tags.some((tag) => tag.id === activeOutfitTagId)) setActiveOutfitTagId("");
   }, [activeOutfitTagId, outfitTagsQuery.data?.tags, setActiveOutfitTagId]);
 
-  useEffect(() => {
-    if (!activeModelProjectId && modelProjects.length) setActiveModelProjectId(modelProjects[0].id);
-    if (activeModelProjectId && modelProjects.length && !modelProjects.some((project) => project.id === activeModelProjectId)) {
-      setActiveModelProjectId(modelProjects[0].id);
-    }
-  }, [activeModelProjectId, modelProjects, setActiveModelProjectId]);
+  const modelTagsQuery = useQuery({
+    queryKey: activeModelProjectId ? modelLibraryKeys.tags(activeModelProjectId) : ["modelTags", "empty"],
+    queryFn: () => listModelTags(activeModelProjectId),
+    enabled: storageConfigured && assetLibrary === "models" && Boolean(activeModelProjectId),
+  });
 
   useEffect(() => {
     const tags = modelTagsQuery.data?.tags || [];
@@ -89,13 +96,13 @@ export function FreeCanvasPage() {
   }, [activeModelTagId, modelTagsQuery.data?.tags, setActiveModelTagId]);
 
   const outfitsQuery = useQuery({
-    queryKey: activeOutfitProjectId ? outfitLibraryKeys.outfits(activeOutfitProjectId, activeOutfitTagId) : ["outfits", "empty"],
+    queryKey: activeOutfitProjectId ? outfitLibraryKeys.outfits(activeOutfitProjectId, activeOutfitTagId) : ["outfits", "empty", activeOutfitTagId],
     queryFn: () => listOutfits({ projectId: activeOutfitProjectId, tagId: activeOutfitTagId }),
     enabled: storageConfigured && assetLibrary === "outfits" && Boolean(activeOutfitProjectId),
   });
 
   const modelsQuery = useQuery({
-    queryKey: activeModelProjectId ? modelLibraryKeys.models(activeModelProjectId, activeModelTagId) : ["models", "empty"],
+    queryKey: activeModelProjectId ? modelLibraryKeys.models(activeModelProjectId, activeModelTagId) : ["models", "empty", activeModelTagId],
     queryFn: () => listModels({ projectId: activeModelProjectId, tagId: activeModelTagId }),
     enabled: storageConfigured && assetLibrary === "models" && Boolean(activeModelProjectId),
   });
@@ -120,7 +127,6 @@ export function FreeCanvasPage() {
   const modelTags = modelTagsQuery.data?.tags || [];
   const activeProjects = assetLibrary === "models" ? modelProjects : outfitProjects;
   const activeProjectId = assetLibrary === "models" ? activeModelProjectId : activeOutfitProjectId;
-  const activeProject = activeProjects.find((project) => project.id === activeProjectId) || null;
   const composerAssets = assetLibrary === "models"
     ? models.map((model) => ({
       id: model.id,
@@ -140,7 +146,6 @@ export function FreeCanvasPage() {
     modelsQuery.error,
   ]);
   const isLoadingProjects = storageSettingsQuery.isLoading || (assetLibrary === "models" ? modelProjectsQuery.isLoading : outfitProjectsQuery.isLoading);
-
   function handleProjectChange(projectId: string) {
     if (assetLibrary === "models") {
       setActiveModelProjectId(projectId);
@@ -148,6 +153,43 @@ export function FreeCanvasPage() {
       setActiveOutfitProjectId(projectId);
     }
   }
+
+  const assetLibrarySwitch = (
+    <div className="free-canvas-rail-controls">
+      <div className="outfit-view-switch" aria-label={t("freeCanvas.assetLibrary")}>
+        <button
+          className={assetLibrary === "outfits" ? "active" : ""}
+          type="button"
+          aria-pressed={assetLibrary === "outfits"}
+          onClick={() => setAssetLibrary("outfits")}
+        >
+          <Images size={18} aria-hidden="true" />
+          <span>{t("outfitLibrary.outfitAssets")}</span>
+        </button>
+        <button
+          className={assetLibrary === "models" ? "active" : ""}
+          type="button"
+          aria-pressed={assetLibrary === "models"}
+          onClick={() => setAssetLibrary("models")}
+        >
+          <Users size={18} aria-hidden="true" />
+          <span>{t("outfitLibrary.modelAssets")}</span>
+        </button>
+      </div>
+      <div className="free-canvas-project-select">
+        <span>{t("freeCanvas.project")}</span>
+        <Select
+          value={activeProjectId}
+          disabled={!activeProjects.length}
+          options={activeProjects.map((project) => ({ value: project.id, label: project.name || t("infiniteCanvas.untitledCanvas") }))}
+          onChange={handleProjectChange}
+          ariaLabel={t("freeCanvas.project")}
+          portal
+          menuPlacement="bottom"
+        />
+      </div>
+    </div>
+  );
 
   function handleTagChange(tagId: string) {
     if (assetLibrary === "models") {
@@ -159,51 +201,19 @@ export function FreeCanvasPage() {
 
   return (
     <section className="model-library-page free-canvas-page" aria-label={t("freeCanvas.title")}>
-      <div className="free-canvas-toolbar">
-        <div className="outfit-view-switch" aria-label={t("freeCanvas.assetLibrary")}> 
-          <button
-            className={assetLibrary === "outfits" ? "active" : ""}
-            type="button"
-            aria-pressed={assetLibrary === "outfits"}
-            onClick={() => setAssetLibrary("outfits")}
-          >
-            <Images size={18} aria-hidden="true" />
-            <span>{t("outfitLibrary.outfitAssets")}</span>
-          </button>
-          <button
-            className={assetLibrary === "models" ? "active" : ""}
-            type="button"
-            aria-pressed={assetLibrary === "models"}
-            onClick={() => setAssetLibrary("models")}
-          >
-            <Users size={18} aria-hidden="true" />
-            <span>{t("outfitLibrary.modelAssets")}</span>
-          </button>
-        </div>
-
-        <label className="free-canvas-project-select">
-          <span>{t("freeCanvas.project")}</span>
-          <select value={activeProjectId} onChange={(event) => handleProjectChange(event.target.value)} disabled={!activeProjects.length}>
-            {activeProjects.map((project) => (
-              <option key={project.id} value={project.id}>{project.name || t("infiniteCanvas.untitledCanvas")}</option>
-            ))}
-          </select>
-        </label>
-      </div>
-
       <div className="free-canvas-body">
         {errorMessage ? <div className="model-lib-error">{t("freeCanvas.requestFailed", { message: errorMessage })}</div> : null}
         {isLoadingProjects ? <div className="model-lib-empty">{t("common.states.loadingProjects")}</div> : null}
         {!storageConfigured ? <div className="model-lib-empty">{t("outfitLibrary.storageUnavailable")}</div> : null}
         {storageConfigured && !isLoadingProjects && !activeProjects.length ? <div className="model-lib-empty">{t("common.empty.noProjects")}</div> : null}
-        {storageConfigured && activeProject ? (
-          <OutfitComposer
+        {storageConfigured && activeProjects.length ? (
+          <FreeCanvasComposer
             assets={composerAssets}
             tags={assetLibrary === "models" ? modelTags : outfitTags}
             activeTagId={assetLibrary === "models" ? activeModelTagId : activeOutfitTagId}
             onTagChange={handleTagChange}
             onLoadAssetChoices={assetLibrary === "models" ? loadModelImageChoices : undefined}
-            assetTitle={assetLibrary === "models" ? t("outfitLibrary.modelAssets") : t("outfitLibrary.outfitAssets")}
+            railControls={assetLibrarySwitch}
             assetAltText={assetLibrary === "models" ? t("outfitLibrary.modelImage") : t("outfitLibrary.outfitImage")}
             emptyText={assetLibrary === "models" ? t("outfitLibrary.noFilteredModels") : t("outfitLibrary.noFilteredOutfits")}
             canvasEmptyText={assetLibrary === "models" ? t("outfitLibrary.canvasEmptyModels") : t("outfitLibrary.canvasEmptyOutfits")}

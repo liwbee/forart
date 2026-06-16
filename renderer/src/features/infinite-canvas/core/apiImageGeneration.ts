@@ -1,4 +1,5 @@
 import type { ApiProvider } from "../../settings/apiProviders";
+import { detectImageModelRuleId, getImageModelRule } from "../../settings/imageModelRules";
 
 export interface ImageGenerationRequest {
   provider: ApiProvider;
@@ -289,7 +290,6 @@ async function normalizeReferenceImages(
       onStatus?.(`Uploading reference image ${normalized.length + 1}...`);
       normalized.push(await uploadReferenceImage(imageUploadsUrl(baseUrl), uploadHeaders, value, normalized.length, signal));
     }
-    if (normalized.length >= 16) break;
   }
   return normalized;
 }
@@ -304,8 +304,8 @@ function openAiSizeFor(resolution: string, aspectRatio: string) {
   return `${Math.round(shortEdge * ratioW / ratioH)}x${shortEdge}`;
 }
 
-function modelSupportsImageToImage(model: string) {
-  return !/(^z-image-turbo$|imagen-4\.0|grok-imagine-1\.5-apimart)/i.test(model.trim());
+function modelRuleFor(provider: ApiProvider, model: string) {
+  return getImageModelRule(provider.modelRules.image[model] || detectImageModelRuleId(model));
 }
 
 async function pollImageTask(
@@ -390,14 +390,16 @@ export async function generateImageWithProvider({
   if (!baseUrl) throw new Error("API provider base URL is empty.");
   if (!modelName) throw new Error("No image model selected.");
   if (provider.protocol === "gemini") {
-    throw new Error("Gemini native image generation is disabled because it uses base64 image payloads. Use an APIMart/OpenAI-compatible image endpoint instead.");
+    throw new Error("Gemini native image generation is disabled because it uses base64 image payloads. Use an OpenAI-compatible image endpoint instead.");
   }
   if (/edit/i.test(modelName)) {
     throw new Error("Image editing endpoints are disabled. Only text-to-image and image-to-image generation are supported.");
   }
-  if (referenceImages.length && !modelSupportsImageToImage(modelName)) {
-    throw new Error(`${modelName} does not support image-to-image generation in the current configuration.`);
-  }
+  const rule = modelRuleFor(provider, modelName);
+  const mode = referenceImages.length ? "image_to_image" : "text_to_image";
+  if (referenceImages.length && !rule.supportsReferenceImages) throw new Error(`${modelName} does not support reference images with the selected rule (${rule.label}).`);
+  if (!rule.modes.includes(mode)) throw new Error(`${modelName} does not support ${mode} with the selected rule (${rule.label}).`);
+  if (referenceImages.length > rule.maxReferenceImages) throw new Error(`${rule.label} supports up to ${rule.maxReferenceImages} reference image(s).`);
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -406,7 +408,8 @@ export async function generateImageWithProvider({
   const uploadHeaders: Record<string, string> = provider.apiKey.trim() ? { Authorization: `Bearer ${provider.apiKey.trim()}` } : {};
   onStatus?.(referenceImages.length ? "Preparing reference images..." : "Preparing text-to-image request...");
   const refs = await normalizeReferenceImages(baseUrl, uploadHeaders, referenceImages, onStatus, signal);
-  const requestSize = provider.protocol === "async" ? aspectRatio : size || openAiSizeFor(resolution, aspectRatio);
+  const requestSize = rule.sizeMode === "ratio" || provider.protocol === "async" ? aspectRatio : size || openAiSizeFor(resolution, aspectRatio);
+  const requestResolution = rule.resolutionCase === "upper" ? resolution.toUpperCase() : resolution.toLowerCase();
 
-  return submitImageGeneration(baseUrl, headers, modelName, prompt, requestSize, resolution, aspectRatio, refs, onStatus, signal);
+  return submitImageGeneration(baseUrl, headers, modelName, prompt, requestSize, requestResolution, aspectRatio, refs, onStatus, signal);
 }

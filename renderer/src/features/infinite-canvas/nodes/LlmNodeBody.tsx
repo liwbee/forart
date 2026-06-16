@@ -1,5 +1,6 @@
-import { Bot, Check, ChevronDown, Play, Square } from "lucide-react";
+import { Bot, Play, Square } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Select } from "../../../components/Select";
 import { getModelDisplayName, type ApiProvider } from "../../settings/apiProviders";
 import type { CanvasNode } from "../types";
 
@@ -27,53 +28,37 @@ export function LlmNodeBody({
   onStop,
 }: LlmNodeBodyProps) {
   const { t } = useTranslation();
-  const modelOptions = selectedProvider?.chatModels.length
-    ? selectedProvider.chatModels.map((model) => ({ value: model, label: getModelDisplayName(selectedProvider, "chat", model) }))
-    : [{ value: "", label: t("settings.noChatModels") }];
-  const selectedOption = modelOptions.find((option) => option.value === selectedModel) || modelOptions[0];
+  const modelOptions = providers.flatMap((provider) => provider.chatModels.map((model) => ({
+    value: `${provider.id}:${model}`,
+    label: getModelDisplayName(provider, "chat", model),
+    providerId: provider.id,
+    model,
+  })));
+  const selectedValue = selectedProvider && selectedModel ? `${selectedProvider.id}:${selectedModel}` : "";
+  const options = modelOptions.length ? modelOptions : [{ value: "", label: t("settings.noChatModels"), providerId: "", model: "" }];
 
   return (
     <div className="ic-node-body ic-llm-node-body nowheel">
       <div className="ic-llm-node__top nodrag nopan">
-        <div className={`ic-composer-select ic-llm-node__model${selectOpen ? " open" : ""}${!providers.length ? " disabled" : ""}`}>
-          <button
-            type="button"
-            className="ic-composer-select__trigger"
-            aria-label={t("infiniteCanvas.chatModel")}
-            aria-haspopup="listbox"
-            aria-expanded={selectOpen}
-            disabled={!providers.length}
-            onClick={() => onSelectOpenChange(!selectOpen)}
-          >
-            <span title={selectedOption?.label || undefined}>{selectedOption?.label || t("settings.noChatModels")}</span>
-            <ChevronDown size={18} aria-hidden="true" />
-          </button>
-          {selectOpen ? (
-            <div className="ic-composer-select__menu" role="listbox" aria-label={t("infiniteCanvas.chatModel")}>
-              {providers.flatMap((provider) => provider.chatModels.map((model) => ({ provider, model }))).map(({ provider, model }) => {
-                const selected = provider.id === selectedProvider?.id && model === selectedModel;
-                return (
-                  <button
-                    key={`${provider.id}:${model}`}
-                    type="button"
-                    className={selected ? "selected" : ""}
-                    role="option"
-                    aria-selected={selected}
-                    onClick={() => {
-                      onPatch({ chatProviderId: provider.id, chatModel: model, generationError: "" });
-                      onSelectOpenChange(false);
-                    }}
-                  >
-                    <span className="ic-composer-select__option-text" title={getModelDisplayName(provider, "chat", model)}>
-                      <strong>{getModelDisplayName(provider, "chat", model)}</strong>
-                    </span>
-                    {selected ? <Check size={14} aria-hidden="true" /> : null}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
+        <Select
+          className="ic-llm-node__model"
+          value={selectedValue}
+          options={options}
+          ariaLabel={t("infiniteCanvas.chatModel")}
+          disabled={!modelOptions.length}
+          open={selectOpen && Boolean(modelOptions.length)}
+          onOpenChange={onSelectOpenChange}
+          onChange={(nextValue) => {
+            const option = modelOptions.find((item) => item.value === nextValue);
+            if (!option) return;
+            onPatch({ chatProviderId: option.providerId, chatModel: option.model, generationError: "" });
+          }}
+          renderOption={(option) => (
+            <span className="ic-composer-select__option-text" title={option.label}>
+              <strong>{option.label}</strong>
+            </span>
+          )}
+        />
         <button
           type="button"
           className={`ic-llm-node__run${node.running ? " is-stop" : ""}`}

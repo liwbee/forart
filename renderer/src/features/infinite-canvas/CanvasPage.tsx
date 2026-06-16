@@ -12,6 +12,7 @@ import { ImageGeneratorComposer } from "./composers/ImageGeneratorComposer";
 import { LibtvComposer } from "./composers/LibtvComposer";
 import { LovartComposer } from "./composers/LovartComposer";
 import type { ImageGeneratorInputPreview } from "./composers/composerTypes";
+import { getImageGenerationReadiness } from "./core/imageGenerationReadiness";
 import { ConnectionLayer } from "./layers/ConnectionLayer";
 import { GroupLayer } from "./layers/GroupLayer";
 import { NodeLayer, type NodeBodyRenderState } from "./layers/NodeLayer";
@@ -33,6 +34,7 @@ import { createCanvasNode, getNodeDefinition } from "./nodes/registry";
 import { createInitialCanvas, useCanvasProjects } from "./useCanvasProjects";
 import { useCanvasGenerationActions } from "./useCanvasGenerationActions";
 import { hasDraggedImageFile, useCanvasMediaActions } from "./useCanvasMediaActions";
+import { detectImageModelRuleId, getImageModelRule } from "../settings/imageModelRules";
 import type { CanvasConnection, CanvasGroup, CanvasNode, CanvasNodeType, Viewport } from "./types";
 
 const uid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 9)}_${Date.now().toString(36)}`;
@@ -1045,14 +1047,13 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
 
   function ungroup(groupId = selectedGroupId) {
     if (!groupId) return;
-    const group = groups.find((item) => item.id === groupId);
     setCanvasDocument((current) => ({
       nodes: current.nodes,
       connections: current.connections,
       groups: current.groups.filter((item) => item.id !== groupId),
     }));
     setSelectedGroupId("");
-    setSelectedIds(new Set(group?.nodeIds || []));
+    setSelectedIds(new Set());
     setSelectedConnectionId("");
     setConnectionAction(null);
     setEditingGroupId("");
@@ -1468,7 +1469,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   }
 
   function handleStageContextMenu(event: React.MouseEvent<HTMLDivElement>) {
-    if ((event.target as HTMLElement).closest(".ic-node, .ic-group-frame")) return;
+    if ((event.target as HTMLElement).closest(".ic-node, .ic-group-frame, .ic-group-controls")) return;
     event.preventDefault();
     const rect = stageRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -1767,13 +1768,24 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
       || imageProviders.find((provider) => provider.id === node.imageProviderId)
       || null;
     const selectedModel = node.imageModel && selectedProvider?.imageModels.includes(node.imageModel) ? node.imageModel : selectedProvider?.imageModels[0] || "";
+    const inputPreviews = getImageGeneratorInputPreviews(node.id);
+    const prompt = [node.text || "", collectPrompt(node, nodes, connections)].filter(Boolean).join("\n\n").trim();
+    const selectedRule = selectedProvider && selectedModel
+      ? getImageModelRule(selectedProvider.modelRules.image[selectedModel] || detectImageModelRuleId(selectedModel))
+      : null;
+    const generationReadiness = getImageGenerationReadiness({
+      prompt,
+      referenceImageCount: inputPreviews.filter((item) => item.kind === "image").length,
+      rule: selectedRule,
+    });
     return (
       <ImageGeneratorComposer
         node={node}
         viewport={viewport}
         selectedProvider={selectedProvider}
         selectedModel={selectedModel}
-        inputPreviews={getImageGeneratorInputPreviews(node.id)}
+        inputPreviews={inputPreviews}
+        generationReadiness={generationReadiness}
         openSelectId={openImageComposerSelect}
         draggedInputConnectionId={draggedInputConnectionId}
         inputInsertIndex={inputInsertIndex}
