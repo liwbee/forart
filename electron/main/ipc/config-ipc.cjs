@@ -88,6 +88,27 @@ async function readRemoteRevision(net) {
   };
 }
 
+async function checkRemoteAhead(rootDir, currentRevision, latestRevision) {
+  if (!canGitUpdate(rootDir) || !currentRevision || !latestRevision || currentRevision === latestRevision) {
+    return { ok: true, updateAvailable: false };
+  }
+
+  const fetch = await runCommand('git', ['fetch', '--quiet', 'origin', 'main'], rootDir);
+  if (!fetch.ok) {
+    return {
+      ok: false,
+      updateAvailable: false,
+      error: fetch.error || fetch.stderr || 'git fetch failed',
+    };
+  }
+
+  const ancestor = await runCommand('git', ['merge-base', '--is-ancestor', currentRevision, 'FETCH_HEAD'], rootDir);
+  return {
+    ok: true,
+    updateAvailable: ancestor.ok,
+  };
+}
+
 async function appInfoPayload(rootDir) {
   const packageInfo = readPackageInfo(rootDir);
   const localRevision = await readLocalRevision(rootDir);
@@ -173,13 +194,27 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
           error: 'Remote commit is empty.',
         };
       }
+      const aheadCheck = await checkRemoteAhead(rootDir, info.currentRevision, remoteRevision.revision);
+      if (!aheadCheck.ok) {
+        return {
+          ok: false,
+          currentRevision: info.currentRevision,
+          latestRevision: remoteRevision.revision,
+          currentUpdatedAt: info.currentUpdatedAt,
+          latestUpdatedAt: remoteRevision.updatedAt,
+          updateAvailable: false,
+          canGitUpdate: info.canGitUpdate,
+          repoUrl: REPO_URL,
+          error: aheadCheck.error || 'Could not compare local and remote revisions.',
+        };
+      }
       return {
         ok: true,
         currentRevision: info.currentRevision,
         latestRevision: remoteRevision.revision,
         currentUpdatedAt: info.currentUpdatedAt,
         latestUpdatedAt: remoteRevision.updatedAt,
-        updateAvailable: info.canGitUpdate ? Boolean(info.currentRevision && remoteRevision.revision !== info.currentRevision) : false,
+        updateAvailable: aheadCheck.updateAvailable,
         canGitUpdate: info.canGitUpdate,
         repoUrl: REPO_URL,
       };
