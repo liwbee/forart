@@ -26,8 +26,8 @@ function canvasRecord(canvas) {
     libtvProjectName: String(canvas.libtvProjectName || ''),
     color: String(canvas.color || ''),
     pinned: Boolean(canvas.pinned),
-    createdAt: Number(canvas.createdAt || canvas.created_at || 0),
-    updatedAt: Number(canvas.updatedAt || canvas.updated_at || 0),
+    createdAt: Number(canvas.createdAt || 0),
+    updatedAt: Number(canvas.updatedAt || 0),
     nodeCount: Array.isArray(canvas.nodes) ? canvas.nodes.length : 0,
   };
 }
@@ -45,8 +45,8 @@ function normalizeCanvasProject(input, fallback = {}) {
     libtvProjectName: String(input?.libtvProjectName || fallback.libtvProjectName || ''),
     color: String(input?.color || fallback.color || ''),
     pinned: Boolean(input?.pinned || fallback.pinned),
-    createdAt: Number(input?.createdAt || input?.created_at || fallback.createdAt || timestamp),
-    updatedAt: Number(input?.updatedAt || input?.updated_at || fallback.updatedAt || timestamp),
+    createdAt: Number(input?.createdAt || fallback.createdAt || timestamp),
+    updatedAt: Number(input?.updatedAt || fallback.updatedAt || timestamp),
     nodes: Array.isArray(input?.nodes) ? input.nodes : [],
     connections: Array.isArray(input?.connections) ? input.connections : [],
     groups: Array.isArray(input?.groups) ? input.groups : [],

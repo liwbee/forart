@@ -1,4 +1,4 @@
-import { getAccessToken, getApiBaseUrl } from "../data-source/runtime";
+import { getApiBaseUrl } from "../data-source/runtime";
 
 export class ApiError extends Error {
   status: number;
@@ -26,12 +26,10 @@ async function parseResponse(response: Response) {
 }
 
 export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getAccessToken();
   const response = await fetch(resolveApiUrl(path), {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
   });

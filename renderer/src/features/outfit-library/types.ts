@@ -43,8 +43,4 @@ export interface OutfitFilters {
 
 export interface StorageSettings {
   configured: boolean;
-  data_dir: string;
-  database_path: string;
-  library_dir: string;
-  config_path: string;
 }

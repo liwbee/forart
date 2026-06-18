@@ -11,6 +11,7 @@ export interface ImageGenerationReadiness {
   canRun: boolean;
   reason: ImageGenerationReadinessReason;
   message: string;
+  maxReferenceImages?: number;
 }
 
 export interface ImageGenerationReadinessInput {
@@ -24,7 +25,7 @@ export function getImageGenerationReadiness({ prompt, referenceImageCount, rule 
     return {
       canRun: false,
       reason: "missing_prompt",
-      message: "请输入提示词",
+      message: "",
     };
   }
 
@@ -36,7 +37,7 @@ export function getImageGenerationReadiness({ prompt, referenceImageCount, rule 
     return {
       canRun: false,
       reason: "missing_reference_image",
-      message: "请传入参考图",
+      message: "",
     };
   }
 
@@ -44,7 +45,7 @@ export function getImageGenerationReadiness({ prompt, referenceImageCount, rule 
     return {
       canRun: false,
       reason: "reference_not_supported",
-      message: "该模型不支持传入参考图",
+      message: "",
     };
   }
 
@@ -52,7 +53,8 @@ export function getImageGenerationReadiness({ prompt, referenceImageCount, rule 
     return {
       canRun: false,
       reason: "too_many_reference_images",
-      message: `该模型最多支持 ${rule.maxReferenceImages} 张参考图`,
+      message: "",
+      maxReferenceImages: rule.maxReferenceImages,
     };
   }
 

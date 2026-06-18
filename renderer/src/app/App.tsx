@@ -45,6 +45,7 @@ const updateText = {
   projectOpened: "\u5df2\u6253\u5f00\u9879\u76ee\u9875\u9762",
   current: "\u5df2\u662f\u6700\u65b0\u66f4\u65b0",
   restart: "\u91cd\u542f\u751f\u6548",
+  updateAvailableShort: "\u53ef\u66f4\u65b0",
 };
 
 function formatUpdateDate(value: string) {
@@ -54,7 +55,7 @@ function formatUpdateDate(value: string) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return `${year}.${month}.${day}`;
 }
 
 function isKeepAliveView(view: AppView) {
@@ -134,6 +135,11 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (!appInfo) return;
+    void checkForUpdates(false);
+  }, [appInfo?.currentRevision]);
+
+  useEffect(() => {
     let canceled = false;
 
     async function loadConfig() {
@@ -180,6 +186,52 @@ export function App() {
 
   function toggleLanguage() {
     void i18n.changeLanguage(nextLanguage);
+    if (appConfig) {
+      const nextConfig: ForartAppConfig = { ...appConfig, language: nextLanguage === "en-US" ? "en-US" : "zh-CN" };
+      void window.forartConfig?.save(nextConfig).then((result) => updateConfig(result.config || nextConfig));
+    }
+  }
+
+  async function checkForUpdates(showCheckingState = true) {
+    if (showCheckingState) {
+      setUpdateStatus("checking");
+      setUpdateMessage(currentLanguage === "zh-CN" ? updateText.checkingMessage : "Checking for updates...");
+    }
+
+    const result: ForartUpdateCheckResult | undefined = await window.forartConfig?.checkUpdate().catch((error): ForartUpdateCheckResult => ({
+      ok: false,
+      currentRevision: appInfo?.currentRevision || "",
+      latestRevision: "",
+      currentUpdatedAt: appInfo?.currentUpdatedAt || "",
+      latestUpdatedAt: "",
+      updateAvailable: false,
+      canGitUpdate: appInfo?.canGitUpdate ?? false,
+      repoUrl: appInfo?.repoUrl || "",
+      error: String(error),
+    }));
+    if (!result?.ok) {
+      setUpdateStatus(showCheckingState ? "error" : "idle");
+      setUpdateMessage(showCheckingState ? (result?.error || (currentLanguage === "zh-CN" ? updateText.checkFailed : "Update check failed")) : "");
+      return;
+    }
+
+    setLatestUpdatedAt(result.latestUpdatedAt || result.currentUpdatedAt);
+    setAppInfo((current) => current ? {
+      ...current,
+      canGitUpdate: result.canGitUpdate,
+      repoUrl: result.repoUrl,
+      currentRevision: result.currentRevision || current.currentRevision,
+      currentUpdatedAt: result.currentUpdatedAt || current.currentUpdatedAt,
+    } : current);
+    if (result.updateAvailable) {
+      setUpdateStatus("available");
+      setUpdateMessage(result.canGitUpdate
+        ? (currentLanguage === "zh-CN" ? updateText.updateAvailable : "Update available. Click again to update.")
+        : (currentLanguage === "zh-CN" ? updateText.openProjectAvailable : "Update available. Click again to open project page."));
+    } else {
+      setUpdateStatus("current");
+      setUpdateMessage(currentLanguage === "zh-CN" ? updateText.current : "You're up to date.");
+    }
   }
 
   async function handleUpdateClick() {
@@ -205,54 +257,19 @@ export function App() {
       return;
     }
 
-    setUpdateStatus("checking");
-    setUpdateMessage(currentLanguage === "zh-CN" ? updateText.checkingMessage : "Checking for updates...");
-    const result: ForartUpdateCheckResult | undefined = await window.forartConfig?.checkUpdate().catch((error): ForartUpdateCheckResult => ({
-      ok: false,
-      currentRevision: appInfo?.currentRevision || "",
-      latestRevision: "",
-      currentUpdatedAt: appInfo?.currentUpdatedAt || "",
-      latestUpdatedAt: "",
-      updateAvailable: false,
-      canGitUpdate: appInfo?.canGitUpdate ?? false,
-      repoUrl: appInfo?.repoUrl || "",
-      error: String(error),
-    }));
-    if (!result?.ok) {
-      setUpdateStatus("error");
-      setUpdateMessage(result?.error || (currentLanguage === "zh-CN" ? updateText.checkFailed : "Update check failed"));
-      return;
-    }
-
-    setLatestUpdatedAt(result.latestUpdatedAt || result.currentUpdatedAt);
-    setAppInfo((current) => current ? {
-      ...current,
-      canGitUpdate: result.canGitUpdate,
-      repoUrl: result.repoUrl,
-      currentRevision: result.currentRevision || current.currentRevision,
-      currentUpdatedAt: result.currentUpdatedAt || current.currentUpdatedAt,
-    } : current);
-    if (result.updateAvailable) {
-      setUpdateStatus("available");
-      setUpdateMessage(result.canGitUpdate
-        ? (currentLanguage === "zh-CN" ? updateText.updateAvailable : "Update available. Click again to update.")
-        : (currentLanguage === "zh-CN" ? updateText.openProjectAvailable : "Update available. Click again to open project page."));
-    } else {
-      setUpdateStatus("current");
-      setUpdateMessage(currentLanguage === "zh-CN" ? updateText.current : "You're up to date.");
-    }
+    await checkForUpdates(true);
   }
 
   const updateDateLabel = formatUpdateDate(latestUpdatedAt || appInfo?.currentUpdatedAt || "");
   const updateButtonLabel = updateStatus === "available"
-    ? `${currentLanguage === "zh-CN" ? updateText.updateTo : "Update to"} ${updateDateLabel}`
+    ? `${currentLanguage === "zh-CN" ? updateText.updateAvailableShort : "Update"}v${updateDateLabel}`
     : updateStatus === "checking"
       ? (currentLanguage === "zh-CN" ? updateText.checking : "Checking")
       : updateStatus === "updating"
         ? (currentLanguage === "zh-CN" ? updateText.updating : "Updating")
         : updateStatus === "updated"
           ? (currentLanguage === "zh-CN" ? updateText.restart : "Restart")
-          : `${currentLanguage === "zh-CN" ? updateText.updatePrefix : "Updated"} ${updateDateLabel}`;
+          : `v${updateDateLabel}`;
   const updateButtonTitle = updateMessage || (currentLanguage === "zh-CN" ? updateText.checkingTitle : "Click to check for updates");
   const UpdateIcon = updateStatus === "available" ? Download : RefreshCw;
 
@@ -310,6 +327,17 @@ export function App() {
 
         <div className="side-footer" aria-label={t("app.settingsNavigation")}>
           <button
+            className={`side-nav-item side-footer-button${activeView === "settings" ? " active" : ""}`}
+            type="button"
+            data-short={t("nav.short.settings")}
+            aria-current={activeView === "settings" ? "page" : undefined}
+            onClick={() => setActiveView("settings")}
+          >
+            <Settings className="nav-icon" aria-hidden="true" size={20} />
+            <span className="nav-label">{t("nav.settings")}</span>
+          </button>
+
+          <button
             className="side-version-button"
             type="button"
             data-status={updateStatus}
@@ -320,18 +348,6 @@ export function App() {
           >
             <UpdateIcon className="side-version-icon" aria-hidden="true" size={16} />
             <span className="side-version-main">{updateButtonLabel}</span>
-            <span className="side-version-sub">{updateStatus === "idle" ? (currentLanguage === "zh-CN" ? updateText.checkingSub : "Check updates") : updateMessage}</span>
-          </button>
-
-          <button
-            className={`side-nav-item side-footer-button${activeView === "settings" ? " active" : ""}`}
-            type="button"
-            data-short={t("nav.short.settings")}
-            aria-current={activeView === "settings" ? "page" : undefined}
-            onClick={() => setActiveView("settings")}
-          >
-            <Settings className="nav-icon" aria-hidden="true" size={20} />
-            <span className="nav-label">{t("nav.settings")}</span>
           </button>
 
           <div className="side-footer-control-row">

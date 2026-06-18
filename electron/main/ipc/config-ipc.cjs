@@ -107,6 +107,7 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
   ipcMain.handle('config:load', async () => {
     try {
       const config = configStore.load();
+      if (!config) return null;
       activeAppConfig = config;
       if (config.mode === 'local') await localServer.ensure(config);
       return config;
@@ -133,9 +134,9 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
     return { ok: true, apiSettings };
   });
 
-  ipcMain.handle('dialog:choose-directory', async () => {
+  ipcMain.handle('dialog:choose-directory', async (_event, payload = {}) => {
     const result = await dialog.showOpenDialog({
-      title: 'Choose Forart asset library folder',
+      title: String(payload?.title || 'Choose Forart asset library folder'),
       properties: ['openDirectory', 'createDirectory'],
     });
 

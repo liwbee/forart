@@ -7,7 +7,7 @@
     <script>
       (() => {
         try {
-          const theme = localStorage.getItem("forart_theme") || localStorage.getItem("studio_theme") || "light";
+          const theme = localStorage.getItem("forart_theme") || "light";
           if (theme === "dark") document.documentElement.classList.add("theme-dark");
         } catch {}
       })();

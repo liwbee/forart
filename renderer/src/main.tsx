@@ -7,6 +7,7 @@ import "./styles/global.css";
 import "./styles/components.css";
 import "./styles/model-library.css";
 import "./styles/outfit-library.css";
+import "./styles/free-canvas.css";
 import "./styles/image-review.css";
 import "./styles/infinite-canvas.css";
 import "./styles/responsive.css";

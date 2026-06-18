@@ -4,8 +4,8 @@ export interface ForartAppConfig {
   mode: ForartMode;
   localLibraryPath: string;
   serverUrl: string;
-  accessToken: string;
   imageDownloadPath: string;
+  language: "zh-CN" | "en-US";
 }
 
 export type ForartApiProviderProtocol = "openai" | "async" | "gemini";
@@ -70,7 +70,7 @@ export interface ForartConfigApi {
   save: (config: ForartAppConfig) => Promise<{ ok: true; config: ForartAppConfig }>;
   loadApiSettings: () => Promise<ForartApiSettingsConfig>;
   saveApiSettings: (settings: ForartApiSettingsConfig) => Promise<{ ok: true; apiSettings: ForartApiSettingsConfig }>;
-  chooseDirectory: () => Promise<{ canceled: boolean; path: string }>;
+  chooseDirectory: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
   testServer: (serverUrl: string) => Promise<{ ok: boolean; status?: number; error?: string; payload?: unknown }>;
   localServerStatus: () => Promise<{ ok: boolean; managed?: boolean; localLibraryPath?: string; status?: number; error?: string; payload?: unknown }>;
   appInfo: () => Promise<ForartAppInfo>;
@@ -88,6 +88,30 @@ export interface EasyToolApi {
   updateCanvasMeta: (canvasId: string, patch: { title?: string; icon?: string; color?: string; pinned?: boolean }) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
   deleteCanvas: (canvasId: string) => Promise<{ ok: true; filePath?: string }>;
   saveCanvasAsset: (payload: { dataUrl?: string; url?: string; defaultName?: string; kind?: "input" | "output" }) => Promise<{ url: string; fileName: string; filePath?: string }>;
+}
+
+export interface ImageReviewImage {
+  id: string;
+  name: string;
+  relativePath: string;
+  url: string;
+  size: number;
+  lastModified: number;
+}
+
+export interface ImageReviewProduct {
+  id: string;
+  hasModelImages: boolean;
+  modelImages: ImageReviewImage[];
+  detailImages: ImageReviewImage[];
+  unknownImages: ImageReviewImage[];
+}
+
+export interface ImageReviewApi {
+  products: (payload: { root: string; modelFolders: string }) => Promise<{ products: ImageReviewProduct[] }>;
+  productImages: (payload: { root: string; productId: string; modelFolders: string; detailFolders: string }) => Promise<{ product: ImageReviewProduct }>;
+  loadIssue: (payload: { root: string; path: string }) => Promise<{ issue: string }>;
+  saveIssue: (payload: { root: string; path: string; issue: string }) => Promise<{ ok: true }>;
 }
 
 export interface LibtvModelOption {
@@ -215,6 +239,7 @@ declare global {
   interface Window {
     forartConfig?: ForartConfigApi;
     easyTool?: EasyToolApi;
+    forartReview?: ImageReviewApi;
     libtv?: LibtvApi;
   }
 }
@@ -223,8 +248,8 @@ export const DEFAULT_APP_CONFIG: ForartAppConfig = {
   mode: "local",
   localLibraryPath: "",
   serverUrl: "",
-  accessToken: "",
   imageDownloadPath: "",
+  language: "zh-CN",
 };
 
 export function normalizeConfig(input: Partial<ForartAppConfig>): ForartAppConfig {
@@ -234,7 +259,7 @@ export function normalizeConfig(input: Partial<ForartAppConfig>): ForartAppConfi
     mode: input.mode === "remote" ? "remote" : "local",
     localLibraryPath: String(input.localLibraryPath || "").trim(),
     serverUrl: String(input.serverUrl || "").trim().replace(/\/+$/, ""),
-    accessToken: String(input.accessToken || "").trim(),
     imageDownloadPath: String(input.imageDownloadPath || "").trim(),
+    language: input.language === "en-US" ? "en-US" : "zh-CN",
   };
 }

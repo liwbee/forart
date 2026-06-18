@@ -1,4 +1,4 @@
-.dialog-backdrop {
+﻿.dialog-backdrop {
   position: fixed;
   inset: 0;
   z-index: 100;
@@ -94,7 +94,8 @@
 :root.theme-dark .side-nav-item.active,
 :root.theme-dark .model-project-row.active,
 :root.theme-dark .outfit-view-switch button.active,
-:root.theme-dark .outfit-composer__tag-row button.active,
+:root.theme-dark .free-canvas-library-switch button.active,
+:root.theme-dark .free-canvas-editor__tag-row button.active,
 :root.theme-dark .gender-icon-filter.female.active,
 :root.theme-dark .gender-icon-filter.male.active,
 :root.theme-dark .library-tag-filter button.active,
@@ -118,7 +119,8 @@
 :root.theme-dark .side-nav-item.active:hover,
 :root.theme-dark .model-project-row.active:hover,
 :root.theme-dark .outfit-view-switch button.active:hover,
-:root.theme-dark .outfit-composer__tag-row button.active:hover,
+:root.theme-dark .free-canvas-library-switch button.active:hover,
+:root.theme-dark .free-canvas-editor__tag-row button.active:hover,
 :root.theme-dark .library-tag-filter button.active:hover,
 :root.theme-dark .library-tag-more-button.active:hover,
 :root.theme-dark .library-tag-overflow-menu button.active:hover,
@@ -153,7 +155,7 @@
   color: var(--state-active-text);
 }
 
-:root.theme-dark .outfit-composer__stage-scroll {
+:root.theme-dark .free-canvas-editor__stage-scroll {
   background: var(--surface-card-muted);
 }
 
@@ -267,3 +269,4 @@
   font-size: 13px;
   font-weight: 700;
 }
+

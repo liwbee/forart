@@ -7,7 +7,7 @@ import { sortByName } from "../../lib/sortByName";
 import { listModelImages, listModelProjects, listModels, listModelTags, modelLibraryKeys } from "../model-library/api";
 import { useModelLibraryStore } from "../model-library/modelLibraryStore";
 import { getStorageSettings, listOutfitProjects, listOutfits, listOutfitTags, outfitLibraryKeys } from "../outfit-library/api";
-import { FreeCanvasComposer } from "../outfit-library/OutfitComposer";
+import { FreeCanvasEditor } from "./FreeCanvasEditor";
 import { useOutfitLibraryStore } from "../outfit-library/outfitLibraryStore";
 
 type FreeCanvasAssetLibrary = "models" | "outfits";
@@ -156,7 +156,7 @@ export function FreeCanvasPage() {
 
   const assetLibrarySwitch = (
     <div className="free-canvas-rail-controls">
-      <div className="outfit-view-switch" aria-label={t("freeCanvas.assetLibrary")}>
+      <div className="free-canvas-library-switch" aria-label={t("freeCanvas.assetLibrary")}>
         <button
           className={assetLibrary === "outfits" ? "active" : ""}
           type="button"
@@ -177,7 +177,6 @@ export function FreeCanvasPage() {
         </button>
       </div>
       <div className="free-canvas-project-select">
-        <span>{t("freeCanvas.project")}</span>
         <Select
           value={activeProjectId}
           disabled={!activeProjects.length}
@@ -207,7 +206,7 @@ export function FreeCanvasPage() {
         {!storageConfigured ? <div className="model-lib-empty">{t("outfitLibrary.storageUnavailable")}</div> : null}
         {storageConfigured && !isLoadingProjects && !activeProjects.length ? <div className="model-lib-empty">{t("common.empty.noProjects")}</div> : null}
         {storageConfigured && activeProjects.length ? (
-          <FreeCanvasComposer
+          <FreeCanvasEditor
             assets={composerAssets}
             tags={assetLibrary === "models" ? modelTags : outfitTags}
             activeTagId={assetLibrary === "models" ? activeModelTagId : activeOutfitTagId}
@@ -216,7 +215,6 @@ export function FreeCanvasPage() {
             railControls={assetLibrarySwitch}
             assetAltText={assetLibrary === "models" ? t("outfitLibrary.modelImage") : t("outfitLibrary.outfitImage")}
             emptyText={assetLibrary === "models" ? t("outfitLibrary.noFilteredModels") : t("outfitLibrary.noFilteredOutfits")}
-            canvasEmptyText={assetLibrary === "models" ? t("outfitLibrary.canvasEmptyModels") : t("outfitLibrary.canvasEmptyOutfits")}
             tagFilterLabel={assetLibrary === "models" ? t("outfitLibrary.filterModelTags") : t("outfitLibrary.filterOutfitTags")}
             cardVariant={assetLibrary === "models" ? "choice" : "direct"}
           />
@@ -225,3 +223,4 @@ export function FreeCanvasPage() {
     </section>
   );
 }
+

@@ -60,11 +60,29 @@ function isImageFile(file: File) {
   return file.type.startsWith("image/") || /\.(avif|bmp|gif|heic|heif|jpe?g|png|svg|webp)$/i.test(file.name);
 }
 
+function imageFilesFromTransfer(dataTransfer: DataTransfer | null) {
+  if (!dataTransfer) return [];
+  const files = Array.from(dataTransfer.files || []).filter(isImageFile);
+  if (files.length) return files;
+  return Array.from(dataTransfer.items || []).flatMap((item) => {
+    if (item.kind !== "file" || !item.type.startsWith("image/")) return [];
+    const file = item.getAsFile();
+    return file ? [file] : [];
+  });
+}
+
 export function hasDraggedImageFile(dataTransfer: DataTransfer) {
   const items = Array.from(dataTransfer.items || []);
   if (items.length) {
     return items.some((item) => item.kind === "file" && (item.type.startsWith("image/") || !item.type));
   }
+  return Array.from(dataTransfer.files || []).some(isImageFile);
+}
+
+export function hasClipboardImage(dataTransfer: DataTransfer | null) {
+  if (!dataTransfer) return false;
+  const items = Array.from(dataTransfer.items || []);
+  if (items.some((item) => item.kind === "file" && item.type.startsWith("image/"))) return true;
   return Array.from(dataTransfer.files || []).some(isImageFile);
 }
 
@@ -284,9 +302,9 @@ export function useCanvasMediaActions({
     setSelectedGroupId("");
   }, [createNode, nodeMap, readImagePatch, replaceLibtvUploadNode, setNodes, setSelectedGroupId, setSelectedIds, syncLibtvBoundNode]);
 
-  const createImageNodesFromDrop = useCallback(async (files: FileList | File[], clientX: number, clientY: number) => {
+  const createImageNodesAtClientPoint = useCallback(async (files: FileList | File[], clientX: number, clientY: number) => {
     const imageFiles = Array.from(files).filter(isImageFile);
-    if (!imageFiles.length) return;
+    if (!imageFiles.length) return false;
     const dropPoint = screenToWorld(clientX, clientY);
     const patches = await Promise.all(imageFiles.map(readImagePatch));
     const createdNodes = patches.map((patch, index) => {
@@ -309,7 +327,16 @@ export function useCanvasMediaActions({
     setContextMenu(null);
     setImageCrop(null);
     setIsImageDropActive(false);
+    return true;
   }, [createNode, readImagePatch, screenToWorld, setConnectionAction, setContextMenu, setNodes, setSelectedConnectionId, setSelectedGroupId, setSelectedIds]);
+
+  const createImageNodesFromDrop = useCallback(async (files: FileList | File[], clientX: number, clientY: number) => {
+    await createImageNodesAtClientPoint(files, clientX, clientY);
+  }, [createImageNodesAtClientPoint]);
+
+  const createImageNodesFromClipboardData = useCallback(async (dataTransfer: DataTransfer | null, clientX: number, clientY: number) => {
+    return createImageNodesAtClientPoint(imageFilesFromTransfer(dataTransfer), clientX, clientY);
+  }, [createImageNodesAtClientPoint]);
 
   const openImagePreview = useCallback((nodeId: string) => {
     const node = nodeMap.get(nodeId);
@@ -429,6 +456,7 @@ export function useCanvasMediaActions({
     saveCanvasImageAsset,
     handleImageFiles,
     createImageNodesFromDrop,
+    createImageNodesFromClipboardData,
     openImagePreview,
     openImageCrop,
     downloadNodeImage,

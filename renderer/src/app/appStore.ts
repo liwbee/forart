@@ -5,7 +5,6 @@ export type ThemeMode = "light" | "dark";
 
 const VIEW_KEY = "forart_active_view";
 const THEME_KEY = "forart_theme";
-const LEGACY_THEME_KEY = "studio_theme";
 const APP_VIEWS: AppView[] = ["library", "free-canvas", "image-review", "canvas", "settings"];
 
 function readStoredView(): AppView {
@@ -16,7 +15,7 @@ function readStoredView(): AppView {
 
 function readStoredTheme(): ThemeMode {
   if (typeof window === "undefined") return "light";
-  const theme = window.localStorage.getItem(THEME_KEY) || window.localStorage.getItem(LEGACY_THEME_KEY);
+  const theme = window.localStorage.getItem(THEME_KEY);
   return theme === "dark" ? "dark" : "light";
 }
 
@@ -44,7 +43,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   toggleTheme: () => {
     const next: ThemeMode = get().theme === "dark" ? "light" : "dark";
     window.localStorage.setItem(THEME_KEY, next);
-    window.localStorage.setItem(LEGACY_THEME_KEY, next);
     syncDocumentTheme(next);
     set({ theme: next });
   },

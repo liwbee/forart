@@ -65,6 +65,17 @@ export function ImageGeneratorComposer({
   const isSizePanelOpen = openSelectId === sizePanelId;
   const patchNode = (patch: Partial<CanvasNode>) => onPatchNode(node.id, patch);
   const canRun = Boolean(selectedProvider && selectedModel && generationReadiness.canRun);
+  const generationReadinessMessage = generationReadiness.message || (
+    generationReadiness.reason === "missing_prompt"
+      ? t("infiniteCanvas.imageGenerationMissingPrompt")
+      : generationReadiness.reason === "missing_reference_image"
+        ? t("infiniteCanvas.imageGenerationMissingReferenceImage")
+        : generationReadiness.reason === "reference_not_supported"
+          ? t("infiniteCanvas.imageGenerationReferenceNotSupported")
+          : generationReadiness.reason === "too_many_reference_images"
+            ? t("infiniteCanvas.imageGenerationTooManyReferenceImages", { count: generationReadiness.maxReferenceImages || 0 })
+            : ""
+  );
 
   const renderComposerSelect = (
     name: string,
@@ -101,7 +112,7 @@ export function ImageGeneratorComposer({
           if (event.key === "Escape") onOpenSelectChange("");
         }}
       >
-        <span>{`${selectedResolution.toUpperCase()} 路 ${selectedAspectRatio}`}</span>
+        <span>{`${selectedResolution.toUpperCase()} / ${selectedAspectRatio}`}</span>
         <ChevronDown size={18} aria-hidden="true" />
       </button>
       {isSizePanelOpen ? (
@@ -280,15 +291,15 @@ export function ImageGeneratorComposer({
         <button
           type="button"
           className={`ic-image-composer__run${node.running ? " is-stop" : ""}`}
-          aria-label={node.running ? "停止生成" : t("infiniteCanvas.run")}
-          title={node.running ? "停止生成" : t("infiniteCanvas.run")}
+          aria-label={node.running ? t("infiniteCanvas.stopRun") : t("infiniteCanvas.run")}
+          title={node.running ? t("infiniteCanvas.stopRun") : t("infiniteCanvas.run")}
           disabled={!node.running && !canRun}
           onClick={() => (node.running ? onStop(node.id) : onRun(node.id))}
         >
           {node.running ? <Square size={15} aria-hidden="true" fill="currentColor" /> : <Play size={18} aria-hidden="true" fill="currentColor" />}
         </button>
       </div>
-      {!node.running && generationReadiness.message ? <div className="ic-image-composer__hint">{generationReadiness.message}</div> : null}
+      {!node.running && generationReadinessMessage ? <div className="ic-image-composer__hint">{generationReadinessMessage}</div> : null}
       {node.generationError ? <div className="ic-image-composer__error">{node.generationError}</div> : null}
     </div>
   );

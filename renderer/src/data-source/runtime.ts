@@ -25,10 +25,6 @@ export function getApiBaseUrl() {
   return "http://127.0.0.1:5175";
 }
 
-export function getAccessToken() {
-  return activeConfig?.accessToken || "";
-}
-
 function createDataSource(config: ForartAppConfig): ForartDataSource {
   return config.mode === "remote" ? new RemoteDataSource(config) : new LocalDataSource(config);
 }

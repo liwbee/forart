@@ -1,9 +1,11 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ImagePlus, Images, MoreHorizontal, Pencil, Plus, Tags, Trash2, Users } from "lucide-react";
+import { Copy, Download, ImagePlus, Images, MoreHorizontal, Pencil, Plus, Tags, Trash2, Users } from "lucide-react";
 import { createPortal } from "react-dom";
 import { ImageViewer } from "../../lib/ImageViewer";
+import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
+import { copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
 import { sortByName } from "../../lib/sortByName";
 import {
   createOutfit,
@@ -341,6 +343,7 @@ function OutfitCard({
   isDeleting,
   onToggleTag,
   onDelete,
+  onImageActionStatus,
 }: {
   outfit: OutfitEntry;
   tags: OutfitTag[];
@@ -348,6 +351,7 @@ function OutfitCard({
   isDeleting: boolean;
   onToggleTag: (outfitId: string, tagName: string) => void;
   onDelete: (outfitId: string, isConfirming: boolean) => void;
+  onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
 }) {
   const { t } = useTranslation();
   const [menuState, setMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
@@ -387,6 +391,32 @@ function OutfitCard({
       x: Math.max(pad, Math.min(x, window.innerWidth - menuWidth - pad)),
       y: Math.max(pad, Math.min(preferredY, window.innerHeight - menuMaxHeight - pad)),
     });
+  }
+
+  async function handleCopyImage() {
+    if (!assetUrl) return;
+    setMenuState({ open: false, x: 0, y: 0 });
+    setTagMenuOpen(false);
+    onImageActionStatus("busy", t("common.states.copyingImage"));
+    try {
+      await copyLibraryImage(assetUrl);
+      onImageActionStatus("ready", t("common.states.imageCopied"));
+    } catch (error) {
+      onImageActionStatus("error", t("common.errors.imageActionFailed", { message: error instanceof Error ? error.message : String(error) }));
+    }
+  }
+
+  async function handleDownloadOriginalImage() {
+    if (!assetUrl) return;
+    setMenuState({ open: false, x: 0, y: 0 });
+    setTagMenuOpen(false);
+    onImageActionStatus("busy", t("common.states.downloadingImage"));
+    try {
+      await downloadLibraryOriginalImage(assetUrl, outfit.name || `outfit-${outfit.id}`);
+      onImageActionStatus("ready", t("common.states.imageDownloadStarted"));
+    } catch (error) {
+      onImageActionStatus("error", t("common.errors.imageActionFailed", { message: error instanceof Error ? error.message : String(error) }));
+    }
   }
 
   return (
@@ -453,6 +483,14 @@ function OutfitCard({
                   )}
                 </div>
               ) : null}
+              <button type="button" role="menuitem" disabled={!assetUrl} onClick={() => void handleDownloadOriginalImage()}>
+                <Download size={16} aria-hidden="true" />
+                <span>{t("common.actions.downloadOriginalImage")}</span>
+              </button>
+              <button type="button" role="menuitem" disabled={!assetUrl} onClick={() => void handleCopyImage()}>
+                <Copy size={16} aria-hidden="true" />
+                <span>{t("common.actions.copyImage")}</span>
+              </button>
               <button
                 className={deleteConfirmOutfitId === outfit.id ? "danger confirming" : "danger"}
                 type="button"
@@ -481,6 +519,7 @@ function OutfitGrid({
   onCreate,
   onToggleTag,
   onDelete,
+  onImageActionStatus,
 }: {
   outfits: OutfitEntry[];
   tags: OutfitTag[];
@@ -490,6 +529,7 @@ function OutfitGrid({
   onCreate: (file: File) => void;
   onToggleTag: (outfitId: string, tagName: string) => void;
   onDelete: (outfitId: string, isConfirming: boolean) => void;
+  onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
 }) {
   return (
     <div className="outfit-grid">
@@ -503,6 +543,7 @@ function OutfitGrid({
           isDeleting={deletingOutfitId === outfit.id}
           onToggleTag={onToggleTag}
           onDelete={onDelete}
+          onImageActionStatus={onImageActionStatus}
         />
       ))}
     </div>
@@ -709,6 +750,7 @@ export function OutfitLibraryPage() {
   const [deleteConfirmOutfitId, setDeleteConfirmOutfitId] = useState("");
   const [deleteConfirmTagId, setDeleteConfirmTagId] = useState("");
   const [closeMenuToken, setCloseMenuToken] = useState(0);
+  const { toast: imageActionToast, showToast: showImageActionToast } = useLibraryImageActionToast();
   const activeProjectId = useOutfitLibraryStore((state) => state.activeProjectId);
   const activeTagId = useOutfitLibraryStore((state) => state.activeTagId);
   const setActiveProjectId = useOutfitLibraryStore((state) => state.setActiveProjectId);
@@ -979,6 +1021,7 @@ export function OutfitLibraryPage() {
                 onCreate={(file) => createOutfitMutation.mutate(file)}
                 onToggleTag={handleToggleOutfitTag}
                 onDelete={handleOutfitDelete}
+                onImageActionStatus={showImageActionToast}
               />
             ) : null}
           </div>
@@ -1001,6 +1044,7 @@ export function OutfitLibraryPage() {
         onRenameTag={handleRenameTag}
         onDeleteTag={handleDeleteTag}
       />
+      <LibraryImageActionToast toast={imageActionToast} />
     </section>
   );
 }

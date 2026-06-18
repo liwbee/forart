@@ -8,12 +8,6 @@ The canonical server implementation lives in:
 server/forart-server.mjs
 ```
 
-Keep this file synchronized with:
-
-```text
-server/api-contract/API.md
-```
-
 No shared package is used. Generated or hand-written client types should stay inside Forart.
 
 ## Base
@@ -21,8 +15,11 @@ No shared package is used. Generated or hand-written client types should stay in
 ```text
 GET /api/health
 GET /api/settings/storage
-PATCH /api/settings/storage
 ```
+
+`GET /api/health` returns `{ ok: true }`.
+
+`GET /api/settings/storage` returns `{ configured: boolean }`.
 
 ## Assets
 
@@ -52,4 +49,4 @@ The current remote API supports model, outfit, and action libraries:
 /api/libraries/action/tags?project_id=:projectId
 ```
 
-See the server contract for the full route list.
+Use `server/forart-server.mjs` as the full route source of truth.

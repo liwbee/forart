@@ -12,9 +12,8 @@ const CANVAS_NODE_TYPES = ["imageGenerator", "image", "prompt", "loop", "llm", "
 const LAST_CANVAS_ID_KEY = "forart_infinite_canvas_last_canvas_id";
 const LAST_CANVAS_HOME_KEY = "forart_infinite_canvas_show_home";
 
-type StoredCanvasNode = Omit<CanvasNode, "type" | "imageMode"> & {
-  type: CanvasNodeType | "generator" | "output" | "group";
-  imageMode?: CanvasNode["imageMode"] | "generator";
+type StoredCanvasNode = Omit<CanvasNode, "type"> & {
+  type: CanvasNodeType;
 };
 
 interface UseCanvasProjectsOptions {
@@ -105,14 +104,14 @@ function normalizeStoredNode(node: StoredCanvasNode): CanvasNode | null {
     ? "libtvPrompt"
     : node.type === "image" && hasLibtvBinding
       ? "libtvUpload"
-      : (node.type === "generator" || (node.type === "image" && node.imageMode === "generator")) ? "imageGenerator" : node.type;
+      : node.type;
   if (!isCanvasNodeType(normalizedType)) return null;
   return {
     ...node,
     type: normalizedType,
     title: normalizedType === "imageGenerator" && (node.title === "Image" || node.title === "Upload" || node.title === "Generate") ? "Image Generation" : node.title,
     url: node.url?.startsWith("blob:") ? "" : node.url,
-    imageMode: normalizedType === "imageGenerator" ? "imageGenerator" : (normalizedType === "image" || normalizedType === "libtvUpload") ? "asset" : node.imageMode === "generator" ? "imageGenerator" : node.imageMode,
+    imageMode: normalizedType === "imageGenerator" ? "imageGenerator" : (normalizedType === "image" || normalizedType === "libtvUpload") ? "asset" : node.imageMode,
     imageSource: normalizedType === "imageGenerator" ? "generated" : (normalizedType === "image" || normalizedType === "libtvUpload") ? "uploaded" : node.imageSource,
   };
 }

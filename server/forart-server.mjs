@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,19 +10,40 @@ const SERVER_PORT = Number(process.env.PORT || 5175);
 const SERVER_HOST = process.env.HOST || "0.0.0.0";
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_DATA_ROOT = path.join(ROOT_DIR, ".forart-data");
-const CONFIG_DIR = path.resolve(process.env.FORART_CONFIG_DIR || path.join(DEFAULT_DATA_ROOT, "config"));
+const DATABASE_DIR = path.resolve(process.env.FORART_DATABASE_DIR || path.join(DEFAULT_DATA_ROOT, "database"));
 const DEFAULT_DATA_DIR = path.resolve(process.env.FORART_DATA_DIR || path.join(DEFAULT_DATA_ROOT, "library"));
-const REVIEW_DIR = path.resolve(process.env.FORART_REVIEW_DIR || path.join(DEFAULT_DATA_ROOT, "review"));
-const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
-const LEGACY_CONFIG_PATH = path.join(ROOT_DIR, "config.json");
 const DATABASE_FILENAME = "forart-library.sqlite";
-const DEFAULT_PROJECT_NAME = "Default Project";
-const DEFAULT_MODEL_NAME = "Untitled Model";
+const SERVER_LANGUAGE = process.env.FORART_LANGUAGE === "en-US" ? "en-US" : "zh-CN";
+const LIBRARY_LABELS = SERVER_LANGUAGE === "en-US"
+  ? {
+    modelLibrary: "Model Library",
+    outfitLibrary: "Outfit Library",
+    actionLibrary: "Action Library",
+    defaultProject: "Default Project",
+    defaultModel: "Untitled Model",
+    defaultOutfitProject: "Default Outfit Project",
+    defaultOutfit: "Untitled Outfit",
+    defaultActionProject: "Default Action Project",
+    defaultAction: "Untitled Action",
+  }
+  : {
+    modelLibrary: "模特库",
+    outfitLibrary: "穿搭库",
+    actionLibrary: "动作库",
+    defaultProject: "默认项目",
+    defaultModel: "未命名模特",
+    defaultOutfitProject: "默认穿搭项目",
+    defaultOutfit: "未命名穿搭",
+    defaultActionProject: "默认动作项目",
+    defaultAction: "未命名动作",
+  };
+const DEFAULT_PROJECT_NAME = LIBRARY_LABELS.defaultProject;
+const DEFAULT_MODEL_NAME = LIBRARY_LABELS.defaultModel;
 const DEFAULT_TAG_COLOR = "#6b7280";
-const DEFAULT_OUTFIT_PROJECT_NAME = "Default Outfit Project";
-const DEFAULT_OUTFIT_NAME = "Untitled Outfit";
-const DEFAULT_ACTION_PROJECT_NAME = "Default Action Project";
-const DEFAULT_ACTION_NAME = "Untitled Action";
+const DEFAULT_OUTFIT_PROJECT_NAME = LIBRARY_LABELS.defaultOutfitProject;
+const DEFAULT_OUTFIT_NAME = LIBRARY_LABELS.defaultOutfit;
+const DEFAULT_ACTION_PROJECT_NAME = LIBRARY_LABELS.defaultActionProject;
+const DEFAULT_ACTION_NAME = LIBRARY_LABELS.defaultAction;
 const RESERVED_FILE_NAMES = new Set([
   "CON",
   "PRN",
@@ -49,9 +70,8 @@ const RESERVED_FILE_NAMES = new Set([
 ]);
 
 let DATA_DIR = "";
-let DATABASE_PATH = path.join(CONFIG_DIR, DATABASE_FILENAME);
+let DATABASE_PATH = path.join(DATABASE_DIR, DATABASE_FILENAME);
 let STORAGE_ROOT = "";
-let appConfig = readAppConfig();
 let db;
 
 const CORS_HEADERS = {
@@ -125,24 +145,6 @@ function ensureDir(dir) {
   mkdirSync(dir, { recursive: true });
 }
 
-function readAppConfig() {
-  try {
-    ensureDir(CONFIG_DIR);
-    const configPath = existsSync(CONFIG_PATH) ? CONFIG_PATH : LEGACY_CONFIG_PATH;
-    const raw = readFileSync(configPath, "utf8");
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeAppConfig(nextConfig) {
-  appConfig = { ...nextConfig };
-  ensureDir(CONFIG_DIR);
-  writeFileSync(CONFIG_PATH, `${JSON.stringify(appConfig, null, 2)}\n`, "utf8");
-}
-
 function resolveDataDir(value) {
   const raw = String(value || "").trim();
   if (!raw) throw new Error("Save path is required");
@@ -159,22 +161,15 @@ function ensureDataDirWritable(targetDir) {
 }
 
 function applyDataDir(targetDir) {
-  ensureDir(CONFIG_DIR);
+  ensureDir(DATABASE_DIR);
   DATA_DIR = ensureDataDirWritable(targetDir);
-  DATABASE_PATH = path.join(CONFIG_DIR, DATABASE_FILENAME);
+  DATABASE_PATH = path.join(DATABASE_DIR, DATABASE_FILENAME);
   STORAGE_ROOT = DATA_DIR;
   ensureDir(STORAGE_ROOT);
 }
 
 function storageSettingsPayload() {
-  const configured = Boolean(db && DATA_DIR);
-  return {
-    configured,
-    data_dir: configured ? DATA_DIR : "",
-    database_path: configured ? DATABASE_PATH : "",
-    library_dir: configured ? STORAGE_ROOT : "",
-    config_path: CONFIG_PATH,
-  };
+  return { configured: Boolean(db && DATA_DIR) };
 }
 
 function parseJsonBody(req) {
@@ -349,16 +344,12 @@ function initDatabase() {
   CREATE UNIQUE INDEX IF NOT EXISTS idx_action_projects_name_unique ON action_projects(name);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_action_entries_project_name_unique ON action_entries(project_id, name);
 `);
-  const actionColumns = db.prepare("PRAGMA table_info(action_entries)").all().map((column) => column.name);
-  if (!actionColumns.includes("prompt")) {
-    db.exec("ALTER TABLE action_entries ADD COLUMN prompt TEXT NOT NULL DEFAULT '';");
-  }
   ensureDefaultProject();
   ensureDefaultOutfitProject();
   ensureDefaultActionProject();
 }
 
-function switchDataDir(nextDataDir, { persist = false } = {}) {
+function switchDataDir(nextDataDir) {
   const previousDb = db;
   if (previousDb) {
     previousDb.close();
@@ -367,9 +358,6 @@ function switchDataDir(nextDataDir, { persist = false } = {}) {
   try {
     applyDataDir(nextDataDir);
     initDatabase();
-    if (persist) {
-      writeAppConfig({ ...appConfig, modelLibraryDataDir: DATA_DIR });
-    }
   } catch (error) {
     if (db) {
       db.close();
@@ -410,9 +398,7 @@ function ensureDefaultActionProject() {
   ).run(newId("action_project"), name, timestamp, timestamp);
 }
 
-switchDataDir(process.env.FORART_DATA_DIR || appConfig.modelLibraryDataDir || DEFAULT_DATA_DIR, {
-  persist: !existsSync(CONFIG_PATH),
-});
+switchDataDir(process.env.FORART_DATA_DIR || DEFAULT_DATA_DIR);
 
 function ensureStorageConfigured(res) {
   if (db) return true;
@@ -483,7 +469,7 @@ function actionNameExists(projectId, name, exceptActionId = "") {
 }
 
 function modelLibraryRoot() {
-  return path.join(STORAGE_ROOT, "Model Library");
+  return path.join(STORAGE_ROOT, LIBRARY_LABELS.modelLibrary);
 }
 
 function projectDirForName(projectName) {
@@ -495,7 +481,7 @@ function modelDirForNames(projectName, modelName) {
 }
 
 function outfitLibraryRoot() {
-  return path.join(STORAGE_ROOT, "Outfit Library");
+  return path.join(STORAGE_ROOT, LIBRARY_LABELS.outfitLibrary);
 }
 
 function outfitProjectDirForName(projectName) {
@@ -503,7 +489,7 @@ function outfitProjectDirForName(projectName) {
 }
 
 function actionLibraryRoot() {
-  return path.join(STORAGE_ROOT, "Action Library");
+  return path.join(STORAGE_ROOT, LIBRARY_LABELS.actionLibrary);
 }
 
 function actionProjectDirForName(projectName) {
@@ -530,312 +516,6 @@ function assetRelativePath(value) {
 function assetAbsolutePath(value) {
   const text = String(value || "");
   return path.isAbsolute(text) ? text : path.join(STORAGE_ROOT, text);
-}
-
-const REVIEW_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]);
-
-function normalizeReviewFolderName(value) {
-  return String(value || "").trim().toLocaleLowerCase().replace(/\s+/g, " ");
-}
-
-function parseReviewFolderNames(value) {
-  return new Set(
-    String(value || "")
-      .split(/[,，、\n]/)
-      .map(normalizeReviewFolderName)
-      .filter(Boolean)
-  );
-}
-
-function reviewRoot() {
-  ensureDir(REVIEW_DIR);
-  return path.resolve(REVIEW_DIR);
-}
-
-function reviewDirectoryPath(relativePath = "") {
-  const root = reviewRoot();
-  const normalized = String(relativePath || "").replace(/\\/g, "/");
-  const absolute = path.resolve(root, ...normalized.split("/").filter(Boolean));
-  if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) {
-    throw new Error("Invalid review path");
-  }
-  return absolute;
-}
-
-function selectedReviewRootPath(selectedRoot = "") {
-  if (!String(selectedRoot || "").trim()) throw new Error("Review root is required");
-  return reviewDirectoryPath(selectedRoot);
-}
-
-function reviewAbsolutePath(relativePath = "", selectedRoot = "") {
-  const root = selectedRoot ? selectedReviewRoot(selectedRoot) : reviewRoot();
-  const normalized = String(relativePath || "").replace(/\\/g, "/");
-  const absolute = path.resolve(root, ...normalized.split("/").filter(Boolean));
-  if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) {
-    throw new Error("Invalid review path");
-  }
-  return absolute;
-}
-
-function selectedReviewRoot(selectedRoot = "") {
-  const absolute = selectedReviewRootPath(selectedRoot);
-  if (!existsSync(absolute)) throw new Error("Review root not found");
-  if (!statSync(absolute).isDirectory()) throw new Error("Review root is not a directory");
-  return absolute;
-}
-
-function reviewRelativePath(absolutePath, selectedRoot = "") {
-  return path.relative(selectedReviewRoot(selectedRoot), absolutePath).split(path.sep).join("/");
-}
-
-function reviewRootOptions() {
-  const root = reviewRoot();
-  return listReviewDirectories(root).map((name) => ({ name, path: name }));
-}
-
-function reviewDirectoryListing(relativePath = "") {
-  const absolute = reviewDirectoryPath(relativePath);
-  if (!existsSync(absolute)) throw new Error("Review directory not found");
-  if (!statSync(absolute).isDirectory()) throw new Error("Review path is not a directory");
-  const normalizedPath = reviewRelativeFromRoot(absolute);
-  return {
-    review_dir: reviewRoot(),
-    path: normalizedPath,
-    parent_path: normalizedPath ? reviewRelativeFromRoot(path.dirname(absolute)) : "",
-    directories: listReviewDirectories(absolute).map((name) => ({
-      name,
-      path: [normalizedPath, name].filter(Boolean).join("/"),
-    })),
-  };
-}
-
-function reviewRelativeFromRoot(absolutePath) {
-  return path.relative(reviewRoot(), absolutePath).split(path.sep).filter(Boolean).join("/");
-}
-
-function isReviewImageFile(filePath) {
-  return REVIEW_IMAGE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
-}
-
-function listReviewDirectories(dir) {
-  try {
-    return readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
-  } catch {
-    return [];
-  }
-}
-
-function hasReviewImageInDirectory(dir) {
-  try {
-    return readdirSync(dir, { withFileTypes: true }).some((entry) => entry.isFile() && isReviewImageFile(path.join(dir, entry.name)));
-  } catch {
-    return false;
-  }
-}
-
-function productHasModelImages(productDir, modelFolderValue) {
-  const modelFolders = parseReviewFolderNames(modelFolderValue);
-  if (!modelFolders.size) return false;
-  for (const folderName of listReviewDirectories(productDir)) {
-    if (modelFolders.has(normalizeReviewFolderName(folderName)) && hasReviewImageInDirectory(path.join(productDir, folderName))) return true;
-  }
-  return false;
-}
-
-function collectReviewImages(dir, selectedRoot = "") {
-  try {
-    return readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && isReviewImageFile(path.join(dir, entry.name)))
-      .map((entry) => {
-        const absolutePath = path.join(dir, entry.name);
-        const stats = statSync(absolutePath);
-        const relativePath = reviewRelativePath(absolutePath, selectedRoot);
-        const rootQuery = selectedRoot ? `&root=${encodeURIComponent(selectedRoot)}` : "";
-        return {
-          id: `${relativePath}-${stats.mtimeMs}-${stats.size}`,
-          name: entry.name,
-          relativePath,
-          url: `/api/review/images?path=${encodeURIComponent(relativePath)}${rootQuery}`,
-          size: stats.size,
-          lastModified: Math.round(stats.mtimeMs),
-        };
-      })
-      .sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: "base" }));
-  } catch {
-    return [];
-  }
-}
-
-function loadReviewProducts(modelFolderValue, selectedRoot = "") {
-  const root = selectedReviewRoot(selectedRoot);
-  return listReviewDirectories(root).map((productId) => {
-    const productDir = path.join(root, productId);
-    return {
-      id: productId,
-      hasModelImages: productHasModelImages(productDir, modelFolderValue),
-      modelImages: [],
-      detailImages: [],
-      unknownImages: [],
-    };
-  });
-}
-
-function loadReviewProductImages(productId, modelFolderValue, detailFolderValue, selectedRoot = "") {
-  const productDir = reviewAbsolutePath(productId, selectedRoot);
-  if (!existsSync(productDir) || !statSync(productDir).isDirectory()) throw new Error("Product not found");
-  const modelFolders = parseReviewFolderNames(modelFolderValue);
-  const detailFolders = parseReviewFolderNames(detailFolderValue);
-  const product = {
-    id: productId,
-    hasModelImages: false,
-    modelImages: [],
-    detailImages: [],
-    unknownImages: [],
-  };
-
-  for (const folderName of listReviewDirectories(productDir)) {
-    const images = collectReviewImages(path.join(productDir, folderName), selectedRoot);
-    const normalized = normalizeReviewFolderName(folderName);
-    if (modelFolders.has(normalized)) product.modelImages.push(...images);
-    else if (detailFolders.has(normalized)) product.detailImages.push(...images);
-    else product.unknownImages.push(...images);
-  }
-
-  product.modelImages.sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: "base" }));
-  product.detailImages.sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: "base" }));
-  product.unknownImages.sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: "base" }));
-  product.hasModelImages = product.modelImages.length > 0;
-  return product;
-}
-
-function reviewIssuePath(selectedRoot = "") {
-  return path.join(selectedReviewRoot(selectedRoot), "error.txt");
-}
-
-function readReviewIssueText(selectedRoot = "") {
-  try {
-    return readFileSync(reviewIssuePath(selectedRoot), "utf8");
-  } catch {
-    return "";
-  }
-}
-
-function findReviewIssue(imagePath, selectedRoot = "") {
-  const normalizedPath = String(imagePath || "").trim();
-  if (!normalizedPath) return "";
-  const name = path.basename(normalizedPath);
-  const line = readReviewIssueText(selectedRoot)
-    .split(/\r?\n/)
-    .find((item) => item.startsWith(`${normalizedPath}  `) || item.startsWith(`${name}  `));
-  if (!line) return "";
-  return line.startsWith(`${normalizedPath}  `) ? line.slice(normalizedPath.length).trim() : line.slice(name.length).trim();
-}
-
-function saveReviewIssue(imagePath, issue, selectedRoot = "") {
-  const normalizedPath = String(imagePath || "").trim();
-  const nextIssue = String(issue || "").trim();
-  if (!normalizedPath) throw new Error("Image path is required");
-  if (!nextIssue) throw new Error("Issue is required");
-  reviewAbsolutePath(normalizedPath, selectedRoot);
-  const nextLine = `${normalizedPath}  ${nextIssue}`;
-  const lines = readReviewIssueText(selectedRoot)
-    .split(/\r?\n/)
-    .filter((line) => line.trim() && !line.startsWith(`${normalizedPath}  `) && !line.startsWith(`${path.basename(normalizedPath)}  `));
-  lines.push(nextLine);
-  writeFileSync(reviewIssuePath(selectedRoot), `${lines.join("\n")}\n`, "utf8");
-}
-
-function handleReviewApi(req, res, url) {
-  const method = String(req.method || "GET").toUpperCase();
-  const pathname = url.pathname;
-
-  if (method === "GET" && pathname === "/api/review/status") {
-    sendJson(res, 200, { configured: existsSync(reviewRoot()), review_dir: reviewRoot(), roots: reviewRootOptions() });
-    return true;
-  }
-
-  if (method === "GET" && pathname === "/api/review/roots") {
-    sendJson(res, 200, { review_dir: reviewRoot(), roots: reviewRootOptions() });
-    return true;
-  }
-
-  if (method === "GET" && pathname === "/api/review/directories") {
-    try {
-      sendJson(res, 200, reviewDirectoryListing(url.searchParams.get("path") || ""));
-    } catch (error) {
-      sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) });
-    }
-    return true;
-  }
-
-  if (method === "GET" && pathname === "/api/review/products") {
-    const selectedRoot = url.searchParams.get("root") || "";
-    try {
-      sendJson(res, 200, {
-        review_dir: reviewRoot(),
-        root: selectedRoot,
-        products: loadReviewProducts(url.searchParams.get("model_folders") || "", selectedRoot),
-      });
-    } catch (error) {
-      sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) });
-    }
-    return true;
-  }
-
-  const productImagesMatch = pathname.match(/^\/api\/review\/products\/([^/]+)\/images$/);
-  if (method === "GET" && productImagesMatch) {
-    try {
-      const product = loadReviewProductImages(
-        decodeURIComponent(productImagesMatch[1]),
-        url.searchParams.get("model_folders") || "",
-        url.searchParams.get("detail_folders") || "",
-        url.searchParams.get("root") || ""
-      );
-      sendJson(res, 200, { product });
-    } catch (error) {
-      sendJson(res, 404, { detail: error instanceof Error ? error.message : String(error) });
-    }
-    return true;
-  }
-
-  if ((method === "GET" || method === "HEAD") && pathname === "/api/review/images") {
-    try {
-      const imagePath = url.searchParams.get("path") || "";
-      const absolutePath = reviewAbsolutePath(imagePath, url.searchParams.get("root") || "");
-      if (!existsSync(absolutePath) || !statSync(absolutePath).isFile()) return sendText(res, 404, "Image not found");
-      const contentType = STATIC_MIME_TYPES[path.extname(absolutePath).toLowerCase()] || "application/octet-stream";
-      res.writeHead(200, withCorsHeaders({ "content-type": contentType }));
-      res.end(method === "HEAD" ? undefined : readFileSync(absolutePath));
-    } catch (error) {
-      sendText(res, 400, error instanceof Error ? error.message : String(error));
-    }
-    return true;
-  }
-
-  if (pathname === "/api/review/issues") {
-    if (method === "GET") {
-      try {
-        sendJson(res, 200, { issue: findReviewIssue(url.searchParams.get("path") || "", url.searchParams.get("root") || "") });
-      } catch (error) {
-        sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) });
-      }
-      return true;
-    }
-    if (method === "POST") {
-      parseJsonBody(req)
-        .then((payload) => {
-          saveReviewIssue(payload?.path, payload?.issue, payload?.root || "");
-          sendJson(res, 200, { ok: true });
-        })
-        .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
-      return true;
-    }
-  }
-
-  return false;
 }
 
 function renameDirectoryIfNeeded(oldDir, nextDir) {
@@ -1282,29 +962,13 @@ function handleModelLibraryApi(req, res, url) {
   const pathname = url.pathname;
 
   if (method === "GET" && pathname === "/api/health") {
-    sendJson(res, 200, {
-      ok: true,
-      storage_configured: Boolean(db && DATA_DIR),
-      data_dir: DATA_DIR,
-      config_path: CONFIG_PATH,
-    });
+    sendJson(res, 200, { ok: true });
     return true;
   }
 
   if (pathname === "/api/settings/storage") {
     if (method === "GET") {
       sendJson(res, 200, storageSettingsPayload());
-      return true;
-    }
-    if (method === "PATCH") {
-      parseJsonBody(req)
-        .then((payload) => {
-          const nextDir = String(payload?.data_dir || "").trim();
-          if (!nextDir) return sendJson(res, 400, { detail: "Save path is required" });
-          switchDataDir(nextDir, { persist: true });
-          sendJson(res, 200, storageSettingsPayload());
-        })
-        .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
     }
   }
@@ -2024,7 +1688,6 @@ const server = createServer((req, res) => {
   }
 
   const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
-  if (handleReviewApi(req, res, url)) return;
   if (handleModelLibraryApi(req, res, url)) return;
   sendJson(res, 404, { detail: "API route not found" });
 });

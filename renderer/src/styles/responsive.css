@@ -1,4 +1,4 @@
-@media (max-width: 860px) {
+﻿@media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 72px minmax(0, 1fr);
   }
@@ -51,41 +51,6 @@
   .model-toolbar {
     align-items: center;
     flex-wrap: wrap;
-  }
-
-  .outfit-composer {
-    grid-template-columns: 1fr;
-    grid-template-rows: 180px minmax(0, 1fr);
-  }
-
-  .outfit-composer__rail-resizer {
-    display: none;
-  }
-
-  .outfit-composer__asset-rail {
-    border-right: 0;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-
-  .outfit-composer__asset-list {
-    grid-auto-flow: column;
-    grid-auto-columns: 92px;
-    grid-template-columns: none;
-    overflow-y: hidden;
-    overflow-x: auto;
-  }
-
-  .outfit-composer__stage-toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .outfit-composer__stage-actions {
-    justify-content: stretch;
-  }
-
-  .outfit-composer__stage-actions .button {
-    flex: 1;
   }
 
   .model-inline-editor {
@@ -350,3 +315,5 @@
     padding: var(--space-2);
   }
 }
+
+

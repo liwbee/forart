@@ -14,7 +14,6 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
   const [mode, setMode] = useState<ForartMode>(initialConfig?.mode || "local");
   const [localLibraryPath, setLocalLibraryPath] = useState(initialConfig?.localLibraryPath || "");
   const [serverUrl, setServerUrl] = useState(initialConfig?.serverUrl || "");
-  const [accessToken, setAccessToken] = useState(initialConfig?.accessToken || "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -47,7 +46,7 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
       mode,
       localLibraryPath,
       serverUrl,
-      accessToken,
+      language: i18n.language === "en-US" ? "en-US" : "zh-CN",
     });
 
     setSaving(true);
@@ -116,17 +115,10 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
               </div>
             </label>
           ) : (
-            <>
-              <label className="setup-field">
-                <span>{t("setup.serverUrl")}</span>
-                <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://192.168.1.20:5175" />
-              </label>
-
-              <label className="setup-field">
-                <span>{t("setup.accessToken")}</span>
-                <input value={accessToken} onChange={(event) => setAccessToken(event.target.value)} placeholder={t("setup.accessTokenPlaceholder")} />
-              </label>
-            </>
+            <label className="setup-field">
+              <span>{t("setup.serverUrl")}</span>
+              <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://192.168.1.20:5175" />
+            </label>
           )}
 
           <div className="settings-section__head">

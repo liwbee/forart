@@ -4,15 +4,14 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=5175 \
     FORART_APP_TITLE=Forart \
-    FORART_CONFIG_DIR=/data/config \
-    FORART_DATA_DIR=/data/library \
-    FORART_REVIEW_DIR=/data/review
+    FORART_DATABASE_DIR=/data/.forart/database \
+    FORART_DATA_DIR=/data \
+    FORART_LANGUAGE=zh-CN
 
 WORKDIR /app
 
 COPY package.json ./
 COPY forart-server.mjs ./
-COPY api-contract ./api-contract
 
 VOLUME ["/data"]
 EXPOSE 5175

@@ -124,13 +124,12 @@ function LibtvLogo() {
 }
 
 export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [mode, setMode] = useState<ForartMode>(config.mode);
   const [localLibraryPath, setLocalLibraryPath] = useState(config.localLibraryPath);
   const [imageDownloadPath, setImageDownloadPath] = useState(config.imageDownloadPath);
   const [serverUrl, setServerUrl] = useState(config.serverUrl);
-  const [accessToken, setAccessToken] = useState(config.accessToken);
   const [status, setStatus] = useState<StatusState>({ tone: "idle", text: t("settings.loaded") });
   const [localStatus, setLocalStatus] = useState<StatusState>({ tone: "idle", text: t("settings.localStatusIdle") });
   const [saving, setSaving] = useState(false);
@@ -163,7 +162,6 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     setLocalLibraryPath(config.localLibraryPath);
     setImageDownloadPath(config.imageDownloadPath);
     setServerUrl(config.serverUrl);
-    setAccessToken(config.accessToken);
   }, [config]);
 
   useEffect(() => {
@@ -260,7 +258,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    const nextConfig = normalizeConfig({ mode, localLibraryPath, imageDownloadPath, serverUrl, accessToken });
+    const nextConfig = normalizeConfig({ mode, localLibraryPath, imageDownloadPath, serverUrl, language: i18n.language === "en-US" ? "en-US" : "zh-CN" });
 
     if (nextConfig.mode === "local" && !nextConfig.localLibraryPath) {
       setStatus({ tone: "error", text: t("settings.localPathRequired") });
@@ -897,11 +895,6 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                   <label className="settings-field">
                     <span>{t("settings.serverUrl")}</span>
                     <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://192.168.1.20:5175" />
-                  </label>
-
-                  <label className="settings-field">
-                    <span>{t("settings.accessToken")}</span>
-                    <input value={accessToken} onChange={(event) => setAccessToken(event.target.value)} placeholder={t("settings.accessTokenPlaceholder")} />
                   </label>
 
                   <button className="settings-secondary-button" type="button" onClick={testRemoteServer}>

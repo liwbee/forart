@@ -319,10 +319,12 @@
 }
 
 .ic-project-card-grid {
+  --ic-project-card-size: clamp(136px, calc((100% - 48px) / 5), 148px);
   min-height: 0;
   overflow: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(166px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   align-content: start;
   gap: 12px;
   border: 1px solid color-mix(in srgb, var(--canvas-node-border) 78%, transparent);
@@ -333,8 +335,11 @@
 
 .ic-project-card {
   position: relative;
+  flex: 0 0 var(--ic-project-card-size);
+  width: var(--ic-project-card-size);
+  height: var(--ic-project-card-size);
   min-width: 0;
-  min-height: 142px;
+  min-height: 0;
   display: grid;
   border: 1px solid var(--canvas-node-border);
   border-radius: 12px;
@@ -374,8 +379,9 @@
   width: 100%;
   height: 100%;
   display: grid;
-  align-content: start;
-  gap: 10px;
+  grid-template-rows: 36px 38px minmax(0, 1fr) 20px;
+  align-content: stretch;
+  row-gap: 6px;
   border: 0;
   padding: 0;
   color: var(--canvas-state-hover-text);
@@ -385,6 +391,7 @@
 }
 
 .ic-project-card__icon {
+  grid-row: 1;
   width: 36px;
   height: 36px;
   display: inline-grid;
@@ -407,15 +414,27 @@
 }
 
 .ic-project-card__main strong {
+  grid-row: 2;
+  align-self: start;
   min-width: 0;
+  max-width: 100%;
+  min-height: 38px;
+  display: -webkit-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--canvas-state-hover-text);
   font-size: 15px;
   line-height: 1.24;
   font-weight: 900;
   overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .ic-project-card__main small {
+  grid-row: 4;
+  align-self: center;
+  justify-self: start;
   width: fit-content;
   border-radius: 999px;
   padding: 3px 9px;
@@ -426,6 +445,7 @@
 }
 
 .ic-project-card__import-progress {
+  grid-row: 4;
   align-self: end;
   display: grid;
   gap: 8px;
@@ -482,6 +502,12 @@
   gap: 6px;
   opacity: 0;
   transition: opacity 150ms ease;
+}
+
+.ic-project-icon-button {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
 }
 
 .ic-project-card:hover .ic-project-card__actions,
@@ -578,7 +604,7 @@
 }
 
 .ic-project-empty {
-  grid-column: 1 / -1;
+  flex: 1 0 100%;
   padding: 42px 8px;
   color: var(--canvas-node-muted);
   font-size: 14px;
@@ -593,8 +619,9 @@
 }
 
 .ic-libtv-project-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(166px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   align-content: start;
   gap: 12px;
   border: 1px solid color-mix(in srgb, var(--canvas-node-border) 78%, transparent);
@@ -604,23 +631,12 @@
 }
 
 .ic-libtv-project-card {
-  min-height: 142px;
   padding-right: 48px;
 }
 
 .ic-libtv-project-card .ic-project-card__main {
-  gap: 8px;
-  align-content: start;
-}
-
-.ic-libtv-project-card .ic-project-card__main strong {
-  max-width: 100%;
-  min-height: 38px;
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-height: 1.22;
+  grid-template-rows: 24px 38px minmax(0, 1fr) 20px;
+  row-gap: 6px;
 }
 
 .ic-libtv-project-card .ic-project-card__main small {
@@ -629,7 +645,13 @@
 }
 
 .ic-libtv-project-card .ic-project-card__main small:first-child {
+  grid-row: 1;
+  align-self: start;
   max-width: calc(100% - 44px);
+}
+
+.ic-libtv-project-card .ic-project-card__main small:last-child {
+  grid-row: 4;
 }
 
 .ic-libtv-project-card__import {
@@ -2302,7 +2324,7 @@
 .ic-composer-size__ratios i {
   display: block;
   border: 1.5px solid currentColor;
-  border-radius: 6px;
+  border-radius: 3px;
   opacity: 0.82;
 }
 
@@ -3110,7 +3132,7 @@
   }
 
   .ic-project-card-grid {
-    grid-template-columns: minmax(0, 1fr);
+    --ic-project-card-size: clamp(136px, calc((100% - 24px) / 3), 140px);
   }
 
   .ic-status {

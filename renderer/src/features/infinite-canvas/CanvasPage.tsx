@@ -32,7 +32,7 @@ import { useCanvasUiStore } from "./canvasUiStore";
 import { createCanvasNode, getNodeDefinition } from "./nodes/registry";
 import { createInitialCanvas, useCanvasProjects } from "./useCanvasProjects";
 import { useCanvasGenerationActions } from "./useCanvasGenerationActions";
-import { hasDraggedImageFile, useCanvasMediaActions } from "./useCanvasMediaActions";
+import { hasClipboardImage, hasDraggedImageFile, useCanvasMediaActions } from "./useCanvasMediaActions";
 import { detectImageModelRuleId, getImageModelRule } from "../settings/imageModelRules";
 import type { CanvasConnection, CanvasGroup, CanvasNode, CanvasNodeType, Viewport } from "./types";
 
@@ -373,6 +373,13 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     };
   }, [viewport]);
 
+  const getPasteClientPoint = useCallback(() => {
+    const rect = stageRef.current?.getBoundingClientRect();
+    return rect
+      ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      : { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+  }, []);
+
   const defaultImageProvider = useMemo(() => (
     apiProviders.find((provider) => provider.id === defaultImageProviderId && provider.protocol !== "gemini")
     || imageProviders[0]
@@ -550,6 +557,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     saveCanvasImageAsset,
     handleImageFiles,
     createImageNodesFromDrop,
+    createImageNodesFromClipboardData,
     openImagePreview,
     openImageCrop,
     downloadNodeImage,
@@ -725,15 +733,28 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         }
         return;
       }
-      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && key === "v") {
+    }
+
+    function handlePaste(event: ClipboardEvent) {
+      if (isEditingTarget(event.target)) return;
+      if (hasClipboardImage(event.clipboardData)) {
         event.preventDefault();
-        pasteCopiedNodes();
+        const point = getPasteClientPoint();
+        void createImageNodesFromClipboardData(event.clipboardData, point.x, point.y);
+        return;
       }
+      if (!copiedSelectionRef.current?.nodes.length) return;
+      event.preventDefault();
+      pasteCopiedNodes();
     }
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [connections, deleteConnection, groups, nodes, selectedConnectionId, selectedGroupId, selectedIds, t]);
+    window.addEventListener("paste", handlePaste);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("paste", handlePaste);
+    };
+  }, [connections, createImageNodesFromClipboardData, deleteConnection, getPasteClientPoint, groups, nodes, selectedConnectionId, selectedGroupId, selectedIds, t]);
 
   useEffect(() => {
     function updateSizes() {

@@ -6,7 +6,6 @@ Responsibilities:
 
 - Provides database APIs.
 - Stores server-side resource files.
-- Handles authentication and access tokens.
 - Runs in Docker.
 - Does not run Electron code or bundled desktop UI.
 
@@ -40,12 +39,26 @@ Run:
 docker run --rm -p 5175:5175 -v forart-data:/data forart-server
 ```
 
-## API Contract
-
-The server API contract starts at:
+The container uses these paths by default:
 
 ```text
-api-contract/API.md
+FORART_DATABASE_DIR=/data/.forart/database
+FORART_DATA_DIR=/data
+FORART_LANGUAGE=zh-CN
 ```
 
-Keep it synchronized with `renderer/src/api-contract/API.md` when changing remote APIs.
+Mount `/data` to a NAS/shared volume to share the resource library. The server creates library folders directly under `/data`.
+
+Set `FORART_LANGUAGE=en-US` if you want newly-created library folders and default records to use English names:
+
+```powershell
+docker run --rm -p 5175:5175 -v forart-data:/data -e FORART_LANGUAGE=en-US forart-server
+```
+
+## API Contract
+
+The API contract is tracked in the renderer project:
+
+```text
+../renderer/src/api-contract/API.md
+```

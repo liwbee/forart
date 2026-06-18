@@ -12,11 +12,11 @@ function createLocalServerManager({ app, rootDir, fetchImpl = fetch, port = 5175
     const libraryRoot = path.resolve(config.localLibraryPath || path.join(app.getPath('userData'), 'library'));
     return {
       ...process.env,
+      FORART_LANGUAGE: config.language === 'en-US' ? 'en-US' : 'zh-CN',
       HOST: '127.0.0.1',
       PORT: String(port),
-      FORART_CONFIG_DIR: path.join(libraryRoot, '.forart', 'config'),
-      FORART_DATA_DIR: path.join(libraryRoot, 'library'),
-      FORART_REVIEW_DIR: path.join(libraryRoot, 'review'),
+      FORART_DATABASE_DIR: path.join(libraryRoot, '.forart', 'database'),
+      FORART_DATA_DIR: libraryRoot,
     };
   }
 

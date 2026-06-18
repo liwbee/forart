@@ -4,6 +4,7 @@ dist/
 CanvasAssests/
 data/
 config.json
+forart-config.json
 *.log
 *.err.log
 npm-debug.log*

@@ -1,10 +1,12 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { MoreHorizontal, Pencil, Plus, Search, Star, Trash2, Upload, X } from "lucide-react";
+import { Copy, Download, MoreHorizontal, Pencil, Plus, Search, Star, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Fragment } from "react";
 import { ImageViewer } from "../../lib/ImageViewer";
+import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
+import { copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
 import { sortByName } from "../../lib/sortByName";
 import {
   createModel,
@@ -612,6 +614,7 @@ function ModelInlineEditor({
   onUploadImage,
   onDeleteImage,
   onSetCover,
+  onImageActionStatus,
 }: {
   model: ModelEntry;
   tags: ModelTag[];
@@ -626,6 +629,7 @@ function ModelInlineEditor({
   onUploadImage: (modelId: string, file: File) => void;
   onDeleteImage: (imageId: string) => void;
   onSetCover: (modelId: string, imageId: string) => void;
+  onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
 }) {
   const { t } = useTranslation();
   const [draftName, setDraftName] = useState(model.name || "");
@@ -761,8 +765,8 @@ function ModelInlineEditor({
   function openImageMenu(imageId: string, event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
     const rect = event.currentTarget.getBoundingClientRect();
-    const menuWidth = 148;
-    const menuHeight = 92;
+    const menuWidth = 176;
+    const menuHeight = 188;
     const pad = 8;
     const preferredX = rect.right + 8;
     const preferredY = rect.top;
@@ -773,6 +777,32 @@ function ModelInlineEditor({
       x: Math.max(pad, Math.min(x, window.innerWidth - menuWidth - pad)),
       y,
     });
+  }
+
+  async function handleCopyImage(src: string) {
+    if (!src) return;
+    setOpenImageMenuState({ imageId: "", x: 0, y: 0 });
+    setDeleteConfirmImageId("");
+    onImageActionStatus("busy", t("common.states.copyingImage"));
+    try {
+      await copyLibraryImage(src);
+      onImageActionStatus("ready", t("common.states.imageCopied"));
+    } catch (error) {
+      onImageActionStatus("error", t("common.errors.imageActionFailed", { message: error instanceof Error ? error.message : String(error) }));
+    }
+  }
+
+  async function handleDownloadOriginalImage(src: string, defaultName: string) {
+    if (!src) return;
+    setOpenImageMenuState({ imageId: "", x: 0, y: 0 });
+    setDeleteConfirmImageId("");
+    onImageActionStatus("busy", t("common.states.downloadingImage"));
+    try {
+      await downloadLibraryOriginalImage(src, defaultName);
+      onImageActionStatus("ready", t("common.states.imageDownloadStarted"));
+    } catch (error) {
+      onImageActionStatus("error", t("common.errors.imageActionFailed", { message: error instanceof Error ? error.message : String(error) }));
+    }
   }
 
   return (
@@ -936,6 +966,24 @@ function ModelInlineEditor({
                               <span>{t("modelLibrary.setAsCover")}</span>
                             </button>
                             <button
+                              type="button"
+                              role="menuitem"
+                              disabled={!src}
+                              onClick={() => void handleDownloadOriginalImage(src, image.filename || image.caption || `${model.name}-${image.id}`)}
+                            >
+                              <Download size={15} aria-hidden="true" />
+                              <span>{t("common.actions.downloadOriginalImage")}</span>
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              disabled={!src}
+                              onClick={() => void handleCopyImage(src)}
+                            >
+                              <Copy size={15} aria-hidden="true" />
+                              <span>{t("common.actions.copyImage")}</span>
+                            </button>
+                            <button
                               className={deleteConfirmImageId === image.id ? "danger confirming" : "danger"}
                               type="button"
                               role="menuitem"
@@ -993,6 +1041,7 @@ function ModelGrid({
   onUploadImage,
   onDeleteImage,
   onSetCover,
+  onImageActionStatus,
 }: {
   models: ModelEntry[];
   openModelId: string;
@@ -1011,6 +1060,7 @@ function ModelGrid({
   onUploadImage: (modelId: string, file: File) => void;
   onDeleteImage: (imageId: string) => void;
   onSetCover: (modelId: string, imageId: string) => void;
+  onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
 }) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [columnCount, setColumnCount] = useState(1);
@@ -1068,6 +1118,7 @@ function ModelGrid({
           onUploadImage={onUploadImage}
           onDeleteImage={onDeleteImage}
           onSetCover={onSetCover}
+          onImageActionStatus={onImageActionStatus}
         />
       ))}
     </div>
@@ -1092,6 +1143,7 @@ function FragmentWithEditor({
   onUploadImage,
   onDeleteImage,
   onSetCover,
+  onImageActionStatus,
 }: {
   model: ModelEntry;
   isOpen: boolean;
@@ -1110,6 +1162,7 @@ function FragmentWithEditor({
   onUploadImage: (modelId: string, file: File) => void;
   onDeleteImage: (imageId: string) => void;
   onSetCover: (modelId: string, imageId: string) => void;
+  onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
 }) {
   return (
     <>
@@ -1129,6 +1182,7 @@ function FragmentWithEditor({
           onUploadImage={onUploadImage}
           onDeleteImage={onDeleteImage}
           onSetCover={onSetCover}
+          onImageActionStatus={onImageActionStatus}
         />
       ) : null}
     </>
@@ -1341,6 +1395,7 @@ export function ModelLibraryPage() {
   const [deleteConfirmModelId, setDeleteConfirmModelId] = useState("");
   const [deleteConfirmTagId, setDeleteConfirmTagId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const { toast: imageActionToast, showToast: showImageActionToast } = useLibraryImageActionToast();
   const activeProjectId = useModelLibraryStore((state) => state.activeProjectId);
   const activeTagId = useModelLibraryStore((state) => state.activeTagId);
   const activeGender = useModelLibraryStore((state) => state.activeGender);
@@ -1706,6 +1761,7 @@ export function ModelLibraryPage() {
                   onUploadImage={(modelId, file) => uploadModelImageMutation.mutate({ modelId, file })}
                   onDeleteImage={(imageId) => deleteModelImageMutation.mutate(imageId)}
                   onSetCover={(modelId, imageId) => setModelCoverMutation.mutate({ modelId, imageId })}
+                  onImageActionStatus={showImageActionToast}
                 />
               </>
             ) : null}
@@ -1729,6 +1785,7 @@ export function ModelLibraryPage() {
         onRenameTag={handleRenameTag}
         onDeleteTag={handleDeleteTag}
       />
+      <LibraryImageActionToast toast={imageActionToast} />
     </section>
   );
 }

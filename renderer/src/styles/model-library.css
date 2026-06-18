@@ -11,10 +11,60 @@
 .model-library-page {
   min-height: 0;
   height: 100%;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   overflow: hidden;
+}
+
+.library-image-action-toast {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 1200;
+  max-width: min(360px, calc(100% - 28px));
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 0 12px;
+  color: var(--state-hover-text);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(10px);
+  font-size: 12px;
+  font-weight: 900;
+  pointer-events: none;
+}
+
+.library-image-action-toast span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-image-action-toast--busy svg {
+  animation: library-image-action-spin 900ms linear infinite;
+}
+
+.library-image-action-toast--ready {
+  color: #0f7b4f;
+  border-color: color-mix(in srgb, #0f7b4f 28%, var(--border-subtle));
+}
+
+.library-image-action-toast--error {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--border-subtle));
+}
+
+@keyframes library-image-action-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .model-library-title {
@@ -1075,7 +1125,7 @@
   position: fixed;
   transform: none;
   z-index: 230;
-  width: 148px;
+  width: 176px;
   display: grid;
   gap: var(--space-1);
   padding: var(--space-1);

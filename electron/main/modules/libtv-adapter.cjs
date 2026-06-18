@@ -741,11 +741,12 @@ function createLibtvAdapter({ rootDir }) {
   async function deleteLibtvNode(projectId, payload = {}) {
     const requestedNodeId = String(payload.nodeId || '').trim();
     let nodeKey = requestedNodeId;
+    const nodeNotFoundMessage = '\u672a\u627e\u5230\u8282\u70b9';
     try {
       await runLibtv(['node', 'delete', nodeKey, '-p', projectId], { timeoutMs: 120000 });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!message.includes('未找到节点') && !message.includes('not found')) throw error;
+      if (!message.includes(nodeNotFoundMessage) && !message.includes('not found')) throw error;
       nodeKey = await resolveLibtvNodeKey(projectId, payload);
       if (!nodeKey || nodeKey === requestedNodeId) throw error;
       await runLibtv(['node', 'delete', nodeKey, '-p', projectId], { timeoutMs: 120000 });

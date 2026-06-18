@@ -1,7 +1,6 @@
 import { PointerEvent, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type MutableRefObject, type WheelEvent as ReactWheelEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Flag, FolderOpen, ImageOff, Save, Search, X } from "lucide-react";
-import { apiRequest } from "../../lib/apiClient";
 
 type ImageGroupKey = "model" | "detail";
 
@@ -20,18 +19,6 @@ interface ReviewProduct {
   modelImages: ReviewImage[];
   detailImages: ReviewImage[];
   unknownImages: ReviewImage[];
-}
-
-interface ReviewDirectoryOption {
-  name: string;
-  path: string;
-}
-
-interface ReviewDirectoryListing {
-  review_dir: string;
-  path: string;
-  parent_path: string;
-  directories: ReviewDirectoryOption[];
 }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
@@ -72,33 +59,19 @@ function formatBytes(size: number) {
   return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
-function queryString(params: Record<string, string>) {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value) search.set(key, value);
-  }
-  const text = search.toString();
-  return text ? `?${text}` : "";
-}
-
-function listReviewDirectories(path = "") {
-  return apiRequest<ReviewDirectoryListing>(`/api/review/directories${queryString({ path })}`);
-}
-
 function listReviewProducts(modelFolderValue: string, reviewRootPath: string) {
-  return apiRequest<{ review_dir: string; root: string; products: ReviewProduct[] }>(
-    `/api/review/products${queryString({ model_folders: modelFolderValue, root: reviewRootPath })}`,
-  ).then((payload) => sortProducts(payload.products));
+  if (!window.forartReview?.products) return Promise.reject(new Error("Image review bridge is not available."));
+  return window.forartReview.products({ root: reviewRootPath, modelFolders: modelFolderValue }).then((payload) => sortProducts(payload.products));
 }
 
 function loadProductImages(productId: string, modelFolderValue: string, detailFolderValue: string, reviewRootPath: string) {
-  return apiRequest<{ product: ReviewProduct }>(
-    `/api/review/products/${encodeURIComponent(productId)}/images${queryString({
-      model_folders: modelFolderValue,
-      detail_folders: detailFolderValue,
-      root: reviewRootPath,
-    })}`,
-  ).then((payload) => ({
+  if (!window.forartReview?.productImages) return Promise.reject(new Error("Image review bridge is not available."));
+  return window.forartReview.productImages({
+    root: reviewRootPath,
+    productId,
+    modelFolders: modelFolderValue,
+    detailFolders: detailFolderValue,
+  }).then((payload) => ({
     ...payload.product,
     modelImages: sortImages(payload.product.modelImages),
     detailImages: sortImages(payload.product.detailImages),
@@ -107,18 +80,17 @@ function loadProductImages(productId: string, modelFolderValue: string, detailFo
 }
 
 function saveReviewIssue(image: ReviewImage, issue: string, reviewRootPath: string) {
-  return apiRequest<{ ok: true }>("/api/review/issues", {
-    method: "POST",
-    body: JSON.stringify({ root: reviewRootPath, path: image.relativePath, issue }),
-  });
+  if (!window.forartReview?.saveIssue) return Promise.reject(new Error("Image review bridge is not available."));
+  return window.forartReview.saveIssue({ root: reviewRootPath, path: image.relativePath, issue });
 }
 
 function loadReviewIssue(image: ReviewImage, reviewRootPath: string) {
-  return apiRequest<{ issue: string }>(`/api/review/issues${queryString({ root: reviewRootPath, path: image.relativePath })}`).then((payload) => payload.issue);
+  if (!window.forartReview?.loadIssue) return Promise.reject(new Error("Image review bridge is not available."));
+  return window.forartReview.loadIssue({ root: reviewRootPath, path: image.relativePath }).then((payload) => payload.issue);
 }
 
 function reviewRootDisplayName(path: string) {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] || "";
 }
 
@@ -151,95 +123,6 @@ function RootFolderPicker({
         </button>
       </div>
     </div>
-  );
-}
-
-function ReviewDirectoryDialog({
-  open,
-  initialPath,
-  onClose,
-  onSelect,
-}: {
-  open: boolean;
-  initialPath: string;
-  onClose: () => void;
-  onSelect: (path: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [currentPath, setCurrentPath] = useState(initialPath);
-  const [listing, setListing] = useState<ReviewDirectoryListing | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (!open) return;
-    setCurrentPath(initialPath);
-  }, [initialPath, open]);
-
-  useEffect(() => {
-    if (!open) return;
-    let ignore = false;
-    setLoading(true);
-    setError("");
-    listReviewDirectories(currentPath)
-      .then((payload) => {
-        if (ignore) return;
-        setListing(payload);
-      })
-      .catch((loadError) => {
-        if (!ignore) setError(loadError instanceof Error ? loadError.message : t("imageReview.readDirectoryFailed"));
-      })
-      .finally(() => {
-        if (!ignore) setLoading(false);
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, [currentPath, open]);
-
-  if (!open) return null;
-
-  const parts = (listing?.path || currentPath).split("/").filter(Boolean);
-
-  return (
-    <section className="review-directory-dialog" role="dialog" aria-label={t("imageReview.chooseDirectory")}>
-      <nav className="review-directory-breadcrumb" aria-label={t("imageReview.currentDirectory")}>
-        <button type="button" onClick={() => setCurrentPath("")}>
-          {t("imageReview.rootDirectory")}
-        </button>
-        {parts.map((part, index) => {
-          const pathValue = parts.slice(0, index + 1).join("/");
-          return (
-            <button key={pathValue} type="button" onClick={() => setCurrentPath(pathValue)}>
-              {part}
-            </button>
-          );
-        })}
-      </nav>
-
-      <div className="review-directory-list">
-        {listing?.directories.map((directory) => (
-          <button key={directory.path} type="button" onClick={() => setCurrentPath(directory.path)}>
-            <FolderOpen size={18} aria-hidden="true" />
-            <span>{directory.name}</span>
-          </button>
-        ))}
-        {!loading && listing && !listing.directories.length ? <div className="review-directory-empty">{t("imageReview.noSubfolders")}</div> : null}
-        {loading ? <div className="review-directory-empty">{t("imageReview.reading")}</div> : null}
-      </div>
-
-      {error ? <span className="review-directory-error">{error}</span> : null}
-
-      <div className="dialog__actions">
-        <button className="button secondary" type="button" onClick={onClose}>
-          {t("common.actions.cancel")}
-        </button>
-        <button className="button primary" type="button" disabled={loading || !(listing?.path || currentPath)} onClick={() => onSelect(listing?.path || currentPath)}>
-          {t("imageReview.loadDirectory")}
-        </button>
-      </div>
-    </section>
   );
 }
 
@@ -765,7 +648,6 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
 export function ImageReviewPage() {
   const { t } = useTranslation();
   const [selectedReviewRoot, setSelectedReviewRoot] = useState("");
-  const [directoryDialogOpen, setDirectoryDialogOpen] = useState(false);
   const [products, setProducts] = useState<ReviewProduct[]>([]);
   const [activeProductId, setActiveProductId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -834,25 +716,6 @@ export function ImageReviewPage() {
   }, [scanReviewDirectory]);
 
   useEffect(() => {
-    let ignore = false;
-    listReviewDirectories("")
-      .then((payload) => {
-        if (ignore) return;
-        if (!payload.directories.length) {
-          setProducts([]);
-          setFolderError(t("imageReview.createRootFolderFirst"));
-        }
-      })
-      .catch((error) => {
-        if (!ignore) setFolderError(error instanceof Error ? error.message : t("imageReview.readReviewDirFailed"));
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, []);
-
-  useEffect(() => {
     if (!selectedReviewRoot) return;
     void scanReviewDirectory(selectedReviewRoot);
   }, [scanReviewDirectory, selectedReviewRoot]);
@@ -918,11 +781,21 @@ export function ImageReviewPage() {
 
   function selectReviewRoot(rootPath: string) {
     setSelectedReviewRoot(rootPath);
-    setDirectoryDialogOpen(false);
     setActiveProductId("");
     setSearchQuery("");
     setProducts([]);
     setFolderError("");
+  }
+
+  async function chooseReviewRoot() {
+    setFolderError("");
+    try {
+      const result = await window.forartConfig?.chooseDirectory({ title: t("imageReview.chooseDirectory") });
+      if (!result || result.canceled || !result.path) return;
+      selectReviewRoot(result.path);
+    } catch (error) {
+      setFolderError(error instanceof Error ? error.message : t("imageReview.readDirectoryFailed"));
+    }
   }
 
   const reportIssue = useCallback(async (image: ReviewImage, issue: string) => {
@@ -944,14 +817,8 @@ export function ImageReviewPage() {
         <RootFolderPicker
           selectedRoot={selectedReviewRoot}
           loading={folderLoading}
-          onChoose={() => setDirectoryDialogOpen(true)}
+          onChoose={chooseReviewRoot}
           onScan={refreshReviewDirectory}
-        />
-        <ReviewDirectoryDialog
-          open={directoryDialogOpen}
-          initialPath={selectedReviewRoot}
-          onClose={() => setDirectoryDialogOpen(false)}
-          onSelect={selectReviewRoot}
         />
         {folderError ? <span className="review-directory-error">{folderError}</span> : null}
       </div>

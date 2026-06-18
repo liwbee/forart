@@ -7,8 +7,8 @@ function normalizeConfig(payload = {}) {
     mode,
     localLibraryPath: String(payload.localLibraryPath || '').trim(),
     serverUrl: String(payload.serverUrl || '').trim().replace(/\/+$/, ''),
-    accessToken: String(payload.accessToken || '').trim(),
     imageDownloadPath: String(payload.imageDownloadPath || '').trim(),
+    language: payload.language === 'en-US' ? 'en-US' : 'zh-CN',
   };
 }
 
@@ -88,9 +88,13 @@ function normalizeApiSettings(payload = {}) {
   return { providers, defaultImageProviderId };
 }
 
-function createConfigStore({ app }) {
+function createConfigStore({ app, rootDir }) {
+  function portableRoot() {
+    return app.isPackaged ? path.dirname(app.getPath('exe')) : rootDir;
+  }
+
   function configPath() {
-    return path.join(app.getPath('userData'), 'forart-config.json');
+    return path.join(portableRoot(), 'forart-config.json');
   }
 
   function readRaw() {
@@ -107,7 +111,11 @@ function createConfigStore({ app }) {
   }
 
   function load() {
-    return normalizeConfig(readRaw());
+    if (!fs.existsSync(configPath())) return null;
+    const config = normalizeConfig(readRaw());
+    if (config.mode === 'local' && !config.localLibraryPath) return null;
+    if (config.mode === 'remote' && !config.serverUrl) return null;
+    return config;
   }
 
   function save(payload) {

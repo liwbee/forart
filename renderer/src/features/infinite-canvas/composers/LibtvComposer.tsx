@@ -110,7 +110,7 @@ export function LibtvComposer({
           aria-expanded={isOpen}
           onClick={() => onOpenSelectChange((current) => (current === id ? "" : id))}
         >
-          <span>{`${selectedResolution.toUpperCase()} 路 ${selectedAspectRatio}`}</span>
+          <span>{`${selectedResolution.toUpperCase()} / ${selectedAspectRatio}`}</span>
           <ChevronDown size={18} aria-hidden="true" />
         </button>
         {isOpen ? (
