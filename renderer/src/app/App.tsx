@@ -1,12 +1,12 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, Languages, Layers3, LayoutTemplate, LibraryBig, Moon, RefreshCw, ScanSearch, Settings, Sun, Users } from "lucide-react";
+import { CheckCircle2, Download, Languages, Layers3, LayoutTemplate, LibraryBig, Moon, RefreshCw, ScanSearch, Settings, Sun, Users, X, XCircle } from "lucide-react";
 import { setActiveForartConfig } from "../data-source/runtime";
 import { ImageReviewPage } from "../features/image-review/ImageReviewPage";
 import { ResourceLibraryPage } from "../features/resource-library/ResourceLibraryPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { AppView, useAppStore } from "./appStore";
-import type { ForartAppConfig, ForartAppInfo, ForartUpdateCheckResult, ForartUpdateRunResult } from "./appConfig";
+import type { ForartAppConfig, ForartAppInfo, ForartUpdateCheckResult, ForartUpdateConnectivityResult, ForartUpdateNotes, ForartUpdateRunResult } from "./appConfig";
 import { getAppTitle } from "./runtimeConfig";
 import { SetupPage } from "./SetupPage";
 
@@ -46,6 +46,15 @@ const updateText = {
   current: "\u5df2\u662f\u6700\u65b0\u66f4\u65b0",
   restart: "\u91cd\u542f\u751f\u6548",
   updateAvailableShort: "\u53ef\u66f4\u65b0",
+  connectivity: "\u68c0\u6d4b\u8fde\u901a\u6027",
+  connectivityChecking: "\u68c0\u6d4b\u4e2d",
+  startUpdate: "\u5f00\u59cb\u66f4\u65b0",
+  close: "\u5173\u95ed",
+  updateNotes: "\u66f4\u65b0\u65e5\u5fd7",
+  noUpdateNotes: "\u6682\u672a\u83b7\u53d6\u5230\u66f4\u65b0\u65e5\u5fd7",
+  readyToUpdate: "\u51c6\u5907\u66f4\u65b0",
+  connectivityOk: "\u8fde\u901a\u6027\u6b63\u5e38",
+  connectivityWarn: "\u5efa\u8bae\u5148\u68c0\u6d4b\u8fde\u901a\u6027",
 };
 
 function formatUpdateDate(value: string) {
@@ -111,6 +120,11 @@ export function App() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [latestUpdatedAt, setLatestUpdatedAt] = useState("");
   const [updateMessage, setUpdateMessage] = useState("");
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [updateCheckResult, setUpdateCheckResult] = useState<ForartUpdateCheckResult | null>(null);
+  const [updateNotes, setUpdateNotes] = useState<ForartUpdateNotes | null>(null);
+  const [connectivity, setConnectivity] = useState<ForartUpdateConnectivityResult | null>(null);
+  const [connectivityChecking, setConnectivityChecking] = useState(false);
 
   useEffect(() => {
     document.title = appTitle;
@@ -212,9 +226,12 @@ export function App() {
     if (!result?.ok) {
       setUpdateStatus(showCheckingState ? "error" : "idle");
       setUpdateMessage(showCheckingState ? (result?.error || (currentLanguage === "zh-CN" ? updateText.checkFailed : "Update check failed")) : "");
+      if (showCheckingState) setUpdateModalOpen(true);
       return;
     }
 
+    setUpdateCheckResult(result);
+    setUpdateNotes(result.updateNotes || null);
     setLatestUpdatedAt(result.latestUpdatedAt || result.currentUpdatedAt);
     setAppInfo((current) => current ? {
       ...current,
@@ -232,32 +249,49 @@ export function App() {
       setUpdateStatus("current");
       setUpdateMessage(currentLanguage === "zh-CN" ? updateText.current : "You're up to date.");
     }
+
+    if (showCheckingState) setUpdateModalOpen(true);
+  }
+
+  async function runConnectivityCheck() {
+    if (connectivityChecking) return;
+    setConnectivityChecking(true);
+    const result = await window.forartConfig?.updateConnectivity().catch((): ForartUpdateConnectivityResult => ({ ok: false, results: [] }));
+    setConnectivity(result || { ok: false, results: [] });
+    setConnectivityChecking(false);
+  }
+
+  async function confirmUpdate() {
+    if (updateStatus === "checking" || updateStatus === "updating") return;
+    if (updateStatus !== "available") {
+      await checkForUpdates(true);
+      return;
+    }
+
+    setUpdateStatus("updating");
+    setUpdateMessage(currentLanguage === "zh-CN" ? updateText.updatingMessage : "Updating...");
+    const canGitUpdate = updateCheckResult?.canGitUpdate ?? appInfo?.canGitUpdate ?? false;
+    const result: ForartUpdateRunResult | undefined = canGitUpdate
+      ? await window.forartConfig?.runUpdate().catch((error): ForartUpdateRunResult => ({ ok: false, error: String(error) }))
+      : await window.forartConfig?.openUpdatePage().then((): ForartUpdateRunResult => ({ ok: true, restartRequired: false })).catch((error): ForartUpdateRunResult => ({ ok: false, error: String(error) }));
+
+    if (result?.ok) {
+      setUpdateStatus(canGitUpdate ? "updated" : "current");
+      setUpdateMessage(canGitUpdate
+        ? (currentLanguage === "zh-CN" ? updateText.updateFinished : "Updated. Restart to apply.")
+        : (currentLanguage === "zh-CN" ? updateText.projectOpened : "Project page opened."));
+    } else {
+      setUpdateStatus("error");
+      setUpdateMessage(result?.error || (currentLanguage === "zh-CN" ? updateText.updateFailed : "Update failed"));
+    }
   }
 
   async function handleUpdateClick() {
     if (updateStatus === "checking" || updateStatus === "updating") return;
-
-    if (updateStatus === "available") {
-      setUpdateStatus("updating");
-      setUpdateMessage(currentLanguage === "zh-CN" ? updateText.updatingMessage : "Updating...");
-      const canGitUpdate = appInfo?.canGitUpdate ?? false;
-      const result: ForartUpdateRunResult | undefined = canGitUpdate
-        ? await window.forartConfig?.runUpdate().catch((error): ForartUpdateRunResult => ({ ok: false, error: String(error) }))
-        : await window.forartConfig?.openUpdatePage().then((): ForartUpdateRunResult => ({ ok: true, restartRequired: false })).catch((error): ForartUpdateRunResult => ({ ok: false, error: String(error) }));
-
-      if (result?.ok) {
-        setUpdateStatus(canGitUpdate ? "updated" : "current");
-        setUpdateMessage(canGitUpdate
-          ? (currentLanguage === "zh-CN" ? updateText.updateFinished : "Updated. Restart to apply.")
-          : (currentLanguage === "zh-CN" ? updateText.projectOpened : "Project page opened."));
-      } else {
-        setUpdateStatus("error");
-        setUpdateMessage(result?.error || (currentLanguage === "zh-CN" ? updateText.updateFailed : "Update failed"));
-      }
-      return;
+    setUpdateModalOpen(true);
+    if (!updateCheckResult || updateStatus === "idle") {
+      await checkForUpdates(true);
     }
-
-    await checkForUpdates(true);
   }
 
   const updateDateLabel = formatUpdateDate(latestUpdatedAt || appInfo?.currentUpdatedAt || "");
@@ -272,6 +306,18 @@ export function App() {
           : `v${updateDateLabel}`;
   const updateButtonTitle = updateMessage || (currentLanguage === "zh-CN" ? updateText.checkingTitle : "Click to check for updates");
   const UpdateIcon = updateStatus === "available" ? Download : RefreshCw;
+  const modalTitle = updateStatus === "available"
+    ? (currentLanguage === "zh-CN" ? "\u53d1\u73b0\u65b0\u66f4\u65b0" : "Update available")
+    : updateStatus === "updated"
+      ? (currentLanguage === "zh-CN" ? "\u66f4\u65b0\u5b8c\u6210" : "Update complete")
+      : currentLanguage === "zh-CN" ? "\u9879\u76ee\u66f4\u65b0" : "Project update";
+  const notesItems = updateNotes?.items || [];
+  const updateCanRun = updateStatus === "available";
+  const updateSummaryText = updateStatus === "available"
+    ? `${currentLanguage === "zh-CN" ? "\u6709\u53ef\u7528\u66f4\u65b0" : "Update available"} ${updateDateLabel}`
+    : updateStatus === "current"
+      ? `${currentLanguage === "zh-CN" ? "\u5df2\u662f\u6700\u65b0\u7248\u672c" : "Already up to date"} ${updateDateLabel}`
+      : updateMessage || (currentLanguage === "zh-CN" ? updateText.connectivityWarn : "Check status before updating");
 
   const keepAliveViewsToRender = isKeepAliveView(activeView)
     ? new Set([...mountedKeepAliveViews, activeView])
@@ -396,6 +442,79 @@ export function App() {
           ) : null}
         </div>
       </main>
+      {updateModalOpen ? (
+        <div className="update-modal-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && updateStatus !== "updating") setUpdateModalOpen(false);
+        }}>
+          <section className="update-modal" role="dialog" aria-modal="true" aria-labelledby="forart-update-title">
+            <header className="update-modal-head">
+              <div>
+                <h2 id="forart-update-title">{modalTitle}</h2>
+              </div>
+              <button className="update-modal-close" type="button" aria-label={currentLanguage === "zh-CN" ? updateText.close : "Close"} disabled={updateStatus === "updating"} onClick={() => setUpdateModalOpen(false)}>
+                <X size={18} aria-hidden="true" />
+              </button>
+            </header>
+
+            <div className={`update-modal-summary ${updateStatus === "error" ? "fail" : updateStatus === "current" || updateStatus === "updated" ? "ok" : "warn"}`}>
+              <span className="update-modal-dot" aria-hidden="true" />
+              <div>
+                <strong>{updateSummaryText}</strong>
+              </div>
+            </div>
+
+            <section className="update-notes-panel">
+              <div className="update-panel-head">
+                <h3>{currentLanguage === "zh-CN" ? updateText.updateNotes : "Update notes"}</h3>
+              </div>
+              {notesItems.length ? (
+                <ol className="update-notes-list">
+                  {notesItems.slice(0, 8).map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+                </ol>
+              ) : (
+                <p className="update-empty-text">{currentLanguage === "zh-CN" ? updateText.noUpdateNotes : "No update notes found."}</p>
+              )}
+            </section>
+
+            <div className="update-modal-grid">
+              <section className="update-modal-panel">
+                <div className="update-panel-head">
+                  <h3>{currentLanguage === "zh-CN" ? updateText.connectivity : "Connectivity"}</h3>
+                  <button className="update-modal-small-button" type="button" disabled={connectivityChecking || updateStatus === "updating"} onClick={runConnectivityCheck}>
+                    <RefreshCw size={14} aria-hidden="true" />
+                    <span>{connectivityChecking ? (currentLanguage === "zh-CN" ? updateText.connectivityChecking : "Testing") : (currentLanguage === "zh-CN" ? "\u91cd\u65b0\u68c0\u6d4b" : "Test")}</span>
+                  </button>
+                </div>
+                <div className="update-connectivity-list">
+                  {(connectivity?.results || []).length ? connectivity!.results.map((item) => (
+                    <div className="update-connectivity-row" data-ok={item.ok ? "true" : "false"} key={item.name}>
+                      {item.ok ? <CheckCircle2 size={16} aria-hidden="true" /> : <XCircle size={16} aria-hidden="true" />}
+                      <span>{item.name}</span>
+                      <strong>{item.ok ? "OK" : "Failed"} · {item.elapsedMs}ms</strong>
+                    </div>
+                  )) : (
+                    <p className="update-empty-text">{currentLanguage === "zh-CN" ? "\u8fd8\u6ca1\u6709\u68c0\u6d4b\u7ed3\u679c\u3002" : "No connectivity results yet."}</p>
+                  )}
+                </div>
+              </section>
+            </div>
+
+            <footer className="update-modal-actions">
+              <button className="update-modal-button" type="button" disabled={updateStatus === "updating"} onClick={() => setUpdateModalOpen(false)}>
+                {currentLanguage === "zh-CN" ? updateText.close : "Close"}
+              </button>
+              <button className="update-modal-button" type="button" disabled={updateStatus === "checking" || updateStatus === "updating"} onClick={() => checkForUpdates(true)}>
+                <RefreshCw size={16} aria-hidden="true" />
+                {currentLanguage === "zh-CN" ? "\u68c0\u67e5\u66f4\u65b0" : "Check"}
+              </button>
+              <button className="update-modal-button primary" type="button" disabled={!updateCanRun} onClick={confirmUpdate}>
+                <Download size={16} aria-hidden="true" />
+                {updateStatus === "updating" ? (currentLanguage === "zh-CN" ? updateText.updating : "Updating") : (currentLanguage === "zh-CN" ? updateText.startUpdate : "Start update")}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

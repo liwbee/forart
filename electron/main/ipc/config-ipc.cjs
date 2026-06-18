@@ -4,6 +4,7 @@ const { spawn } = require('child_process');
 
 const REPO_URL = 'https://github.com/liwbee/forart';
 const REMOTE_COMMIT_URL = 'https://api.github.com/repos/liwbee/forart/commits/main';
+const REMOTE_UPDATE_NOTES_URL = 'https://raw.githubusercontent.com/liwbee/forart/main/update-notes.json';
 
 function readPackageInfo(rootDir) {
   try {
@@ -28,6 +29,19 @@ async function fetchJson(net, url) {
     throw new Error(`HTTP ${response.status}`);
   }
   return response.json();
+}
+
+async function fetchText(net, url) {
+  const response = await net.fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, {
+    headers: {
+      Accept: 'text/plain, application/json',
+      'User-Agent': 'Forart-Updater',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.text();
 }
 
 function canGitUpdate(rootDir) {
@@ -88,6 +102,71 @@ async function readRemoteRevision(net) {
   };
 }
 
+function normalizeUpdateNotes(input, fallbackRevision = '') {
+  const payload = input && typeof input === 'object' ? input : {};
+  const items = Array.isArray(payload.items)
+    ? payload.items
+      .map((item) => {
+        if (typeof item === 'string') return item.trim();
+        if (item && typeof item === 'object') return String(item.text || '').trim();
+        return '';
+      })
+      .filter(Boolean)
+    : [];
+
+  return {
+    version: String(payload.version || '').trim(),
+    updatedAt: String(payload.updatedAt || payload.updated_at || '').trim(),
+    revision: String(payload.revision || fallbackRevision || '').trim(),
+    items,
+  };
+}
+
+function readLocalUpdateNotes(rootDir) {
+  try {
+    const filePath = path.join(rootDir, 'update-notes.json');
+    const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return normalizeUpdateNotes(payload);
+  } catch {
+    return normalizeUpdateNotes({});
+  }
+}
+
+async function readRemoteUpdateNotes(net, latestRevision) {
+  try {
+    const payload = JSON.parse(await fetchText(net, REMOTE_UPDATE_NOTES_URL));
+    return normalizeUpdateNotes(payload, latestRevision);
+  } catch (error) {
+    return {
+      ...normalizeUpdateNotes({}, latestRevision),
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function readCommitUpdateNotes(rootDir, currentRevision) {
+  if (!canGitUpdate(rootDir) || !currentRevision) return normalizeUpdateNotes({});
+  const log = await runCommand('git', ['log', '--oneline', `${currentRevision}..FETCH_HEAD`], rootDir);
+  if (!log.ok) return normalizeUpdateNotes({});
+  return normalizeUpdateNotes({
+    items: log.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean),
+  });
+}
+
+async function buildUpdateNotes(rootDir, net, currentRevision, latestRevision) {
+  const remoteNotes = await readRemoteUpdateNotes(net, latestRevision);
+  if (remoteNotes.items.length) return { ...remoteNotes, source: 'update-notes.json' };
+
+  const commitNotes = await readCommitUpdateNotes(rootDir, currentRevision);
+  if (commitNotes.items.length) return { ...commitNotes, source: 'commit-log' };
+
+  const localNotes = readLocalUpdateNotes(rootDir);
+  return { ...localNotes, source: localNotes.items.length ? 'local-update-notes.json' : 'empty', error: remoteNotes.error };
+}
+
 async function checkRemoteAhead(rootDir, currentRevision, latestRevision) {
   if (!canGitUpdate(rootDir) || !currentRevision || !latestRevision || currentRevision === latestRevision) {
     return { ok: true, updateAvailable: false };
@@ -107,6 +186,43 @@ async function checkRemoteAhead(rootDir, currentRevision, latestRevision) {
     ok: true,
     updateAvailable: ancestor.ok,
   };
+}
+
+async function probeCommand(name, command, args, rootDir) {
+  const startedAt = Date.now();
+  const result = await runCommand(command, args, rootDir);
+  return {
+    name,
+    ok: result.ok,
+    elapsedMs: Date.now() - startedAt,
+    detail: result.ok ? (result.stdout || result.stderr || '').trim().split(/\r?\n/)[0] || 'OK' : result.error || result.stderr || 'Failed',
+    required: true,
+  };
+}
+
+async function probeNet(name, net, url, required = true) {
+  const startedAt = Date.now();
+  try {
+    const response = await net.fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, {
+      headers: { 'User-Agent': 'Forart-Updater' },
+    });
+    return {
+      name,
+      ok: response.ok,
+      status: response.status,
+      elapsedMs: Date.now() - startedAt,
+      detail: response.ok ? `HTTP ${response.status}` : `HTTP ${response.status}`,
+      required,
+    };
+  } catch (error) {
+    return {
+      name,
+      ok: false,
+      elapsedMs: Date.now() - startedAt,
+      detail: error instanceof Error ? error.message : String(error),
+      required,
+    };
+  }
 }
 
 async function appInfoPayload(rootDir) {
@@ -217,6 +333,7 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
         updateAvailable: aheadCheck.updateAvailable,
         canGitUpdate: info.canGitUpdate,
         repoUrl: REPO_URL,
+        updateNotes: await buildUpdateNotes(rootDir, net, info.currentRevision, remoteRevision.revision),
       };
     } catch (error) {
       return {
@@ -251,6 +368,21 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
       stderr: `${pull.stderr || ''}${install.stderr || ''}`,
       restartRequired: install.ok,
       error: install.ok ? undefined : install.error || 'npm install failed',
+    };
+  });
+
+  ipcMain.handle('app:update-connectivity', async () => {
+    const results = await Promise.all([
+      probeNet('GitHub commit API', net, REMOTE_COMMIT_URL),
+      probeNet('GitHub update notes', net, REMOTE_UPDATE_NOTES_URL, false),
+      probeCommand('Git command', 'git', ['--version'], rootDir),
+      probeCommand('Git fetch origin/main', 'git', ['fetch', '--quiet', 'origin', 'main'], rootDir),
+      probeCommand('npm command', 'npm', ['--version'], rootDir),
+    ]);
+    const required = results.filter((item) => item.required);
+    return {
+      ok: required.every((item) => item.ok),
+      results,
     };
   });
 

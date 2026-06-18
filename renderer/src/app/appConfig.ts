@@ -54,6 +54,7 @@ export interface ForartUpdateCheckResult {
   updateAvailable: boolean;
   canGitUpdate: boolean;
   repoUrl: string;
+  updateNotes?: ForartUpdateNotes;
   error?: string;
 }
 
@@ -63,6 +64,29 @@ export interface ForartUpdateRunResult {
   stderr?: string;
   restartRequired?: boolean;
   error?: string;
+}
+
+export interface ForartUpdateNotes {
+  version?: string;
+  updatedAt?: string;
+  revision?: string;
+  source?: string;
+  items: string[];
+  error?: string;
+}
+
+export interface ForartUpdateConnectivityItem {
+  name: string;
+  ok: boolean;
+  required: boolean;
+  elapsedMs: number;
+  status?: number;
+  detail?: string;
+}
+
+export interface ForartUpdateConnectivityResult {
+  ok: boolean;
+  results: ForartUpdateConnectivityItem[];
 }
 
 export interface ForartConfigApi {
@@ -76,6 +100,7 @@ export interface ForartConfigApi {
   appInfo: () => Promise<ForartAppInfo>;
   checkUpdate: () => Promise<ForartUpdateCheckResult>;
   runUpdate: () => Promise<ForartUpdateRunResult>;
+  updateConnectivity: () => Promise<ForartUpdateConnectivityResult>;
   openUpdatePage: () => Promise<{ ok: true }>;
 }
 

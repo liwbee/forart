@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('forartConfig', {
   appInfo: () => ipcRenderer.invoke('app:info'),
   checkUpdate: () => ipcRenderer.invoke('app:check-update'),
   runUpdate: () => ipcRenderer.invoke('app:run-update'),
+  updateConnectivity: () => ipcRenderer.invoke('app:update-connectivity'),
   openUpdatePage: () => ipcRenderer.invoke('app:open-update-page'),
 });
 
