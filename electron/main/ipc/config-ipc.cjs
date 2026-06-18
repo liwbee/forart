@@ -271,6 +271,10 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
     return { ok: true, apiSettings };
   });
 
+  ipcMain.handle('config:default-paths', async () => ({
+    imageDownloadPath: app.getPath('downloads'),
+  }));
+
   ipcMain.handle('dialog:choose-directory', async (_event, payload = {}) => {
     const result = await dialog.showOpenDialog({
       title: String(payload?.title || 'Choose Forart asset library folder'),

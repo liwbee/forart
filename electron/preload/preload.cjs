@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('forartConfig', {
   save: (payload) => ipcRenderer.invoke('config:save', payload),
   loadApiSettings: () => ipcRenderer.invoke('config:load-api-settings'),
   saveApiSettings: (payload) => ipcRenderer.invoke('config:save-api-settings', payload),
+  defaultPaths: () => ipcRenderer.invoke('config:default-paths'),
   chooseDirectory: (payload) => ipcRenderer.invoke('dialog:choose-directory', payload),
   testServer: (serverUrl) => ipcRenderer.invoke('server:test-remote', serverUrl),
   localServerStatus: () => ipcRenderer.invoke('server:local-status'),

@@ -94,6 +94,7 @@ export interface ForartConfigApi {
   save: (config: ForartAppConfig) => Promise<{ ok: true; config: ForartAppConfig }>;
   loadApiSettings: () => Promise<ForartApiSettingsConfig>;
   saveApiSettings: (settings: ForartApiSettingsConfig) => Promise<{ ok: true; apiSettings: ForartApiSettingsConfig }>;
+  defaultPaths: () => Promise<{ imageDownloadPath: string }>;
   chooseDirectory: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
   testServer: (serverUrl: string) => Promise<{ ok: boolean; status?: number; error?: string; payload?: unknown }>;
   localServerStatus: () => Promise<{ ok: boolean; managed?: boolean; localLibraryPath?: string; status?: number; error?: string; payload?: unknown }>;

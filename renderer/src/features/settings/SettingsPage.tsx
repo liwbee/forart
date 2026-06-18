@@ -1,5 +1,5 @@
-﻿import { Download, FolderOpen, KeyRound, LogIn, LogOut, Plus, RefreshCw, Save, Server, Settings, TestTube2, Trash2 } from "lucide-react";
-import { FormEvent, PointerEvent, UIEvent, useEffect, useState } from "react";
+import { ChevronDown, Download, FolderOpen, KeyRound, LogIn, LogOut, Plus, RefreshCw, Save, Server, Settings, TestTube2, Trash2 } from "lucide-react";
+import { PointerEvent, UIEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ForartAppConfig, ForartMode, normalizeConfig, type LibtvAccountRecord } from "../../app/appConfig";
 import { Select } from "../../components/Select";
@@ -70,6 +70,14 @@ function libtvAccountTypeLabel(account: LibtvAccountRecord, t: (key: string) => 
   return account.accountType === 2 ? t("settings.libtvTeamAccount") : t("settings.libtvPersonalAccount");
 }
 
+function sameAppConfig(left: ForartAppConfig, right: ForartAppConfig) {
+  return left.mode === right.mode
+    && left.localLibraryPath === right.localLibraryPath
+    && left.imageDownloadPath === right.imageDownloadPath
+    && left.serverUrl === right.serverUrl
+    && left.language === right.language;
+}
+
 function formatModelsUrl(provider: ApiProvider) {
   const rawBaseUrl = provider.baseUrl.trim();
   if (!rawBaseUrl) throw new Error("base-url-required");
@@ -127,12 +135,15 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   const { i18n, t } = useTranslation();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [mode, setMode] = useState<ForartMode>(config.mode);
+  const [runModeExpanded, setRunModeExpanded] = useState(false);
   const [localLibraryPath, setLocalLibraryPath] = useState(config.localLibraryPath);
   const [imageDownloadPath, setImageDownloadPath] = useState(config.imageDownloadPath);
+  const [defaultImageDownloadPath, setDefaultImageDownloadPath] = useState("");
   const [serverUrl, setServerUrl] = useState(config.serverUrl);
-  const [status, setStatus] = useState<StatusState>({ tone: "idle", text: t("settings.loaded") });
-  const [localStatus, setLocalStatus] = useState<StatusState>({ tone: "idle", text: t("settings.localStatusIdle") });
-  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<StatusState>({ tone: "idle", text: t("settings.connectionChecking") });
+  const didMountGeneralSettings = useRef(false);
+  const savingConfigRef = useRef(false);
+  const pendingSaveRef = useRef(false);
   const [apiProviders, setApiProviders] = useState<ApiProvider[]>(readApiProviders);
   const [selectedProviderId, setSelectedProviderId] = useState(() => readApiProviders()[0]?.id || "");
   const [activeApiPane, setActiveApiPane] = useState<ApiSettingsPane>("provider");
@@ -158,11 +169,24 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   const selectedProvider = apiProviders.find((provider) => provider.id === selectedProviderId) || apiProviders[0] || null;
 
   useEffect(() => {
+    if (savingConfigRef.current) return;
     setMode(config.mode);
     setLocalLibraryPath(config.localLibraryPath);
     setImageDownloadPath(config.imageDownloadPath);
     setServerUrl(config.serverUrl);
   }, [config]);
+
+  useEffect(() => {
+    let canceled = false;
+    async function loadDefaultPaths() {
+      const paths = await window.forartConfig?.defaultPaths().catch(() => null);
+      if (!canceled && paths?.imageDownloadPath) setDefaultImageDownloadPath(paths.imageDownloadPath);
+    }
+    void loadDefaultPaths();
+    return () => {
+      canceled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let canceled = false;
@@ -223,6 +247,20 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     void refreshLibtvStatus();
   }, [activeTab, activeApiPane]);
 
+  useEffect(() => {
+    if (!didMountGeneralSettings.current) {
+      didMountGeneralSettings.current = true;
+      void refreshConnectionStatus(config.mode, config.serverUrl);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void saveGeneralSettings();
+    }, 450);
+
+    return () => window.clearTimeout(timeout);
+  }, [mode, localLibraryPath, imageDownloadPath, serverUrl, i18n.language]);
+
   async function chooseDirectory() {
     const result = await window.forartConfig?.chooseDirectory();
     if (result && !result.canceled) setLocalLibraryPath(result.path);
@@ -233,22 +271,29 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     if (result && !result.canceled) setImageDownloadPath(result.path);
   }
 
-  async function refreshLocalStatus() {
-    setLocalStatus({ tone: "busy", text: t("settings.localStatusBusy") });
-    const result = await window.forartConfig?.localServerStatus();
-    if (result?.ok) {
-      setLocalStatus({
-        tone: "ready",
-        text: result.managed ? t("settings.localStatusManaged") : t("settings.localStatusExternal"),
-      });
+  async function refreshConnectionStatus(nextMode = mode, nextServerUrl = serverUrl) {
+    if (nextMode === "local") {
+      setStatus({ tone: "busy", text: t("settings.localStatusBusy") });
+      const result = await window.forartConfig?.localServerStatus();
+      if (result?.ok) {
+        setStatus({
+          tone: "ready",
+          text: result.managed ? t("settings.localStatusManaged") : t("settings.localStatusExternal"),
+        });
+        return;
+      }
+      setStatus({ tone: "error", text: result?.error || t("settings.localStatusDisconnected") });
       return;
     }
-    setLocalStatus({ tone: "error", text: result?.error || t("settings.localStatusDisconnected") });
-  }
 
-  async function testRemoteServer() {
+    const trimmedServerUrl = nextServerUrl.trim();
+    if (!trimmedServerUrl) {
+      setStatus({ tone: "idle", text: t("settings.serverUrlRequired") });
+      return;
+    }
+
     setStatus({ tone: "busy", text: t("settings.testingServer") });
-    const result = await window.forartConfig?.testServer(serverUrl);
+    const result = await window.forartConfig?.testServer(trimmedServerUrl);
     if (result?.ok) {
       setStatus({ tone: "ready", text: t("settings.serverOk") });
       return;
@@ -256,8 +301,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     setStatus({ tone: "error", text: result?.error || `${t("settings.connectionFailed")}${result?.status ? ` (${result.status})` : ""}` });
   }
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
+  async function saveGeneralSettings() {
     const nextConfig = normalizeConfig({ mode, localLibraryPath, imageDownloadPath, serverUrl, language: i18n.language === "en-US" ? "en-US" : "zh-CN" });
 
     if (nextConfig.mode === "local" && !nextConfig.localLibraryPath) {
@@ -270,17 +314,30 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
       return;
     }
 
-    setSaving(true);
-    setStatus({ tone: "busy", text: t("settings.savingConfig") });
+    if (savingConfigRef.current) {
+      pendingSaveRef.current = true;
+      return;
+    }
+
+    if (sameAppConfig(nextConfig, config)) {
+      void refreshConnectionStatus(nextConfig.mode, nextConfig.serverUrl);
+      return;
+    }
+
+    savingConfigRef.current = true;
     try {
       const result = await window.forartConfig?.save(nextConfig);
-      onConfigChange(result?.config || nextConfig);
-      setStatus({ tone: "ready", text: nextConfig.mode === "local" ? t("settings.switchedLocal") : t("settings.switchedRemote") });
-      if (nextConfig.mode === "local") await refreshLocalStatus();
+      const savedConfig = result?.config || nextConfig;
+      onConfigChange(savedConfig);
+      await refreshConnectionStatus(savedConfig.mode, savedConfig.serverUrl);
     } catch (error) {
       setStatus({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     } finally {
-      setSaving(false);
+      savingConfigRef.current = false;
+      if (pendingSaveRef.current) {
+        pendingSaveRef.current = false;
+        void saveGeneralSettings();
+      }
     }
   }
 
@@ -837,7 +894,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
         </nav>
 
         {activeTab === "general" ? (
-          <form className="settings-layout" onSubmit={handleSubmit} role="tabpanel" aria-label={t("settings.generalSettings")}>
+          <div className="settings-layout" role="tabpanel" aria-label={t("settings.generalSettings")}>
             <section className="settings-section" aria-label={t("settings.generalSettings")}>
               <div className="settings-section__head">
                 <div>
@@ -845,90 +902,86 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                 </div>
               </div>
 
-              <div className="settings-subsection">
-                <h3>{t("settings.runMode")}</h3>
-                <div className="settings-segmented" role="radiogroup" aria-label={t("settings.runMode")}>
-                  <button className={mode === "local" ? "active" : ""} type="button" role="radio" aria-checked={mode === "local"} onClick={() => setMode("local")}>
-                    {t("settings.localMode")}
-                  </button>
-                  <button className={mode === "remote" ? "active" : ""} type="button" role="radio" aria-checked={mode === "remote"} onClick={() => setMode("remote")}>
-                    {t("settings.remoteMode")}
-                  </button>
-                </div>
-                <p className="settings-mode-description">
-                  {mode === "local" ? t("settings.localModeDescription") : t("settings.remoteModeDescription")}
-                </p>
-              </div>
-
-              {mode === "local" ? (
-                <div className="settings-subsection" aria-label={t("settings.localConfig")}>
-                  <div className="settings-subsection__head">
-                    <FolderOpen size={20} aria-hidden="true" />
-                    <h2>{t("settings.localLibrary")}</h2>
+              <div className={`settings-subsection settings-run-mode${runModeExpanded ? " settings-run-mode--expanded" : ""}`}>
+                <div className="settings-run-mode-row">
+                  <div className="settings-run-mode-title">
+                    <div>
+                      <h3>{t("settings.runMode")}</h3>
+                    </div>
                   </div>
-
-                  <label className="settings-field">
-                    <span>{t("settings.libraryPath")}</span>
-                    <div className="settings-path-row">
-                      <input value={localLibraryPath} onChange={(event) => setLocalLibraryPath(event.target.value)} placeholder="D:/ForartLibrary" />
-                      <button type="button" className="settings-icon-button" title={t("setup.chooseDirectory")} aria-label={t("setup.chooseDirectory")} onClick={chooseDirectory}>
-                        <FolderOpen size={18} aria-hidden="true" />
+                  <div className="settings-run-mode-controls">
+                    <div className="settings-segmented settings-segmented--compact" role="radiogroup" aria-label={t("settings.runMode")}>
+                      <button className={mode === "local" ? "active" : ""} type="button" role="radio" aria-checked={mode === "local"} onClick={() => {
+                        setMode("local");
+                        setRunModeExpanded(true);
+                      }}>
+                        {t("settings.localMode")}
+                      </button>
+                      <button className={mode === "remote" ? "active" : ""} type="button" role="radio" aria-checked={mode === "remote"} onClick={() => {
+                        setMode("remote");
+                        setRunModeExpanded(true);
+                      }}>
+                        {t("settings.remoteMode")}
                       </button>
                     </div>
-                  </label>
-
-                  <div className="settings-inline-status" data-tone={localStatus.tone}>
-                    {localStatus.text}
-                  </div>
-                  <button className="settings-secondary-button" type="button" onClick={refreshLocalStatus}>
-                    <RefreshCw size={16} aria-hidden="true" />
-                    {t("settings.checkLocalServer")}
-                  </button>
-                </div>
-              ) : (
-                <div className="settings-subsection" aria-label={t("settings.serverConfig")}>
-                  <div className="settings-subsection__head">
-                    <Server size={20} aria-hidden="true" />
-                    <h2>{t("settings.remoteServer")}</h2>
-                  </div>
-
-                  <label className="settings-field">
-                    <span>{t("settings.serverUrl")}</span>
-                    <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://192.168.1.20:5175" />
-                  </label>
-
-                  <button className="settings-secondary-button" type="button" onClick={testRemoteServer}>
-                    <TestTube2 size={16} aria-hidden="true" />
-                    {t("settings.testServer")}
-                  </button>
-                </div>
-              )}
-
-              <div className="settings-subsection" aria-label={t("settings.imageDownloadConfig")}>
-                <div className="settings-subsection__head">
-                  <FolderOpen size={20} aria-hidden="true" />
-                  <h2>{t("settings.imageDownloadPath")}</h2>
-                </div>
-
-                <label className="settings-field">
-                  <span>{t("settings.imageDownloadDirectory")}</span>
-                  <div className="settings-path-row">
-                    <input value={imageDownloadPath} onChange={(event) => setImageDownloadPath(event.target.value)} placeholder={t("settings.imageDownloadDefault")} />
-                    <button type="button" className="settings-icon-button" title={t("setup.chooseDirectory")} aria-label={t("setup.chooseDirectory")} onClick={chooseImageDownloadDirectory}>
-                      <FolderOpen size={18} aria-hidden="true" />
+                    <button
+                      type="button"
+                      className="settings-expand-button"
+                      aria-expanded={runModeExpanded}
+                      aria-controls="settings-run-mode-panel"
+                      aria-label={runModeExpanded ? t("settings.collapseRunModeConfig") : t("settings.expandRunModeConfig")}
+                      title={runModeExpanded ? t("settings.collapseRunModeConfig") : t("settings.expandRunModeConfig")}
+                      onClick={() => setRunModeExpanded((expanded) => !expanded)}
+                    >
+                      <ChevronDown size={18} aria-hidden="true" />
                     </button>
                   </div>
-                </label>
-                <p className="settings-mode-description">{t("settings.imageDownloadDescription")}</p>
+                </div>
+
+                {runModeExpanded ? (
+                  <div id="settings-run-mode-panel" className="settings-run-mode-panel" aria-label={mode === "local" ? t("settings.localConfig") : t("settings.serverConfig")}>
+                    {mode === "local" ? (
+                      <>
+                        <label className="settings-field">
+                          <span>{t("settings.libraryPath")}</span>
+                          <div className="settings-path-row">
+                            <input value={localLibraryPath} onChange={(event) => setLocalLibraryPath(event.target.value)} placeholder="D:/ForartLibrary" />
+                            <button type="button" className="settings-icon-button" title={t("setup.chooseDirectory")} aria-label={t("setup.chooseDirectory")} onClick={chooseDirectory}>
+                              <FolderOpen size={18} aria-hidden="true" />
+                            </button>
+                          </div>
+                        </label>
+
+                      </>
+                    ) : (
+                      <>
+                        <label className="settings-field">
+                          <span>{t("settings.serverUrl")}</span>
+                          <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://192.168.1.20:5175" />
+                        </label>
+                      </>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="settings-subsection settings-download-path-row" aria-label={t("settings.imageDownloadConfig")}>
+                <h3>{t("settings.imageDownloadPath")}</h3>
+                <div className="settings-download-path-control">
+                  <input
+                    value={imageDownloadPath}
+                    onChange={(event) => setImageDownloadPath(event.target.value)}
+                    placeholder={defaultImageDownloadPath || t("settings.imageDownloadDefault")}
+                    aria-label={t("settings.imageDownloadDirectory")}
+                  />
+                  <button type="button" className="settings-icon-button" title={t("setup.chooseDirectory")} aria-label={t("setup.chooseDirectory")} onClick={chooseImageDownloadDirectory}>
+                    <FolderOpen size={18} aria-hidden="true" />
+                  </button>
+                </div>
               </div>
             </section>
 
-            <div className="settings-actions">
-              <button className="settings-submit" type="submit" disabled={saving}>
-                {saving ? t("settings.saving") : t("settings.saveSettings")}
-              </button>
-            </div>
-          </form>
+          </div>
         ) : (
           <div className="settings-api-layout" role="tabpanel" aria-label={t("settings.apiSettings")}>
             <aside className="settings-api-sidebar" aria-label={t("settings.providerList")}>

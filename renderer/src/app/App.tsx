@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Download, Languages, Layers3, LayoutTemplate, LibraryBig, Moon, RefreshCw, ScanSearch, Settings, Sun, Users, X, XCircle } from "lucide-react";
 import { setActiveForartConfig } from "../data-source/runtime";
 import { ImageReviewPage } from "../features/image-review/ImageReviewPage";
@@ -26,6 +27,19 @@ const VIEW_TRANSITION_MS = 500;
 const FreeCanvasPage = lazy(() => import("../features/free-canvas/FreeCanvasPage").then((module) => ({ default: module.FreeCanvasPage })));
 const CanvasPage = lazy(() => import("../features/infinite-canvas/CanvasPage"));
 const KEEP_ALIVE_VIEWS = new Set<AppView>(["free-canvas", "canvas"]);
+const LIBRARY_QUERY_ROOTS = new Set([
+  "storageSettings",
+  "modelProjects",
+  "modelTags",
+  "models",
+  "modelImages",
+  "actionProjects",
+  "actionTags",
+  "actions",
+  "outfitProjects",
+  "outfitTags",
+  "outfits",
+]);
 type UpdateStatus = "idle" | "checking" | "available" | "current" | "error" | "updating" | "updated";
 
 const updateText = {
@@ -102,6 +116,7 @@ function renderView(view: AppView, appConfig: ForartAppConfig, onConfigChange: (
 
 export function App() {
   const { t, i18n } = useTranslation();
+  const queryClient = useQueryClient();
   const appTitle = getAppTitle();
   const activeView = useAppStore((state) => state.activeView);
   const setActiveView = useAppStore((state) => state.setActiveView);
@@ -193,9 +208,30 @@ export function App() {
     return () => window.clearTimeout(timeout);
   }, [activeView]);
 
+  function shouldRefreshLibraryQueries(nextConfig: ForartAppConfig) {
+    if (!appConfig) return false;
+    return (
+      appConfig.mode !== nextConfig.mode ||
+      appConfig.localLibraryPath !== nextConfig.localLibraryPath ||
+      appConfig.serverUrl !== nextConfig.serverUrl
+    );
+  }
+
+  function refreshLibraryQueries() {
+    void queryClient.invalidateQueries({
+      refetchType: "active",
+      predicate: (query) => {
+        const root = query.queryKey[0];
+        return typeof root === "string" && LIBRARY_QUERY_ROOTS.has(root);
+      },
+    });
+  }
+
   function updateConfig(config: ForartAppConfig) {
+    const refreshLibraryCache = shouldRefreshLibraryQueries(config);
     setActiveForartConfig(config);
     setAppConfig(config);
+    if (refreshLibraryCache) refreshLibraryQueries();
   }
 
   function toggleLanguage() {

@@ -605,6 +605,125 @@ body {
   box-shadow: var(--shadow-ui);
 }
 
+.settings-segmented--compact {
+  width: min(100%, 300px);
+}
+
+.settings-run-mode {
+  gap: var(--space-4);
+}
+
+.settings-run-mode-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.settings-run-mode-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.settings-run-mode-title h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.settings-run-mode-controls {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.settings-expand-button {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  background: var(--surface-control);
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+.settings-expand-button:hover {
+  color: var(--state-hover-text);
+  border-color: var(--state-hover-border);
+  background: var(--state-hover-bg);
+}
+
+.settings-expand-button svg {
+  transition: transform 180ms ease;
+}
+
+.settings-run-mode--expanded .settings-expand-button svg {
+  transform: rotate(180deg);
+}
+
+.settings-run-mode-panel {
+  display: grid;
+  gap: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
+  background: var(--surface-control);
+}
+
+.settings-run-mode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.settings-download-path-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.settings-download-path-row h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.settings-download-path-control {
+  min-width: 0;
+  width: min(100%, 402px);
+  flex: 0 1 402px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: var(--space-2);
+}
+
+.settings-download-path-control input {
+  min-width: 0;
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  padding: 0 var(--space-3);
+  color: var(--input-text);
+  background: var(--input-bg);
+}
+
 .settings-mode-description {
   max-width: 560px;
   margin: calc(var(--space-2) * -1) 0 0;
@@ -1255,6 +1374,30 @@ body {
 }
 
 @media (max-width: 860px) {
+  .settings-run-mode-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-run-mode-controls {
+    width: 100%;
+  }
+
+  .settings-segmented--compact {
+    flex: 1;
+    width: auto;
+  }
+
+  .settings-download-path-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-download-path-control {
+    width: 100%;
+    flex-basis: auto;
+  }
+
   .settings-libtv-card {
     grid-template-columns: minmax(0, 1fr);
   }
