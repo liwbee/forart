@@ -48,11 +48,15 @@ function canGitUpdate(rootDir) {
   return fs.existsSync(path.join(rootDir, '.git'));
 }
 
+function resolveCommand(command) {
+  if (process.platform === 'win32' && command === 'npm') return 'npm.cmd';
+  return command;
+}
+
 function runCommand(command, args, cwd) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
+    const child = spawn(resolveCommand(command), args.map(String), {
       cwd,
-      shell: process.platform === 'win32',
       windowsHide: true,
     });
     let stdout = '';

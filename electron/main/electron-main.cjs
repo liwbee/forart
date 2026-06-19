@@ -17,6 +17,12 @@ const { createLocalServerManager } = require('./modules/local-server-manager.cjs
 
 const rootDir = path.resolve(__dirname, '..', '..');
 const isDev = !app.isPackaged;
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+  return;
+}
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'forart-asset', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -29,6 +35,7 @@ const configStore = createConfigStore({ app, rootDir });
 const imageReviewStore = createImageReviewStore();
 const localServer = createLocalServerManager({ app, rootDir });
 const libtv = createLibtvAdapter({ rootDir });
+let mainWindow = null;
 
 function registerCanvasAssetProtocol() {
   protocol.handle('forart-asset', (request) => {
@@ -57,10 +64,16 @@ registerImageReviewIpc({ ipcMain, imageReviewStore });
 registerLibtvIpc({ ipcMain, libtv });
 registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, rootDir, net, shell });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   registerCanvasAssetProtocol();
   registerImageReviewProtocol();
-  createWindow({ rootDir, isDev });
+  mainWindow = await createWindow({ rootDir, isDev });
+});
+
+app.on('second-instance', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
 });
 
 app.on('window-all-closed', () => {

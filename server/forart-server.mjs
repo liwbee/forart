@@ -1704,6 +1704,15 @@ function localNetworkUrls() {
   return urls;
 }
 
+server.on("error", (error) => {
+  if (error?.code === "EADDRINUSE") {
+    console.error(`Forart Server API port is already in use: http://127.0.0.1:${SERVER_PORT}`);
+    process.exit(0);
+  }
+  console.error(error);
+  process.exit(1);
+});
+
 server.listen(SERVER_PORT, SERVER_HOST, () => {
   console.log(`Forart Server API running at http://127.0.0.1:${SERVER_PORT}`);
   const urls = localNetworkUrls();

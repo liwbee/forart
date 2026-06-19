@@ -23,6 +23,8 @@ async function createWindow({ rootDir, isDev }) {
   } else {
     await win.loadFile(path.join(rootDir, 'dist', 'index.html'));
   }
+
+  return win;
 }
 
 module.exports = { createWindow };

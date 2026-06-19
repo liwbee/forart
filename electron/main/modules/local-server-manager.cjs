@@ -7,6 +7,7 @@ function createLocalServerManager({ app, rootDir, fetchImpl = fetch, port = 5175
   const bundledServerEntry = path.join(bundledServerDir, 'forart-server.mjs');
   let serverProcess = null;
   let activeLocalServerConfig = null;
+  let startingServerPromise = null;
 
   function localServerEnv(config) {
     const libraryRoot = path.resolve(config.localLibraryPath || path.join(app.getPath('userData'), 'library'));
@@ -49,6 +50,13 @@ function createLocalServerManager({ app, rootDir, fetchImpl = fetch, port = 5175
     const currentHealth = await checkHealth('http://127.0.0.1:' + port);
     if (currentHealth.ok && serverProcess) return currentHealth;
     if (currentHealth.ok && !serverProcess) return { ...currentHealth, external: true };
+    if (startingServerPromise) return startingServerPromise;
+    if (serverProcess) {
+      startingServerPromise = waitForReady().finally(() => {
+        startingServerPromise = null;
+      });
+      return startingServerPromise;
+    }
 
     if (!fs.existsSync(bundledServerEntry)) {
       return { ok: false, error: 'Bundled server not found: ' + bundledServerEntry };
@@ -67,9 +75,13 @@ function createLocalServerManager({ app, rootDir, fetchImpl = fetch, port = 5175
     serverProcess.on('exit', (code) => {
       console.log('[forart-server] exited ' + code);
       serverProcess = null;
+      startingServerPromise = null;
     });
 
-    return waitForReady();
+    startingServerPromise = waitForReady().finally(() => {
+      startingServerPromise = null;
+    });
+    return startingServerPromise;
   }
 
   function stop() {
@@ -78,6 +90,7 @@ function createLocalServerManager({ app, rootDir, fetchImpl = fetch, port = 5175
       serverProcess = null;
     }
     activeLocalServerConfig = null;
+    startingServerPromise = null;
   }
 
   async function localStatus() {
