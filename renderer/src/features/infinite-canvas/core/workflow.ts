@@ -2,11 +2,6 @@ import type { CanvasConnection, CanvasNode } from "../types";
 
 export function collectPrompt(node: CanvasNode, nodes: CanvasNode[], connections: CanvasConnection[]): string {
   if (node.type === "prompt" || node.type === "libtvPrompt" || node.type === "llm") return node.text || "";
-  if (node.type === "loop") {
-    const variable = node.variablePrompt?.trim();
-    const fixed = node.fixedPrompt?.trim();
-    return [fixed, variable ? `Loop variable: ${variable}` : ""].filter(Boolean).join("\n");
-  }
   const upstream = connections
     .filter((connection) => connection.to === node.id)
     .map((connection) => nodes.find((candidate) => candidate.id === connection.from))

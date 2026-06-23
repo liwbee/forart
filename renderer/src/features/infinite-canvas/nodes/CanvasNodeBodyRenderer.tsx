@@ -4,7 +4,6 @@ import { isImageLikeNode } from "../nodePredicates";
 import type { CanvasNode, CropRect } from "../types";
 import { ImageNodeBody } from "./ImageNodeBody";
 import { LlmNodeBody } from "./LlmNodeBody";
-import { LoopNodeBody } from "./LoopNodeBody";
 import { PromptNodeBody } from "./PromptNodeBody";
 
 export interface CanvasNodeBodyActions {
@@ -12,6 +11,7 @@ export interface CanvasNodeBodyActions {
   setFileInputRef: (nodeId: string, input: HTMLInputElement | null) => void;
   uploadFiles: (nodeId: string, files: FileList | File[]) => void;
   uploadClick: (nodeId: string) => void;
+  libraryClick: (nodeId: string) => void;
   previewImage: (nodeId: string) => void;
   downloadImage: (nodeId: string) => void;
   patchNode: (nodeId: string, patch: Partial<CanvasNode>) => void;
@@ -60,6 +60,9 @@ export const CanvasNodeBodyRenderer = memo(function CanvasNodeBodyRenderer({
         onUploadClick={() => {
           if (node.type === "image" || node.type === "libtvUpload") actions.uploadClick(node.id);
         }}
+        onLibraryClick={() => {
+          if (node.type === "image" || node.type === "libtvUpload") actions.libraryClick(node.id);
+        }}
         onPreview={() => actions.previewImage(node.id)}
         onDownload={() => actions.downloadImage(node.id)}
         isDownloadBusy={isDownloadBusy}
@@ -104,5 +107,5 @@ export const CanvasNodeBodyRenderer = memo(function CanvasNodeBodyRenderer({
     );
   }
 
-  return <LoopNodeBody node={node} onPatch={onPatch} />;
+  return null;
 });

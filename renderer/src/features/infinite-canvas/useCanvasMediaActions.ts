@@ -12,6 +12,7 @@ import {
 } from "./imageCrop";
 import { isImageLikeNode } from "./nodePredicates";
 import type { CanvasConnection, CanvasGroup, CanvasNode, CanvasNodeType, CropAspectKey, CropInteractionState, ImageDialogState } from "./types";
+import type { LibraryAssetSelection } from "../library-asset-picker/types";
 
 type StateUpdater<T> = T | ((current: T) => T);
 
@@ -140,6 +141,29 @@ export function useCanvasMediaActions({
       ...nextSize,
     };
   }, [saveCanvasImageAsset]);
+
+  const readLibraryImagePatch = useCallback(async (selection: LibraryAssetSelection): Promise<Partial<CanvasNode>> => {
+    const dimensions = await readImageDimensions(selection.url);
+    const nextSize = dimensions ? fitImageNodeSize(dimensions.width, dimensions.height) : {};
+    return {
+      url: selection.url,
+      fileName: selection.name || "Library image",
+      filePath: undefined,
+      title: selection.name || "Library image",
+      imageMode: "asset",
+      imageSource: "uploaded",
+      text: "",
+      imageNaturalWidth: dimensions?.width,
+      imageNaturalHeight: dimensions?.height,
+      librarySource: {
+        kind: selection.kind,
+        assetId: selection.assetId,
+        entryId: selection.entryId,
+        name: selection.name,
+      },
+      ...nextSize,
+    };
+  }, []);
 
   const getLibtvLeftOrderForReplacement = useCallback((targetId: string, oldLocalNodeId: string, oldRemoteNodeId: string, nextRemoteNodeId: string) => {
     const orderedLeft = connections
@@ -302,6 +326,52 @@ export function useCanvasMediaActions({
     setSelectedGroupId("");
   }, [createNode, nodeMap, readImagePatch, replaceLibtvUploadNode, setNodes, setSelectedGroupId, setSelectedIds, syncLibtvBoundNode]);
 
+  const importLibraryImageToNode = useCallback(async (nodeId: string, selection: LibraryAssetSelection) => {
+    if (!selection.url) return;
+    const patch = await readLibraryImagePatch(selection);
+    const source = nodeMap.get(nodeId);
+    if (source?.type === "libtvUpload") {
+      setNodes((current) => current.map((node) => (node.id === nodeId ? {
+        ...node,
+        ...patch,
+        id: node.id,
+        type: "libtvUpload",
+        title: String(patch.title || node.title || "LibTV Upload"),
+        text: "",
+        generationError: "",
+        generationStatus: "",
+      } : node)));
+      setSelectedIds(new Set([nodeId]));
+      setSelectedGroupId("");
+      if (isLibtvCanvas && source.libtvProjectId && source.libtvNodeId) {
+        showLibtvSyncStatus("ready", t("infiniteCanvas.libraryReferenceLocalOnly"));
+      }
+      return;
+    }
+    setNodes((current) => current.map((node) => (node.id === nodeId ? { ...node, ...patch } : node)));
+    setSelectedIds(new Set([nodeId]));
+    setSelectedGroupId("");
+  }, [isLibtvCanvas, nodeMap, readLibraryImagePatch, setNodes, setSelectedGroupId, setSelectedIds, showLibtvSyncStatus, t]);
+
+  const createLibraryImageNodeAtWorldPoint = useCallback(async (selection: LibraryAssetSelection, point: { x: number; y: number }, nodeType: "image" | "libtvUpload" = "image") => {
+    if (!selection.url) return "";
+    const patch = await readLibraryImagePatch(selection);
+    const node = {
+      ...createNode(nodeType),
+      ...patch,
+    };
+    node.x = Math.round(point.x - node.w / 2);
+    node.y = Math.round(point.y - node.h / 2);
+    setNodes((current) => current.concat(node));
+    setSelectedIds(new Set([node.id]));
+    setSelectedGroupId("");
+    setSelectedConnectionId("");
+    setConnectionAction(null);
+    setContextMenu(null);
+    setImageCrop(null);
+    return node.id;
+  }, [createNode, readLibraryImagePatch, setConnectionAction, setContextMenu, setNodes, setSelectedConnectionId, setSelectedGroupId, setSelectedIds]);
+
   const createImageNodesAtClientPoint = useCallback(async (files: FileList | File[], clientX: number, clientY: number) => {
     const imageFiles = Array.from(files).filter(isImageFile);
     if (!imageFiles.length) return false;
@@ -455,6 +525,8 @@ export function useCanvasMediaActions({
     setIsImageDropActive,
     saveCanvasImageAsset,
     handleImageFiles,
+    importLibraryImageToNode,
+    createLibraryImageNodeAtWorldPoint,
     createImageNodesFromDrop,
     createImageNodesFromClipboardData,
     openImagePreview,

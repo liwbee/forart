@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Clock, Crosshair, Crop, Eye, Layers, Map as MapIcon, Play, Ratio, RefreshCw, Square, Trash2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Check, ChevronDown, Clock, Crosshair, Crop, Eye, Images, Layers, Map as MapIcon, Play, Ratio, RefreshCw, Square, Trash2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
 import { PointerEvent, WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ImageViewer } from "../../lib/ImageViewer";
@@ -10,6 +10,8 @@ import { clamp, getGroupBounds, linkMidpoint, WORLD_CENTER } from "./canvasGeome
 import { useLibtvNodeSync } from "./libtv/useLibtvNodeSync";
 import { ImageGeneratorComposer } from "./composers/ImageGeneratorComposer";
 import { LibtvComposer } from "./composers/LibtvComposer";
+import { LibraryAssetPickerRail } from "../library-asset-picker/LibraryAssetPickerRail";
+import type { LibraryAssetSelection } from "../library-asset-picker/types";
 import type { ImageGeneratorInputPreview } from "./composers/composerTypes";
 import { getImageGenerationReadiness } from "./core/imageGenerationReadiness";
 import { ConnectionLayer } from "./layers/ConnectionLayer";
@@ -47,8 +49,9 @@ const NODE_DRAG_START_THRESHOLD = 8;
 const GROUP_PADDING = 32;
 const EMPTY_GROUP_DEFAULT_WIDTH = 360;
 const EMPTY_GROUP_DEFAULT_HEIGHT = 240;
+const CANVAS_LIBRARY_PICKER_TARGET = "__canvas__";
 const LIBTV_CREATABLE_NODE_TYPES = ["libtvImage", "libtvPrompt"] as const satisfies readonly CanvasNodeType[];
-const LOCAL_CONTEXT_MENU_NODE_TYPES = ["imageGenerator", "image", "llm", "prompt", "loop"] as const satisfies readonly CanvasNodeType[];
+const LOCAL_CONTEXT_MENU_NODE_TYPES = ["imageGenerator", "image", "llm", "prompt"] as const satisfies readonly CanvasNodeType[];
 type LibtvCreatableNodeType = typeof LIBTV_CREATABLE_NODE_TYPES[number];
 
 function isLibtvCreatableNodeType(type: CanvasNodeType): type is LibtvCreatableNodeType {
@@ -269,6 +272,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   const setEditingPromptId = useCanvasUiStore((state) => state.setEditingPromptId);
   const [editingGroupId, setEditingGroupId] = useState("");
   const [openImageComposerSelect, setOpenImageComposerSelect] = useState("");
+  const [libraryPickerNodeId, setLibraryPickerNodeId] = useState("");
 
   const scheduleFrame = useCallback(<T,>(slot: React.MutableRefObject<ScheduledFrame<T>>, value: T, apply: (value: T) => void) => {
     slot.current.value = value;
@@ -556,6 +560,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setIsImageDropActive,
     saveCanvasImageAsset,
     handleImageFiles,
+    importLibraryImageToNode,
+    createLibraryImageNodeAtWorldPoint,
     createImageNodesFromDrop,
     createImageNodesFromClipboardData,
     openImagePreview,
@@ -1673,6 +1679,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   });
   const uploadNodeFilesStable = useStableEvent((nodeId: string, files: FileList | File[]) => void handleImageFiles(nodeId, files));
   const clickNodeUploadStable = useStableEvent((nodeId: string) => fileInputRefs.current[nodeId]?.click());
+  const clickNodeLibraryStable = useStableEvent((nodeId: string) => setLibraryPickerNodeId(nodeId));
   const previewNodeImageStable = useStableEvent(openImagePreview);
   const downloadNodeImageStable = useStableEvent((nodeId: string) => void downloadNodeImage(nodeId));
   const startCropInteractionStable = useStableEvent(startCropInteraction);
@@ -1700,6 +1707,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setFileInputRef: setNodeFileInputRefStable,
     uploadFiles: uploadNodeFilesStable,
     uploadClick: clickNodeUploadStable,
+    libraryClick: clickNodeLibraryStable,
     previewImage: previewNodeImageStable,
     downloadImage: downloadNodeImageStable,
     patchNode,
@@ -1713,6 +1721,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     patchPrompt: patchPromptStable,
   }), [
     clickNodeUploadStable,
+    clickNodeLibraryStable,
     commitPromptStable,
     cropPointerMoveStable,
     downloadNodeImageStable,
@@ -1727,6 +1736,26 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     stopLlmNodeStable,
     uploadNodeFilesStable,
   ]);
+
+  async function importLibraryImage(selection: LibraryAssetSelection) {
+    const nodeId = libraryPickerNodeId;
+    if (!nodeId) return;
+    if (nodeId === CANVAS_LIBRARY_PICKER_TARGET) {
+      const rect = stageRef.current?.getBoundingClientRect();
+      const point = rect
+        ? screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2)
+        : screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
+      await createLibraryImageNodeAtWorldPoint(selection, point);
+      return;
+    }
+    await importLibraryImageToNode(nodeId, selection);
+  }
+
+  function toggleCanvasLibraryPicker() {
+    setIsZoomMenuOpen(false);
+    setIsMinimapOpen(false);
+    setLibraryPickerNodeId((current) => (current ? "" : CANVAS_LIBRARY_PICKER_TARGET));
+  }
 
   const renderNodeBodyStable = useStableEvent(renderNodeBody);
   const startNodeDragStable = useStableEvent(startNodeDrag);
@@ -1983,6 +2012,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
           downloadStatus={downloadStatus}
           onCropAspectMenuOpenChange={setCropAspectMenuOpen}
           onUploadImage={(nodeId) => fileInputRefs.current[nodeId]?.click()}
+          onImportLibraryImage={setLibraryPickerNodeId}
           onOpenCrop={openImageCrop}
           onChangeCropAspect={changeCropAspect}
           onApplyCrop={(nodeId) => void applyCrop(nodeId)}
@@ -2134,7 +2164,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             {activeProject?.canvasType === "forart-libtv" ? (
               <button
                 type="button"
-                title={t("infiniteCanvas.libtvRefreshingRemoteCanvas")}
+                data-tooltip={t("infiniteCanvas.libtvRefreshingRemoteCanvas")}
                 aria-label={t("infiniteCanvas.libtvRefreshingRemoteCanvas")}
                 onClick={() => void refreshLibtvCanvasFromRemote({
                   ...activeProject,
@@ -2147,13 +2177,23 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
                 <RefreshCw size={16} aria-hidden="true" />
               </button>
             ) : null}
-            <button type="button" title={t("infiniteCanvas.resetView")} aria-label={t("infiniteCanvas.resetView")} onClick={resetView}>
+            <button
+              type="button"
+              className={libraryPickerNodeId ? "active" : ""}
+              data-tooltip={t("infiniteCanvas.importFromLibrary")}
+              aria-label={t("infiniteCanvas.importFromLibrary")}
+              aria-pressed={Boolean(libraryPickerNodeId)}
+              onClick={toggleCanvasLibraryPicker}
+            >
+              <Images size={16} aria-hidden="true" />
+            </button>
+            <button type="button" data-tooltip={t("infiniteCanvas.resetView")} aria-label={t("infiniteCanvas.resetView")} onClick={resetView}>
               <Crosshair size={16} aria-hidden="true" />
             </button>
             <button
               type="button"
               className={!showConnections ? "active" : ""}
-              title={t(showConnections ? "infiniteCanvas.hideConnections" : "infiniteCanvas.showConnections")}
+              data-tooltip={t(showConnections ? "infiniteCanvas.hideConnections" : "infiniteCanvas.showConnections")}
               aria-label={t(showConnections ? "infiniteCanvas.hideConnections" : "infiniteCanvas.showConnections")}
               aria-pressed={!showConnections}
               onClick={() => {
@@ -2169,7 +2209,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             <button
               type="button"
               className={isMinimapOpen ? "active" : ""}
-              title={t("infiniteCanvas.minimap")}
+              data-tooltip={t("infiniteCanvas.minimap")}
               aria-label={t("infiniteCanvas.minimap")}
               aria-pressed={isMinimapOpen}
               onClick={() => {
@@ -2182,7 +2222,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             <button
               type="button"
               className="ic-zoom-value"
-              title={t("infiniteCanvas.zoomCanvas")}
+              data-tooltip={t("infiniteCanvas.zoomCanvas")}
               aria-label={t("infiniteCanvas.zoomCanvas")}
               aria-expanded={isZoomMenuOpen}
               onClick={() => {
@@ -2213,6 +2253,11 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
           </div>
         ) : null}
         {previewNode && isImageLikeNode(previewNode) && previewNode.url ? <ImageViewer src={previewNode.url} alt={previewNode.fileName || "canvas image preview"} ariaLabel={t("infiniteCanvas.viewLargeImage")} onClose={() => setImagePreview(null)} /> : null}
+        {libraryPickerNodeId ? (
+          <div className="ic-library-rail-panel nodrag nopan" onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+            <LibraryAssetPickerRail onSelect={(selection) => void importLibraryImage(selection)} />
+          </div>
+        ) : null}
       </div>
     </section>
   );

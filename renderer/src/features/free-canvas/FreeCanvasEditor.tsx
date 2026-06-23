@@ -1,9 +1,7 @@
 import {
   DragEvent,
   KeyboardEvent,
-  MouseEvent as ReactMouseEvent,
   PointerEvent,
-  ReactNode,
   WheelEvent,
   type CSSProperties,
   useEffect,
@@ -11,7 +9,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
   ArrowDown,
@@ -30,6 +27,8 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import { LibraryAssetPickerRail } from "../library-asset-picker/LibraryAssetPickerRail";
+import type { LibraryAssetSelection } from "../library-asset-picker/types";
 import {
   commitFreeCanvasDocumentChange,
   redoFreeCanvasHistory,
@@ -102,62 +101,8 @@ const CANVAS_PRESETS = [
 
 const VIEWPORT_SCALE_MIN = 0.25;
 const VIEWPORT_SCALE_MAX = 4;
-const ASSET_RAIL_MIN = 180;
-const ASSET_RAIL_MAX = 760;
-const ASSET_RAIL_DEFAULT = 320;
-const ASSET_PREVIEW_MAX_WIDTH = 360;
-const ASSET_PREVIEW_MAX_HEIGHT = 520;
-const ASSET_PREVIEW_OFFSET = 18;
 const DRAG_DISTANCE = 3;
 const TEXT_CREATE_MIN_WIDTH = 96;
-
-export interface ComposerAsset {
-  id: string;
-  name: string;
-  asset_id?: string | null;
-  asset_url: string | null;
-  updated_at?: string;
-}
-
-export interface ComposerAssetChoice {
-  id: string;
-  name: string;
-  asset_id?: string | null;
-  asset_url: string | null;
-  updated_at?: string;
-}
-
-export interface ComposerTag {
-  id: string;
-  name: string;
-}
-
-interface FreeCanvasEditorProps {
-  assets: ComposerAsset[];
-  tags: ComposerTag[];
-  activeTagId: string;
-  onTagChange: (tagId: string) => void;
-  onOpenTagManager?: () => void;
-  onLoadAssetChoices?: (assetId: string) => Promise<ComposerAssetChoice[]>;
-  assetTitle?: string;
-  railControls?: ReactNode;
-  assetAltText: string;
-  emptyText: string;
-  tagFilterLabel: string;
-  cardVariant?: "direct" | "choice";
-}
-
-interface AssetHoverPreview {
-  src: string;
-  x: number;
-  y: number;
-}
-
-interface AssetChoicePopoverState {
-  asset: ComposerAsset;
-  x: number;
-  y: number;
-}
 
 type ActiveTextTool = "fontSize" | "color";
 type ActiveCanvasTool = "select" | "text";
@@ -194,10 +139,6 @@ type StageInteraction =
     itemId: string;
     didDrag: boolean;
   };
-
-function getAssetUrl(asset: ComposerAsset | ComposerAssetChoice) {
-  return asset.asset_url ? `${asset.asset_url}?t=${encodeURIComponent(asset.updated_at || asset.asset_id || asset.id)}` : "";
-}
 
 function loadImage(src: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
@@ -260,26 +201,6 @@ function hasImageFileDrag(dataTransfer: DataTransfer) {
   return Array.from(dataTransfer.types || []).includes("Files");
 }
 
-function assetPreviewPosition(clientX: number, clientY: number) {
-  const margin = 12;
-  const viewportWidth = window.innerWidth || ASSET_PREVIEW_MAX_WIDTH;
-  const viewportHeight = window.innerHeight || ASSET_PREVIEW_MAX_HEIGHT;
-  let x = clientX + ASSET_PREVIEW_OFFSET;
-  let y = clientY + ASSET_PREVIEW_OFFSET;
-
-  if (x + ASSET_PREVIEW_MAX_WIDTH > viewportWidth - margin) {
-    x = clientX - ASSET_PREVIEW_MAX_WIDTH - ASSET_PREVIEW_OFFSET;
-  }
-  if (y + ASSET_PREVIEW_MAX_HEIGHT > viewportHeight - margin) {
-    y = clientY - ASSET_PREVIEW_MAX_HEIGHT - ASSET_PREVIEW_OFFSET;
-  }
-
-  return {
-    x: clamp(x, margin, Math.max(margin, viewportWidth - ASSET_PREVIEW_MAX_WIDTH - margin)),
-    y: clamp(y, margin, Math.max(margin, viewportHeight - ASSET_PREVIEW_MAX_HEIGHT - margin)),
-  };
-}
-
 function createImageItem({
   id,
   name,
@@ -333,75 +254,7 @@ function constrainMovedItemPosition(item: FreeCanvasEditorItem, x: number, y: nu
   };
 }
 
-function AssetHoverPreviewLayer({ preview }: { preview: AssetHoverPreview | null }) {
-  if (!preview || typeof document === "undefined") return null;
-
-  return createPortal(
-    <div className="free-canvas-editor__asset-preview" style={{ left: `${preview.x}px`, top: `${preview.y}px` }} aria-hidden="true">
-      <img src={preview.src} alt="" draggable={false} />
-    </div>,
-    document.body,
-  );
-}
-
-function AssetChoicePopover({
-  state,
-  choices,
-  loading,
-  error,
-  emptyText,
-  onSelect,
-}: {
-  state: AssetChoicePopoverState | null;
-  choices: ComposerAssetChoice[];
-  loading: boolean;
-  error: string;
-  emptyText: string;
-  onSelect: (choice: ComposerAssetChoice) => void;
-}) {
-  const { t } = useTranslation();
-  if (!state || typeof document === "undefined") return null;
-
-  return createPortal(
-    <div
-      className="free-canvas-editor__choice-popover"
-      role="dialog"
-      aria-label={t("freeCanvasEditor.imageChoices", { name: state.asset.name })}
-      style={{ left: `${state.x}px`, top: `${state.y}px` }}
-      onPointerDown={(event) => event.stopPropagation()}
-    >
-      <div className="free-canvas-editor__choice-grid">
-        {loading ? <div className="free-canvas-editor__choice-empty">{t("freeCanvasEditor.loadingImages")}</div> : null}
-        {error ? <div className="free-canvas-editor__choice-empty">{t("freeCanvasEditor.loadFailed", { message: error })}</div> : null}
-        {!loading && !error && !choices.length ? <div className="free-canvas-editor__choice-empty">{emptyText}</div> : null}
-        {!loading && !error ? choices.map((choice) => {
-          const src = getAssetUrl(choice);
-          return (
-            <button key={choice.id} type="button" disabled={!src} onClick={() => onSelect(choice)}>
-              {src ? <img src={src} alt={choice.name} loading="lazy" draggable={false} /> : <span>{t("common.empty.noImage")}</span>}
-            </button>
-          );
-        }) : null}
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-export function FreeCanvasEditor({
-  assets,
-  tags,
-  activeTagId,
-  onTagChange,
-  onOpenTagManager,
-  onLoadAssetChoices,
-  assetTitle,
-  railControls,
-  assetAltText,
-  emptyText,
-  tagFilterLabel,
-  cardVariant = "direct",
-}: FreeCanvasEditorProps) {
+export function FreeCanvasEditor() {
   const { t } = useTranslation();
   const items = useFreeCanvasStore((state) => state.items);
   const addItem = useFreeCanvasStore((state) => state.addItem);
@@ -417,11 +270,6 @@ export function FreeCanvasEditor({
   const [exporting, setExporting] = useState(false);
   const [copying, setCopying] = useState(false);
   const [exportError, setExportError] = useState("");
-  const [assetHoverPreview, setAssetHoverPreview] = useState<AssetHoverPreview | null>(null);
-  const [choicePopover, setChoicePopover] = useState<AssetChoicePopoverState | null>(null);
-  const [assetChoices, setAssetChoices] = useState<ComposerAssetChoice[]>([]);
-  const [assetChoicesLoading, setAssetChoicesLoading] = useState(false);
-  const [assetChoicesError, setAssetChoicesError] = useState("");
   const [activeTextTool, setActiveTextTool] = useState<{ itemId: string; tool: ActiveTextTool } | null>(null);
   const [activeCanvasTool, setActiveCanvasTool] = useState<ActiveCanvasTool>("select");
   const [editingTextItemId, setEditingTextItemId] = useState("");
@@ -434,8 +282,6 @@ export function FreeCanvasEditor({
   const [stageSize, setStageSize] = useState<FreeCanvasSize>({ width: 0, height: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [isFileDropActive, setIsFileDropActive] = useState(false);
-  const [assetRailWidth, setAssetRailWidth] = useState(ASSET_RAIL_DEFAULT);
-  const [isResizingRail, setIsResizingRail] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasSizePanelRef = useRef<HTMLDivElement | null>(null);
@@ -444,7 +290,6 @@ export function FreeCanvasEditor({
   const interactionRef = useRef<StageInteraction | null>(null);
   const textEditDocumentRef = useRef<ReturnType<typeof snapshotFreeCanvasDocument> | null>(null);
   const textDoubleClickRef = useRef<{ itemId: string; time: number; x: number; y: number } | null>(null);
-  const railResizeRef = useRef<{ pointerId: number; startClientX: number; startWidth: number } | null>(null);
 
   const canvasPreset = CANVAS_PRESETS.find((preset) => preset.key === canvasAspectKey) || CANVAS_PRESETS[0];
   const canvasSize = canvasPreset.sizes.find((size) => size.key === canvasSizeKey) || canvasPreset.sizes[0];
@@ -505,28 +350,6 @@ export function FreeCanvasEditor({
   }, []);
 
   useEffect(() => {
-    if (!choicePopover) return;
-    function closeChoicePopover() {
-      setChoicePopover(null);
-    }
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") closeChoicePopover();
-    }
-    window.addEventListener("pointerdown", closeChoicePopover);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", closeChoicePopover);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [choicePopover]);
-
-  useEffect(() => {
-    setChoicePopover(null);
-    setAssetChoices([]);
-    setAssetChoicesError("");
-  }, [assets]);
-
-  useEffect(() => {
     if (selectedItemId && !items.some((item) => item.id === selectedItemId)) setSelectedItemId("");
     if (editingTextItemId && !items.some((item) => item.id === editingTextItemId && item.type === "text")) setEditingTextItemId("");
     if (activeTextTool && !items.some((item) => item.id === activeTextTool.itemId && item.type === "text")) setActiveTextTool(null);
@@ -536,46 +359,21 @@ export function FreeCanvasEditor({
     if (activeTextTool && activeTextTool.itemId !== selectedItemId) setActiveTextTool(null);
   }, [activeTextTool, selectedItemId]);
 
-  useEffect(() => {
-    if (!isResizingRail) return;
-    function handlePointerMove(event: globalThis.PointerEvent) {
-      const resize = railResizeRef.current;
-      if (!resize) return;
-      setAssetRailWidth(clamp(resize.startWidth + event.clientX - resize.startClientX, ASSET_RAIL_MIN, ASSET_RAIL_MAX));
-    }
-    function stopPointerResize() {
-      railResizeRef.current = null;
-      setIsResizingRail(false);
-    }
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopPointerResize);
-    window.addEventListener("pointercancel", stopPointerResize);
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopPointerResize);
-      window.removeEventListener("pointercancel", stopPointerResize);
-    };
-  }, [isResizingRail]);
-
   function getCanvasPoint(event: { clientX: number; clientY: number }) {
     const rect = stageRef.current?.getBoundingClientRect();
     if (!rect) return null;
     return screenToCanvasPoint(event.clientX, event.clientY, rect, canvasSize, canvasFitScale, viewport);
   }
 
-  function updateAssetHoverPreview(event: ReactMouseEvent<HTMLButtonElement>, src: string) {
-    setAssetHoverPreview({ src, ...assetPreviewPosition(event.clientX, event.clientY) });
-  }
-
-  function addAsset(asset: ComposerAsset | ComposerAssetChoice, fallbackName = assetAltText, point?: { x: number; y: number }) {
+  function addAsset(selection: LibraryAssetSelection, point?: { x: number; y: number }) {
     if (editingTextItemId) stopTextEditing();
-    const src = getAssetUrl(asset);
+    const src = selection.url ? `${selection.url}?t=${encodeURIComponent(selection.updatedAt || selection.assetId || selection.entryId)}` : "";
     if (!src) return;
     const maxZIndex = Math.max(...items.map((item) => item.zIndex), 0);
     const item = createImageItem({
-      id: `${asset.id}-${Date.now()}`,
-      assetId: asset.id,
-      name: asset.name || fallbackName,
+      id: `${selection.kind}-${selection.entryId}-${Date.now()}`,
+      assetId: selection.assetId || selection.entryId,
+      name: selection.name || "Library image",
       src,
       canvasSize,
       point,
@@ -637,31 +435,6 @@ export function FreeCanvasEditor({
       setEditingTextItemId(item.id);
     }
     return item;
-  }
-
-  async function openAssetChoices(event: ReactMouseEvent<HTMLButtonElement>, asset: ComposerAsset) {
-    if (!onLoadAssetChoices) return;
-    event.stopPropagation();
-    setAssetHoverPreview(null);
-    const rect = event.currentTarget.getBoundingClientRect();
-    const popoverWidth = 360;
-    const popoverHeight = 420;
-    const margin = 12;
-    setChoicePopover({
-      asset,
-      x: clamp(rect.right + 10, margin, Math.max(margin, window.innerWidth - popoverWidth - margin)),
-      y: clamp(rect.top, margin, Math.max(margin, window.innerHeight - popoverHeight - margin)),
-    });
-    setAssetChoices([]);
-    setAssetChoicesError("");
-    setAssetChoicesLoading(true);
-    try {
-      setAssetChoices(await onLoadAssetChoices(asset.id));
-    } catch (error) {
-      setAssetChoicesError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setAssetChoicesLoading(false);
-    }
   }
 
   function addDroppedFiles(files: File[], point?: { x: number; y: number }) {
@@ -1082,37 +855,6 @@ export function FreeCanvasEditor({
     }
   }
 
-  function startRailResize(event: PointerEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    railResizeRef.current = { pointerId: event.pointerId, startClientX: event.clientX, startWidth: assetRailWidth };
-    setIsResizingRail(true);
-  }
-
-  function handleRailResizeMove(event: PointerEvent<HTMLButtonElement>) {
-    const resize = railResizeRef.current;
-    if (!resize || resize.pointerId !== event.pointerId) return;
-    setAssetRailWidth(clamp(resize.startWidth + event.clientX - resize.startClientX, ASSET_RAIL_MIN, ASSET_RAIL_MAX));
-  }
-
-  function stopRailResize(event: PointerEvent<HTMLButtonElement>) {
-    const resize = railResizeRef.current;
-    if (!resize || resize.pointerId !== event.pointerId) return;
-    railResizeRef.current = null;
-    setIsResizingRail(false);
-  }
-
-  function handleRailResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
-    event.preventDefault();
-    if (event.key === "Home") setAssetRailWidth(ASSET_RAIL_MIN);
-    else if (event.key === "End") setAssetRailWidth(ASSET_RAIL_MAX);
-    else {
-      const step = event.shiftKey ? 64 : 20;
-      setAssetRailWidth((currentWidth) => clamp(currentWidth + (event.key === "ArrowRight" ? step : -step), ASSET_RAIL_MIN, ASSET_RAIL_MAX));
-    }
-  }
-
   async function renderCanvasBlob() {
     const canvas = document.createElement("canvas");
     canvas.width = canvasSize.width;
@@ -1187,82 +929,7 @@ export function FreeCanvasEditor({
   }
 
   return (
-    <div
-      className={`free-canvas-editor${isResizingRail ? " resizing-rail" : ""}`}
-      style={{ "--free-canvas-asset-rail-width": `${assetRailWidth}px` } as CSSProperties}
-      onKeyDown={handleEditorKeyDown}
-    >
-      <aside className="free-canvas-editor__asset-rail" aria-label={assetTitle || tagFilterLabel}>
-        <div className="free-canvas-editor__rail-head">
-          <strong>{assetTitle || tagFilterLabel}</strong>
-          {onOpenTagManager ? (
-            <button type="button" aria-label={tagFilterLabel} title={tagFilterLabel} onClick={onOpenTagManager}>
-              <Layers size={18} aria-hidden="true" />
-            </button>
-          ) : null}
-        </div>
-        {railControls ? <div className="free-canvas-editor__rail-controls">{railControls}</div> : null}
-        <div className="free-canvas-editor__tag-row" aria-label={tagFilterLabel}>
-          <button type="button" className={!activeTagId ? "active" : ""} onClick={() => onTagChange("")}>
-            {t("common.empty.all")}
-          </button>
-          {tags.map((tag) => (
-            <button key={tag.id} type="button" className={activeTagId === tag.id ? "active" : ""} onClick={() => onTagChange(tag.id)}>
-              {tag.name}
-            </button>
-          ))}
-        </div>
-        <div className="free-canvas-editor__asset-list">
-          {assets.map((asset) => {
-            const src = getAssetUrl(asset);
-            const isChoiceCard = cardVariant === "choice";
-            return (
-              <button
-                key={asset.id}
-                className={`free-canvas-editor__asset${isChoiceCard ? " free-canvas-editor__asset--named" : ""}`}
-                type="button"
-                disabled={!isChoiceCard && !src}
-                onClick={(event) => {
-                  if (isChoiceCard) {
-                    openAssetChoices(event, asset);
-                    return;
-                  }
-                  addAsset(asset);
-                }}
-                onMouseEnter={(event) => {
-                  if (!isChoiceCard && src) updateAssetHoverPreview(event, src);
-                }}
-                onMouseMove={(event) => {
-                  if (!isChoiceCard && src) updateAssetHoverPreview(event, src);
-                }}
-                onMouseLeave={() => setAssetHoverPreview(null)}
-                onBlur={() => setAssetHoverPreview(null)}
-              >
-                {src ? <img src={src} alt={asset.name || assetAltText} loading="lazy" draggable={false} /> : <span className={isChoiceCard ? "free-canvas-editor__asset-placeholder" : ""}>{t("common.empty.noImage")}</span>}
-                {isChoiceCard ? <span className="free-canvas-editor__asset-name">{asset.name || assetAltText}</span> : null}
-              </button>
-            );
-          })}
-          {!assets.length ? <div className="free-canvas-editor__empty">{emptyText}</div> : null}
-        </div>
-      </aside>
-
-      <button
-        className="free-canvas-editor__rail-resizer"
-        type="button"
-        role="separator"
-        aria-label={t("freeCanvasEditor.resizeRail", { title: assetTitle || tagFilterLabel })}
-        aria-orientation="vertical"
-        aria-valuemin={ASSET_RAIL_MIN}
-        aria-valuemax={ASSET_RAIL_MAX}
-        aria-valuenow={assetRailWidth}
-        onPointerDown={startRailResize}
-        onPointerMove={handleRailResizeMove}
-        onPointerUp={stopRailResize}
-        onPointerCancel={stopRailResize}
-        onKeyDown={handleRailResizeKeyDown}
-      />
-
+    <div className="free-canvas-editor" onKeyDown={handleEditorKeyDown}>
       <main className="free-canvas-editor__stage-wrap">
         <div className="free-canvas-editor__stage-toolbar">
           <div className="free-canvas-editor__stage-settings" aria-label={t("freeCanvasEditor.canvasSettings")}>
@@ -1395,6 +1062,10 @@ export function FreeCanvasEditor({
           onDragLeave={handleStageDragLeave}
           onDrop={handleStageDrop}
         >
+          <div className="free-canvas-editor__library-panel" onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+            <LibraryAssetPickerRail onSelect={addAsset} />
+          </div>
+
           <div
             className="free-canvas-editor__canvas-shell"
             style={{
@@ -1604,18 +1275,6 @@ export function FreeCanvasEditor({
         {exportError ? <div className="free-canvas-editor__error">{t("freeCanvasEditor.exportFailed", { message: exportError })}</div> : null}
       </main>
 
-      <AssetHoverPreviewLayer preview={assetHoverPreview} />
-      <AssetChoicePopover
-        state={choicePopover}
-        choices={assetChoices}
-        loading={assetChoicesLoading}
-        error={assetChoicesError}
-        emptyText={t("freeCanvasEditor.noModelImages")}
-        onSelect={(choice) => {
-          addAsset(choice, choicePopover?.asset.name || assetAltText);
-          setChoicePopover(null);
-        }}
-      />
     </div>
   );
 }

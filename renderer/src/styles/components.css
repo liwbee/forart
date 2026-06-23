@@ -94,13 +94,12 @@
 :root.theme-dark .side-nav-item.active,
 :root.theme-dark .model-project-row.active,
 :root.theme-dark .outfit-view-switch button.active,
-:root.theme-dark .free-canvas-library-switch button.active,
-:root.theme-dark .free-canvas-editor__tag-row button.active,
-:root.theme-dark .gender-icon-filter.female.active,
-:root.theme-dark .gender-icon-filter.male.active,
+:root.theme-dark .library-asset-picker__tabs button.active,
+:root.theme-dark .library-tag-filter-trigger.active,
 :root.theme-dark .library-tag-filter button.active,
 :root.theme-dark .library-tag-more-button.active,
 :root.theme-dark .library-tag-overflow-menu button.active,
+:root.theme-dark .library-tag-filter-menu button.active,
 :root.theme-dark .model-tag-manager__list button.active,
 :root.theme-dark .library-modal-tags button.selected {
   color: var(--state-active-text);
@@ -119,11 +118,12 @@
 :root.theme-dark .side-nav-item.active:hover,
 :root.theme-dark .model-project-row.active:hover,
 :root.theme-dark .outfit-view-switch button.active:hover,
-:root.theme-dark .free-canvas-library-switch button.active:hover,
-:root.theme-dark .free-canvas-editor__tag-row button.active:hover,
+:root.theme-dark .library-asset-picker__tabs button.active:hover,
+:root.theme-dark .library-tag-filter-trigger.active:hover,
 :root.theme-dark .library-tag-filter button.active:hover,
 :root.theme-dark .library-tag-more-button.active:hover,
 :root.theme-dark .library-tag-overflow-menu button.active:hover,
+:root.theme-dark .library-tag-filter-menu button.active:hover,
 :root.theme-dark .model-tag-manager__list button.active:hover,
 :root.theme-dark .library-modal-tags button.selected:hover {
   background: var(--state-active-hover-bg);
@@ -177,6 +177,95 @@
 
 .button.danger.confirming {
   background: var(--danger-soft);
+}
+
+.library-tag-filter-trigger {
+  flex: 0 0 38px;
+  width: 38px;
+  min-height: 38px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--button-functional-border);
+  border-radius: 12px;
+  padding: 0;
+  background: var(--button-functional-bg);
+  color: var(--button-functional-muted-text);
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.library-tag-filter-trigger:hover,
+.library-tag-filter-trigger:focus-visible {
+  border-color: var(--button-functional-hover-border);
+  background: var(--button-functional-hover-bg);
+  color: var(--button-functional-text);
+  outline: 0;
+}
+
+.library-tag-filter-trigger.active {
+  border-color: var(--state-active-border);
+  background: var(--state-active-bg);
+  color: var(--state-active-text);
+}
+
+.library-tag-filter-menu {
+  position: fixed;
+  z-index: 1500;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 8px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-popover);
+}
+
+.library-tag-filter-menu button {
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.library-tag-filter-menu button:hover,
+.library-tag-filter-menu button:focus-visible {
+  border-color: var(--button-functional-hover-border);
+  background: var(--button-functional-hover-bg);
+  color: var(--button-functional-text);
+  outline: 0;
+}
+
+.library-tag-filter-menu button.active {
+  border-color: var(--state-active-border);
+  background: var(--state-active-bg);
+  color: var(--state-active-text);
+}
+
+.library-tag-filter-menu__empty {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .tag-create-row {

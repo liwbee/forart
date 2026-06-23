@@ -140,6 +140,9 @@ export function Select({
       role="listbox"
       aria-label={ariaLabel}
       style={portal ? portalMenuStyle : { maxHeight: maxMenuHeight }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
     >
       {options.map((option) => {
         const selected = option.value === selectedOption.value;

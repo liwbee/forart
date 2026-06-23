@@ -275,6 +275,13 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
     return { ok: true, apiSettings };
   });
 
+  ipcMain.handle('config:load-image-review-settings', async () => configStore.loadImageReviewSettings());
+
+  ipcMain.handle('config:save-image-review-settings', async (_event, payload) => {
+    const imageReview = configStore.saveImageReviewSettings(payload);
+    return { ok: true, imageReview };
+  });
+
   ipcMain.handle('config:default-paths', async () => ({
     imageDownloadPath: app.getPath('downloads'),
   }));

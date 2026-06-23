@@ -8,7 +8,7 @@ import type { CanvasHomeMode, CanvasSortMode, HomeCanvasRecord, LibtvImportCardR
 
 const uid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 9)}_${Date.now().toString(36)}`;
 const GROUP_PADDING = 32;
-const CANVAS_NODE_TYPES = ["imageGenerator", "image", "prompt", "loop", "llm", "libtvImage", "libtvPrompt", "libtvUpload"] as const;
+const CANVAS_NODE_TYPES = ["imageGenerator", "image", "prompt", "llm", "libtvImage", "libtvPrompt", "libtvUpload"] as const;
 const LAST_CANVAS_ID_KEY = "forart_infinite_canvas_last_canvas_id";
 const LAST_CANVAS_HOME_KEY = "forart_infinite_canvas_show_home";
 

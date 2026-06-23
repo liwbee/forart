@@ -12,6 +12,13 @@ function normalizeConfig(payload = {}) {
   };
 }
 
+function normalizeImageReviewSettings(payload = {}) {
+  return {
+    modelFolders: String(payload.modelFolders || '').trim(),
+    detailFolders: String(payload.detailFolders || '').trim(),
+  };
+}
+
 function normalizeApiProvider(input = {}, providers = []) {
   const name = String(input.name || 'API').trim() || 'API';
   const base = (String(input.id || name || 'custom-api')
@@ -124,6 +131,16 @@ function createConfigStore({ app, rootDir }) {
     return config;
   }
 
+  function loadImageReviewSettings() {
+    return normalizeImageReviewSettings(readRaw().imageReview || {});
+  }
+
+  function saveImageReviewSettings(payload) {
+    const imageReview = normalizeImageReviewSettings(payload);
+    writeRaw({ ...readRaw(), imageReview });
+    return imageReview;
+  }
+
   function loadApiSettings() {
     return normalizeApiSettings(readRaw().apiSettings || {});
   }
@@ -139,11 +156,12 @@ function createConfigStore({ app, rootDir }) {
     return settings.providers.find((provider) => provider.id === providerId) || null;
   }
 
-  return { getProvider, load, loadApiSettings, readRaw, save, saveApiSettings, writeRaw };
+  return { getProvider, load, loadApiSettings, loadImageReviewSettings, readRaw, save, saveApiSettings, saveImageReviewSettings, writeRaw };
 }
 
 module.exports = {
   createConfigStore,
   normalizeApiSettings,
   normalizeConfig,
+  normalizeImageReviewSettings,
 };

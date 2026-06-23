@@ -3,8 +3,8 @@ import type { TFunction } from "i18next";
 import type { LibtvModelOption } from "../../app/appConfig";
 import type { ApiProvider } from "../settings/apiProviders";
 import { generateChatWithProvider } from "./core/apiChatGeneration";
-import { collectReferenceImages, collectUpstreamPrompt } from "./core/workflow";
 import { fitImageNodeSize, readImageDimensions } from "./imageCrop";
+import { buildLlmNodeRequest } from "./llm/llmNodeRequest";
 import type { CanvasConnection, CanvasGroup, CanvasNode, CanvasProjectRecord, Viewport } from "./types";
 import { useCanvasGenerationPersistence } from "./generation/canvasGenerationPersistence";
 import { useImageGenerationActions } from "./generation/useImageGenerationActions";
@@ -215,18 +215,11 @@ export function useCanvasGenerationActions({
       patchNode(nodeId, { generationError: t("infiniteCanvas.noChatApiConfigured") });
       return;
     }
-    const upstreamPrompt = collectUpstreamPrompt(node, nodes, connections).trim();
-    const referenceImages = collectReferenceImages(node, nodes, connections);
-    if (!upstreamPrompt && !referenceImages.length) {
+    const request = buildLlmNodeRequest({ node, nodes, connections, t });
+    if (!request.hasInput) {
       patchNode(nodeId, { generationError: t("infiniteCanvas.llmInputRequired") });
       return;
     }
-    const instruction = (node.variablePrompt || t("infiniteCanvas.llmDefaultInstruction")).trim();
-    const prompt = [
-      instruction,
-      upstreamPrompt ? `${t("infiniteCanvas.llmInputLabel")}\n${upstreamPrompt}` : "",
-      referenceImages.length ? t("infiniteCanvas.llmImageInputHint") : "",
-    ].filter(Boolean).join("\n\n");
 
     const abortController = new AbortController();
     generationAbortControllersRef.current[nodeId]?.abort();
@@ -240,7 +233,7 @@ export function useCanvasGenerationActions({
     });
 
     try {
-      const text = await generateChatWithProvider({ provider, model, prompt, referenceImages, signal: abortController.signal });
+      const text = await generateChatWithProvider({ provider, model, prompt: request.prompt, referenceImages: request.referenceImages, signal: abortController.signal });
       if (abortController.signal.aborted) throw new DOMException("Aborted", "AbortError");
       patchNode(nodeId, {
         text,

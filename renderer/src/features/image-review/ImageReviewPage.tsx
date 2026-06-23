@@ -1,6 +1,6 @@
 import { PointerEvent, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type MutableRefObject, type WheelEvent as ReactWheelEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Flag, FolderOpen, ImageOff, Save, Search, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleHelp, Flag, FolderOpen, ImageOff, Save, Search, X } from "lucide-react";
 
 type ImageGroupKey = "model" | "detail";
 
@@ -97,11 +97,15 @@ function reviewRootDisplayName(path: string) {
 function RootFolderPicker({
   selectedRoot,
   loading,
+  modelFolderName,
+  detailFolderName,
   onChoose,
   onScan,
 }: {
   selectedRoot: string;
   loading: boolean;
+  modelFolderName: string;
+  detailFolderName: string;
   onChoose: () => void;
   onScan: () => void;
 }) {
@@ -121,6 +125,31 @@ function RootFolderPicker({
         <button className="button secondary review-folder-button" type="button" disabled={loading || !selectedRoot} onClick={onScan}>
           <span>{loading ? t("imageReview.scanning") : t("imageReview.refresh")}</span>
         </button>
+        <div className="review-folder-guide">
+          <button className="button secondary review-folder-guide-button" type="button" aria-label={t("imageReview.pathGuideTitle")}>
+            <CircleHelp size={18} aria-hidden="true" />
+          </button>
+          <div className="review-folder-guide-popover" role="tooltip">
+            <div className="review-folder-guide-tree" aria-label={t("imageReview.pathGuideStructureLabel")}>
+              <div className="review-folder-guide-node review-folder-guide-node--root">
+                <span>{t("imageReview.pathGuideRootFolder")}</span>
+              </div>
+              <div className="review-folder-guide-branch">
+                <div className="review-folder-guide-node">
+                  <span>{t("imageReview.pathGuideProductFolder")}</span>
+                </div>
+                <div className="review-folder-guide-children">
+                  <div className="review-folder-guide-node review-folder-guide-node--model">
+                    <span>{modelFolderName || t("imageReview.defaultModelFolder")}</span>
+                  </div>
+                  <div className="review-folder-guide-node review-folder-guide-node--detail">
+                    <span>{detailFolderName || t("imageReview.defaultDetailFolder")}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -646,13 +675,13 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
 }));
 
 export function ImageReviewPage() {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
   const [selectedReviewRoot, setSelectedReviewRoot] = useState("");
   const [products, setProducts] = useState<ReviewProduct[]>([]);
   const [activeProductId, setActiveProductId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [modelFolderValue, setModelFolderValue] = useState(t("imageReview.defaultModelFolder"));
-  const [detailFolderValue, setDetailFolderValue] = useState(t("imageReview.defaultDetailFolder"));
+  const [modelFolderValue, setModelFolderValue] = useState(() => t("imageReview.defaultModelFolder"));
+  const [detailFolderValue, setDetailFolderValue] = useState(() => t("imageReview.defaultDetailFolder"));
   const [activeImageGroup, setActiveImageGroup] = useState<ImageGroupKey>("detail");
   const [folderLoading, setFolderLoading] = useState(false);
   const [productImagesLoading, setProductImagesLoading] = useState(false);
@@ -660,6 +689,9 @@ export function ImageReviewPage() {
   const [productListVersion, setProductListVersion] = useState(0);
   const modelPaneRef = useRef<ProductImagePaneHandle | null>(null);
   const detailPaneRef = useRef<ProductImagePaneHandle | null>(null);
+  const settingsLoadedRef = useRef(false);
+  const hasSavedFolderSettingsRef = useRef(false);
+  const folderSettingsDirtyRef = useRef(false);
 
   const activeProduct = useMemo(
     () => products.find((product) => product.id === activeProductId) || products[0] || null,
@@ -676,6 +708,14 @@ export function ImageReviewPage() {
     const pane = activeImageGroup === "model" ? modelPaneRef.current : detailPaneRef.current;
     pane?.goImages(direction);
   }, [activeImageGroup]);
+  const changeModelFolderValue = useCallback((value: string) => {
+    folderSettingsDirtyRef.current = true;
+    setModelFolderValue(value);
+  }, []);
+  const changeDetailFolderValue = useCallback((value: string) => {
+    folderSettingsDirtyRef.current = true;
+    setDetailFolderValue(value);
+  }, []);
   const scanReviewDirectory = useCallback(async (rootPath = selectedReviewRoot) => {
     setFolderError("");
     if (!rootPath) {
@@ -714,6 +754,49 @@ export function ImageReviewPage() {
   const refreshReviewDirectory = useCallback(async () => {
     await scanReviewDirectory();
   }, [scanReviewDirectory]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadFolderSettings() {
+      const settings = await window.forartConfig?.loadImageReviewSettings?.().catch(() => null);
+      if (ignore) return;
+      const savedModelFolders = String(settings?.modelFolders || "").trim();
+      const savedDetailFolders = String(settings?.detailFolders || "").trim();
+      hasSavedFolderSettingsRef.current = Boolean(savedModelFolders || savedDetailFolders);
+      folderSettingsDirtyRef.current = false;
+      setModelFolderValue(savedModelFolders || t("imageReview.defaultModelFolder"));
+      setDetailFolderValue(savedDetailFolders || t("imageReview.defaultDetailFolder"));
+      settingsLoadedRef.current = true;
+    }
+
+    void loadFolderSettings();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!settingsLoadedRef.current || hasSavedFolderSettingsRef.current) return;
+    setModelFolderValue(t("imageReview.defaultModelFolder"));
+    setDetailFolderValue(t("imageReview.defaultDetailFolder"));
+  }, [i18n.language, t]);
+
+  useEffect(() => {
+    if (!settingsLoadedRef.current || !folderSettingsDirtyRef.current) return;
+    const timeout = window.setTimeout(() => {
+      const imageReview = {
+        modelFolders: modelFolderValue.trim(),
+        detailFolders: detailFolderValue.trim(),
+      };
+      void window.forartConfig?.saveImageReviewSettings?.(imageReview).then(() => {
+        hasSavedFolderSettingsRef.current = Boolean(imageReview.modelFolders || imageReview.detailFolders);
+      });
+    }, 450);
+
+    return () => window.clearTimeout(timeout);
+  }, [detailFolderValue, modelFolderValue]);
 
   useEffect(() => {
     if (!selectedReviewRoot) return;
@@ -817,6 +900,8 @@ export function ImageReviewPage() {
         <RootFolderPicker
           selectedRoot={selectedReviewRoot}
           loading={folderLoading}
+          modelFolderName={modelFolderValue}
+          detailFolderName={detailFolderValue}
           onChoose={chooseReviewRoot}
           onScan={refreshReviewDirectory}
         />
@@ -850,7 +935,7 @@ export function ImageReviewPage() {
                 folderValue={modelFolderValue}
                 images={modelImages}
                 resetKey={`${activeProduct?.id || ""}:model:${productListVersion}:${productImagesLoading ? "loading" : "ready"}`}
-                onFolderValueChange={setModelFolderValue}
+                onFolderValueChange={changeModelFolderValue}
                 onActivate={activateGroup}
                 onReportIssue={reportIssue}
                 onLoadIssue={loadIssue}
@@ -863,7 +948,7 @@ export function ImageReviewPage() {
                 folderValue={detailFolderValue}
                 images={detailImages}
                 resetKey={`${activeProduct?.id || ""}:detail:${productListVersion}:${productImagesLoading ? "loading" : "ready"}`}
-                onFolderValueChange={setDetailFolderValue}
+                onFolderValueChange={changeDetailFolderValue}
                 onActivate={activateGroup}
                 onReportIssue={reportIssue}
                 onLoadIssue={loadIssue}

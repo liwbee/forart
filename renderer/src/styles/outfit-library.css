@@ -340,6 +340,13 @@
   color: var(--danger);
 }
 
+.outfit-card-menu > button.danger:hover:not(:disabled),
+.outfit-card-menu > button.danger:focus-visible:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger) 34%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .outfit-card-menu > button.confirming {
   border-color: color-mix(in srgb, var(--danger) 36%, var(--button-functional-border));
   background: color-mix(in srgb, var(--danger) 10%, var(--button-functional-bg));

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Download, Languages, Layers3, LayoutTemplate, LibraryBig, Moon, RefreshCw, ScanSearch, Settings, Sun, Users, X, XCircle } from "lucide-react";
+import { CheckCircle2, Download, Languages, Layers3, LayoutTemplate, LibraryBig, Moon, PanelLeftClose, PanelLeftOpen, RefreshCw, ScanSearch, Settings, Sun, Users, X, XCircle } from "lucide-react";
 import { setActiveForartConfig } from "../data-source/runtime";
 import { ImageReviewPage } from "../features/image-review/ImageReviewPage";
 import { ResourceLibraryPage } from "../features/resource-library/ResourceLibraryPage";
@@ -140,6 +140,7 @@ export function App() {
   const [updateNotes, setUpdateNotes] = useState<ForartUpdateNotes | null>(null);
   const [connectivity, setConnectivity] = useState<ForartUpdateConnectivityResult | null>(null);
   const [connectivityChecking, setConnectivityChecking] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     document.title = appTitle;
@@ -174,7 +175,10 @@ export function App() {
     async function loadConfig() {
       const config = await window.forartConfig?.load();
       if (!canceled) {
-        if (config) setActiveForartConfig(config);
+        if (config) {
+          if (i18n.language !== config.language) void i18n.changeLanguage(config.language);
+          setActiveForartConfig(config);
+        }
         setAppConfig(config || null);
         setConfigLoaded(true);
       }
@@ -354,6 +358,8 @@ export function App() {
     : updateStatus === "current"
       ? `${currentLanguage === "zh-CN" ? "\u5df2\u662f\u6700\u65b0\u7248\u672c" : "Already up to date"} ${updateDateLabel}`
       : updateMessage || (currentLanguage === "zh-CN" ? updateText.connectivityWarn : "Check status before updating");
+  const sidebarToggleLabel = sidebarCollapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar");
+  const SidebarToggleIcon = sidebarCollapsed ? PanelLeftOpen : PanelLeftClose;
 
   const keepAliveViewsToRender = isKeepAliveView(activeView)
     ? new Set([...mountedKeepAliveViews, activeView])
@@ -378,13 +384,24 @@ export function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${sidebarCollapsed ? " app-shell--sidebar-collapsed" : ""}`}>
       <aside className="left-panel" aria-label={`${appTitle} navigation`}>
         <div className="side-head">
           <div className="brand" aria-label={appTitle}>
             <span className="brand-mark" aria-hidden="true" />
             <strong className="brand-name">{appTitle}</strong>
           </div>
+          <button
+            className="side-collapse-button"
+            type="button"
+            data-tooltip={sidebarToggleLabel}
+            aria-label={sidebarToggleLabel}
+            aria-expanded={!sidebarCollapsed}
+            title={sidebarToggleLabel}
+            onClick={() => setSidebarCollapsed((value) => !value)}
+          >
+            <SidebarToggleIcon size={20} aria-hidden="true" />
+          </button>
         </div>
 
         <nav className="side-nav" aria-label={t("app.mainNavigation")}>
@@ -397,6 +414,7 @@ export function App() {
                 className={`side-nav-item${isActive ? " active" : ""}`}
                 type="button"
                 data-short={t(item.shortKey)}
+                data-tooltip={t(item.labelKey)}
                 aria-current={isActive ? "page" : undefined}
                 onClick={() => setActiveView(item.id)}
               >
@@ -412,6 +430,7 @@ export function App() {
             className={`side-nav-item side-footer-button${activeView === "settings" ? " active" : ""}`}
             type="button"
             data-short={t("nav.short.settings")}
+            data-tooltip={t("nav.settings")}
             aria-current={activeView === "settings" ? "page" : undefined}
             onClick={() => setActiveView("settings")}
           >
@@ -423,6 +442,7 @@ export function App() {
             className="side-version-button"
             type="button"
             data-status={updateStatus}
+            data-tooltip={updateButtonTitle}
             disabled={updateStatus === "checking" || updateStatus === "updating"}
             aria-label={updateButtonTitle}
             title={updateButtonTitle}
@@ -437,6 +457,7 @@ export function App() {
               className="side-nav-item side-footer-button side-icon-button theme-toggle"
               type="button"
               data-short={theme === "dark" ? t("nav.short.light") : t("nav.short.dark")}
+              data-tooltip={theme === "dark" ? t("nav.theme.switchToLight") : t("nav.theme.switchToDark")}
               aria-pressed={theme === "dark"}
               aria-label={theme === "dark" ? t("nav.theme.switchToLight") : t("nav.theme.switchToDark")}
               title={theme === "dark" ? t("nav.theme.switchToLight") : t("nav.theme.switchToDark")}
@@ -448,6 +469,7 @@ export function App() {
             <button
               className="side-nav-item side-footer-button side-icon-button language-toggle"
               type="button"
+              data-tooltip={`${t("settings.language")}: ${nextLanguageLabel}`}
               aria-label={`${t("settings.language")}: ${nextLanguageLabel}`}
               title={`${t("settings.language")}: ${nextLanguageLabel}`}
               onClick={toggleLanguage}

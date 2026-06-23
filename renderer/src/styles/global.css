@@ -90,6 +90,8 @@
   --canvas-state-selected-text: var(--state-active-bg);
   --canvas-state-disabled-opacity: var(--state-disabled-opacity);
   --nav-width: 220px;
+  --nav-collapsed-width: 72px;
+  --app-nav-width: var(--nav-width);
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -414,7 +416,7 @@ body {
   min-height: 100%;
   height: 100%;
   padding: var(--space-5) var(--space-4) var(--space-4);
-  overflow: hidden;
+  overflow: visible;
   background: var(--surface-app);
 }
 
@@ -1866,46 +1868,86 @@ input[type="color"]:focus-visible {
 
 .app-shell {
   display: grid;
-  grid-template-columns: var(--nav-width) minmax(0, 1fr);
+  grid-template-columns: var(--app-nav-width) minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
+  transition: grid-template-columns 260ms var(--ease-fluid);
+}
+
+.app-shell--sidebar-collapsed {
+  --app-nav-width: var(--nav-collapsed-width);
 }
 
 .left-panel {
   position: sticky;
   top: 0;
+  z-index: 10;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   height: 100dvh;
-  padding: var(--space-4);
+  padding: var(--space-4) 14px;
   background: var(--surface-panel);
   border-right: 1px solid var(--border-subtle);
+  overflow: visible;
+  transition: padding 260ms var(--ease-fluid);
 }
 
 .side-head {
-  min-height: 48px;
+  min-height: 44px;
   display: flex;
   align-items: center;
+  gap: var(--space-2);
 }
 
 .brand {
+  min-width: 0;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  overflow: hidden;
 }
 
 .brand-mark {
   width: 30px;
   height: 30px;
+  flex: 0 0 30px;
   border-radius: var(--radius-sm);
   background: linear-gradient(135deg, #f45b69 0%, #ffd166 46%, #06d6a0 100%);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.38);
 }
 
 .brand-name {
+  min-width: 0;
+  overflow: hidden;
   font-size: 18px;
   font-weight: 800;
+  white-space: nowrap;
+}
+
+.side-collapse-button {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  color: var(--text-secondary);
+  background: transparent;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+.side-collapse-button:hover,
+.side-collapse-button:focus-visible {
+  color: var(--state-hover-text);
+  border-color: var(--state-hover-border);
+  background: var(--state-hover-bg);
 }
 
 .side-nav,
@@ -1927,17 +1969,17 @@ input[type="color"]:focus-visible {
 .side-version-button {
   min-height: 34px;
   width: 100%;
-  display: flex;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
-  gap: 7px;
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  padding: 0 var(--space-3);
+  padding: 0;
   color: var(--text-primary);
   background: color-mix(in srgb, var(--surface-card) 88%, var(--surface-app));
   text-align: center;
   cursor: pointer;
+  overflow: hidden;
 }
 
 .side-version-button:hover:not(:disabled),
@@ -1985,6 +2027,7 @@ input[type="color"]:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding-right: var(--space-3);
 }
 
 .side-version-main {
@@ -2025,15 +2068,20 @@ input[type="color"]:focus-visible {
 .side-nav-item {
   min-height: 44px;
   width: 100%;
-  display: flex;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
   align-items: center;
-  gap: var(--space-3);
   border: 1px solid transparent;
   border-radius: 20px;
-  padding: 0 var(--space-3);
+  padding: 0;
   color: var(--text-secondary);
   background: transparent;
   text-align: left;
+  overflow: hidden;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
 }
 
 .side-nav-item:hover {
@@ -2057,9 +2105,8 @@ input[type="color"]:focus-visible {
 }
 
 .side-icon-button {
-  justify-content: center;
-  gap: 6px;
-  padding: 0 var(--space-2);
+  grid-template-columns: 44px minmax(0, auto);
+  padding: 0;
 }
 
 .language-toggle__code {
@@ -2071,8 +2118,226 @@ input[type="color"]:focus-visible {
   text-align: center;
 }
 
+.brand-name,
+.nav-label,
+.side-version-main,
+.language-toggle__code {
+  transition:
+    opacity 180ms ease,
+    max-width 260ms var(--ease-fluid);
+}
+
+.nav-label,
+.side-version-main,
+.language-toggle__code {
+  max-width: 140px;
+}
+
+.nav-label {
+  min-width: 0;
+  padding-right: var(--space-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-name {
+  max-width: 116px;
+}
+
+.app-shell--sidebar-collapsed .left-panel {
+  gap: var(--space-4);
+  padding-inline: 14px;
+}
+
+.app-shell--sidebar-collapsed .side-head {
+  min-height: 44px;
+  justify-content: center;
+}
+
+.app-shell--sidebar-collapsed .brand {
+  display: none;
+}
+
+.app-shell--sidebar-collapsed .side-collapse-button {
+  display: inline-grid;
+}
+
+.app-shell--sidebar-collapsed .side-nav {
+  gap: var(--space-2);
+  grid-auto-rows: 44px;
+  align-content: start;
+}
+
+.app-shell--sidebar-collapsed .side-footer {
+  gap: var(--space-2);
+}
+
+.app-shell--sidebar-collapsed .side-nav-item,
+.app-shell--sidebar-collapsed .side-icon-button {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  grid-template-columns: 44px 0;
+  padding: 0;
+  justify-self: center;
+  overflow: visible;
+}
+
+.app-shell--sidebar-collapsed .side-version-button {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  grid-template-columns: 40px 0;
+  padding: 0;
+  justify-self: center;
+  overflow: visible;
+}
+
+.app-shell--sidebar-collapsed .side-version-icon {
+  display: block;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.app-shell--sidebar-collapsed .side-footer-control-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: start;
+  gap: var(--space-2);
+}
+
+.app-shell--sidebar-collapsed .side-footer-control-row .side-icon-button {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  grid-template-columns: 36px 0;
+  border-radius: 999px;
+  padding: 0;
+}
+
+.app-shell--sidebar-collapsed .side-footer-control-row .nav-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.app-shell--sidebar-collapsed .language-toggle {
+  display: grid;
+}
+
+.app-shell--sidebar-collapsed .side-collapse-button,
+.app-shell--sidebar-collapsed .side-nav-item,
+.app-shell--sidebar-collapsed .side-version-button,
+.app-shell--sidebar-collapsed .side-icon-button {
+  position: relative;
+}
+
+.app-shell--sidebar-collapsed .side-collapse-button::before,
+.app-shell--sidebar-collapsed .side-collapse-button::after,
+.app-shell--sidebar-collapsed .side-nav-item::before,
+.app-shell--sidebar-collapsed .side-nav-item::after,
+.app-shell--sidebar-collapsed .side-version-button::before,
+.app-shell--sidebar-collapsed .side-version-button::after,
+.app-shell--sidebar-collapsed .side-icon-button::before,
+.app-shell--sidebar-collapsed .side-icon-button::after {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  z-index: 50;
+  opacity: 0;
+  transform: translate(4px, -50%);
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.app-shell--sidebar-collapsed .side-collapse-button::before,
+.app-shell--sidebar-collapsed .side-nav-item::before,
+.app-shell--sidebar-collapsed .side-version-button::before,
+.app-shell--sidebar-collapsed .side-icon-button::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--surface-card);
+  border-left: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  transform: translate(0, -50%) rotate(45deg);
+  box-shadow: -4px 4px 10px rgba(15, 23, 42, 0.06);
+}
+
+.app-shell--sidebar-collapsed .side-collapse-button::after,
+.app-shell--sidebar-collapsed .side-nav-item::after,
+.app-shell--sidebar-collapsed .side-version-button::after,
+.app-shell--sidebar-collapsed .side-icon-button::after {
+  content: attr(data-tooltip);
+  min-width: max-content;
+  max-width: 180px;
+  margin-left: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-popover);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.app-shell--sidebar-collapsed .side-collapse-button:hover::before,
+.app-shell--sidebar-collapsed .side-collapse-button:hover::after,
+.app-shell--sidebar-collapsed .side-collapse-button:focus-visible::before,
+.app-shell--sidebar-collapsed .side-collapse-button:focus-visible::after,
+.app-shell--sidebar-collapsed .side-nav-item:hover::before,
+.app-shell--sidebar-collapsed .side-nav-item:hover::after,
+.app-shell--sidebar-collapsed .side-nav-item:focus-visible::before,
+.app-shell--sidebar-collapsed .side-nav-item:focus-visible::after,
+.app-shell--sidebar-collapsed .side-version-button:hover::before,
+.app-shell--sidebar-collapsed .side-version-button:hover::after,
+.app-shell--sidebar-collapsed .side-version-button:focus-visible::before,
+.app-shell--sidebar-collapsed .side-version-button:focus-visible::after,
+.app-shell--sidebar-collapsed .side-icon-button:hover::before,
+.app-shell--sidebar-collapsed .side-icon-button:hover::after,
+.app-shell--sidebar-collapsed .side-icon-button:focus-visible::before,
+.app-shell--sidebar-collapsed .side-icon-button:focus-visible::after {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+.app-shell--sidebar-collapsed .side-collapse-button:hover::before,
+.app-shell--sidebar-collapsed .side-collapse-button:focus-visible::before,
+.app-shell--sidebar-collapsed .side-nav-item:hover::before,
+.app-shell--sidebar-collapsed .side-nav-item:focus-visible::before,
+.app-shell--sidebar-collapsed .side-version-button:hover::before,
+.app-shell--sidebar-collapsed .side-version-button:focus-visible::before,
+.app-shell--sidebar-collapsed .side-icon-button:hover::before,
+.app-shell--sidebar-collapsed .side-icon-button:focus-visible::before {
+  transform: translate(0, -50%) rotate(45deg);
+}
+
+.app-shell--sidebar-collapsed .brand-name,
+.app-shell--sidebar-collapsed .nav-label,
+.app-shell--sidebar-collapsed .side-version-main,
+.app-shell--sidebar-collapsed .language-toggle__code {
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .nav-icon {
   flex: 0 0 auto;
+  justify-self: center;
+}
+
+.side-version-icon {
+  justify-self: center;
 }
 
 .workspace {

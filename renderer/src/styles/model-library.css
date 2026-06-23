@@ -486,15 +486,15 @@
 }
 
 .gender-icon-filter.female.active {
-  color: var(--state-active-text);
-  background: var(--state-active-bg);
-  border-color: var(--state-active-border);
+  color: #ffffff;
+  background: var(--female);
+  border-color: var(--female);
 }
 
 .gender-icon-filter.male.active {
-  color: var(--state-active-text);
-  background: var(--state-active-bg);
-  border-color: var(--state-active-border);
+  color: #ffffff;
+  background: var(--male);
+  border-color: var(--male);
 }
 
 .library-tag-filter button {

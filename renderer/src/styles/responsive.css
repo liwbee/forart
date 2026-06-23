@@ -1,6 +1,10 @@
 ﻿@media (max-width: 860px) {
   .app-shell {
-    grid-template-columns: 72px minmax(0, 1fr);
+    --app-nav-width: 72px;
+  }
+
+  .app-shell--sidebar-collapsed {
+    --app-nav-width: 72px;
   }
 
   .left-panel {
@@ -9,21 +13,38 @@
 
   .side-head,
   .brand {
-    justify-content: center;
+    justify-content: flex-start;
   }
 
-  .brand {
-    width: 100%;
+  .side-head {
+    min-height: 40px;
   }
 
   .brand-name,
-  .nav-label {
-    display: none;
+  .nav-label,
+  .side-version-main,
+  .language-toggle__code {
+    width: 0;
+    min-width: 0;
+    max-width: 0;
+    opacity: 0;
+    pointer-events: none;
   }
 
   .side-nav-item {
-    justify-content: center;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    grid-template-columns: 44px 0;
     padding: 0;
+    justify-self: center;
+  }
+
+  .side-footer-control-row {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
   }
 
   .workspace {
@@ -307,7 +328,11 @@
 
 @media (max-width: 380px) {
   .app-shell {
-    grid-template-columns: 64px minmax(0, 1fr);
+    --app-nav-width: 64px;
+  }
+
+  .app-shell--sidebar-collapsed {
+    --app-nav-width: 64px;
   }
 
   .left-panel,

@@ -36,6 +36,11 @@ export interface ForartApiSettingsConfig {
   defaultImageProviderId: string;
 }
 
+export interface ForartImageReviewSettings {
+  modelFolders: string;
+  detailFolders: string;
+}
+
 export interface ForartAppInfo {
   name: string;
   repoUrl: string;
@@ -94,6 +99,8 @@ export interface ForartConfigApi {
   save: (config: ForartAppConfig) => Promise<{ ok: true; config: ForartAppConfig }>;
   loadApiSettings: () => Promise<ForartApiSettingsConfig>;
   saveApiSettings: (settings: ForartApiSettingsConfig) => Promise<{ ok: true; apiSettings: ForartApiSettingsConfig }>;
+  loadImageReviewSettings: () => Promise<ForartImageReviewSettings>;
+  saveImageReviewSettings: (settings: ForartImageReviewSettings) => Promise<{ ok: true; imageReview: ForartImageReviewSettings }>;
   defaultPaths: () => Promise<{ imageDownloadPath: string }>;
   chooseDirectory: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
   testServer: (serverUrl: string) => Promise<{ ok: boolean; status?: number; error?: string; payload?: unknown }>;

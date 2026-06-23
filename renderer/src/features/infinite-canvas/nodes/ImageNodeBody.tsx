@@ -1,4 +1,4 @@
-import { Download, Sparkles, UploadCloud } from "lucide-react";
+import { Download, Images, Sparkles, UploadCloud } from "lucide-react";
 import { useEffect, useState, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { CanvasNode, CropRect } from "../types";
@@ -15,6 +15,7 @@ interface ImageNodeBodyProps {
   setFileInputRef: (input: HTMLInputElement | null) => void;
   onFiles: (files: FileList | File[]) => void;
   onUploadClick: () => void;
+  onLibraryClick: () => void;
   onPreview: () => void;
   onDownload: () => void;
   isDownloadBusy: boolean;
@@ -29,6 +30,7 @@ export function ImageNodeBody({
   setFileInputRef,
   onFiles,
   onUploadClick,
+  onLibraryClick,
   onPreview,
   onDownload,
   isDownloadBusy,
@@ -111,20 +113,36 @@ export function ImageNodeBody({
               }}
             />
             {!isGeneratorLike ? (
-              <button
-                className="ic-image-replace-button nodrag nopan"
-                type="button"
-                aria-label={t("common.actions.uploadImage")}
-                title={t("common.actions.uploadImage")}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onUploadClick();
-                }}
-              >
-                <UploadCloud size={14} aria-hidden="true" />
-              </button>
+              <div className="ic-image-source-actions nodrag nopan">
+                <button
+                  className="ic-image-replace-button"
+                  type="button"
+                  aria-label={t("common.actions.uploadImage")}
+                  title={t("common.actions.uploadImage")}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onUploadClick();
+                  }}
+                >
+                  <UploadCloud size={14} aria-hidden="true" />
+                </button>
+                <button
+                  className="ic-image-library-button"
+                  type="button"
+                  aria-label={t("infiniteCanvas.importFromLibrary")}
+                  title={t("infiniteCanvas.importFromLibrary")}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onLibraryClick();
+                  }}
+                >
+                  <Images size={14} aria-hidden="true" />
+                </button>
+              </div>
             ) : null}
             {showGeneratorDownload ? (
               <button
@@ -160,17 +178,32 @@ export function ImageNodeBody({
                 <span className="ic-upload-node-sub">{t(isLibtv ? "infiniteCanvas.libtvPromptPlaceholder" : "infiniteCanvas.imageGeneratorNodeEmptyAction")}</span>
               </>
             ) : (
-              <button
-                className="ic-upload-node-button nodrag nopan"
-                type="button"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onUploadClick();
-                }}
-              >
-                {t("infiniteCanvas.imageNode")}
-              </button>
+              <span className="ic-upload-node-actions nodrag nopan">
+                <button
+                  className="ic-upload-node-button"
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onUploadClick();
+                  }}
+                >
+                  <UploadCloud size={14} aria-hidden="true" />
+                  <span>{t("infiniteCanvas.imageNode")}</span>
+                </button>
+                <button
+                  className="ic-upload-node-button"
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onLibraryClick();
+                  }}
+                >
+                  <Images size={14} aria-hidden="true" />
+                  <span>{t("infiniteCanvas.libraryImageNode")}</span>
+                </button>
+              </span>
             )}
           </div>
         )}

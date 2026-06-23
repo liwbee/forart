@@ -71,6 +71,26 @@
   display: none;
 }
 
+.ic-library-rail-panel {
+  position: absolute;
+  left: 14px;
+  top: 58px;
+  bottom: 76px;
+  z-index: 72;
+  width: min(320px, calc(100% - 28px));
+  min-height: 0;
+  overflow: visible;
+  border: 1px solid var(--canvas-node-border);
+  border-radius: 14px;
+  background: var(--canvas-node-bg);
+  box-shadow: var(--shadow-ui);
+}
+
+.ic-library-rail-panel .library-asset-picker--rail {
+  height: 100%;
+  border-radius: inherit;
+}
+
 .ic-project-home {
   min-width: 0;
   min-height: 0;
@@ -1462,10 +1482,6 @@
   line-height: 1.45;
 }
 
-.ic-node--loop .ic-node-body textarea {
-  min-height: 54px;
-}
-
 .ic-node-body input,
 .ic-node-body select {
   min-height: 38px;
@@ -1610,12 +1626,21 @@
   background: var(--canvas-node-bg);
 }
 
-.ic-image-replace-button,
-.ic-image-download-button {
+.ic-image-source-actions {
   position: absolute;
   top: 10px;
   right: 10px;
   z-index: 5;
+  display: inline-flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.ic-image-replace-button,
+.ic-image-library-button,
+.ic-image-download-button {
+  position: relative;
   width: 30px;
   height: 30px;
   display: inline-grid;
@@ -1625,19 +1650,16 @@
   color: var(--canvas-state-hover-text);
   background: color-mix(in srgb, var(--canvas-node-bg) 82%, transparent);
   box-shadow: var(--shadow-ui);
-  opacity: 0;
   cursor: pointer;
   backdrop-filter: blur(10px);
   transition:
-    opacity 150ms ease,
     background 150ms ease,
     border-color 150ms ease;
 }
 
-.ic-image-drop.has-image:hover .ic-image-replace-button,
-.ic-image-drop.has-image:focus-within .ic-image-replace-button,
-.ic-node--libtvUpload .ic-image-replace-button,
-.ic-image-download-button,
+.ic-image-drop.has-image:hover .ic-image-source-actions,
+.ic-image-drop.has-image:focus-within .ic-image-source-actions,
+.ic-node--libtvUpload .ic-image-source-actions,
 .ic-image-drop.has-image:hover .ic-image-download-button,
 .ic-image-drop.has-image:focus-within .ic-image-download-button {
   opacity: 1;
@@ -1645,6 +1667,8 @@
 
 .ic-image-replace-button:hover,
 .ic-image-replace-button:focus-visible,
+.ic-image-library-button:hover,
+.ic-image-library-button:focus-visible,
 .ic-image-download-button:hover,
 .ic-image-download-button:focus-visible {
   border-color: var(--canvas-state-active-border);
@@ -1665,7 +1689,7 @@
 }
 
 .ic-upload-node-card.is-uploader {
-  gap: 16px;
+  gap: 12px;
 }
 
 .ic-upload-node-main {
@@ -1713,6 +1737,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   color: var(--canvas-state-hover-text);
   background: var(--canvas-control-bg);
   box-shadow: var(--shadow-ui);
@@ -1722,11 +1747,30 @@
   cursor: pointer;
 }
 
+.ic-upload-node-actions {
+  max-width: calc(100% - 20px);
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
 .ic-upload-node-button:hover,
 .ic-upload-node-button:focus-visible {
   border-color: var(--canvas-state-active-border);
   background: var(--canvas-state-hover-bg);
   outline: 0;
+}
+
+.ic-upload-node-button svg {
+  flex: 0 0 auto;
+}
+
+.ic-upload-node-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ic-upload-node-sub {
@@ -2142,6 +2186,7 @@
   left: auto;
   right: auto;
   bottom: auto;
+  z-index: 1400;
 }
 
 .ic-composer-select__menu::-webkit-scrollbar,
@@ -2601,6 +2646,7 @@
 }
 
 .ic-node-hover-toolbar button {
+  position: relative;
   width: 30px;
   min-width: 30px;
   height: 30px;
@@ -2610,6 +2656,83 @@
   border-radius: 6px;
   color: var(--canvas-node-muted);
   background: transparent;
+}
+
+.ic-node-hover-toolbar button[data-tooltip]::before,
+.ic-control-bar button[data-tooltip]::before {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  z-index: 120;
+  width: max-content;
+  max-width: 180px;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 10px;
+  color: var(--text-primary);
+  background: var(--surface-control);
+  box-shadow: none;
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  transform: translateX(-50%) translateY(4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.ic-node-hover-toolbar button[data-tooltip]::after,
+.ic-control-bar button[data-tooltip]::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  z-index: 119;
+  width: 10px;
+  height: 7px;
+  background: var(--surface-control);
+  clip-path: polygon(50% 100%, 0 0, 100% 0);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.ic-node-hover-toolbar button[data-tooltip]::before {
+  bottom: calc(100% + 9px);
+}
+
+.ic-node-hover-toolbar button[data-tooltip]::after {
+  bottom: calc(100% + 5px);
+}
+
+.ic-node-hover-toolbar button[data-tooltip]:hover::before,
+.ic-node-hover-toolbar button[data-tooltip]:focus-visible::before,
+.ic-node-hover-toolbar button[data-tooltip]:hover::after,
+.ic-node-hover-toolbar button[data-tooltip]:focus-visible::after,
+.ic-control-bar button[data-tooltip]:hover::before,
+.ic-control-bar button[data-tooltip]:focus-visible::before,
+.ic-control-bar button[data-tooltip]:hover::after,
+.ic-control-bar button[data-tooltip]:focus-visible::after {
+  opacity: 1;
+}
+
+.ic-node-hover-toolbar button[data-tooltip]:hover::before,
+.ic-node-hover-toolbar button[data-tooltip]:focus-visible::before {
+  transform: translateX(-50%) translateY(0);
+}
+
+.ic-node-hover-toolbar button[data-tooltip]:hover::after,
+.ic-node-hover-toolbar button[data-tooltip]:focus-visible::after {
+  transform: translateX(-50%) translateY(0);
 }
 
 .ic-node-hover-toolbar--crop {
@@ -2796,6 +2919,7 @@
 
 .ic-control-bar button,
 .ic-zoom-popover button {
+  position: relative;
   width: 36px;
   min-width: 36px;
   height: 36px;
@@ -2812,6 +2936,24 @@
   transition:
     background 150ms ease,
     color 150ms ease;
+}
+
+.ic-control-bar button[data-tooltip]::before {
+  bottom: calc(100% + 10px);
+}
+
+.ic-control-bar button[data-tooltip]::after {
+  bottom: calc(100% + 6px);
+}
+
+.ic-control-bar button[data-tooltip]:hover::before,
+.ic-control-bar button[data-tooltip]:focus-visible::before {
+  transform: translateX(-50%) translateY(0);
+}
+
+.ic-control-bar button[data-tooltip]:hover::after,
+.ic-control-bar button[data-tooltip]:focus-visible::after {
+  transform: translateX(-50%) translateY(0);
 }
 
 .ic-control-bar button:hover,

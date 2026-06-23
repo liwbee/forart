@@ -1,4 +1,4 @@
-export type CanvasNodeType = "imageGenerator" | "image" | "prompt" | "loop" | "llm" | "libtvImage" | "libtvPrompt" | "libtvUpload";
+export type CanvasNodeType = "imageGenerator" | "image" | "prompt" | "llm" | "libtvImage" | "libtvPrompt" | "libtvUpload";
 
 export interface CanvasNode {
   id: string;
@@ -15,6 +15,12 @@ export interface CanvasNode {
   imageNaturalHeight?: number;
   imageMode?: "imageGenerator" | "asset";
   imageSource?: "generated" | "uploaded";
+  librarySource?: {
+    kind: "model" | "outfit" | "action";
+    assetId?: string | null;
+    entryId?: string;
+    name?: string;
+  };
   imageProviderId?: string;
   imageModel?: string;
   imageResolution?: "1k" | "2k" | "4k";
@@ -32,8 +38,6 @@ export interface CanvasNode {
   generationStatus?: string;
   generationTask?: CanvasGenerationTask;
   text?: string;
-  count?: number;
-  mode?: "serial" | "batch";
   fixedPrompt?: string;
   variablePrompt?: string;
   running?: boolean;

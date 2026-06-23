@@ -140,6 +140,158 @@
   gap: var(--space-2);
 }
 
+.review-folder-guide {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+.review-folder-guide-button {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+}
+
+.review-folder-guide-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 80;
+  width: min(330px, calc(100vw - 32px));
+  display: grid;
+  gap: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 16px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-popover);
+  color: var(--state-hover-text);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.review-folder-guide:hover .review-folder-guide-popover,
+.review-folder-guide:focus-within .review-folder-guide-popover {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.review-folder-guide-popover strong {
+  color: var(--state-hover-text);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.review-folder-guide-popover p,
+.review-folder-guide-popover em,
+.review-folder-guide-node span {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.review-folder-guide-popover p {
+  color: var(--text-secondary);
+}
+
+.review-folder-guide-tree {
+  display: grid;
+  gap: 14px;
+}
+
+.review-folder-guide-branch {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  padding-left: 24px;
+}
+
+.review-folder-guide-branch::before {
+  position: absolute;
+  left: 11px;
+  top: -10px;
+  bottom: 17px;
+  width: 1px;
+  content: "";
+  background: var(--border-subtle);
+}
+
+.review-folder-guide-children {
+  display: grid;
+  gap: 8px;
+  padding-left: 20px;
+}
+
+.review-folder-guide-node {
+  position: relative;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  padding: 0 10px;
+  background: var(--surface-panel);
+  color: var(--state-hover-text);
+}
+
+.review-folder-guide-branch > .review-folder-guide-node::before,
+.review-folder-guide-children > .review-folder-guide-node::before {
+  position: absolute;
+  left: -13px;
+  top: 50%;
+  width: 13px;
+  height: 1px;
+  content: "";
+  background: var(--border-subtle);
+}
+
+.review-folder-guide-children > .review-folder-guide-node::before {
+  left: -20px;
+  width: 20px;
+}
+
+.review-folder-guide-node--root {
+  border-color: color-mix(in srgb, #16a34a 44%, var(--border-subtle));
+  background: color-mix(in srgb, #16a34a 16%, var(--surface-card));
+  color: #166534;
+  justify-content: flex-start;
+}
+
+.review-folder-guide-node--model {
+  min-height: 22px;
+  border-color: transparent;
+  background: transparent;
+  padding: 0;
+  color: var(--text-secondary);
+}
+
+.review-folder-guide-node--detail {
+  min-height: 22px;
+  border-color: transparent;
+  background: transparent;
+  padding: 0;
+  color: var(--text-secondary);
+}
+
+.review-folder-guide-popover em {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: var(--state-active-bg);
+  color: var(--state-active-text);
+  font-style: normal;
+  font-weight: 900;
+}
+
 .review-directory-dialog {
   position: absolute;
   top: calc(100% + 8px);

@@ -1,4 +1,4 @@
-import { Bot, ImageIcon, ImagePlus, Repeat2, Tv, TextCursorInput, type LucideIcon } from "lucide-react";
+import { Bot, ImageIcon, ImagePlus, Tv, TextCursorInput, type LucideIcon } from "lucide-react";
 import { NODE_DEFAULTS } from "../constants";
 import type { CanvasNode, CanvasNodeType } from "../types";
 
@@ -31,19 +31,6 @@ export const NODE_DEFINITIONS: Record<CanvasNodeType, CanvasNodeDefinition> = {
     icon: TextCursorInput,
     defaultSize: NODE_DEFAULTS.prompt,
     init: (node) => ({ ...node, text: "" }),
-  },
-  loop: {
-    type: "loop",
-    label: "Loop",
-    icon: Repeat2,
-    defaultSize: NODE_DEFAULTS.loop,
-    init: (node) => ({
-      ...node,
-      count: 3,
-      mode: "serial",
-      fixedPrompt: "",
-      variablePrompt: "",
-    }),
   },
   llm: {
     type: "llm",

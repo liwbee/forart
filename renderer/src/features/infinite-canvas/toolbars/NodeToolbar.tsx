@@ -1,4 +1,4 @@
-import { Check, Crop, Download, Eye, Ratio, Trash2, Upload, X } from "lucide-react";
+import { Check, Crop, Download, Eye, Images, Ratio, Trash2, Upload, X } from "lucide-react";
 import { memo } from "react";
 import type { useTranslation } from "react-i18next";
 import { CROP_ASPECT_OPTIONS } from "../constants";
@@ -26,6 +26,7 @@ interface NodeToolbarProps {
   downloadStatus: NodeToolbarDownloadStatus | null;
   onCropAspectMenuOpenChange: (open: boolean) => void;
   onUploadImage: (nodeId: string) => void;
+  onImportLibraryImage: (nodeId: string) => void;
   onOpenCrop: (nodeId: string) => void;
   onChangeCropAspect: (nodeId: string, aspect: CropAspectKey) => void;
   onApplyCrop: (nodeId: string) => void;
@@ -46,6 +47,7 @@ export const NodeToolbar = memo(function NodeToolbar({
   downloadStatus,
   onCropAspectMenuOpenChange,
   onUploadImage,
+  onImportLibraryImage,
   onOpenCrop,
   onChangeCropAspect,
   onApplyCrop,
@@ -69,7 +71,7 @@ export const NodeToolbar = memo(function NodeToolbar({
       {isCropping && imageCrop ? (
         <>
           <div className={`ic-crop-aspect-menu${cropAspectMenuOpen ? " open" : ""}`} onPointerEnter={() => onCropAspectMenuOpenChange(true)} onPointerLeave={() => onCropAspectMenuOpenChange(false)}>
-            <button type="button" className="ic-crop-aspect-trigger" aria-label={t("infiniteCanvas.cropAspect")} title={t("infiniteCanvas.cropAspect")} onClick={() => onCropAspectMenuOpenChange(true)}>
+            <button type="button" className="ic-crop-aspect-trigger" data-tooltip={t("infiniteCanvas.cropAspect")} aria-label={t("infiniteCanvas.cropAspect")} onClick={() => onCropAspectMenuOpenChange(true)}>
               <Ratio size={14} aria-hidden="true" />
               <span>{imageCrop.aspect === "original" ? t("infiniteCanvas.originalAspect") : imageCrop.aspect === "free" ? t("infiniteCanvas.freeAspect") : imageCrop.aspect}</span>
             </button>
@@ -82,36 +84,41 @@ export const NodeToolbar = memo(function NodeToolbar({
               ))}
             </div>
           </div>
-          <button type="button" className="ic-node-toolbar-icon" aria-label={t("infiniteCanvas.applyCrop")} title={t("infiniteCanvas.applyCrop")} onClick={() => onApplyCrop(node.id)}>
+          <button type="button" className="ic-node-toolbar-icon" data-tooltip={t("infiniteCanvas.applyCrop")} aria-label={t("infiniteCanvas.applyCrop")} onClick={() => onApplyCrop(node.id)}>
             <Check size={15} aria-hidden="true" />
           </button>
-          <button type="button" className="ic-node-toolbar-icon ic-node-toolbar-icon--danger" aria-label={t("infiniteCanvas.cancelCrop")} title={t("infiniteCanvas.cancelCrop")} onClick={onCancelCrop}>
+          <button type="button" className="ic-node-toolbar-icon ic-node-toolbar-icon--danger" data-tooltip={t("infiniteCanvas.cancelCrop")} aria-label={t("infiniteCanvas.cancelCrop")} onClick={onCancelCrop}>
             <X size={15} aria-hidden="true" />
           </button>
         </>
       ) : (
         <>
           {node.type === "image" || node.type === "libtvUpload" ? (
-            <button type="button" aria-label={t("common.actions.uploadImage")} title={t("common.actions.uploadImage")} onClick={() => onUploadImage(node.id)}>
-              <Upload size={14} aria-hidden="true" />
-            </button>
+            <>
+              <button type="button" data-tooltip={t("common.actions.uploadImage")} aria-label={t("common.actions.uploadImage")} onClick={() => onUploadImage(node.id)}>
+                <Upload size={14} aria-hidden="true" />
+              </button>
+              <button type="button" data-tooltip={t("infiniteCanvas.importFromLibrary")} aria-label={t("infiniteCanvas.importFromLibrary")} onClick={() => onImportLibraryImage(node.id)}>
+                <Images size={14} aria-hidden="true" />
+              </button>
+            </>
           ) : null}
           {isImageLikeNode(node) && node.url ? (
             <>
-              <button type="button" aria-label={t("infiniteCanvas.cropImage")} title={t("infiniteCanvas.cropImage")} onClick={() => onOpenCrop(node.id)}>
+              <button type="button" data-tooltip={t("infiniteCanvas.cropImage")} aria-label={t("infiniteCanvas.cropImage")} onClick={() => onOpenCrop(node.id)}>
                 <Crop size={14} aria-hidden="true" />
               </button>
-              <button type="button" aria-label={t("infiniteCanvas.viewLargeImage")} title={t("infiniteCanvas.viewLargeImage")} onClick={() => onPreviewImage(node.id)}>
+              <button type="button" data-tooltip={t("infiniteCanvas.viewLargeImage")} aria-label={t("infiniteCanvas.viewLargeImage")} onClick={() => onPreviewImage(node.id)}>
                 <Eye size={14} aria-hidden="true" />
               </button>
               {node.type === "imageGenerator" || node.type === "libtvImage" ? (
-                <button type="button" aria-label={t("infiniteCanvas.downloadImage")} title={t("infiniteCanvas.downloadImage")} disabled={downloadStatus?.nodeId === node.id && downloadStatus.tone === "busy"} onClick={() => onDownloadImage(node.id)}>
+                <button type="button" data-tooltip={t("infiniteCanvas.downloadImage")} aria-label={t("infiniteCanvas.downloadImage")} disabled={downloadStatus?.nodeId === node.id && downloadStatus.tone === "busy"} onClick={() => onDownloadImage(node.id)}>
                   <Download size={14} aria-hidden="true" />
                 </button>
               ) : null}
             </>
           ) : null}
-          <button type="button" className="ic-node-toolbar-icon--danger" aria-label={t("infiniteCanvas.deleteNode")} title={t("infiniteCanvas.deleteNode")} onClick={() => onDeleteNode(node.id)}>
+          <button type="button" className="ic-node-toolbar-icon--danger" data-tooltip={t("infiniteCanvas.deleteNode")} aria-label={t("infiniteCanvas.deleteNode")} onClick={() => onDeleteNode(node.id)}>
             <Trash2 size={14} aria-hidden="true" />
           </button>
         </>
