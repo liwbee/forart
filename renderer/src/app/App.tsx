@@ -272,7 +272,7 @@ export function App() {
 
     setUpdateCheckResult(result);
     setUpdateNotes(result.updateNotes || null);
-    setLatestUpdatedAt(result.latestUpdatedAt || result.currentUpdatedAt);
+    setLatestUpdatedAt(result.updateAvailable ? (result.latestUpdatedAt || result.currentUpdatedAt) : (result.currentUpdatedAt || result.latestUpdatedAt));
     setAppInfo((current) => current ? {
       ...current,
       canGitUpdate: result.canGitUpdate,
@@ -334,16 +334,17 @@ export function App() {
     }
   }
 
-  const updateDateLabel = formatUpdateDate(latestUpdatedAt || appInfo?.currentUpdatedAt || "");
+  const currentUpdateDateLabel = formatUpdateDate(appInfo?.currentUpdatedAt || latestUpdatedAt || "");
+  const latestUpdateDateLabel = formatUpdateDate(latestUpdatedAt || appInfo?.currentUpdatedAt || "");
   const updateButtonLabel = updateStatus === "available"
-    ? `${currentLanguage === "zh-CN" ? updateText.updateAvailableShort : "Update"}v${updateDateLabel}`
+    ? `${currentLanguage === "zh-CN" ? updateText.updateAvailableShort : "Update"}v${latestUpdateDateLabel}`
     : updateStatus === "checking"
       ? (currentLanguage === "zh-CN" ? updateText.checking : "Checking")
       : updateStatus === "updating"
         ? (currentLanguage === "zh-CN" ? updateText.updating : "Updating")
         : updateStatus === "updated"
           ? (currentLanguage === "zh-CN" ? updateText.restart : "Restart")
-          : `v${updateDateLabel}`;
+          : `v${currentUpdateDateLabel}`;
   const updateButtonTitle = updateMessage || (currentLanguage === "zh-CN" ? updateText.checkingTitle : "Click to check for updates");
   const UpdateIcon = updateStatus === "available" ? Download : RefreshCw;
   const modalTitle = updateStatus === "available"
@@ -354,9 +355,9 @@ export function App() {
   const notesItems = updateNotes?.items || [];
   const updateCanRun = updateStatus === "available";
   const updateSummaryText = updateStatus === "available"
-    ? `${currentLanguage === "zh-CN" ? "\u6709\u53ef\u7528\u66f4\u65b0" : "Update available"} ${updateDateLabel}`
+    ? `${currentLanguage === "zh-CN" ? "\u6709\u53ef\u7528\u66f4\u65b0" : "Update available"} ${latestUpdateDateLabel}`
     : updateStatus === "current"
-      ? `${currentLanguage === "zh-CN" ? "\u5df2\u662f\u6700\u65b0\u7248\u672c" : "Already up to date"} ${updateDateLabel}`
+      ? `${currentLanguage === "zh-CN" ? "\u5df2\u662f\u6700\u65b0\u7248\u672c" : "Already up to date"} ${currentUpdateDateLabel}`
       : updateMessage || (currentLanguage === "zh-CN" ? updateText.connectivityWarn : "Check status before updating");
   const sidebarToggleLabel = sidebarCollapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar");
   const SidebarToggleIcon = sidebarCollapsed ? PanelLeftOpen : PanelLeftClose;

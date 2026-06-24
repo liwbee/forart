@@ -171,8 +171,31 @@ async function buildUpdateNotes(rootDir, net, currentRevision, latestRevision) {
   return { ...localNotes, source: localNotes.items.length ? 'local-update-notes.json' : 'empty', error: remoteNotes.error };
 }
 
-async function checkRemoteAhead(rootDir, currentRevision, latestRevision) {
-  if (!canGitUpdate(rootDir) || !currentRevision || !latestRevision || currentRevision === latestRevision) {
+function parseUpdateTimestamp(value) {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function isRemoteNotesNewer(localNotes, remoteNotes) {
+  if (remoteNotes.revision && localNotes.revision) return remoteNotes.revision !== localNotes.revision;
+
+  const remoteTimestamp = parseUpdateTimestamp(remoteNotes.updatedAt);
+  const localTimestamp = parseUpdateTimestamp(localNotes.updatedAt);
+  if (remoteTimestamp && localTimestamp) return remoteTimestamp > localTimestamp;
+  if (remoteNotes.updatedAt && localNotes.updatedAt) return remoteNotes.updatedAt > localNotes.updatedAt;
+
+  if (remoteNotes.version && localNotes.version) return remoteNotes.version !== localNotes.version;
+  if (remoteNotes.items?.length && localNotes.items?.length) return JSON.stringify(remoteNotes.items) !== JSON.stringify(localNotes.items);
+  return Boolean(remoteNotes.items?.length && !localNotes.items?.length);
+}
+
+async function checkRemoteAhead(rootDir, currentRevision, latestRevision, localNotes, remoteNotes) {
+  if (!canGitUpdate(rootDir)) {
+    return { ok: true, updateAvailable: isRemoteNotesNewer(localNotes, remoteNotes) };
+  }
+
+  if (!currentRevision || !latestRevision || currentRevision === latestRevision) {
     return { ok: true, updateAvailable: false };
   }
 
@@ -232,13 +255,14 @@ async function probeNet(name, net, url, required = true) {
 async function appInfoPayload(rootDir) {
   const packageInfo = readPackageInfo(rootDir);
   const localRevision = await readLocalRevision(rootDir);
+  const localNotes = readLocalUpdateNotes(rootDir);
   return {
     name: packageInfo.name,
     repoUrl: REPO_URL,
     updateUrl: REMOTE_COMMIT_URL,
     canGitUpdate: canGitUpdate(rootDir),
-    currentRevision: localRevision.revision,
-    currentUpdatedAt: localRevision.updatedAt,
+    currentRevision: localRevision.revision || localNotes.revision,
+    currentUpdatedAt: localRevision.updatedAt || localNotes.updatedAt,
   };
 }
 
@@ -325,7 +349,9 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
           error: 'Remote commit is empty.',
         };
       }
-      const aheadCheck = await checkRemoteAhead(rootDir, info.currentRevision, remoteRevision.revision);
+      const localNotes = readLocalUpdateNotes(rootDir);
+      const remoteNotes = await readRemoteUpdateNotes(net, remoteRevision.revision);
+      const aheadCheck = await checkRemoteAhead(rootDir, info.currentRevision, remoteRevision.revision, localNotes, remoteNotes);
       if (!aheadCheck.ok) {
         return {
           ok: false,
@@ -348,7 +374,9 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
         updateAvailable: aheadCheck.updateAvailable,
         canGitUpdate: info.canGitUpdate,
         repoUrl: REPO_URL,
-        updateNotes: await buildUpdateNotes(rootDir, net, info.currentRevision, remoteRevision.revision),
+        updateNotes: remoteNotes.items.length
+          ? { ...remoteNotes, source: 'update-notes.json' }
+          : await buildUpdateNotes(rootDir, net, info.currentRevision, remoteRevision.revision),
       };
     } catch (error) {
       return {
