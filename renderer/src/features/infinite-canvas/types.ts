@@ -15,6 +15,8 @@ export interface CanvasNode {
   imageNaturalHeight?: number;
   imageMode?: "imageGenerator" | "asset";
   imageSource?: "generated" | "uploaded";
+  outputDownloadState?: "pending" | "downloaded";
+  outputDownloadedAt?: number;
   librarySource?: {
     kind: "model" | "outfit" | "action";
     assetId?: string | null;

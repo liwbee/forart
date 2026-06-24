@@ -1,9 +1,10 @@
-import { Check, ChevronDown, Clock, Crosshair, Crop, Eye, Images, Layers, Map as MapIcon, Play, Ratio, RefreshCw, Square, Trash2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Check, Clock, Crosshair, Crop, Eye, Images, Layers, Map as MapIcon, Play, Ratio, RefreshCw, Square, Trash2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
 import { PointerEvent, WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ImageViewer } from "../../lib/ImageViewer";
 import { API_PROVIDER_CHANGED_EVENT, getModelDisplayName, loadApiSettings, readApiProviders, readDefaultImageProviderId, type ApiProvider } from "../settings/apiProviders";
 import { CanvasHomePanel } from "./CanvasHomePanel";
+import { CanvasTabsBar } from "./CanvasTabsBar";
 import { canConnect } from "./core/rules";
 import { collectPrompt } from "./core/workflow";
 import { clamp, getGroupBounds, linkMidpoint, WORLD_CENTER } from "./canvasGeometry";
@@ -483,6 +484,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     activeCanvasTitle,
     activeCanvasId,
     activeCanvasIdRef,
+    canvasTabs,
     showCanvasHome,
     returnToCanvasHome,
     canvasHomeMode,
@@ -512,6 +514,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     refreshCanvasProjects,
     refreshLibtvCanvasFromRemote,
     openCanvasProject,
+    closeCanvasTab,
+    reorderCanvasTabs,
     createCanvasProjectFromDraft,
     submitRenameCanvasProject,
     deleteCanvasProject,
@@ -1805,7 +1809,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
 
   function renderImageComposer() {
     const node = selectedId ? nodeMap.get(selectedId) : null;
-    if (!node || node.type !== "imageGenerator" || imageCrop?.nodeId === node.id) return null;
+    if (isNodeDragging || !node || node.type !== "imageGenerator" || imageCrop?.nodeId === node.id) return null;
     const selectedProvider = defaultImageProvider
       || imageProviders.find((provider) => provider.id === node.imageProviderId)
       || null;
@@ -1847,7 +1851,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
 
   function renderLibtvComposer() {
     const node = selectedId ? nodeMap.get(selectedId) : null;
-    if (!node || node.type !== "libtvImage" || imageCrop?.nodeId === node.id) return null;
+    if (isNodeDragging || !node || node.type !== "libtvImage" || imageCrop?.nodeId === node.id) return null;
     return (
       <LibtvComposer
         node={node}
@@ -1947,6 +1951,16 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   }
   return (
     <section className="infinite-canvas-page" aria-label={t("infiniteCanvas.title")}>
+      <CanvasTabsBar
+        tabs={canvasTabs}
+        activeCanvasId={activeCanvasId}
+        showHome={showCanvasHome}
+        onOpenHome={returnToCanvasHome}
+        onOpenCanvas={(canvasId) => void openCanvasProject(canvasId)}
+        onCloseCanvas={(canvasId) => void closeCanvasTab(canvasId)}
+        onReorderCanvas={reorderCanvasTabs}
+        t={t}
+      />
       {renderLibtvHomeToast()}
       {showCanvasHome ? renderCanvasHome() : null}
       <div
@@ -1963,10 +1977,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         onDragLeave={handleStageDragLeave}
         onDrop={handleStageDrop}
       >
-        <button className="ic-back-to-projects nodrag" type="button" title={t("infiniteCanvas.backToCanvases")} aria-label={`${t("infiniteCanvas.backToCanvases")}: ${activeCanvasTitle}`} onClick={returnToCanvasHome}>
-          <ChevronDown size={16} aria-hidden="true" />
-          <span>{activeCanvasTitle || t("infiniteCanvas.untitledCanvas")}</span>
-        </button>
         <div
           className="ic-canvas-grid"
           style={{
@@ -1998,30 +2008,32 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
           selectedCount={selectedIds.size}
           stageSize={stageSize}
           viewport={viewport}
-          isHidden={Boolean(imageCrop)}
+          isHidden={Boolean(imageCrop) || isNodeDragging}
           onCreateGroup={createGroupFromSelection}
           t={t}
         />
-        <NodeToolbar
-          node={toolbarNode}
-          imageCrop={imageCrop}
-          selectedCount={selectedIds.size}
-          stageSize={stageSize}
-          viewport={viewport}
-          cropAspectMenuOpen={cropAspectMenuOpen}
-          downloadStatus={downloadStatus}
-          onCropAspectMenuOpenChange={setCropAspectMenuOpen}
-          onUploadImage={(nodeId) => fileInputRefs.current[nodeId]?.click()}
-          onImportLibraryImage={setLibraryPickerNodeId}
-          onOpenCrop={openImageCrop}
-          onChangeCropAspect={changeCropAspect}
-          onApplyCrop={(nodeId) => void applyCrop(nodeId)}
-          onCancelCrop={() => setImageCrop(null)}
-          onPreviewImage={openImagePreview}
-          onDownloadImage={(nodeId) => void downloadNodeImage(nodeId)}
-          onDeleteNode={(nodeId) => void deleteNode(nodeId)}
-          t={t}
-        />
+        {!isNodeDragging ? (
+          <NodeToolbar
+            node={toolbarNode}
+            imageCrop={imageCrop}
+            selectedCount={selectedIds.size}
+            stageSize={stageSize}
+            viewport={viewport}
+            cropAspectMenuOpen={cropAspectMenuOpen}
+            downloadStatus={downloadStatus}
+            onCropAspectMenuOpenChange={setCropAspectMenuOpen}
+            onUploadImage={(nodeId) => fileInputRefs.current[nodeId]?.click()}
+            onImportLibraryImage={setLibraryPickerNodeId}
+            onOpenCrop={openImageCrop}
+            onChangeCropAspect={changeCropAspect}
+            onApplyCrop={(nodeId) => void applyCrop(nodeId)}
+            onCancelCrop={() => setImageCrop(null)}
+            onPreviewImage={openImagePreview}
+            onDownloadImage={(nodeId) => void downloadNodeImage(nodeId)}
+            onDeleteNode={(nodeId) => void deleteNode(nodeId)}
+            t={t}
+          />
+        ) : null}
         <div
           className="ic-world"
           style={{
@@ -2058,6 +2070,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             openSelectId={openImageComposerSelect}
             editingPromptId={editingPromptId}
             linkDraftFromId={linkDraft?.from || ""}
+            linkDraftSourceNode={linkDraft ? nodeMap.get(linkDraft.from) || null : null}
+            canvasType={activeProject?.canvasType || "forart"}
             renderNodeBody={renderNodeBodyStable}
             startNodeDrag={startNodeDragStable}
             finishLink={finishLinkStable}

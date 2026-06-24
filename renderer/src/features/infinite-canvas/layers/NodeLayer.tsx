@@ -4,6 +4,7 @@ import type { useTranslation } from "react-i18next";
 import { useCanvasStore } from "../canvasStore";
 import { useCanvasUiStore } from "../canvasUiStore";
 import { WORLD_CENTER } from "../canvasGeometry";
+import { canConnect, hasConnection } from "../core/rules";
 import { acceptsIncomingConnections, isImageLikeNode } from "../nodePredicates";
 import { getNodeDefinition } from "../nodes/registry";
 import type { CanvasNode, CanvasNodeType, CropRect } from "../types";
@@ -23,6 +24,8 @@ interface NodeLayerProps {
   openSelectId: string;
   editingPromptId: string;
   linkDraftFromId: string;
+  linkDraftSourceNode: CanvasNode | null;
+  canvasType: "forart" | "forart-libtv";
   renderNodeBody: (node: CanvasNode, state: NodeBodyRenderState) => React.ReactNode;
   startNodeDrag: (event: PointerEvent<HTMLDivElement>, node: CanvasNode) => void;
   finishLink: (event: PointerEvent<HTMLElement>, target: CanvasNode) => void;
@@ -52,6 +55,8 @@ const CanvasNodeItem = memo(function CanvasNodeItem({
   itemOpenSelectId,
   isEditingPrompt,
   isConnecting,
+  linkDraftSourceNode,
+  canvasType,
   renderNodeBody,
   startNodeDrag,
   finishLink,
@@ -75,9 +80,14 @@ const CanvasNodeItem = memo(function CanvasNodeItem({
       || (selectedIds.has(nodeId) && (connection.from === nodeId || connection.to === nodeId))
     ));
   });
+  const hasExistingDraftConnection = useCanvasStore((state) => (
+    linkDraftSourceNode ? hasConnection(state.connections, linkDraftSourceNode.id, nodeId) : false
+  ));
 
   if (!node) return null;
   const hasCustomNodeBody = ["image", "libtvUpload", "imageGenerator", "libtvImage", "prompt", "libtvPrompt"].includes(node.type);
+  const canAcceptLinkDraft = linkDraftSourceNode ? canConnect(linkDraftSourceNode, node, canvasType) && !hasExistingDraftConnection : acceptsIncomingConnections(node);
+  const showInputPort = acceptsIncomingConnections(node) && canAcceptLinkDraft;
 
   return (
     <div
@@ -89,7 +99,7 @@ const CanvasNodeItem = memo(function CanvasNodeItem({
       onPointerEnter={() => setHoveredId(node.id)}
       onPointerLeave={() => setHoveredId((current) => (current === node.id ? "" : current))}
     >
-      {acceptsIncomingConnections(node) ? (
+      {showInputPort ? (
         <button className="ic-port ic-port--in nodrag" type="button" title={t("infiniteCanvas.connectHere")} onPointerUp={(event) => finishLink(event, node)}>
           <Link2 size={13} aria-hidden="true" />
         </button>
@@ -127,6 +137,8 @@ export const NodeLayer = memo(function NodeLayer({
   openSelectId,
   editingPromptId,
   linkDraftFromId,
+  linkDraftSourceNode,
+  canvasType,
   renderNodeBody,
   startNodeDrag,
   finishLink,
@@ -150,6 +162,8 @@ export const NodeLayer = memo(function NodeLayer({
           itemOpenSelectId={openSelectId.startsWith(`${nodeId}:`) ? openSelectId : ""}
           isEditingPrompt={editingPromptId === nodeId}
           isConnecting={linkDraftFromId === nodeId}
+          linkDraftSourceNode={linkDraftSourceNode}
+          canvasType={canvasType}
           renderNodeBody={renderNodeBody}
           startNodeDrag={startNodeDrag}
           finishLink={finishLink}

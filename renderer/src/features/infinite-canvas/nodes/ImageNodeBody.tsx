@@ -45,6 +45,7 @@ export function ImageNodeBody({
   const isGeneratorLike = isImageGenerator || isLibtv;
   const isGenerating = isGeneratorLike && Boolean(node.running);
   const showGeneratorDownload = hasImage && isGeneratorLike && !isGenerating;
+  const isPendingDownload = showGeneratorDownload && node.outputDownloadState === "pending";
   const [loadedSize, setLoadedSize] = useState<{ width: number; height: number } | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const imageWidth = Math.round(node.imageNaturalWidth || loadedSize?.width || 0);
@@ -146,7 +147,7 @@ export function ImageNodeBody({
             ) : null}
             {showGeneratorDownload ? (
               <button
-                className="ic-image-download-button nodrag nopan"
+                className={`ic-image-download-button nodrag nopan${isPendingDownload ? " is-pending-download" : ""}`}
                 type="button"
                 aria-label={t("infiniteCanvas.downloadImage")}
                 title={t("infiniteCanvas.downloadImage")}

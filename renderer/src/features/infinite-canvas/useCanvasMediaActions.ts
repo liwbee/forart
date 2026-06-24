@@ -423,11 +423,16 @@ export function useCanvasMediaActions({
   const downloadNodeImage = useCallback(async (nodeId: string) => {
     const node = nodeMap.get(nodeId);
     if (!node || !isImageLikeNode(node) || !node.url) return;
+    const markDownloaded = () => {
+      if (node.type !== "imageGenerator" && node.type !== "libtvImage") return;
+      patchNode(nodeId, { outputDownloadState: "downloaded", outputDownloadedAt: Date.now() });
+    };
     const defaultName = node.fileName || `${node.type}-${Date.now()}.png`;
     setDownloadStatus({ nodeId, tone: "busy", text: t("infiniteCanvas.downloadBusy") });
     if (window.easyTool?.saveResult) {
       try {
         const result = await window.easyTool.saveResult({ url: node.url, dataUrl: node.url, defaultName, directory: imageDownloadPath });
+        markDownloaded();
         setDownloadStatus({ nodeId, tone: "ready", text: result.filePath ? t("infiniteCanvas.downloadSaved", { path: result.filePath }) : t("infiniteCanvas.downloadComplete") });
         window.setTimeout(() => setDownloadStatus((current) => (current?.nodeId === nodeId && current.tone === "ready" ? null : current)), 4500);
       } catch (error) {
@@ -441,9 +446,10 @@ export function useCanvasMediaActions({
     document.body.appendChild(link);
     link.click();
     link.remove();
+    markDownloaded();
     setDownloadStatus({ nodeId, tone: "ready", text: t("infiniteCanvas.downloadComplete") });
     window.setTimeout(() => setDownloadStatus((current) => (current?.nodeId === nodeId && current.tone === "ready" ? null : current)), 3000);
-  }, [imageDownloadPath, nodeMap, t]);
+  }, [imageDownloadPath, nodeMap, patchNode, t]);
 
   const changeCropAspect = useCallback((nodeId: string, aspect: CropAspectKey) => {
     const node = nodeMap.get(nodeId);

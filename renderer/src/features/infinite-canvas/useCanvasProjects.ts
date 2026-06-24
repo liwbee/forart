@@ -11,10 +11,13 @@ const GROUP_PADDING = 32;
 const CANVAS_NODE_TYPES = ["imageGenerator", "image", "prompt", "llm", "libtvImage", "libtvPrompt", "libtvUpload"] as const;
 const LAST_CANVAS_ID_KEY = "forart_infinite_canvas_last_canvas_id";
 const LAST_CANVAS_HOME_KEY = "forart_infinite_canvas_show_home";
+const OPEN_CANVAS_TABS_KEY = "forart_infinite_canvas_open_tabs";
 
 type StoredCanvasNode = Omit<CanvasNode, "type"> & {
   type: CanvasNodeType;
 };
+
+export type CanvasProjectTab = Pick<CanvasProjectRecord, "id" | "title" | "icon" | "canvasType" | "source" | "updatedAt">;
 
 interface UseCanvasProjectsOptions {
   nodes: CanvasNode[];
@@ -45,6 +48,46 @@ function writeLastCanvasState(canvasId: string, showHome: boolean) {
   if (typeof window === "undefined") return;
   if (canvasId) window.localStorage.setItem(LAST_CANVAS_ID_KEY, canvasId);
   window.localStorage.setItem(LAST_CANVAS_HOME_KEY, showHome ? "true" : "false");
+}
+
+function normalizeCanvasTab(input: unknown): CanvasProjectTab | null {
+  const parsed = input as Partial<CanvasProjectTab> | null;
+  if (!parsed?.id) return null;
+  return {
+    id: String(parsed.id),
+    title: String(parsed.title || "Untitled canvas"),
+    icon: parsed.icon || "layers",
+    canvasType: parsed.canvasType === "forart-libtv" || parsed.source === "libtv" ? "forart-libtv" : "forart",
+    source: parsed.source === "libtv" || parsed.canvasType === "forart-libtv" ? "libtv" : "forart",
+    updatedAt: Number(parsed.updatedAt || 0),
+  };
+}
+
+function readOpenCanvasTabs() {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(OPEN_CANVAS_TABS_KEY) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeCanvasTab).filter(Boolean) as CanvasProjectTab[];
+  } catch {
+    return [];
+  }
+}
+
+function writeOpenCanvasTabs(tabs: CanvasProjectTab[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(OPEN_CANVAS_TABS_KEY, JSON.stringify(tabs));
+}
+
+function canvasTabFromRecord(record: CanvasProjectRecord | CanvasProject): CanvasProjectTab {
+  return {
+    id: record.id,
+    title: record.title || "Untitled canvas",
+    icon: record.icon || "layers",
+    canvasType: record.canvasType === "forart-libtv" || record.source === "libtv" ? "forart-libtv" : "forart",
+    source: record.source === "libtv" || record.canvasType === "forart-libtv" ? "libtv" : "forart",
+    updatedAt: Number(record.updatedAt || 0),
+  };
 }
 
 function nodeDefaults(type: CanvasNodeType): CanvasNode {
@@ -277,6 +320,7 @@ export function useCanvasProjects({
 }: UseCanvasProjectsOptions) {
   const [initialLastCanvasState] = useState(readLastCanvasState);
   const [canvasProjects, setCanvasProjects] = useState<CanvasProjectRecord[]>([]);
+  const [canvasTabs, setCanvasTabs] = useState<CanvasProjectTab[]>(readOpenCanvasTabs);
   const [activeCanvasId, setActiveCanvasId] = useState("");
   const activeCanvasIdRef = useRef("");
   const [activeCanvasTitle, setActiveCanvasTitle] = useState(t("infiniteCanvas.untitledCanvas"));
@@ -314,6 +358,10 @@ export function useCanvasProjects({
     activeCanvasIdRef.current = activeCanvasId;
   }, [activeCanvasId]);
 
+  useEffect(() => {
+    writeOpenCanvasTabs(canvasTabs);
+  }, [canvasTabs]);
+
   const showLibtvStatus = useCallback((status: string, tone: "busy" | "ready" | "error" = "ready", autoHideMs = 5500) => {
     if (libtvStatusTimeoutRef.current) {
       window.clearTimeout(libtvStatusTimeoutRef.current);
@@ -337,13 +385,32 @@ export function useCanvasProjects({
     showCanvasHomeRef.current = showCanvasHome;
   }, [showCanvasHome]);
 
-  const returnToCanvasHome = useCallback(() => {
-    showCanvasHomeRef.current = true;
-    setShowCanvasHome(true);
-    writeLastCanvasState(activeCanvasIdRef.current, true);
-    setProjectStatus("");
-    clearCanvasTransientState();
-  }, [clearCanvasTransientState]);
+  const addOrUpdateCanvasTab = useCallback((recordInput: CanvasProjectRecord | CanvasProject | CanvasProjectTab) => {
+    const tab = normalizeCanvasTab(recordInput);
+    if (!tab) return;
+    setCanvasTabs((current) => (
+      current.some((item) => item.id === tab.id)
+        ? current.map((item) => (item.id === tab.id ? { ...item, ...tab } : item))
+        : [...current, tab]
+    ));
+  }, []);
+
+  const removeCanvasTabState = useCallback((canvasId: string) => {
+    setCanvasTabs((current) => current.filter((item) => item.id !== canvasId));
+  }, []);
+
+  const reorderCanvasTabs = useCallback((draggedCanvasId: string, targetIndex: number) => {
+    if (!draggedCanvasId) return;
+    setCanvasTabs((current) => {
+      const draggedTab = current.find((item) => item.id === draggedCanvasId);
+      if (!draggedTab) return current;
+      const withoutDragged = current.filter((item) => item.id !== draggedCanvasId);
+      const insertIndex = Math.max(0, Math.min(targetIndex, withoutDragged.length));
+      const next = [...withoutDragged];
+      next.splice(insertIndex, 0, draggedTab);
+      return next;
+    });
+  }, []);
 
   const setTransientLibtvStatus = useCallback((status: string) => {
     showLibtvStatus(status, status ? "error" : "ready", status ? 7000 : 0);
@@ -358,8 +425,9 @@ export function useCanvasProjects({
     setActiveCanvasTitle(project.title);
     setShowCanvasHome(false);
     writeLastCanvasState(project.id, false);
+    addOrUpdateCanvasTab(project);
     clearCanvasTransientState();
-  }, [clearCanvasTransientState, setViewport, setZoomInput]);
+  }, [addOrUpdateCanvasTab, clearCanvasTransientState, setViewport, setZoomInput]);
 
   const updateCanvasProjectRecord = useCallback((recordInput: unknown) => {
     const record = normalizeCanvasRecord(recordInput);
@@ -370,8 +438,44 @@ export function useCanvasProjects({
         : [record, ...current];
       return [...next].sort((a, b) => Number(b.updatedAt || b.createdAt) - Number(a.updatedAt || a.createdAt));
     });
+    setCanvasTabs((current) => current.map((item) => (item.id === record.id ? { ...item, ...canvasTabFromRecord(record) } : item)));
     if (record.id === activeCanvasIdRef.current) setActiveCanvasTitle(record.title);
   }, []);
+
+  const saveActiveCanvasNow = useCallback(async () => {
+    const canvasId = activeCanvasIdRef.current;
+    if (!canvasId || !window.easyTool?.saveCanvasProject) return null;
+    const project = canvasProjects.find((item) => item.id === canvasId);
+    const snapshot = {
+      title: project?.title || activeCanvasTitle,
+      icon: project?.icon,
+      canvasType: project?.canvasType,
+      source: project?.source,
+      libtvProjectId: project?.libtvProjectId,
+      libtvProjectName: project?.libtvProjectName,
+      nodes,
+      connections,
+      groups,
+      viewport,
+    };
+    const result = await window.easyTool.saveCanvasProject(canvasId, snapshot);
+    updateCanvasProjectRecord(result.record || result.canvas);
+    const tabRecord = normalizeCanvasRecord(result.record || result.canvas);
+    if (tabRecord) addOrUpdateCanvasTab(tabRecord);
+    return result;
+  }, [activeCanvasTitle, addOrUpdateCanvasTab, canvasProjects, connections, groups, nodes, updateCanvasProjectRecord, viewport]);
+
+  const returnToCanvasHome = useCallback(() => {
+    void saveActiveCanvasNow();
+    activeCanvasIdRef.current = "";
+    setActiveCanvasId("");
+    setActiveCanvasTitle(t("infiniteCanvas.untitledCanvas"));
+    showCanvasHomeRef.current = true;
+    setShowCanvasHome(true);
+    writeLastCanvasState("", true);
+    setProjectStatus("");
+    clearCanvasTransientState();
+  }, [clearCanvasTransientState, saveActiveCanvasNow, t]);
 
   const refreshCanvasProjects = useCallback(async () => {
     if (!window.easyTool?.listCanvases) return [];
@@ -417,8 +521,10 @@ export function useCanvasProjects({
     }
   }, [applyCanvasProject, flushLibtvPending, getPendingLibtvNodeIds, t, updateCanvasProjectRecord]);
 
-  const openCanvasProject = useCallback(async (canvasId: string) => {
+  const openCanvasProject = useCallback(async (canvasId: string, options?: { skipSave?: boolean }) => {
     if (!canvasId || !window.easyTool?.loadCanvasProject) return;
+    if (canvasId === activeCanvasIdRef.current && !showCanvasHomeRef.current) return;
+    if (!options?.skipSave) await saveActiveCanvasNow();
     setProjectStatus(t("infiniteCanvas.openingCanvas"));
     const project = normalizeCanvasProject(await window.easyTool.loadCanvasProject(canvasId));
     if (!project) {
@@ -430,7 +536,38 @@ export function useCanvasProjects({
     updateCanvasProjectRecord(project);
     setProjectStatus(t("infiniteCanvas.canvasReady"));
     void refreshLibtvCanvasFromRemote(project);
-  }, [applyCanvasProject, refreshCanvasProjects, refreshLibtvCanvasFromRemote, t, updateCanvasProjectRecord]);
+  }, [applyCanvasProject, refreshCanvasProjects, refreshLibtvCanvasFromRemote, saveActiveCanvasNow, t, updateCanvasProjectRecord]);
+
+  const closeCanvasTab = useCallback(async (canvasId: string) => {
+    if (!canvasId) return;
+    const isActiveCanvas = canvasId === activeCanvasIdRef.current;
+    if (isActiveCanvas) await saveActiveCanvasNow();
+    const currentTabs = canvasTabs;
+    const closingIndex = currentTabs.findIndex((item) => item.id === canvasId);
+    const nextTabs = currentTabs.filter((item) => item.id !== canvasId);
+    removeCanvasTabState(canvasId);
+    if (!isActiveCanvas) return;
+    if (showCanvasHomeRef.current) {
+      activeCanvasIdRef.current = "";
+      setActiveCanvasId("");
+      setActiveCanvasTitle(t("infiniteCanvas.untitledCanvas"));
+      writeLastCanvasState("", true);
+      return;
+    }
+    const nextTab = nextTabs[Math.max(0, closingIndex - 1)] || nextTabs[0] || null;
+    if (nextTab) {
+      await openCanvasProject(nextTab.id, { skipSave: true });
+      return;
+    }
+    activeCanvasIdRef.current = "";
+    setActiveCanvasId("");
+    setActiveCanvasTitle(t("infiniteCanvas.untitledCanvas"));
+    showCanvasHomeRef.current = true;
+    setShowCanvasHome(true);
+    writeLastCanvasState("", true);
+    setProjectStatus("");
+    clearCanvasTransientState();
+  }, [canvasTabs, clearCanvasTransientState, openCanvasProject, removeCanvasTabState, saveActiveCanvasNow, t]);
 
   const createCanvasProjectFromDraft = useCallback(async () => {
     const title = projectDraftTitle.trim() || `${t("infiniteCanvas.canvasBaseName")} ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
@@ -467,6 +604,7 @@ export function useCanvasProjects({
     if (!canvasId || !window.easyTool?.deleteCanvas) return;
     setConfirmingDeleteCanvasId("");
     await window.easyTool.deleteCanvas(canvasId);
+    removeCanvasTabState(canvasId);
     const nextProjects = await refreshCanvasProjects();
     setSelectedHomeCanvasId((current) => (current === canvasId ? nextProjects[0]?.id || "" : current));
     if (canvasId === activeCanvasIdRef.current && showCanvasHome) {
@@ -477,7 +615,7 @@ export function useCanvasProjects({
     if (canvasId === activeCanvasIdRef.current) {
       const nextProject = nextProjects.find((project) => project.id !== canvasId) || nextProjects[0];
       if (nextProject) {
-        await openCanvasProject(nextProject.id);
+        await openCanvasProject(nextProject.id, { skipSave: true });
       } else if (window.easyTool.createCanvas) {
         const initialCanvas = createInitialCanvas();
         const created = await window.easyTool.createCanvas({ title: t("infiniteCanvas.untitledCanvas"), nodes: initialCanvas.nodes, connections: initialCanvas.connections, groups: initialCanvas.groups, viewport: initialCanvas.viewport });
@@ -487,7 +625,7 @@ export function useCanvasProjects({
         if (project) applyCanvasProject(project);
       }
     }
-  }, [applyCanvasProject, openCanvasProject, refreshCanvasProjects, showCanvasHome, t]);
+  }, [applyCanvasProject, openCanvasProject, refreshCanvasProjects, removeCanvasTabState, showCanvasHome, t]);
 
   const searchLibtvProjects = useCallback(async (queryOverride?: string) => {
     const query = queryOverride !== undefined ? queryOverride.trim() : libtvProjectDraftId.trim();
@@ -600,6 +738,10 @@ export function useCanvasProjects({
       try {
         const projects = await refreshCanvasProjects();
         if (canceled) return;
+        const projectMap = new Map(projects.map((project) => [project.id, project]));
+        setCanvasTabs((current) => current
+          .filter((tab) => projectMap.has(tab.id))
+          .map((tab) => canvasTabFromRecord(projectMap.get(tab.id)!)));
         const lastCanvas = readLastCanvasState();
         if (!lastCanvas.showHome && lastCanvas.canvasId && projects.some((project) => project.id === lastCanvas.canvasId)) {
           await openCanvasProject(lastCanvas.canvasId);
@@ -661,6 +803,7 @@ export function useCanvasProjects({
     activeCanvasTitle,
     activeCanvasId,
     activeCanvasIdRef,
+    canvasTabs,
     projectStatus,
     showCanvasHome,
     setShowCanvasHome,
@@ -691,6 +834,8 @@ export function useCanvasProjects({
     refreshCanvasProjects,
     refreshLibtvCanvasFromRemote,
     openCanvasProject,
+    closeCanvasTab,
+    reorderCanvasTabs,
     createCanvasProjectFromDraft,
     submitRenameCanvasProject,
     deleteCanvasProject,

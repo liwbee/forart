@@ -50,6 +50,8 @@ export async function applyImageGenerationResult({
     imageAspectRatio: aspectRatio,
     imageMode: "imageGenerator",
     imageSource: "generated",
+    outputDownloadState: "pending",
+    outputDownloadedAt: undefined,
     imageNaturalWidth: dimensions?.width || result.width || 1024,
     imageNaturalHeight: dimensions?.height || result.height || 1024,
     running: false,
