@@ -659,13 +659,18 @@ function createLibtvAdapter({ rootDir }) {
         : [String(payload.originalUrl || '').trim()].filter(Boolean);
       if (originalUrl.length) args.push('--update', `originalUrl=${JSON.stringify(originalUrl)}`);
     }
-    const left = Array.isArray(payload.left) ? payload.left : payload.left !== undefined ? [payload.left] : [];
-    left.map((item) => String(item || '').trim()).filter(Boolean).forEach((node) => args.push('--left', node));
-    const leftAdd = Array.isArray(payload.leftAdd) ? payload.leftAdd : payload.leftAdd !== undefined ? [payload.leftAdd] : [];
-    leftAdd.map((item) => String(item || '').trim()).filter(Boolean).forEach((node) => args.push('--left-add', node));
-    const leftRemove = Array.isArray(payload.leftRemove) ? payload.leftRemove : payload.leftRemove !== undefined ? [payload.leftRemove] : [];
-    leftRemove.map((item) => String(item || '').trim()).filter(Boolean).forEach((node) => args.push('--left-rm', node));
+    appendNodeRefs(args, '--left', payload.left);
+    appendNodeRefs(args, '--left-add', payload.leftAdd);
+    appendNodeRefs(args, '--left-rm', payload.leftRemove);
+    appendNodeRefs(args, '--right', payload.right);
+    appendNodeRefs(args, '--right-add', payload.rightAdd);
+    appendNodeRefs(args, '--right-rm', payload.rightRemove);
     return args;
+  }
+
+  function appendNodeRefs(args, flag, value) {
+    const nodes = Array.isArray(value) ? value : value !== undefined ? [value] : [];
+    nodes.map((item) => String(item || '').trim()).filter(Boolean).forEach((node) => args.push(flag, node));
   }
 
   async function updateLibtvNode(projectId, nodeId, payload = {}) {

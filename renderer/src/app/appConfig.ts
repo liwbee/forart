@@ -184,6 +184,9 @@ export interface LibtvGeneratePayload {
   left?: string | string[];
   leftAdd?: string | string[];
   leftRemove?: string | string[];
+  right?: string | string[];
+  rightAdd?: string | string[];
+  rightRemove?: string | string[];
 }
 
 export interface LibtvGenerateResult {
