@@ -1,11 +1,12 @@
 {
-  "version": "0.1.9",
-  "updatedAt": "2026-07-03T00:45:00+08:00",
+  "version": "0.1.10",
+  "updatedAt": "2026-07-03T01:05:00+08:00",
   "items": [
     "修复 Windows PowerShell 5.1 下更新 apply 脚本的 Split-Path 参数兼容问题。",
     "修复 PowerShell 写出的状态 JSON 带 BOM 导致 Electron 解析失败的问题。",
     "移除 Forart.exe 启动器依赖，更新完成后改为通过 npm run dev 或 npm run electron 重启。",
     "修复 Electron 直接 detached 启动 PowerShell 时 apply 脚本未接手导致更新超时的问题。",
-    "更新接手阶段显示 PowerShell 进度窗口，方便确认更新仍在进行。"
+    "更新接手阶段显示 PowerShell 进度窗口，方便确认更新仍在进行。",
+    "修复更新完成后只重启 Electron 时 Vite 服务已不可用导致 ERR_CONNECTION_REFUSED 的问题。"
   ]
 }

@@ -480,16 +480,43 @@ function Test-TcpPortOpen {
   }
 }
 
-function Wait-ForDevServerToStop {
+function Get-PortOwningProcessIds {
   param([int]$Port)
-  Write-Log ("Waiting for dev server port {0} to stop." -f $Port)
-  for ($attempt = 1; $attempt -le 120; $attempt += 1) {
+  try {
+    return @(Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.OwningProcess } | Sort-Object -Unique)
+  } catch {
+    Write-Log ("Could not inspect dev server port {0}: {1}" -f $Port, $_.Exception.Message)
+    return @()
+  }
+}
+
+function Stop-DevServerOnPort {
+  param([int]$Port)
+  Write-Log ("Stopping dev server on port {0}." -f $Port)
+  $processIds = Get-PortOwningProcessIds -Port $Port
+  foreach ($processId in $processIds) {
+    if ($processId -le 0 -or $processId -eq $PID) {
+      continue
+    }
+    try {
+      $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+      if ($process) {
+        Write-Log ("Stopping process {0} ({1}) on port {2}." -f $processId, $process.ProcessName, $Port)
+        Stop-Process -Id $processId -Force -ErrorAction Stop
+      }
+    } catch {
+      Write-Log ("Could not stop process {0}: {1}" -f $processId, $_.Exception.Message)
+    }
+  }
+
+  for ($attempt = 1; $attempt -le 60; $attempt += 1) {
     if (-not (Test-TcpPortOpen -Port $Port)) {
       return $true
     }
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 250
   }
-  Write-Log ("Dev server port {0} is still open. Continuing with Electron-only restart." -f $Port)
+
+  Write-Log ("Dev server port {0} is still open after stop attempt." -f $Port)
   return $false
 }
 
@@ -524,12 +551,6 @@ function Cleanup-UpdateDirs {
 }
 
 function Start-ForartAgain {
-  param([bool]$DevServerWasStopped)
-  if (-not $DevServerWasStopped) {
-    Write-Log "Restarting Electron only because the dev server is still running."
-    Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "npm run electron") -WorkingDirectory $script:RootDir
-    return
-  }
   Write-Log "Restarting with npm run dev"
   Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "npm run dev") -WorkingDirectory $script:RootDir
 }
@@ -560,7 +581,7 @@ try {
     }
   }
 
-  $devServerWasStopped = Wait-ForDevServerToStop -Port 6981
+  Stop-DevServerOnPort -Port 6981 | Out-Null
   Start-Sleep -Milliseconds 500
 
   foreach ($file in $plan.files) {
@@ -584,7 +605,7 @@ try {
 
   Write-Status -State "success"
   Write-Log "Forart update applied successfully."
-  Start-ForartAgain -DevServerWasStopped $devServerWasStopped
+  Start-ForartAgain
   Cleanup-UpdateDirs
 } catch {
   $message = $_.Exception.Message
