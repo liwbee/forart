@@ -1,9 +1,9 @@
 {
-  "version": "0.1.6",
-  "updatedAt": "2026-07-02T16:20:00+08:00",
+  "version": "0.1.7",
+  "updatedAt": "2026-07-02T17:12:00+08:00",
   "items": [
-    "更新器现在会等待 apply 脚本写入 running 状态后再关闭 Forart，避免下载完成后脚本还没接管就退出。",
-    "apply 启动器改为通过 Windows Win32_Process.Create 创建独立 PowerShell 进程，降低被父进程树清理连带关闭的风险。",
-    "如果 apply 脚本未能接管，更新会返回失败并保留当前窗口，方便查看错误。"
+    "更新器改为等待独立 runner 写入 running 状态后再关闭 Forart，避免 apply 脚本初始化阶段失败时只显示 timeout。",
+    "新增 launcher-status.json、runner-status.json 和 apply-process.log，更新接管失败时会保留更明确的诊断信息。",
+    "apply 过程的 stdout/stderr 会写入 apply-process.log，便于定位 PowerShell 启动或脚本执行问题。"
   ]
 }

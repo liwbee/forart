@@ -457,7 +457,16 @@ function psSingleQuoted(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
-async function waitForApplyStatus(statusPath, expectedState, timeoutMs = 10000) {
+async function readTextIfExists(filePath, maxLength = 1600) {
+  try {
+    const text = await fs.promises.readFile(filePath, 'utf8');
+    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+  } catch {
+    return '';
+  }
+}
+
+async function waitForApplyStatus(statusPath, expectedState, timeoutMs = 10000, diagnosticPaths = []) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     try {
@@ -473,7 +482,12 @@ async function waitForApplyStatus(statusPath, expectedState, timeoutMs = 10000) 
     }
     await wait(150);
   }
-  throw new Error('Timed out waiting for update apply script to take over.');
+  const details = [];
+  for (const item of diagnosticPaths) {
+    const text = await readTextIfExists(item.path);
+    if (text) details.push(`${item.name}: ${text.trim()}`);
+  }
+  throw new Error(`Timed out waiting for update apply script to take over.${details.length ? ` ${details.join(' ')}` : ''}`);
 }
 
 function writeUpdateApplyScript(scriptPath) {
@@ -729,9 +743,13 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, fil
   const scriptPath = path.join(applyRoot, 'apply-update.ps1');
   const launcherPath = path.join(applyRoot, 'launch-apply.cmd');
   const launcherScriptPath = path.join(applyRoot, 'launch-apply.ps1');
+  const runnerScriptPath = path.join(applyRoot, 'apply-runner.ps1');
   const planPath = path.join(applyRoot, 'update-plan.json');
   const logPath = path.join(applyRoot, 'apply-update.log');
   const statusPath = path.join(applyRoot, 'apply-status.json');
+  const runnerStatusPath = path.join(applyRoot, 'runner-status.json');
+  const launcherStatusPath = path.join(applyRoot, 'launcher-status.json');
+  const applyOutputPath = path.join(applyRoot, 'apply-process.log');
 
   const plan = {
     rootDir,
@@ -749,15 +767,53 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, fil
   writeUpdateApplyScript(scriptPath);
   fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf8');
   fs.writeFileSync(
-    launcherScriptPath,
+    runnerScriptPath,
     [
       '$ErrorActionPreference = "Stop"',
       `$applyScript = ${psSingleQuoted(scriptPath)}`,
       `$planPath = ${psSingleQuoted(planPath)}`,
+      `$runnerStatusPath = ${psSingleQuoted(runnerStatusPath)}`,
+      `$applyOutputPath = ${psSingleQuoted(applyOutputPath)}`,
+      'function Write-RunnerStatus {',
+      '  param([string]$State, [string]$ErrorMessage = "")',
+      '  [ordered]@{ state = $State; error = $ErrorMessage; updatedAt = (Get-Date).ToString("o") } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $runnerStatusPath -Encoding UTF8',
+      '}',
+      'Write-RunnerStatus -State "running"',
+      'try {',
+      '  & $applyScript -PlanPath $planPath *>&1 | Tee-Object -FilePath $applyOutputPath -Append',
+      '  Write-RunnerStatus -State "finished"',
+      '} catch {',
+      '  $message = $_.Exception.Message',
+      '  Add-Content -LiteralPath $applyOutputPath -Value ("RUNNER ERROR: {0}" -f $message) -Encoding UTF8',
+      '  Write-RunnerStatus -State "failed" -ErrorMessage $message',
+      '  throw',
+      '}',
+      '',
+    ].join('\r\n'),
+    'utf8',
+  );
+  fs.writeFileSync(
+    launcherScriptPath,
+    [
+      '$ErrorActionPreference = "Stop"',
+      `$runnerScript = ${psSingleQuoted(runnerScriptPath)}`,
       `$rootDir = ${psSingleQuoted(rootDir)}`,
-      "$command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"' + $applyScript + '\" -PlanPath \"' + $planPath + '\"'",
-      '$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command; CurrentDirectory = $rootDir }',
-      'if ($result.ReturnValue -ne 0) { throw "Win32_Process.Create failed: $($result.ReturnValue)" }',
+      `$launcherStatusPath = ${psSingleQuoted(launcherStatusPath)}`,
+      'function Write-LauncherStatus {',
+      '  param([string]$State, [string]$ErrorMessage = "")',
+      '  [ordered]@{ state = $State; error = $ErrorMessage; updatedAt = (Get-Date).ToString("o") } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $launcherStatusPath -Encoding UTF8',
+      '}',
+      'try {',
+      '  Write-LauncherStatus -State "starting"',
+      "  $command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"' + $runnerScript + '\"'",
+      '  $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command; CurrentDirectory = $rootDir }',
+      '  if ($result.ReturnValue -ne 0) { throw "Win32_Process.Create failed: $($result.ReturnValue)" }',
+      '  Write-LauncherStatus -State "created"',
+      '} catch {',
+      '  $message = $_.Exception.Message',
+      '  Write-LauncherStatus -State "failed" -ErrorMessage $message',
+      '  throw',
+      '}',
       '',
     ].join('\r\n'),
     'utf8',
@@ -797,9 +853,15 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, fil
       else reject(new Error(`Update launcher exited with code ${code}`));
     });
   });
-  await waitForApplyStatus(statusPath, 'running', 12000);
+  await waitForApplyStatus(runnerStatusPath, 'running', 12000, [
+    { name: 'launcher-status', path: launcherStatusPath },
+    { name: 'runner-status', path: runnerStatusPath },
+    { name: 'apply-output', path: applyOutputPath },
+    { name: 'apply-status', path: statusPath },
+    { name: 'apply-log', path: logPath },
+  ]);
 
-  return { applyRoot, scriptPath, launcherPath, launcherScriptPath, planPath, logPath, statusPath };
+  return { applyRoot, scriptPath, launcherPath, launcherScriptPath, runnerScriptPath, planPath, logPath, statusPath, runnerStatusPath, launcherStatusPath, applyOutputPath };
 }
 
 async function probeNet(name, net, url, required = true) {
