@@ -1,4 +1,5 @@
-import { Bot, ImageIcon, ImagePlus, Tv, TextCursorInput, type LucideIcon } from "lucide-react";
+import { Bot, ImageIcon, ImagePlus, MonitorUp, Split, TextCursorInput, type LucideIcon } from "lucide-react";
+import { createDefaultActionFissionState } from "../action-fission/actionFissionState";
 import { NODE_DEFAULTS } from "../constants";
 import type { CanvasNode, CanvasNodeType } from "../types";
 
@@ -16,13 +17,29 @@ export const NODE_DEFINITIONS: Record<CanvasNodeType, CanvasNodeDefinition> = {
     label: "Image Generation",
     icon: ImagePlus,
     defaultSize: NODE_DEFAULTS.imageGenerator,
-    init: (node) => ({ ...node, text: "", imageMode: "imageGenerator", imageSource: "generated" }),
+    init: (node) => ({ ...node, text: "", imageGenerationApiType: "third-party-api", imageMode: "imageGenerator", imageSource: "generated" }),
   },
-  image: {
-    type: "image",
-    label: "Image",
+  libtvImageGenerator: {
+    type: "libtvImageGenerator",
+    label: "LibTV Image Generator",
+    icon: MonitorUp,
+    defaultSize: NODE_DEFAULTS.libtvImageGenerator,
+    init: (node) => ({
+      ...node,
+      imageMode: "imageGenerator",
+      imageSource: "generated",
+      libtvImageGeneration: {
+        aspectRatio: "1:1",
+        quality: "2K",
+        prompt: "",
+      },
+    }),
+  },
+  imageLoader: {
+    type: "imageLoader",
+    label: "Image Loader",
     icon: ImageIcon,
-    defaultSize: NODE_DEFAULTS.image,
+    defaultSize: NODE_DEFAULTS.imageLoader,
     init: (node) => ({ ...node, text: "", imageMode: "asset", imageSource: "uploaded" }),
   },
   prompt: {
@@ -44,36 +61,16 @@ export const NODE_DEFINITIONS: Record<CanvasNodeType, CanvasNodeDefinition> = {
       generationStatus: "",
     }),
   },
-  libtvImage: {
-    type: "libtvImage",
-    label: "LibTV Image",
-    icon: Tv,
-    defaultSize: NODE_DEFAULTS.libtvImage,
+  actionFission: {
+    type: "actionFission",
+    label: "Action Fission",
+    icon: Split,
+    defaultSize: NODE_DEFAULTS.actionFission,
     init: (node) => ({
       ...node,
-      text: "",
-      libtvModel: "",
-      libtvModelName: "",
-      libtvResolution: "1k",
-      libtvAspectRatio: "1:1",
-      generationError: "",
-      generationStatus: "",
-      imageSource: "generated",
+      title: "Action Fission",
+      actionFission: createDefaultActionFissionState(),
     }),
-  },
-  libtvPrompt: {
-    type: "libtvPrompt",
-    label: "LibTV Prompt",
-    icon: TextCursorInput,
-    defaultSize: NODE_DEFAULTS.libtvPrompt,
-    init: (node) => ({ ...node, text: "" }),
-  },
-  libtvUpload: {
-    type: "libtvUpload",
-    label: "LibTV Upload",
-    icon: ImageIcon,
-    defaultSize: NODE_DEFAULTS.libtvUpload,
-    init: (node) => ({ ...node, text: "", imageMode: "asset", imageSource: "uploaded" }),
   },
 };
 

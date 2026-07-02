@@ -1,10 +1,10 @@
 import { Home, Layers, X } from "lucide-react";
 import { PointerEvent, useRef, useState } from "react";
 import type { TFunction } from "i18next";
-import type { CanvasProjectTab } from "./useCanvasProjects";
+import type { CanvasDocumentTab } from "./useCanvasProjects";
 
 interface CanvasTabsBarProps {
-  tabs: CanvasProjectTab[];
+  tabs: CanvasDocumentTab[];
   activeCanvasId: string;
   showHome: boolean;
   onOpenHome: () => void;
@@ -28,7 +28,7 @@ interface DragState {
 
 const DRAG_THRESHOLD = 4;
 
-function getTargetIndex(draggedCenter: number, draggedCanvasId: string, tabs: CanvasProjectTab[], tabElements: Map<string, HTMLElement>) {
+function getTargetIndex(draggedCenter: number, draggedCanvasId: string, tabs: CanvasDocumentTab[], tabElements: Map<string, HTMLElement>) {
   const otherTabs: Array<{ id: string; element: HTMLElement }> = [];
   tabs.forEach((tab) => {
     if (tab.id === draggedCanvasId) return;
@@ -58,7 +58,7 @@ export function CanvasTabsBar({
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [isReleasingDrag, setIsReleasingDrag] = useState(false);
 
-  function startTabDrag(event: PointerEvent<HTMLDivElement>, tab: CanvasProjectTab, index: number) {
+  function startTabDrag(event: PointerEvent<HTMLDivElement>, tab: CanvasDocumentTab, index: number) {
     if (event.button !== 0) return;
     if ((event.target as HTMLElement).closest(".ic-canvas-tab__close")) return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -90,7 +90,7 @@ export function CanvasTabsBar({
     });
   }
 
-  function finishTabDrag(event: PointerEvent<HTMLDivElement>, tab: CanvasProjectTab) {
+  function finishTabDrag(event: PointerEvent<HTMLDivElement>, tab: CanvasDocumentTab) {
     if (!dragState || event.pointerId !== dragState.pointerId || dragState.canvasId !== tab.id) return;
     event.currentTarget.releasePointerCapture(event.pointerId);
     const shouldOpen = !dragState.hasMoved;
@@ -113,7 +113,7 @@ export function CanvasTabsBar({
     setDragState(null);
   }
 
-  function getTabDragStyle(tab: CanvasProjectTab) {
+  function getTabDragStyle(tab: CanvasDocumentTab) {
     if (!dragState) return undefined;
     if (dragState.canvasId === tab.id) {
       return {
@@ -134,7 +134,7 @@ export function CanvasTabsBar({
   }
 
   return (
-    <div className="ic-tabs-bar nodrag" role="tablist" aria-label={t("infiniteCanvas.title")}>
+    <div className="ic-tabs-bar nodrag" role="tablist" aria-label={t("infiniteCanvas:title")}>
       <button
         className={`ic-canvas-tab ic-canvas-tab--home${showHome ? " active" : ""}`}
         type="button"
@@ -148,7 +148,7 @@ export function CanvasTabsBar({
       </button>
       <div className={`ic-canvas-tabs-strip${dragState ? " is-reordering" : ""}${isReleasingDrag ? " is-releasing" : ""}`}>
         {tabs.map((tab, index) => {
-          const title = tab.title || t("infiniteCanvas.untitledCanvas");
+          const title = tab.title || t("infiniteCanvas:untitledCanvas");
           const isActive = !showHome && tab.id === activeCanvasId;
           const isDragging = dragState?.canvasId === tab.id;
           return (
@@ -180,8 +180,8 @@ export function CanvasTabsBar({
               <button
                 className="ic-canvas-tab__close"
                 type="button"
-                aria-label={`${t("common.actions.close")}: ${title}`}
-                title={t("common.actions.close")}
+                aria-label={`${t("common:actions.close")}: ${title}`}
+                title={t("common:actions.close")}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={() => onCloseCanvas(tab.id)}
               >

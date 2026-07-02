@@ -102,14 +102,14 @@ export function Select({
       if (event.key === "Escape") setOpen(false);
     }
 
-    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("pointerdown", handlePointerDown, true);
     window.addEventListener("keydown", handleKeyDown);
     if (portal) {
       window.addEventListener("resize", updatePortalMenuPosition);
       window.addEventListener("scroll", updatePortalMenuPosition, true);
     }
     return () => {
-      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("pointerdown", handlePointerDown, true);
       window.removeEventListener("keydown", handleKeyDown);
       if (portal) {
         window.removeEventListener("resize", updatePortalMenuPosition);

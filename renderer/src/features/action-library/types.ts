@@ -24,7 +24,6 @@ export interface ActionTag {
   kind: "action";
   project_id: string;
   name: string;
-  color: string;
   sort_order: number;
   usage_count: number;
   created_at: string;
@@ -39,7 +38,7 @@ export interface AssetUploadPayload {
 
 export interface ActionFilters {
   projectId: string;
-  tagId?: string;
+  tagIds?: string[];
 }
 
 export interface StorageSettings {

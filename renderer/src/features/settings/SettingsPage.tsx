@@ -1,9 +1,9 @@
-import { ChevronDown, Download, FolderOpen, KeyRound, LogIn, LogOut, Plus, RefreshCw, Save, Server, Settings, TestTube2, Trash2 } from "lucide-react";
-import { PointerEvent, UIEvent, useEffect, useRef, useState } from "react";
+import { ChevronDown, Download, FolderOpen, HardDrive, KeyRound, LogIn, LogOut, Plus, RefreshCw, Settings, TestTube2, Trash2 } from "lucide-react";
+import { PointerEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ForartAppConfig, ForartMode, normalizeConfig, type LibtvAccountRecord } from "../../app/appConfig";
+import { ForartAppConfig, ForartMode, normalizeConfig, type CanvasCacheAsset, type CanvasCacheDeleteResult, type CanvasCacheScanResult, type LibtvAccountRecord } from "../../app/appConfig";
 import { Select } from "../../components/Select";
-import { createApiProvider, getModelDisplayName, loadApiSettings, normalizeApiProvider, readApiProviders, readDefaultImageProviderId, saveApiSettings, uniqueModels, type ApiModelKind, type ApiProvider } from "./apiProviders";
+import { createApiProvider, getModelDisplayName, loadApiSettings, normalizeApiProvider, readApiProviders, saveApiSettings, uniqueModels, type ApiModelKind, type ApiProvider } from "./apiProviders";
 import { detectImageModelRuleId, IMAGE_MODEL_RULES, normalizeImageModelRuleId } from "./imageModelRules";
 
 interface SettingsPageProps {
@@ -16,9 +16,12 @@ interface StatusState {
   text: string;
 }
 
-type SettingsTab = "general" | "api";
+type SettingsTab = "general" | "api" | "cache";
 type ApiSettingsPane = "provider" | "libtv";
 type ApiAction = "verify" | "fetch" | "libtv-check" | "libtv-install" | "libtv-login" | "libtv-logout" | "";
+type CacheAction = "scan" | "delete" | "delete-old" | "open-root" | "";
+type CacheKindFilter = "all" | "input" | "output";
+type CacheStatusFilter = "all" | "referenced" | "cleanable" | "missing";
 
 interface FetchedModelEntry {
   id: string;
@@ -67,7 +70,7 @@ function summarizeLibtvAccount(account: unknown): LibtvAccountSummary {
 }
 
 function libtvAccountTypeLabel(account: LibtvAccountRecord, t: (key: string) => string) {
-  return account.accountType === 2 ? t("settings.libtvTeamAccount") : t("settings.libtvPersonalAccount");
+  return account.accountType === 2 ? t("settings:libtvTeamAccount") : t("settings:libtvPersonalAccount");
 }
 
 function sameAppConfig(left: ForartAppConfig, right: ForartAppConfig) {
@@ -88,6 +91,29 @@ function formatModelsUrl(provider: ApiProvider) {
     return baseUrl.endsWith("/v1beta") ? `${baseUrl}/models` : `${baseUrl}/v1beta/models`;
   }
   return baseUrl.endsWith("/v1") ? `${baseUrl}/models` : `${baseUrl}/v1/models`;
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function formatCacheTime(timestamp: number) {
+  if (!timestamp) return "-";
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
 }
 
 function modelValueToId(item: unknown): string {
@@ -140,17 +166,16 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   const [imageDownloadPath, setImageDownloadPath] = useState(config.imageDownloadPath);
   const [defaultImageDownloadPath, setDefaultImageDownloadPath] = useState("");
   const [serverUrl, setServerUrl] = useState(config.serverUrl);
-  const [status, setStatus] = useState<StatusState>({ tone: "idle", text: t("settings.connectionChecking") });
+  const [status, setStatus] = useState<StatusState>({ tone: "idle", text: t("settings:connectionChecking") });
   const didMountGeneralSettings = useRef(false);
   const savingConfigRef = useRef(false);
   const pendingSaveRef = useRef(false);
   const [apiProviders, setApiProviders] = useState<ApiProvider[]>(readApiProviders);
   const [selectedProviderId, setSelectedProviderId] = useState(() => readApiProviders()[0]?.id || "");
   const [activeApiPane, setActiveApiPane] = useState<ApiSettingsPane>("provider");
-  const [defaultImageProviderId, setDefaultImageProviderId] = useState(readDefaultImageProviderId);
   const [apiAction, setApiAction] = useState<ApiAction>("");
-  const [apiStatus, setApiStatus] = useState<StatusState>({ tone: "idle", text: t("settings.apiActionReady") });
-  const [libtvStatus, setLibtvStatus] = useState<StatusState>({ tone: "idle", text: t("settings.libtvStatusIdle") });
+  const [apiStatus, setApiStatus] = useState<StatusState>({ tone: "idle", text: t("settings:apiActionReady") });
+  const [libtvStatus, setLibtvStatus] = useState<StatusState>({ tone: "idle", text: t("settings:libtvStatusIdle") });
   const [libtvLoggedIn, setLibtvLoggedIn] = useState(false);
   const [libtvAvailable, setLibtvAvailable] = useState(false);
   const [libtvAccount, setLibtvAccount] = useState<LibtvAccountSummary | null>(null);
@@ -160,6 +185,13 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   const [modelPickerFilter, setModelPickerFilter] = useState("");
   const [modelPickerTab, setModelPickerTab] = useState<ApiModelKind | "all">("all");
   const [fetchedModels, setFetchedModels] = useState<FetchedModelEntry[]>([]);
+  const [cacheScan, setCacheScan] = useState<CanvasCacheScanResult | null>(null);
+  const [cacheAction, setCacheAction] = useState<CacheAction>("");
+  const [cacheStatus, setCacheStatus] = useState<StatusState>({ tone: "idle", text: "Ready" });
+  const [cacheKindFilter, setCacheKindFilter] = useState<CacheKindFilter>("all");
+  const [cacheStatusFilter, setCacheStatusFilter] = useState<CacheStatusFilter>("all");
+  const [cacheCanvasFilter, setCacheCanvasFilter] = useState("all");
+  const [selectedCacheAssetIds, setSelectedCacheAssetIds] = useState<Set<string>>(new Set());
   const [apiSettingsLoaded, setApiSettingsLoaded] = useState(false);
   const [modelScrollbars, setModelScrollbars] = useState<Record<ApiModelKind, { top: number; height: number; visible: boolean }>>({
     image: { top: 0, height: 0, visible: false },
@@ -167,6 +199,31 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     video: { top: 0, height: 0, visible: false },
   });
   const selectedProvider = apiProviders.find((provider) => provider.id === selectedProviderId) || apiProviders[0] || null;
+  const cacheAssets = useMemo(() => {
+    if (!cacheScan) return [];
+    return [...cacheScan.assets, ...cacheScan.missingReferences];
+  }, [cacheScan]);
+  const cacheCanvasOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    cacheAssets.forEach((asset) => {
+      asset.references.forEach((reference) => {
+        if (reference.canvasId) byId.set(reference.canvasId, reference.canvasTitle || reference.canvasId);
+      });
+    });
+    return Array.from(byId.entries()).map(([id, title]) => ({ value: id, label: title })).sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }));
+  }, [cacheAssets]);
+  const filteredCacheAssets = useMemo(() => {
+    return cacheAssets.filter((asset) => {
+      if (cacheKindFilter !== "all" && asset.kind !== cacheKindFilter) return false;
+      if (cacheStatusFilter === "referenced" && (!asset.exists || !asset.referenced)) return false;
+      if (cacheStatusFilter === "cleanable" && (!asset.exists || asset.referenced)) return false;
+      if (cacheStatusFilter === "missing" && asset.exists) return false;
+      if (cacheCanvasFilter !== "all" && !asset.references.some((reference) => reference.canvasId === cacheCanvasFilter)) return false;
+      return true;
+    });
+  }, [cacheAssets, cacheCanvasFilter, cacheKindFilter, cacheStatusFilter]);
+  const selectedCacheAssets = useMemo(() => cacheAssets.filter((asset) => selectedCacheAssetIds.has(asset.id)), [cacheAssets, selectedCacheAssetIds]);
+  const selectedCleanableCacheAssets = useMemo(() => selectedCacheAssets.filter((asset) => asset.exists && !asset.referenced), [selectedCacheAssets]);
 
   useEffect(() => {
     if (savingConfigRef.current) return;
@@ -194,7 +251,6 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
       const settings = await loadApiSettings();
       if (canceled) return;
       setApiProviders(settings.providers);
-      setDefaultImageProviderId(settings.defaultImageProviderId);
       setSelectedProviderId((current) => (
         current && settings.providers.some((provider) => provider.id === current)
           ? current
@@ -210,22 +266,15 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
 
   useEffect(() => {
     if (!apiSettingsLoaded) return;
-    void saveApiSettings({ providers: apiProviders, defaultImageProviderId });
+    void saveApiSettings({ providers: apiProviders });
     if (apiProviders.length && !apiProviders.some((provider) => provider.id === selectedProviderId)) {
       setSelectedProviderId(apiProviders[0].id);
     }
     if (!apiProviders.length && selectedProviderId) setSelectedProviderId("");
-    if (apiProviders.length && defaultImageProviderId && !apiProviders.some((provider) => provider.id === defaultImageProviderId)) {
-      const nextDefault = apiProviders.find((provider) => provider.protocol !== "gemini" && provider.imageModels.length)?.id || apiProviders.find((provider) => provider.protocol !== "gemini")?.id || "";
-      setDefaultImageProviderId(nextDefault);
-    }
-    if (!apiProviders.length && defaultImageProviderId) {
-      setDefaultImageProviderId("");
-    }
-  }, [apiProviders, apiSettingsLoaded, defaultImageProviderId, selectedProviderId]);
+  }, [apiProviders, apiSettingsLoaded, selectedProviderId]);
 
   useEffect(() => {
-    setApiStatus({ tone: "idle", text: t("settings.apiActionReady") });
+    setApiStatus({ tone: "idle", text: t("settings:apiActionReady") });
     setApiAction("");
     setModelPickerOpen(false);
     setFetchedModels([]);
@@ -246,6 +295,15 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     if (activeTab !== "api" || activeApiPane !== "libtv" || !window.libtv?.status) return;
     void refreshLibtvStatus();
   }, [activeTab, activeApiPane]);
+
+  useEffect(() => {
+    setCacheStatus({ tone: "idle", text: t("settings:cacheReady") });
+  }, [t]);
+
+  useEffect(() => {
+    if (activeTab !== "cache" || cacheScan || cacheAction) return;
+    void scanCanvasCache();
+  }, [activeTab, cacheScan, cacheAction]);
 
   useEffect(() => {
     if (!didMountGeneralSettings.current) {
@@ -273,44 +331,44 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
 
   async function refreshConnectionStatus(nextMode = mode, nextServerUrl = serverUrl) {
     if (nextMode === "local") {
-      setStatus({ tone: "busy", text: t("settings.localStatusBusy") });
+      setStatus({ tone: "busy", text: t("settings:localStatusBusy") });
       const result = await window.forartConfig?.localServerStatus();
       if (result?.ok) {
         setStatus({
           tone: "ready",
-          text: result.managed ? t("settings.localStatusManaged") : t("settings.localStatusExternal"),
+          text: result.managed ? t("settings:localStatusManaged") : t("settings:localStatusExternal"),
         });
         return;
       }
-      setStatus({ tone: "error", text: result?.error || t("settings.localStatusDisconnected") });
+      setStatus({ tone: "error", text: result?.error || t("settings:localStatusDisconnected") });
       return;
     }
 
     const trimmedServerUrl = nextServerUrl.trim();
     if (!trimmedServerUrl) {
-      setStatus({ tone: "idle", text: t("settings.serverUrlRequired") });
+      setStatus({ tone: "idle", text: t("settings:serverUrlRequired") });
       return;
     }
 
-    setStatus({ tone: "busy", text: t("settings.testingServer") });
+    setStatus({ tone: "busy", text: t("settings:testingServer") });
     const result = await window.forartConfig?.testServer(trimmedServerUrl);
     if (result?.ok) {
-      setStatus({ tone: "ready", text: t("settings.serverOk") });
+      setStatus({ tone: "ready", text: t("settings:serverOk") });
       return;
     }
-    setStatus({ tone: "error", text: result?.error || `${t("settings.connectionFailed")}${result?.status ? ` (${result.status})` : ""}` });
+    setStatus({ tone: "error", text: result?.error || `${t("settings:connectionFailed")}${result?.status ? ` (${result.status})` : ""}` });
   }
 
   async function saveGeneralSettings() {
     const nextConfig = normalizeConfig({ mode, localLibraryPath, imageDownloadPath, serverUrl, language: i18n.language === "en-US" ? "en-US" : "zh-CN" });
 
     if (nextConfig.mode === "local" && !nextConfig.localLibraryPath) {
-      setStatus({ tone: "error", text: t("settings.localPathRequired") });
+      setStatus({ tone: "error", text: t("settings:localPathRequired") });
       return;
     }
 
     if (nextConfig.mode === "remote" && !nextConfig.serverUrl) {
-      setStatus({ tone: "error", text: t("settings.serverUrlRequired") });
+      setStatus({ tone: "error", text: t("settings:serverUrlRequired") });
       return;
     }
 
@@ -339,6 +397,86 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
         void saveGeneralSettings();
       }
     }
+  }
+
+  async function scanCanvasCache(nextStatus?: StatusState) {
+    setCacheAction("scan");
+    setCacheStatus({ tone: "busy", text: t("settings:cacheScanning") });
+    try {
+      if (!window.easyTool?.scanCanvasCache) throw new Error("Canvas cache bridge is not available.");
+      const result = await window.easyTool.scanCanvasCache();
+      setCacheScan(result);
+      setSelectedCacheAssetIds(new Set());
+      setCacheStatus(nextStatus || { tone: "ready", text: t("settings:cacheScanComplete", { count: result.assets.length, cleanable: result.totals.cleanableCount }) });
+    } catch (error) {
+      setCacheStatus({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setCacheAction("");
+    }
+  }
+
+  async function deleteCacheAssets(assets: CanvasCacheAsset[], action: CacheAction, olderThanDays?: number) {
+    const cleanable = assets.filter((asset) => asset.exists && !asset.referenced);
+    if (!cleanable.length) {
+      setCacheStatus({ tone: "idle", text: t("settings:cacheNoCleanableSelected") });
+      return;
+    }
+    const totalBytes = cleanable.reduce((sum, asset) => sum + asset.sizeBytes, 0);
+    const message = olderThanDays
+      ? t("settings:cacheDeleteOldConfirm", { count: cleanable.length, size: formatBytes(totalBytes), days: olderThanDays })
+      : t("settings:cacheDeleteConfirm", { count: cleanable.length, size: formatBytes(totalBytes) });
+    if (!window.confirm(message)) return;
+
+    setCacheAction(action);
+    setCacheStatus({ tone: "busy", text: t("settings:cacheDeleting") });
+    try {
+      if (!window.easyTool?.deleteCanvasCacheAssets) throw new Error("Canvas cache bridge is not available.");
+      const result: CanvasCacheDeleteResult = await window.easyTool.deleteCanvasCacheAssets({ ids: cleanable.map((asset) => asset.id), olderThanDays });
+      await scanCanvasCache({
+        tone: result.failedCount ? "error" : "ready",
+        text: t("settings:cacheDeleteComplete", {
+          deleted: result.deletedCount,
+          skipped: result.skippedCount,
+          failed: result.failedCount,
+          size: formatBytes(result.freedBytes),
+        }),
+      });
+    } catch (error) {
+      setCacheStatus({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setCacheAction("");
+    }
+  }
+
+  async function openCanvasCacheRoot() {
+    setCacheAction("open-root");
+    try {
+      if (!window.easyTool?.openCanvasCacheRoot) throw new Error("Canvas cache bridge is not available.");
+      await window.easyTool.openCanvasCacheRoot();
+    } catch (error) {
+      setCacheStatus({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setCacheAction("");
+    }
+  }
+
+  async function revealCanvasCacheAsset(asset: CanvasCacheAsset) {
+    try {
+      if (!window.easyTool?.revealCanvasCacheAsset) throw new Error("Canvas cache bridge is not available.");
+      await window.easyTool.revealCanvasCacheAsset({ id: asset.id, filePath: asset.filePath });
+    } catch (error) {
+      setCacheStatus({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  function toggleCacheAssetSelection(asset: CanvasCacheAsset) {
+    if (!asset.exists || asset.referenced) return;
+    setSelectedCacheAssetIds((current) => {
+      const next = new Set(current);
+      if (next.has(asset.id)) next.delete(asset.id);
+      else next.add(asset.id);
+      return next;
+    });
   }
 
   function addApiProvider() {
@@ -385,29 +523,29 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   async function verifyApiAddress() {
     if (!selectedProvider) return;
     setApiAction("verify");
-    setApiStatus({ tone: "busy", text: t("settings.apiVerifyingAddress") });
+    setApiStatus({ tone: "busy", text: t("settings:apiVerifyingAddress") });
     try {
       const models = await requestProviderModels(selectedProvider);
       if (!models.length) {
         setApiStatus({
           tone: "ready",
-          text: t("settings.apiVerifyNoModels"),
+          text: t("settings:apiVerifyNoModels"),
         });
         return;
       }
       setApiStatus({
         tone: "ready",
-        text: t("settings.apiVerifySuccess", { count: models.length }),
+        text: t("settings:apiVerifySuccess", { count: models.length }),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setApiStatus({
         tone: "error",
         text: message === "base-url-required"
-          ? t("settings.apiBaseUrlRequired")
+          ? t("settings:apiBaseUrlRequired")
           : message === "base-url-invalid"
-            ? t("settings.apiBaseUrlInvalid")
-            : t("settings.apiVerifyFailed", { message }),
+            ? t("settings:apiBaseUrlInvalid")
+            : t("settings:apiVerifyFailed", { message }),
       });
     } finally {
       setApiAction("");
@@ -416,7 +554,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
 
   async function refreshLibtvStatus() {
     setApiAction("libtv-check");
-    setLibtvStatus({ tone: "busy", text: t("settings.libtvChecking") });
+    setLibtvStatus({ tone: "busy", text: t("settings:libtvChecking") });
     try {
       if (!window.libtv?.status || !window.libtv.account) throw new Error("LibTV bridge is not available.");
       const statusResult = await window.libtv.status();
@@ -426,7 +564,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
         setLibtvAccount(null);
         setLibtvAccounts([]);
         setActiveLibtvAccountId("");
-        setLibtvStatus({ tone: "error", text: statusResult.error || t("settings.libtvUnavailable") });
+        setLibtvStatus({ tone: "error", text: statusResult.error || t("settings:libtvUnavailable") });
         return;
       }
       const accountResult = await window.libtv.account();
@@ -444,7 +582,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
       }
       setLibtvStatus({
         tone: accountResult.loggedIn ? "ready" : "error",
-        text: accountResult.loggedIn ? t("settings.libtvLoggedIn") : t("settings.libtvNotLoggedIn"),
+        text: accountResult.loggedIn ? t("settings:libtvLoggedIn") : t("settings:libtvNotLoggedIn"),
       });
     } catch (error) {
       setLibtvLoggedIn(false);
@@ -460,14 +598,14 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
 
   async function installLibtvCli() {
     setApiAction("libtv-install");
-    setLibtvStatus({ tone: "busy", text: t("settings.libtvInstalling") });
+    setLibtvStatus({ tone: "busy", text: t("settings:libtvInstalling") });
     try {
       if (!window.libtv?.install) throw new Error("LibTV bridge is not available.");
       await window.libtv.install();
-      setLibtvStatus({ tone: "ready", text: t("settings.libtvInstallSuccess") });
+      setLibtvStatus({ tone: "ready", text: t("settings:libtvInstallSuccess") });
       await refreshLibtvStatus();
     } catch (error) {
-      setLibtvStatus({ tone: "error", text: t("settings.libtvInstallFailed", { message: error instanceof Error ? error.message : String(error) }) });
+      setLibtvStatus({ tone: "error", text: t("settings:libtvInstallFailed", { message: error instanceof Error ? error.message : String(error) }) });
     } finally {
       setApiAction("");
     }
@@ -475,7 +613,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
 
   async function loginLibtvWeb() {
     setApiAction("libtv-login");
-    setLibtvStatus({ tone: "busy", text: t("settings.libtvOpeningLogin") });
+    setLibtvStatus({ tone: "busy", text: t("settings:libtvOpeningLogin") });
     try {
       if (!window.libtv?.loginWeb) throw new Error("LibTV bridge is not available.");
       await window.libtv.loginWeb();
@@ -491,7 +629,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     if (!accountId || accountId === activeLibtvAccountId) return;
     setApiAction("libtv-check");
     setActiveLibtvAccountId(accountId);
-    setLibtvStatus({ tone: "busy", text: t("settings.libtvSwitchingAccount") });
+    setLibtvStatus({ tone: "busy", text: t("settings:libtvSwitchingAccount") });
     try {
       if (!window.libtv?.useAccount) throw new Error("LibTV bridge is not available.");
       await window.libtv.useAccount(accountId);
@@ -506,7 +644,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
 
   async function logoutLibtv() {
     setApiAction("libtv-logout");
-    setLibtvStatus({ tone: "busy", text: t("settings.libtvLoggingOut") });
+    setLibtvStatus({ tone: "busy", text: t("settings:libtvLoggingOut") });
     try {
       if (!window.libtv?.logout) throw new Error("LibTV bridge is not available.");
       await window.libtv.logout();
@@ -514,7 +652,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
       setLibtvAccount(null);
       setLibtvAccounts([]);
       setActiveLibtvAccountId("");
-      setLibtvStatus({ tone: "idle", text: t("settings.libtvLoggedOut") });
+      setLibtvStatus({ tone: "idle", text: t("settings:libtvLoggedOut") });
     } catch (error) {
       setLibtvStatus({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     } finally {
@@ -525,13 +663,13 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   async function fetchApiModels() {
     if (!selectedProvider) return;
     setApiAction("fetch");
-    setApiStatus({ tone: "busy", text: t("settings.apiFetchingModels") });
+    setApiStatus({ tone: "busy", text: t("settings:apiFetchingModels") });
     try {
       const models = await requestProviderModels(selectedProvider);
       if (!models.length) {
         setApiStatus({
           tone: "error",
-          text: t("settings.apiNoModelsFetched"),
+          text: t("settings:apiNoModelsFetched"),
         });
         return;
       }
@@ -558,17 +696,17 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
       setModelPickerOpen(true);
       setApiStatus({
         tone: "ready",
-        text: t("settings.apiFetchPickerReady", { total: models.length }),
+        text: t("settings:apiFetchPickerReady", { total: models.length }),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setApiStatus({
         tone: "error",
         text: message === "base-url-required"
-          ? t("settings.apiBaseUrlRequired")
+          ? t("settings:apiBaseUrlRequired")
           : message === "base-url-invalid"
-            ? t("settings.apiBaseUrlInvalid")
-            : t("settings.apiFetchFailed", { message }),
+            ? t("settings:apiBaseUrlInvalid")
+            : t("settings:apiFetchFailed", { message }),
       });
     } finally {
       setApiAction("");
@@ -612,7 +750,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     setModelPickerOpen(false);
     setApiStatus({
       tone: "ready",
-      text: t("settings.apiImportSuccess", {
+      text: t("settings:apiImportSuccess", {
         image: grouped.image.length,
         chat: grouped.chat.length,
         video: grouped.video.length,
@@ -639,17 +777,8 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
       const next = current.filter((provider) => provider.id !== selectedProvider.id);
       setSelectedProviderId(next[0]?.id || "");
       if (!next.length) setActiveApiPane("libtv");
-      if (defaultImageProviderId === selectedProvider.id) {
-        const nextDefault = next.find((provider) => provider.protocol !== "gemini" && provider.imageModels.length)?.id || next.find((provider) => provider.protocol !== "gemini")?.id || "";
-        setDefaultImageProviderId(nextDefault);
-      }
       return next;
     });
-  }
-
-  function changeDefaultImageProvider(providerId: string) {
-    const provider = apiProviders.find((item) => item.id === providerId);
-    setDefaultImageProviderId(providerId);
   }
 
   function addModel(kind: ApiModelKind) {
@@ -787,7 +916,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   function renderModelList(kind: ApiModelKind) {
     if (!selectedProvider) return null;
     const key = kind === "image" ? "imageModels" : kind === "chat" ? "chatModels" : "videoModels";
-    const title = kind === "image" ? t("settings.imageModels") : kind === "chat" ? t("settings.chatModels") : t("settings.videoModels");
+    const title = kind === "image" ? t("settings:imageModels") : kind === "chat" ? t("settings:chatModels") : t("settings:videoModels");
     const models = selectedProvider[key];
     return (
       <section className="settings-api-model-card">
@@ -797,7 +926,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
           </div>
           <button type="button" className="settings-api-small-button" onClick={() => addModel(kind)}>
             <Plus size={14} aria-hidden="true" />
-            <span>{t("settings.addModel")}</span>
+            <span>{t("settings:addModel")}</span>
           </button>
         </div>
         <div className="settings-api-model-list-wrap">
@@ -821,13 +950,15 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                   </label>
                 ) : (
                   <label className="settings-api-model-alias">
-                    <input value={model} onChange={(event) => updateModel(kind, index, event.target.value)} placeholder={t("settings.modelNamePlaceholder")} />
+                    <input value={model} onChange={(event) => updateModel(kind, index, event.target.value)} placeholder={t("settings:modelNamePlaceholder")} />
                   </label>
                 )}
                 {kind === "image" && model ? (
                   <label className="settings-api-model-rule">
                     <Select
                       value={imageRuleId}
+                      className="settings-select"
+                      menuClassName="settings-select-menu"
                       options={IMAGE_MODEL_RULES.map((rule) => ({ value: rule.id, label: rule.label }))}
                       onChange={(nextRuleId) => updateImageModelRule(model, nextRuleId)}
                       ariaLabel="Rule"
@@ -836,11 +967,11 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                     />
                   </label>
                 ) : null}
-                <button type="button" aria-label={t("settings.deleteModel")} title={t("settings.deleteModel")} onClick={() => deleteModel(kind, index)}>
+                <button type="button" aria-label={t("settings:deleteModel")} title={t("settings:deleteModel")} onClick={() => deleteModel(kind, index)}>
                   <Trash2 size={15} aria-hidden="true" />
                 </button>
               </div>
-            );}) : <div className="settings-api-empty-row">{t("settings.noModels")}</div>}
+            );}) : <div className="settings-api-empty-row">{t("settings:noModels")}</div>}
           </div>
           {modelScrollbars[kind].visible ? (
             <div className="settings-api-custom-scrollbar" aria-hidden="true">
@@ -858,19 +989,190 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     );
   }
 
+  function cacheKindLabel(kind: CanvasCacheAsset["kind"]) {
+    if (kind === "input") return t("settings:cacheKindInput");
+    if (kind === "output") return t("settings:cacheKindOutput");
+    return t("settings:cacheKindMissing");
+  }
+
+  function cacheStatusLabel(asset: CanvasCacheAsset) {
+    if (!asset.exists) return t("settings:cacheStatusMissing");
+    if (asset.referenced) return t("settings:cacheStatusReferenced");
+    return t("settings:cacheStatusCleanable");
+  }
+
+  function renderCacheMetric(label: string, count: number, bytes?: number) {
+    return (
+      <div className="settings-cache-metric">
+        <span>{label}</span>
+        <strong>{count}</strong>
+        {bytes !== undefined ? <small>{formatBytes(bytes)}</small> : null}
+      </div>
+    );
+  }
+
+  function renderCachePanel() {
+    const cleanableAssets = cacheScan?.assets.filter((asset) => asset.exists && !asset.referenced) || [];
+    const oldCleanableAssets = cleanableAssets.filter((asset) => asset.modifiedAt < Date.now() - 14 * 24 * 60 * 60 * 1000);
+    const allVisibleCleanableSelected = filteredCacheAssets.some((asset) => asset.exists && !asset.referenced)
+      && filteredCacheAssets.filter((asset) => asset.exists && !asset.referenced).every((asset) => selectedCacheAssetIds.has(asset.id));
+
+    return (
+      <div className="settings-cache-layout" role="tabpanel" aria-label={t("settings:cacheCleanup")}>
+        <section className="settings-section settings-cache-section">
+          <div className="settings-inline-status settings-cache-action-status" data-tone={cacheStatus.tone} aria-live="polite">
+            {cacheStatus.text}
+          </div>
+
+          <div className="settings-cache-summary">
+            {renderCacheMetric(t("settings:cacheInputImages"), cacheScan?.totals.inputCount || 0, cacheScan?.totals.inputBytes || 0)}
+            {renderCacheMetric(t("settings:cacheOutputImages"), cacheScan?.totals.outputCount || 0, cacheScan?.totals.outputBytes || 0)}
+            {renderCacheMetric(t("settings:cacheReferencedImages"), cacheScan?.totals.referencedCount || 0, cacheScan?.totals.referencedBytes || 0)}
+            {renderCacheMetric(t("settings:cacheCleanableImages"), cacheScan?.totals.cleanableCount || 0, cacheScan?.totals.cleanableBytes || 0)}
+            {renderCacheMetric(t("settings:cacheMissingImages"), cacheScan?.totals.missingReferenceCount || 0)}
+          </div>
+
+          <div className="settings-cache-toolbar">
+            <div className="settings-segmented settings-cache-segmented" role="tablist" aria-label={t("settings:cacheKindFilter")}>
+              {(["all", "input", "output"] as CacheKindFilter[]).map((kind) => (
+                <button key={kind} type="button" className={cacheKindFilter === kind ? "active" : ""} onClick={() => setCacheKindFilter(kind)}>
+                  {kind === "all" ? t("common:labels.all") : kind === "input" ? t("settings:cacheKindInput") : t("settings:cacheKindOutput")}
+                </button>
+              ))}
+            </div>
+            <div className="settings-segmented settings-cache-segmented settings-cache-segmented--status" role="tablist" aria-label={t("settings:cacheStatusFilter")}>
+              {(["all", "referenced", "cleanable", "missing"] as CacheStatusFilter[]).map((statusFilter) => (
+                <button key={statusFilter} type="button" className={cacheStatusFilter === statusFilter ? "active" : ""} onClick={() => setCacheStatusFilter(statusFilter)}>
+                  {statusFilter === "all" ? t("common:labels.all") : statusFilter === "referenced" ? t("settings:cacheStatusReferenced") : statusFilter === "cleanable" ? t("settings:cacheStatusCleanable") : t("settings:cacheStatusMissing")}
+                </button>
+              ))}
+            </div>
+            <Select
+              value={cacheCanvasFilter}
+              className="settings-select settings-cache-canvas-select"
+              menuClassName="settings-select-menu"
+              options={[{ value: "all", label: t("settings:cacheAllCanvases") }, ...cacheCanvasOptions]}
+              onChange={setCacheCanvasFilter}
+              ariaLabel={t("settings:cacheCanvasFilter")}
+              portal
+              menuPlacement="bottom"
+            />
+          </div>
+
+          <div className="settings-cache-actions">
+            <button type="button" className="settings-api-action-button settings-api-action-button--danger" disabled={cacheAction !== "" || !cleanableAssets.length} onClick={() => deleteCacheAssets(cleanableAssets, "delete")}>
+              <Trash2 size={15} aria-hidden="true" />
+              <span>{t("settings:cacheDeleteAllCleanable")}</span>
+            </button>
+            <button type="button" className="settings-api-action-button" disabled={cacheAction !== "" || !oldCleanableAssets.length} onClick={() => deleteCacheAssets(oldCleanableAssets, "delete-old", 14)}>
+              <Trash2 size={15} aria-hidden="true" />
+              <span>{t("settings:cacheDeleteOldCleanable")}</span>
+            </button>
+            <button type="button" className="settings-api-action-button" disabled={cacheAction !== ""} onClick={openCanvasCacheRoot}>
+              <FolderOpen size={15} aria-hidden="true" />
+              <span>{t("settings:cacheOpenRoot")}</span>
+            </button>
+            <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={cacheAction !== ""} onClick={() => void scanCanvasCache()}>
+              <RefreshCw size={15} aria-hidden="true" />
+              <span>{cacheAction === "scan" ? t("settings:cacheScanningButton") : t("settings:cacheRefresh")}</span>
+            </button>
+          </div>
+
+          <div className="settings-cache-list-head">
+            <label>
+              <input
+                type="checkbox"
+                checked={allVisibleCleanableSelected}
+                disabled={!filteredCacheAssets.some((asset) => asset.exists && !asset.referenced)}
+                onChange={() => {
+                  const visibleCleanable = filteredCacheAssets.filter((asset) => asset.exists && !asset.referenced);
+                  setSelectedCacheAssetIds((current) => {
+                    const next = new Set(current);
+                    if (allVisibleCleanableSelected) visibleCleanable.forEach((asset) => next.delete(asset.id));
+                    else visibleCleanable.forEach((asset) => next.add(asset.id));
+                    return next;
+                  });
+                }}
+              />
+              <span>{t("settings:cacheVisibleCount", { count: filteredCacheAssets.length })}</span>
+            </label>
+            <span>{cacheScan?.rootPath || ""}</span>
+          </div>
+
+          <div className="settings-cache-list">
+            {filteredCacheAssets.length ? filteredCacheAssets.map((asset) => {
+              const canDelete = asset.exists && !asset.referenced;
+              return (
+                <article key={asset.id} className={`settings-cache-row${!asset.exists ? " settings-cache-row--missing" : ""}`}>
+                  <label className="settings-cache-row-select" aria-label={t("settings:cacheSelectAsset")}>
+                    <input type="checkbox" checked={selectedCacheAssetIds.has(asset.id)} disabled={!canDelete} onChange={() => toggleCacheAssetSelection(asset)} />
+                  </label>
+                  <div className="settings-cache-thumb">
+                    {asset.exists ? <img src={asset.url} alt={asset.fileName} loading="lazy" /> : <HardDrive size={20} aria-hidden="true" />}
+                  </div>
+                  <div className="settings-cache-info">
+                    <div className="settings-cache-title-line">
+                      <strong title={asset.fileName}>{asset.fileName}</strong>
+                      <span className={`settings-cache-pill settings-cache-pill--${asset.exists ? asset.referenced ? "referenced" : "cleanable" : "missing"}`}>{cacheStatusLabel(asset)}</span>
+                      <span className="settings-cache-pill">{cacheKindLabel(asset.kind)}</span>
+                    </div>
+                    <div className="settings-cache-meta">
+                      <span>{formatBytes(asset.sizeBytes)}</span>
+                      <span>{formatCacheTime(asset.modifiedAt)}</span>
+                      <span>{t("settings:cacheReferenceCount", { count: asset.references.length })}</span>
+                    </div>
+                    <div className="settings-cache-reference-line" title={asset.references.map((reference) => `${reference.canvasTitle || reference.canvasId}${reference.nodeTitle ? ` / ${reference.nodeTitle}` : ""}`).join("\n")}>
+                      {asset.references.length ? asset.references.slice(0, 3).map((reference) => reference.canvasTitle || reference.canvasId || "-").join(" / ") : t("settings:cacheNoReferences")}
+                    </div>
+                  </div>
+                  <div className="settings-cache-row-actions">
+                    <button type="button" className="settings-api-small-button" disabled={!asset.filePath} onClick={() => revealCanvasCacheAsset(asset)}>
+                      {t("settings:cacheShowInFolder")}
+                    </button>
+                    <button type="button" className="settings-api-small-button settings-api-action-button--danger" disabled={!canDelete || cacheAction !== ""} title={canDelete ? t("common:actions.delete") : t("settings:cacheReferencedCannotDelete")} onClick={() => deleteCacheAssets([asset], "delete")}>
+                      {t("common:actions.delete")}
+                    </button>
+                  </div>
+                </article>
+              );
+            }) : (
+              <div className="settings-empty-state">
+                <HardDrive size={22} aria-hidden="true" />
+                <p>{cacheAction === "scan" ? t("settings:cacheScanning") : t("settings:cacheNoAssets")}</p>
+              </div>
+            )}
+          </div>
+
+          {selectedCacheAssetIds.size ? (
+            <div className="settings-cache-selection-bar">
+              <span>{t("settings:cacheSelectedSummary", { selected: selectedCacheAssetIds.size, cleanable: selectedCleanableCacheAssets.length, size: formatBytes(selectedCleanableCacheAssets.reduce((sum, asset) => sum + asset.sizeBytes, 0)) })}</span>
+              <div>
+                <button type="button" className="settings-api-small-button" onClick={() => setSelectedCacheAssetIds(new Set())}>{t("settings:cacheClearSelection")}</button>
+                <button type="button" className="settings-api-action-button settings-api-action-button--danger" disabled={cacheAction !== "" || !selectedCleanableCacheAssets.length} onClick={() => deleteCacheAssets(selectedCleanableCacheAssets, "delete")}>
+                  <Trash2 size={15} aria-hidden="true" />
+                  <span>{t("settings:cacheDeleteSelected")}</span>
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </section>
+      </div>
+    );
+  }
+
   return (
-    <section className="settings-page" aria-label={t("settings.title")}>
+    <section className="settings-page" aria-label={t("settings:title")}>
       <div className="settings-shell">
         <header className="settings-header">
           <div>
-            <h1>{t("settings.title")}</h1>
+            <h1>{t("settings:title")}</h1>
           </div>
           <div className="settings-status" data-tone={status.tone}>
             {status.text}
           </div>
         </header>
 
-        <nav className="settings-nav" aria-label={t("settings.settingsNavigation")} role="tablist">
+        <nav className="settings-nav" aria-label={t("settings:settingsNavigation")} role="tablist">
           <button
             type="button"
             role="tab"
@@ -879,7 +1181,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
             onClick={() => setActiveTab("general")}
           >
             <Settings size={16} aria-hidden="true" />
-            <span>{t("settings.generalSettings")}</span>
+            <span>{t("settings:generalSettings")}</span>
           </button>
           <button
             type="button"
@@ -889,16 +1191,26 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
             onClick={() => setActiveTab("api")}
           >
             <KeyRound size={16} aria-hidden="true" />
-            <span>{t("settings.apiSettings")}</span>
+            <span>{t("settings:apiSettings")}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "cache"}
+            className={activeTab === "cache" ? "active" : ""}
+            onClick={() => setActiveTab("cache")}
+          >
+            <HardDrive size={16} aria-hidden="true" />
+            <span>{t("settings:cacheCleanup")}</span>
           </button>
         </nav>
 
         {activeTab === "general" ? (
-          <div className="settings-layout" role="tabpanel" aria-label={t("settings.generalSettings")}>
-            <section className="settings-section" aria-label={t("settings.generalSettings")}>
+          <div className="settings-layout" role="tabpanel" aria-label={t("settings:generalSettings")}>
+            <section className="settings-section" aria-label={t("settings:generalSettings")}>
               <div className="settings-section__head">
                 <div>
-                  <h2>{t("settings.generalSettings")}</h2>
+                  <h2>{t("settings:generalSettings")}</h2>
                 </div>
               </div>
 
@@ -906,22 +1218,22 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                 <div className="settings-run-mode-row">
                   <div className="settings-run-mode-title">
                     <div>
-                      <h3>{t("settings.runMode")}</h3>
+                      <h3>{t("settings:runMode")}</h3>
                     </div>
                   </div>
                   <div className="settings-run-mode-controls">
-                    <div className="settings-segmented settings-segmented--compact" role="radiogroup" aria-label={t("settings.runMode")}>
+                    <div className="settings-segmented settings-segmented--compact" role="radiogroup" aria-label={t("settings:runMode")}>
                       <button className={mode === "local" ? "active" : ""} type="button" role="radio" aria-checked={mode === "local"} onClick={() => {
                         setMode("local");
                         setRunModeExpanded(true);
                       }}>
-                        {t("settings.localMode")}
+                        {t("settings:localMode")}
                       </button>
                       <button className={mode === "remote" ? "active" : ""} type="button" role="radio" aria-checked={mode === "remote"} onClick={() => {
                         setMode("remote");
                         setRunModeExpanded(true);
                       }}>
-                        {t("settings.remoteMode")}
+                        {t("settings:remoteMode")}
                       </button>
                     </div>
                     <button
@@ -929,8 +1241,8 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                       className="settings-expand-button"
                       aria-expanded={runModeExpanded}
                       aria-controls="settings-run-mode-panel"
-                      aria-label={runModeExpanded ? t("settings.collapseRunModeConfig") : t("settings.expandRunModeConfig")}
-                      title={runModeExpanded ? t("settings.collapseRunModeConfig") : t("settings.expandRunModeConfig")}
+                      aria-label={runModeExpanded ? t("settings:collapseRunModeConfig") : t("settings:expandRunModeConfig")}
+                      title={runModeExpanded ? t("settings:collapseRunModeConfig") : t("settings:expandRunModeConfig")}
                       onClick={() => setRunModeExpanded((expanded) => !expanded)}
                     >
                       <ChevronDown size={18} aria-hidden="true" />
@@ -939,14 +1251,14 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                 </div>
 
                 {runModeExpanded ? (
-                  <div id="settings-run-mode-panel" className="settings-run-mode-panel" aria-label={mode === "local" ? t("settings.localConfig") : t("settings.serverConfig")}>
+                  <div id="settings-run-mode-panel" className="settings-run-mode-panel" aria-label={mode === "local" ? t("settings:localConfig") : t("settings:serverConfig")}>
                     {mode === "local" ? (
                       <>
                         <label className="settings-field">
-                          <span>{t("settings.libraryPath")}</span>
+                          <span>{t("settings:libraryPath")}</span>
                           <div className="settings-path-row">
                             <input value={localLibraryPath} onChange={(event) => setLocalLibraryPath(event.target.value)} placeholder="D:/ForartLibrary" />
-                            <button type="button" className="settings-icon-button" title={t("setup.chooseDirectory")} aria-label={t("setup.chooseDirectory")} onClick={chooseDirectory}>
+                            <button type="button" className="settings-icon-button" title={t("setup:chooseDirectory")} aria-label={t("setup:chooseDirectory")} onClick={chooseDirectory}>
                               <FolderOpen size={18} aria-hidden="true" />
                             </button>
                           </div>
@@ -956,8 +1268,8 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                     ) : (
                       <>
                         <label className="settings-field">
-                          <span>{t("settings.serverUrl")}</span>
-                          <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://192.168.1.20:5175" />
+                          <span>{t("settings:serverUrl")}</span>
+                          <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://192.168.1.20:6980" />
                         </label>
                       </>
                     )}
@@ -965,16 +1277,16 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                 ) : null}
               </div>
 
-              <div className="settings-subsection settings-download-path-row" aria-label={t("settings.imageDownloadConfig")}>
-                <h3>{t("settings.imageDownloadPath")}</h3>
+              <div className="settings-subsection settings-download-path-row" aria-label={t("settings:imageDownloadConfig")}>
+                <h3>{t("settings:imageDownloadPath")}</h3>
                 <div className="settings-download-path-control">
                   <input
                     value={imageDownloadPath}
                     onChange={(event) => setImageDownloadPath(event.target.value)}
-                    placeholder={defaultImageDownloadPath || t("settings.imageDownloadDefault")}
-                    aria-label={t("settings.imageDownloadDirectory")}
+                    placeholder={defaultImageDownloadPath || t("settings:imageDownloadDefault")}
+                    aria-label={t("settings:imageDownloadDirectory")}
                   />
-                  <button type="button" className="settings-icon-button" title={t("setup.chooseDirectory")} aria-label={t("setup.chooseDirectory")} onClick={chooseImageDownloadDirectory}>
+                  <button type="button" className="settings-icon-button" title={t("setup:chooseDirectory")} aria-label={t("setup:chooseDirectory")} onClick={chooseImageDownloadDirectory}>
                     <FolderOpen size={18} aria-hidden="true" />
                   </button>
                 </div>
@@ -982,17 +1294,17 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
             </section>
 
           </div>
-        ) : (
-          <div className="settings-api-layout" role="tabpanel" aria-label={t("settings.apiSettings")}>
-            <aside className="settings-api-sidebar" aria-label={t("settings.providerList")}>
-              <div className="settings-api-sidebar-title">{t("settings.providerList")}</div>
+        ) : activeTab === "cache" ? renderCachePanel() : (
+          <div className="settings-api-layout" role="tabpanel" aria-label={t("settings:apiSettings")}>
+            <aside className="settings-api-sidebar" aria-label={t("settings:providerList")}>
+              <div className="settings-api-sidebar-title">{t("settings:providerList")}</div>
               <div className="settings-api-provider-list">
                 <div
                   role="button"
                   tabIndex={0}
                   className={`settings-api-provider-card settings-api-provider-card--libtv${activeApiPane === "libtv" ? " active" : ""}`}
-                  aria-label={t("settings.libtvCliSettings")}
-                  title={t("settings.libtvCliSettings")}
+                  aria-label={t("settings:libtvCliSettings")}
+                  title={t("settings:libtvCliSettings")}
                   onClick={() => setActiveApiPane("libtv")}
                   onKeyDown={(event) => {
                     if (event.key !== "Enter" && event.key !== " ") return;
@@ -1021,39 +1333,20 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                       setSelectedProviderId(provider.id);
                     }}
                   >
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      className={`settings-api-default-button${provider.id === defaultImageProviderId ? " active" : ""}`}
-                      aria-pressed={provider.id === defaultImageProviderId}
-                      aria-label={t("settings.defaultImageProvider")}
-                      title={t("settings.defaultImageProvider")}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        changeDefaultImageProvider(provider.id);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key !== "Enter" && event.key !== " ") return;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        changeDefaultImageProvider(provider.id);
-                      }}
-                    />
                     <span className="settings-api-provider-mark">
                       <KeyRound size={15} aria-hidden="true" />
                     </span>
                     <span className="settings-api-provider-info">
                       <strong>{provider.name || provider.id}</strong>
-                      <small>{provider.baseUrl || t("settings.baseUrlNotConfigured")}</small>
+                      <small>{provider.baseUrl || t("settings:baseUrlNotConfigured")}</small>
                     </span>
                     <span className="settings-api-provider-pill">{provider.protocol}</span>
                   </div>
-                )) : <div className="settings-api-provider-empty">{t("settings.noApiProviders")}</div>}
+                )) : <div className="settings-api-provider-empty">{t("settings:noApiProviders")}</div>}
               </div>
               <button type="button" className="settings-api-add-button" onClick={addApiProvider}>
                 <Plus size={16} aria-hidden="true" />
-                <span>{t("settings.addProvider")}</span>
+                <span>{t("settings:addProvider")}</span>
               </button>
             </aside>
 
@@ -1071,44 +1364,46 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                           className="settings-libtv-installed-button"
                           disabled={apiAction !== ""}
                           onClick={installLibtvCli}
-                          aria-label={t("settings.libtvUpdateCli")}
-                          title={t("settings.libtvUpdateCli")}
+                          aria-label={t("settings:libtvUpdateCli")}
+                          title={t("settings:libtvUpdateCli")}
                         >
                           <RefreshCw size={15} aria-hidden="true" />
                           <span className="settings-libtv-installed-button__divider" aria-hidden="true" />
-                          <span>{apiAction === "libtv-install" ? t("settings.libtvInstallingButton") : t("settings.libtvInstalled")}</span>
+                          <span>{apiAction === "libtv-install" ? t("settings:libtvInstallingButton") : t("settings:libtvInstalled")}</span>
                         </button>
                       ) : (
                         <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={apiAction !== ""} onClick={installLibtvCli}>
                           <Download size={15} aria-hidden="true" />
-                          <span>{apiAction === "libtv-install" ? t("settings.libtvInstallingButton") : t("settings.libtvInstallCli")}</span>
+                          <span>{apiAction === "libtv-install" ? t("settings:libtvInstallingButton") : t("settings:libtvInstallCli")}</span>
                         </button>
                       )}
                     </div>
                   </div>
                   <div className="settings-libtv-account-panel">
                     <label className="settings-libtv-account-switcher">
-                      <span>{t("settings.libtvAccountName")}</span>
+                      <span>{t("settings:libtvAccountName")}</span>
                       <Select
                         value={activeLibtvAccountId}
+                        className="settings-select"
+                        menuClassName="settings-select-menu"
                         disabled={apiAction !== "" || !libtvAccounts.length}
                         onChange={(accountId) => void switchLibtvAccount(accountId)}
                         options={libtvAccounts.length ? libtvAccounts.map((account) => ({
                           value: String(account.accountId ?? ""),
                           label: `${account.accountName || account.accountId || "-"} · ${libtvAccountTypeLabel(account, t)}`,
-                        })) : [{ value: "", label: t("settings.libtvNoAccounts") }]}
-                        ariaLabel={t("settings.libtvAccountName")}
+                        })) : [{ value: "", label: t("settings:libtvNoAccounts") }]}
+                        ariaLabel={t("settings:libtvAccountName")}
                         portal
                         menuPlacement="bottom"
                       />
                     </label>
                     <div className="settings-libtv-account-grid">
                       <div className="settings-libtv-account-field">
-                        <span>{t("settings.libtvPlanInfo")}</span>
+                        <span>{t("settings:libtvPlanInfo")}</span>
                         <strong>{libtvAccount?.memberName || "-"}</strong>
                       </div>
                       <div className="settings-libtv-account-field">
-                        <span>{t("settings.libtvAccountUpdatedAt")}</span>
+                        <span>{t("settings:libtvAccountUpdatedAt")}</span>
                         <strong>{libtvAccount?.updatedAt || "-"}</strong>
                       </div>
                     </div>
@@ -1117,17 +1412,17 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                         <>
                           <button type="button" className="settings-api-action-button settings-libtv-status-button settings-libtv-status-button--ready" disabled={apiAction !== ""} onClick={refreshLibtvStatus}>
                             <RefreshCw size={15} aria-hidden="true" />
-                            <span>{apiAction === "libtv-check" ? t("settings.libtvCheckingButton") : t("settings.libtvLoggedInShort")}</span>
+                            <span>{apiAction === "libtv-check" ? t("settings:libtvCheckingButton") : t("settings:libtvLoggedInShort")}</span>
                           </button>
                           <button type="button" className="settings-api-action-button" disabled={apiAction !== ""} onClick={logoutLibtv}>
                             <LogOut size={15} aria-hidden="true" />
-                            <span>{t("settings.libtvLogout")}</span>
+                            <span>{t("settings:libtvLogout")}</span>
                           </button>
                         </>
                       ) : libtvAvailable ? (
                         <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={apiAction !== ""} onClick={loginLibtvWeb}>
                           <LogIn size={15} aria-hidden="true" />
-                          <span>{apiAction === "libtv-login" ? t("settings.libtvLoginWaiting") : t("settings.libtvLoginWeb")}</span>
+                          <span>{apiAction === "libtv-login" ? t("settings:libtvLoginWaiting") : t("settings:libtvLoginWeb")}</span>
                         </button>
                       ) : null}
                     </div>
@@ -1137,16 +1432,12 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                 <>
                   <header className="settings-api-content-head">
                     <div>
-                      <h2>{selectedProvider.name || t("settings.provider")}</h2>
+                      <h2>{selectedProvider.name || t("settings:provider")}</h2>
                     </div>
                     <div className="settings-api-content-actions">
                       <button type="button" className="settings-api-action-button settings-api-action-button--danger" onClick={deleteSelectedProvider}>
                         <Trash2 size={15} aria-hidden="true" />
-                        <span>{t("settings.deleteProvider")}</span>
-                      </button>
-                      <button type="button" className="settings-api-action-button settings-api-action-button--primary">
-                        <Save size={15} aria-hidden="true" />
-                        <span>{t("settings.savedLocally")}</span>
+                        <span>{t("settings:deleteProvider")}</span>
                       </button>
                     </div>
                   </header>
@@ -1154,33 +1445,35 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                   <section className="settings-api-block">
                     <div className="settings-api-block-head">
                       <div>
-                        <h3>{t("settings.basicInfo")}</h3>
+                        <h3>{t("settings:basicInfo")}</h3>
                       </div>
                     </div>
                     <div className="settings-api-form">
                       <label className="settings-field">
-                        <span>{t("settings.providerName")}</span>
-                        <input value={selectedProvider.name} onChange={(event) => patchSelectedProvider({ name: event.target.value })} placeholder={t("settings.providerNamePlaceholder")} />
+                        <span>{t("settings:providerName")}</span>
+                        <input value={selectedProvider.name} onChange={(event) => patchSelectedProvider({ name: event.target.value })} placeholder={t("settings:providerNamePlaceholder")} />
                       </label>
                       <label className="settings-field">
-                        <span>{t("settings.baseUrl")}</span>
+                        <span>{t("settings:baseUrl")}</span>
                         <input value={selectedProvider.baseUrl} onChange={(event) => patchSelectedProvider({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
                       </label>
                       <label className="settings-field">
-                        <span>{t("settings.apiKey")}</span>
-                        <input type="password" value={selectedProvider.apiKey} onChange={(event) => patchSelectedProvider({ apiKey: event.target.value })} placeholder={t("settings.apiKeyPlaceholder")} />
+                        <span>{t("settings:apiKey")}</span>
+                        <input type="password" value={selectedProvider.apiKey} onChange={(event) => patchSelectedProvider({ apiKey: event.target.value })} placeholder={t("settings:apiKeyPlaceholder")} />
                       </label>
                       <label className="settings-field">
-                        <span>{t("settings.protocol")}</span>
+                        <span>{t("settings:protocol")}</span>
                         <Select
                           value={selectedProvider.protocol}
+                          className="settings-select"
+                          menuClassName="settings-select-menu"
                           options={[
-                            { value: "openai", label: t("settings.protocolOpenAI") },
-                            { value: "async", label: t("settings.protocolAsync") },
-                            { value: "gemini", label: t("settings.protocolGemini") },
+                            { value: "openai", label: t("settings:protocolOpenAI") },
+                            { value: "async", label: t("settings:protocolAsync") },
+                            { value: "gemini", label: t("settings:protocolGemini") },
                           ]}
                           onChange={(protocol) => patchSelectedProvider({ protocol: protocol as ApiProvider["protocol"] })}
-                          ariaLabel={t("settings.protocol")}
+                          ariaLabel={t("settings:protocol")}
                           portal
                           menuPlacement="bottom"
                         />
@@ -1192,11 +1485,11 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                         <div className="settings-api-test-actions">
                           <button type="button" className="settings-api-action-button" disabled={apiAction !== ""} onClick={verifyApiAddress}>
                             <TestTube2 size={15} aria-hidden="true" />
-                            <span>{apiAction === "verify" ? t("settings.apiVerifying") : t("settings.verifyAddress")}</span>
+                            <span>{apiAction === "verify" ? t("settings:apiVerifying") : t("settings:verifyAddress")}</span>
                           </button>
                           <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={apiAction !== ""} onClick={fetchApiModels}>
                             <RefreshCw size={15} aria-hidden="true" />
-                            <span>{apiAction === "fetch" ? t("settings.apiFetching") : t("settings.fetchModels")}</span>
+                            <span>{apiAction === "fetch" ? t("settings:apiFetching") : t("settings:fetchModels")}</span>
                           </button>
                         </div>
                       </div>
@@ -1208,18 +1501,18 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                   {renderModelList("video")}
                 </>
               ) : (
-                <section className="settings-section settings-section--api" aria-label={t("settings.apiSettings")}>
+                <section className="settings-section settings-section--api" aria-label={t("settings:apiSettings")}>
                   <div className="settings-section__head">
                     <div>
-                      <h2>{t("settings.apiSettings")}</h2>
+                      <h2>{t("settings:apiSettings")}</h2>
                     </div>
                   </div>
                   <div className="settings-empty-state">
                     <KeyRound size={22} aria-hidden="true" />
-                    <p>{t("settings.noApiProviders")}</p>
+                    <p>{t("settings:noApiProviders")}</p>
                     <button type="button" className="settings-api-add-button settings-api-add-button--inline" onClick={addApiProvider}>
                       <Plus size={16} aria-hidden="true" />
-                      <span>{t("settings.addProvider")}</span>
+                      <span>{t("settings:addProvider")}</span>
                     </button>
                   </div>
                 </section>
@@ -1230,23 +1523,23 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
 
         {modelPickerOpen && selectedProvider ? (
           <div className="settings-api-modal-backdrop" role="presentation" onMouseDown={() => setModelPickerOpen(false)}>
-            <section className="settings-api-model-picker" role="dialog" aria-modal="true" aria-label={t("settings.selectModels")} onMouseDown={(event) => event.stopPropagation()}>
+            <section className="settings-api-model-picker" role="dialog" aria-modal="true" aria-label={t("settings:selectModels")} onMouseDown={(event) => event.stopPropagation()}>
               <header className="settings-api-model-picker-head">
                 <div>
-                  <h2>{t("settings.selectModels")}</h2>
-                  <p>{t("settings.selectModelsDescription", { total: fetchedModelCounts.all })}</p>
+                  <h2>{t("settings:selectModels")}</h2>
+                  <p>{t("settings:selectModelsDescription", { total: fetchedModelCounts.all })}</p>
                 </div>
                 <button type="button" className="settings-api-action-button" onClick={() => setModelPickerOpen(false)}>
-                  {t("common.actions.cancel")}
+                  {t("common:actions.cancel")}
                 </button>
               </header>
 
               <div className="settings-api-model-picker-tools">
-                <input value={modelPickerFilter} onChange={(event) => setModelPickerFilter(event.target.value)} placeholder={t("settings.searchModels")} />
-                <div className="settings-api-picker-tabs" role="tablist" aria-label={t("settings.modelList")}>
+                <input value={modelPickerFilter} onChange={(event) => setModelPickerFilter(event.target.value)} placeholder={t("settings:searchModels")} />
+                <div className="settings-api-picker-tabs" role="tablist" aria-label={t("settings:modelList")}>
                   {(["all", "image", "chat", "video"] as Array<ApiModelKind | "all">).map((kind) => (
                     <button key={kind} type="button" className={modelPickerTab === kind ? "active" : ""} onClick={() => setModelPickerTab(kind)}>
-                      <span>{kind === "all" ? t("settings.allModels") : kind === "image" ? t("settings.imageModels") : kind === "chat" ? t("settings.chatModels") : t("settings.videoModels")}</span>
+                      <span>{kind === "all" ? t("settings:allModels") : kind === "image" ? t("settings:imageModels") : kind === "chat" ? t("settings:chatModels") : t("settings:videoModels")}</span>
                       <small>{fetchedModelCounts[kind]}</small>
                     </button>
                   ))}
@@ -1254,10 +1547,10 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
               </div>
 
               <div className="settings-api-picker-bulk">
-                <span>{t("settings.visibleModelCount", { count: filteredFetchedModels.length })}</span>
+                <span>{t("settings:visibleModelCount", { count: filteredFetchedModels.length })}</span>
                 <div>
-                  <button type="button" className="settings-api-small-button" onClick={() => selectVisibleFetchedModels(true)}>{t("settings.selectVisible")}</button>
-                  <button type="button" className="settings-api-small-button" onClick={() => selectVisibleFetchedModels(false)}>{t("settings.clearVisible")}</button>
+                  <button type="button" className="settings-api-small-button" onClick={() => selectVisibleFetchedModels(true)}>{t("settings:selectVisible")}</button>
+                  <button type="button" className="settings-api-small-button" onClick={() => selectVisibleFetchedModels(false)}>{t("settings:clearVisible")}</button>
                 </div>
               </div>
 
@@ -1270,29 +1563,31 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                     </label>
                     <Select
                       value={model.kind}
+                      className="settings-select"
+                      menuClassName="settings-select-menu"
                       options={[
-                        { value: "image", label: t("settings.imageModels") },
-                        { value: "chat", label: t("settings.chatModels") },
-                        { value: "video", label: t("settings.videoModels") },
+                        { value: "image", label: t("settings:imageModels") },
+                        { value: "chat", label: t("settings:chatModels") },
+                        { value: "video", label: t("settings:videoModels") },
                       ]}
                       onChange={(kind) => patchFetchedModelKind(model.id, kind as ApiModelKind)}
-                      ariaLabel={t("settings.selectModels")}
+                      ariaLabel={t("settings:selectModels")}
                       portal
                       menuPlacement="bottom"
                     />
                   </div>
-                )) : <div className="settings-api-picker-empty">{t("settings.noMatchingModels")}</div>}
+                )) : <div className="settings-api-picker-empty">{t("settings:noMatchingModels")}</div>}
               </div>
 
               <footer className="settings-api-model-picker-foot">
                 <div className="settings-api-picker-summary">
-                  <span>{t("settings.selectedModelCount", { count: fetchedModelCounts.selected })}</span>
-                  <span>{t("settings.imageModels")}: {fetchedModels.filter((model) => model.selected && model.kind === "image").length}</span>
-                  <span>{t("settings.chatModels")}: {fetchedModels.filter((model) => model.selected && model.kind === "chat").length}</span>
-                  <span>{t("settings.videoModels")}: {fetchedModels.filter((model) => model.selected && model.kind === "video").length}</span>
+                  <span>{t("settings:selectedModelCount", { count: fetchedModelCounts.selected })}</span>
+                  <span>{t("settings:imageModels")}: {fetchedModels.filter((model) => model.selected && model.kind === "image").length}</span>
+                  <span>{t("settings:chatModels")}: {fetchedModels.filter((model) => model.selected && model.kind === "chat").length}</span>
+                  <span>{t("settings:videoModels")}: {fetchedModels.filter((model) => model.selected && model.kind === "video").length}</span>
                 </div>
                 <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={!fetchedModelCounts.selected} onClick={applyFetchedModels}>
-                  {t("settings.importSelectedModels")}
+                  {t("settings:importSelectedModels")}
                 </button>
               </footer>
             </section>

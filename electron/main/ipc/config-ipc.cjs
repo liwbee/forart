@@ -3,8 +3,12 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const REPO_URL = 'https://github.com/liwbee/forart';
-const REMOTE_COMMIT_URL = 'https://api.github.com/repos/liwbee/forart/commits/main';
-const REMOTE_UPDATE_NOTES_URL = 'https://raw.githubusercontent.com/liwbee/forart/main/update-notes.json';
+const GITHUB_BRANCH = 'main';
+const GITHUB_API_ROOT = 'https://api.github.com/repos/liwbee/forart';
+const GITHUB_RAW_ROOT = `https://raw.githubusercontent.com/liwbee/forart/${GITHUB_BRANCH}`;
+const REMOTE_TREE_URL = `${GITHUB_API_ROOT}/git/trees/${GITHUB_BRANCH}?recursive=1`;
+const REMOTE_VERSION_URL = `${GITHUB_RAW_ROOT}/VERSION`;
+const REMOTE_UPDATE_NOTES_URL = `${GITHUB_RAW_ROOT}/update-notes.json`;
 
 function readPackageInfo(rootDir) {
   try {
@@ -44,8 +48,17 @@ async function fetchText(net, url) {
   return response.text();
 }
 
-function canGitUpdate(rootDir) {
-  return fs.existsSync(path.join(rootDir, '.git'));
+async function fetchBytes(net, url) {
+  const response = await net.fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, {
+    headers: {
+      Accept: 'application/octet-stream, text/plain, */*',
+      'User-Agent': 'Forart-Updater',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
 }
 
 function resolveCommand(command) {
@@ -85,134 +98,268 @@ function runCommand(command, args, cwd) {
   });
 }
 
-async function readLocalRevision(rootDir) {
-  if (!canGitUpdate(rootDir)) {
-    return { revision: '', updatedAt: '' };
-  }
-
-  const revision = await runCommand('git', ['rev-parse', 'HEAD'], rootDir);
-  const updatedAt = await runCommand('git', ['log', '-1', '--format=%cI'], rootDir);
-  return {
-    revision: revision.ok ? revision.stdout.trim() : '',
-    updatedAt: updatedAt.ok ? updatedAt.stdout.trim() : '',
-  };
-}
-
-async function readRemoteRevision(net) {
-  const payload = await fetchJson(net, REMOTE_COMMIT_URL);
-  return {
-    revision: String(payload.sha || '').trim(),
-    updatedAt: String(payload.commit?.committer?.date || payload.commit?.author?.date || '').trim(),
-  };
-}
-
-function normalizeUpdateNotes(input, fallbackRevision = '') {
+function normalizeUpdateNotes(input, fallbackVersion = '') {
   const payload = input && typeof input === 'object' ? input : {};
   const items = Array.isArray(payload.items)
     ? payload.items
       .map((item) => {
         if (typeof item === 'string') return item.trim();
-        if (item && typeof item === 'object') return String(item.text || '').trim();
+        if (item && typeof item === 'object') return String(item.text || item.title || '').trim();
         return '';
       })
       .filter(Boolean)
     : [];
 
   return {
-    version: String(payload.version || '').trim(),
-    updatedAt: String(payload.updatedAt || payload.updated_at || '').trim(),
-    revision: String(payload.revision || fallbackRevision || '').trim(),
+    version: String(payload.version || fallbackVersion || '').trim(),
+    updatedAt: String(payload.updatedAt || payload.updated_at || payload.date || '').trim(),
+    revision: String(payload.revision || fallbackVersion || '').trim(),
     items,
   };
 }
 
-function readLocalUpdateNotes(rootDir) {
+function readLocalVersion(rootDir) {
+  try {
+    const version = fs.readFileSync(path.join(rootDir, 'VERSION'), 'utf8').trim().split(/\r?\n/)[0]?.trim();
+    if (version) return version;
+  } catch {
+    // Fall back to package.json for older local copies that do not have VERSION yet.
+  }
+  return readPackageInfo(rootDir).version;
+}
+
+async function readRemoteVersion(net) {
+  const text = await fetchText(net, REMOTE_VERSION_URL);
+  const version = String(text || '').trim().split(/\r?\n/)[0]?.trim() || '';
+  if (!version || version.includes('<') || version.includes('{') || !/\d/.test(version)) {
+    throw new Error('Remote VERSION is empty or invalid.');
+  }
+  return version;
+}
+
+function readLocalUpdateNotes(rootDir, fallbackVersion = '') {
   try {
     const filePath = path.join(rootDir, 'update-notes.json');
     const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    return normalizeUpdateNotes(payload);
+    return normalizeUpdateNotes(payload, fallbackVersion);
   } catch {
-    return normalizeUpdateNotes({});
+    return normalizeUpdateNotes({}, fallbackVersion);
   }
 }
 
-async function readRemoteUpdateNotes(net, latestRevision) {
+async function readRemoteUpdateNotes(net, latestVersion) {
   try {
     const payload = JSON.parse(await fetchText(net, REMOTE_UPDATE_NOTES_URL));
-    return normalizeUpdateNotes(payload, latestRevision);
+    return normalizeUpdateNotes(payload, latestVersion);
   } catch (error) {
     return {
-      ...normalizeUpdateNotes({}, latestRevision),
+      ...normalizeUpdateNotes({}, latestVersion),
       error: error instanceof Error ? error.message : String(error),
     };
   }
 }
 
-async function readCommitUpdateNotes(rootDir, currentRevision) {
-  if (!canGitUpdate(rootDir) || !currentRevision) return normalizeUpdateNotes({});
-  const log = await runCommand('git', ['log', '--oneline', `${currentRevision}..FETCH_HEAD`], rootDir);
-  if (!log.ok) return normalizeUpdateNotes({});
-  return normalizeUpdateNotes({
-    items: log.stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean),
-  });
+function versionParts(value) {
+  return String(value || '').match(/\d+/g)?.map(Number) || [];
 }
 
-async function buildUpdateNotes(rootDir, net, currentRevision, latestRevision) {
-  const remoteNotes = await readRemoteUpdateNotes(net, latestRevision);
-  if (remoteNotes.items.length) return { ...remoteNotes, source: 'update-notes.json' };
-
-  const commitNotes = await readCommitUpdateNotes(rootDir, currentRevision);
-  if (commitNotes.items.length) return { ...commitNotes, source: 'commit-log' };
-
-  const localNotes = readLocalUpdateNotes(rootDir);
-  return { ...localNotes, source: localNotes.items.length ? 'local-update-notes.json' : 'empty', error: remoteNotes.error };
-}
-
-function parseUpdateTimestamp(value) {
-  if (!value) return 0;
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? 0 : parsed;
-}
-
-function isRemoteNotesNewer(localNotes, remoteNotes) {
-  if (remoteNotes.revision && localNotes.revision) return remoteNotes.revision !== localNotes.revision;
-
-  const remoteTimestamp = parseUpdateTimestamp(remoteNotes.updatedAt);
-  const localTimestamp = parseUpdateTimestamp(localNotes.updatedAt);
-  if (remoteTimestamp && localTimestamp) return remoteTimestamp > localTimestamp;
-  if (remoteNotes.updatedAt && localNotes.updatedAt) return remoteNotes.updatedAt > localNotes.updatedAt;
-
-  if (remoteNotes.version && localNotes.version) return remoteNotes.version !== localNotes.version;
-  if (remoteNotes.items?.length && localNotes.items?.length) return JSON.stringify(remoteNotes.items) !== JSON.stringify(localNotes.items);
-  return Boolean(remoteNotes.items?.length && !localNotes.items?.length);
-}
-
-async function checkRemoteAhead(rootDir, currentRevision, latestRevision, localNotes, remoteNotes) {
-  if (!canGitUpdate(rootDir)) {
-    return { ok: true, updateAvailable: isRemoteNotesNewer(localNotes, remoteNotes) };
+function compareVersions(a, b) {
+  const aa = versionParts(a);
+  const bb = versionParts(b);
+  const length = Math.max(aa.length, bb.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (aa[index] || 0) - (bb[index] || 0);
+    if (diff) return diff;
   }
+  const left = String(a || '').trim();
+  const right = String(b || '').trim();
+  if (left === right) return 0;
+  return left > right ? 1 : -1;
+}
 
-  if (!currentRevision || !latestRevision || currentRevision === latestRevision) {
-    return { ok: true, updateAvailable: false };
+function portableDataRoot(rootDir) {
+  const directory = path.join(rootDir, '.forart-data');
+  fs.mkdirSync(directory, { recursive: true });
+  return directory;
+}
+
+function updateBackupRoot(rootDir) {
+  const directory = path.join(portableDataRoot(rootDir), 'update_backups');
+  fs.mkdirSync(directory, { recursive: true });
+  return directory;
+}
+
+function updateStagingRoot(rootDir) {
+  const directory = path.join(portableDataRoot(rootDir), 'update_staging');
+  fs.mkdirSync(directory, { recursive: true });
+  return directory;
+}
+
+function timestampName() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+
+function normalizeUpdatePath(input) {
+  return String(input || '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
+}
+
+function hasSafeParts(rel) {
+  return Boolean(rel) && rel.split('/').every((part) => part && part !== '.' && part !== '..');
+}
+
+function updateAllowedFile(input) {
+  const rel = normalizeUpdatePath(input);
+  if (!hasSafeParts(rel)) return false;
+  if (rel === 'Forart.exe') return false;
+  if (rel === 'forart-config.json') return false;
+  if (rel.startsWith('.git/') || rel.startsWith('.forart-data/') || rel.startsWith('CanvasAssests/')) return false;
+  if (rel.startsWith('node_modules/') || rel.startsWith('dist/') || rel.startsWith('data/')) return false;
+  if (rel.startsWith('server/node_modules/') || rel.startsWith('server/.forart-data/') || rel.startsWith('server/data/')) return false;
+  if (/\.(log|err\.log)$/i.test(rel)) return false;
+
+  if ([
+    'VERSION',
+    'README.md',
+    'START_FORART_MAIN.bat',
+    'eslint.config.js',
+    'index.html',
+    'package-lock.json',
+    'package.json',
+    'tsconfig.app.json',
+    'tsconfig.json',
+    'tsconfig.node.json',
+    'update-notes.json',
+    'vite.config.ts',
+  ].includes(rel)) return true;
+
+  return (
+    rel.startsWith('electron/')
+    || rel.startsWith('renderer/')
+    || rel.startsWith('server/')
+    || rel.startsWith('scripts/launcher/')
+  );
+}
+
+function isInsideOrSame(parent, target) {
+  const relative = path.relative(path.resolve(parent), path.resolve(target));
+  return relative === '' || (Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function safeUpdateTarget(rootDir, rel) {
+  const normalized = normalizeUpdatePath(rel);
+  if (!updateAllowedFile(normalized)) throw new Error(`Update file is not allowed: ${normalized}`);
+  const target = path.resolve(rootDir, ...normalized.split('/'));
+  if (!isInsideOrSame(rootDir, target)) throw new Error(`Unsafe update path: ${normalized}`);
+  return target;
+}
+
+function safeStagingTarget(stagingRoot, rel) {
+  const normalized = normalizeUpdatePath(rel);
+  if (!updateAllowedFile(normalized)) throw new Error(`Update file is not allowed: ${normalized}`);
+  const target = path.resolve(stagingRoot, ...normalized.split('/'));
+  if (!isInsideOrSame(stagingRoot, target)) throw new Error(`Unsafe staging path: ${normalized}`);
+  return target;
+}
+
+async function githubUpdateFileList(net) {
+  const payload = await fetchJson(net, REMOTE_TREE_URL);
+  const entries = Array.isArray(payload.tree) ? payload.tree : [];
+  const files = entries
+    .filter((entry) => entry?.type === 'blob')
+    .map((entry) => normalizeUpdatePath(entry.path))
+    .filter(updateAllowedFile)
+    .sort();
+
+  if (!files.includes('VERSION')) throw new Error('Remote update source is missing VERSION.');
+  if (!files.includes('package.json')) throw new Error('Remote update source is missing package.json.');
+  if (!files.some((file) => file.startsWith('electron/'))) throw new Error('Remote update source did not return electron files.');
+  if (!files.some((file) => file.startsWith('renderer/'))) throw new Error('Remote update source did not return renderer files.');
+
+  return [...new Set(files)];
+}
+
+async function downloadGithubUpdateFiles(net, files, stagingRoot) {
+  for (const rel of files) {
+    const target = safeStagingTarget(stagingRoot, rel);
+    const rawUrl = `${GITHUB_RAW_ROOT}/${rel.split('/').map(encodeURIComponent).join('/')}`;
+    const bytes = await fetchBytes(net, rawUrl);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, bytes);
   }
+}
 
-  const fetch = await runCommand('git', ['fetch', '--quiet', 'origin', 'main'], rootDir);
-  if (!fetch.ok) {
+function backupFile(rootDir, backupRoot, rel) {
+  const target = safeUpdateTarget(rootDir, rel);
+  if (!fs.existsSync(target)) return false;
+  const backupPath = path.resolve(backupRoot, ...normalizeUpdatePath(rel).split('/'));
+  if (!isInsideOrSame(backupRoot, backupPath)) throw new Error(`Unsafe backup path: ${rel}`);
+  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+  fs.copyFileSync(target, backupPath);
+  return true;
+}
+
+function restoreFiles(rootDir, backupRoot, applied) {
+  for (const item of [...applied].reverse()) {
+    const target = safeUpdateTarget(rootDir, item.rel);
+    const backupPath = path.resolve(backupRoot, ...normalizeUpdatePath(item.rel).split('/'));
+    try {
+      if (item.hadOriginal && fs.existsSync(backupPath)) {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(backupPath, target);
+      } else if (!item.hadOriginal && fs.existsSync(target)) {
+        fs.unlinkSync(target);
+      }
+    } catch {
+      // Keep restoring the rest. The original update error is more useful to the caller.
+    }
+  }
+}
+
+function applyStagedFiles(rootDir, stagingRoot, backupRoot, files) {
+  const applied = [];
+  for (const rel of files) {
+    const source = safeStagingTarget(stagingRoot, rel);
+    const target = safeUpdateTarget(rootDir, rel);
+    const hadOriginal = backupFile(rootDir, backupRoot, rel);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const tempPath = `${target}.update_tmp`;
+    fs.copyFileSync(source, tempPath);
+    try {
+      fs.renameSync(tempPath, target);
+    } catch {
+      fs.rmSync(target, { force: true });
+      fs.renameSync(tempPath, target);
+    }
+    applied.push({ rel, hadOriginal });
+  }
+  return applied;
+}
+
+async function probeNet(name, net, url, required = true) {
+  const startedAt = Date.now();
+  try {
+    const response = await net.fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, {
+      headers: { 'User-Agent': 'Forart-Updater' },
+    });
     return {
+      name,
+      ok: response.ok,
+      status: response.status,
+      elapsedMs: Date.now() - startedAt,
+      detail: `HTTP ${response.status}`,
+      required,
+    };
+  } catch (error) {
+    return {
+      name,
       ok: false,
-      updateAvailable: false,
-      error: fetch.error || fetch.stderr || 'git fetch failed',
+      elapsedMs: Date.now() - startedAt,
+      detail: error instanceof Error ? error.message : String(error),
+      required,
     };
   }
-
-  const ancestor = await runCommand('git', ['merge-base', '--is-ancestor', currentRevision, 'FETCH_HEAD'], rootDir);
-  return {
-    ok: true,
-    updateAvailable: ancestor.ok,
-  };
 }
 
 async function probeCommand(name, command, args, rootDir) {
@@ -227,42 +374,41 @@ async function probeCommand(name, command, args, rootDir) {
   };
 }
 
-async function probeNet(name, net, url, required = true) {
+async function probeWritable(rootDir) {
   const startedAt = Date.now();
+  const filePath = path.join(portableDataRoot(rootDir), `.update-write-test-${process.pid}.tmp`);
   try {
-    const response = await net.fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, {
-      headers: { 'User-Agent': 'Forart-Updater' },
-    });
+    fs.writeFileSync(filePath, 'ok', 'utf8');
+    fs.rmSync(filePath, { force: true });
     return {
-      name,
-      ok: response.ok,
-      status: response.status,
+      name: 'Local update directory',
+      ok: true,
       elapsedMs: Date.now() - startedAt,
-      detail: response.ok ? `HTTP ${response.status}` : `HTTP ${response.status}`,
-      required,
+      detail: 'Writable',
+      required: true,
     };
   } catch (error) {
     return {
-      name,
+      name: 'Local update directory',
       ok: false,
       elapsedMs: Date.now() - startedAt,
       detail: error instanceof Error ? error.message : String(error),
-      required,
+      required: true,
     };
   }
 }
 
 async function appInfoPayload(rootDir) {
   const packageInfo = readPackageInfo(rootDir);
-  const localRevision = await readLocalRevision(rootDir);
-  const localNotes = readLocalUpdateNotes(rootDir);
+  const version = readLocalVersion(rootDir);
+  const localNotes = readLocalUpdateNotes(rootDir, version);
   return {
     name: packageInfo.name,
     repoUrl: REPO_URL,
-    updateUrl: REMOTE_COMMIT_URL,
-    canGitUpdate: canGitUpdate(rootDir),
-    currentRevision: localRevision.revision || localNotes.revision,
-    currentUpdatedAt: localRevision.updatedAt || localNotes.updatedAt,
+    updateUrl: REMOTE_VERSION_URL,
+    canGitUpdate: true,
+    currentRevision: version,
+    currentUpdatedAt: localNotes.updatedAt || version,
   };
 }
 
@@ -335,48 +481,19 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
   ipcMain.handle('app:check-update', async () => {
     const info = await appInfoPayload(rootDir);
     try {
-      const remoteRevision = await readRemoteRevision(net);
-      if (!remoteRevision.revision) {
-        return {
-          ok: false,
-          currentRevision: info.currentRevision,
-          latestRevision: '',
-          currentUpdatedAt: info.currentUpdatedAt,
-          latestUpdatedAt: '',
-          updateAvailable: false,
-          canGitUpdate: info.canGitUpdate,
-          repoUrl: REPO_URL,
-          error: 'Remote commit is empty.',
-        };
-      }
-      const localNotes = readLocalUpdateNotes(rootDir);
-      const remoteNotes = await readRemoteUpdateNotes(net, remoteRevision.revision);
-      const aheadCheck = await checkRemoteAhead(rootDir, info.currentRevision, remoteRevision.revision, localNotes, remoteNotes);
-      if (!aheadCheck.ok) {
-        return {
-          ok: false,
-          currentRevision: info.currentRevision,
-          latestRevision: remoteRevision.revision,
-          currentUpdatedAt: info.currentUpdatedAt,
-          latestUpdatedAt: remoteRevision.updatedAt,
-          updateAvailable: false,
-          canGitUpdate: info.canGitUpdate,
-          repoUrl: REPO_URL,
-          error: aheadCheck.error || 'Could not compare local and remote revisions.',
-        };
-      }
+      const latestVersion = await readRemoteVersion(net);
+      const remoteNotes = await readRemoteUpdateNotes(net, latestVersion);
+      const updateAvailable = compareVersions(latestVersion, info.currentRevision) > 0;
       return {
         ok: true,
         currentRevision: info.currentRevision,
-        latestRevision: remoteRevision.revision,
+        latestRevision: latestVersion,
         currentUpdatedAt: info.currentUpdatedAt,
-        latestUpdatedAt: remoteRevision.updatedAt,
-        updateAvailable: aheadCheck.updateAvailable,
-        canGitUpdate: info.canGitUpdate,
+        latestUpdatedAt: remoteNotes.updatedAt || latestVersion,
+        updateAvailable,
+        canGitUpdate: true,
         repoUrl: REPO_URL,
-        updateNotes: remoteNotes.items.length
-          ? { ...remoteNotes, source: 'update-notes.json' }
-          : await buildUpdateNotes(rootDir, net, info.currentRevision, remoteRevision.revision),
+        updateNotes: remoteNotes.items.length ? { ...remoteNotes, source: 'update-notes.json' } : remoteNotes,
       };
     } catch (error) {
       return {
@@ -386,7 +503,7 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
         currentUpdatedAt: info.currentUpdatedAt,
         latestUpdatedAt: '',
         updateAvailable: false,
-        canGitUpdate: info.canGitUpdate,
+        canGitUpdate: true,
         repoUrl: REPO_URL,
         error: error instanceof Error ? error.message : String(error),
       };
@@ -394,32 +511,76 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
   });
 
   ipcMain.handle('app:run-update', async () => {
-    if (!canGitUpdate(rootDir)) {
-      await shell.openExternal(REPO_URL);
-      return { ok: false, restartRequired: false, error: 'Git working tree is not available. Opened project page instead.' };
-    }
+    const stagingRoot = path.join(updateStagingRoot(rootDir), `${timestampName()}-${process.pid}`);
+    const backupRoot = path.join(updateBackupRoot(rootDir), timestampName());
+    let applied = [];
+    try {
+      if (fs.existsSync(stagingRoot)) fs.rmSync(stagingRoot, { recursive: true, force: true });
+      fs.mkdirSync(stagingRoot, { recursive: true });
+      fs.mkdirSync(backupRoot, { recursive: true });
 
-    const pull = await runCommand('git', ['pull', '--ff-only'], rootDir);
-    if (!pull.ok) {
-      return { ok: false, stdout: pull.stdout, stderr: pull.stderr, restartRequired: false, error: pull.error || 'git pull failed' };
-    }
+      const files = await githubUpdateFileList(net);
+      await downloadGithubUpdateFiles(net, files, stagingRoot);
+      applied = applyStagedFiles(rootDir, stagingRoot, backupRoot, files);
 
-    const install = await runCommand('npm', ['install'], rootDir);
-    return {
-      ok: install.ok,
-      stdout: `${pull.stdout || ''}${install.stdout || ''}`,
-      stderr: `${pull.stderr || ''}${install.stderr || ''}`,
-      restartRequired: install.ok,
-      error: install.ok ? undefined : install.error || 'npm install failed',
-    };
+      const needsRootInstall = files.includes('package.json') || files.includes('package-lock.json');
+      const needsServerInstall = files.includes('server/package.json') || files.includes('server/package-lock.json');
+      const installResults = [];
+      if (needsRootInstall) {
+        installResults.push(await runCommand('npm', ['install'], rootDir));
+      }
+      if (needsServerInstall) {
+        installResults.push(await runCommand('npm', ['install'], path.join(rootDir, 'server')));
+      }
+      const failedInstall = installResults.find((item) => !item.ok);
+      if (failedInstall) {
+          restoreFiles(rootDir, backupRoot, applied);
+        return {
+          ok: false,
+          stdout: installResults.map((item) => item.stdout || '').join(''),
+          stderr: installResults.map((item) => item.stderr || '').join(''),
+          restartRequired: false,
+          backupDir: backupRoot,
+          updated: applied.map((item) => item.rel),
+          count: applied.length,
+          error: failedInstall.error || 'npm install failed',
+        };
+      }
+
+      const version = readLocalVersion(rootDir);
+      return {
+        ok: true,
+        stdout: installResults.map((item) => item.stdout || '').join(''),
+        stderr: installResults.map((item) => item.stderr || '').join(''),
+        restartRequired: true,
+        backupDir: backupRoot,
+        updated: applied.map((item) => item.rel),
+        count: applied.length,
+        version,
+      };
+    } catch (error) {
+      if (applied.length) restoreFiles(rootDir, backupRoot, applied);
+      return {
+        ok: false,
+        stdout: '',
+        stderr: '',
+        restartRequired: false,
+        backupDir: fs.existsSync(backupRoot) ? backupRoot : '',
+        updated: applied.map((item) => item.rel),
+        count: applied.length,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      if (fs.existsSync(stagingRoot)) fs.rmSync(stagingRoot, { recursive: true, force: true });
+    }
   });
 
   ipcMain.handle('app:update-connectivity', async () => {
     const results = await Promise.all([
-      probeNet('GitHub commit API', net, REMOTE_COMMIT_URL),
+      probeNet('GitHub VERSION', net, REMOTE_VERSION_URL),
+      probeNet('GitHub update tree', net, REMOTE_TREE_URL),
       probeNet('GitHub update notes', net, REMOTE_UPDATE_NOTES_URL, false),
-      probeCommand('Git command', 'git', ['--version'], rootDir),
-      probeCommand('Git fetch origin/main', 'git', ['fetch', '--quiet', 'origin', 'main'], rootDir),
+      probeWritable(rootDir),
       probeCommand('npm command', 'npm', ['--version'], rootDir),
     ]);
     const required = results.filter((item) => item.required);

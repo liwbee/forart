@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
-function createLocalServerManager({ app, rootDir, fetchImpl = fetch, port = 5175, nodeExe = process.env.FORART_SERVER_NODE || 'node' }) {
+function createLocalServerManager({ app, rootDir, fetchImpl = fetch, port = 6980, nodeExe = process.env.FORART_SERVER_NODE || 'node' }) {
   const bundledServerDir = path.join(rootDir, 'server');
   const bundledServerEntry = path.join(bundledServerDir, 'forart-server.mjs');
   let serverProcess = null;

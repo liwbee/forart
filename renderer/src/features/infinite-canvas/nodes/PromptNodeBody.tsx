@@ -39,7 +39,7 @@ export function PromptNodeBody({ node, isEditing, onEditingChange, onPatch, onCo
           ref={textareaRef}
           className="nodrag nopan nowheel ic-prompt-textarea"
           value={node.text || ""}
-          placeholder={t("infiniteCanvas.promptPlaceholder")}
+          placeholder={t("infiniteCanvas:promptPlaceholder")}
           onBlur={(event) => {
             commitText(event.target.value);
             onEditingChange(false);
@@ -67,7 +67,7 @@ export function PromptNodeBody({ node, isEditing, onEditingChange, onPatch, onCo
             enterEditing();
           }}
         >
-          {node.text || t("infiniteCanvas.promptPlaceholder")}
+          {node.text || t("infiniteCanvas:promptPlaceholder")}
         </div>
       )}
     </div>

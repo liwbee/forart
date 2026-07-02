@@ -19,13 +19,13 @@ export function buildLlmNodeRequest({ node, nodes, connections, t }: LlmNodeRequ
   const userInput = (node.variablePrompt || "").trim();
   const upstreamPrompt = collectUpstreamPrompt(node, nodes, connections).trim();
   const referenceImages = collectReferenceImages(node, nodes, connections);
-  const instruction = (node.fixedPrompt || t("infiniteCanvas.llmDefaultInstruction")).trim();
+  const instruction = (node.fixedPrompt || t("infiniteCanvas:llmDefaultInstruction")).trim();
 
   const prompt = [
     instruction,
-    userInput ? `${t("infiniteCanvas.llmUserInputLabel")}\n${userInput}` : "",
-    upstreamPrompt ? `${t("infiniteCanvas.llmInputLabel")}\n${upstreamPrompt}` : "",
-    referenceImages.length ? t("infiniteCanvas.llmImageInputHint") : "",
+    userInput ? `${t("infiniteCanvas:llmUserInputLabel")}\n${userInput}` : "",
+    upstreamPrompt ? `${t("infiniteCanvas:llmInputLabel")}\n${upstreamPrompt}` : "",
+    referenceImages.length ? t("infiniteCanvas:llmImageInputHint") : "",
   ].filter(Boolean).join("\n\n");
 
   return {

@@ -23,7 +23,6 @@ export interface OutfitTag {
   kind: "outfit";
   project_id: string;
   name: string;
-  color: string;
   sort_order: number;
   usage_count: number;
   created_at: string;
@@ -38,7 +37,7 @@ export interface AssetUploadPayload {
 
 export interface OutfitFilters {
   projectId: string;
-  tagId?: string;
+  tagIds?: string[];
 }
 
 export interface StorageSettings {

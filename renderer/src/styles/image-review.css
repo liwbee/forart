@@ -67,7 +67,7 @@
   overflow: hidden;
   color: var(--state-hover-text);
   font-size: 13px;
-  font-weight: 900;
+  font-weight: var(--font-weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -79,7 +79,7 @@
   gap: 4px;
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
 }
 
 .review-folder-rule input,
@@ -124,7 +124,7 @@
 .review-folder-picker span {
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
 }
 
 .review-folder-picker strong {
@@ -185,7 +185,7 @@
 .review-folder-guide-popover strong {
   color: var(--state-hover-text);
   font-size: 13px;
-  font-weight: 900;
+  font-weight: var(--font-weight-semibold);
 }
 
 .review-folder-guide-popover p,
@@ -193,7 +193,7 @@
 .review-folder-guide-node span {
   margin: 0;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--font-weight-regular);
   line-height: 1.45;
 }
 
@@ -289,7 +289,7 @@
   background: var(--state-active-bg);
   color: var(--state-active-text);
   font-style: normal;
-  font-weight: 900;
+  font-weight: var(--font-weight-semibold);
 }
 
 .review-directory-dialog {
@@ -325,7 +325,7 @@
   background: var(--surface-control);
   color: var(--text-secondary);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
 }
 
 .review-directory-breadcrumb button:hover {
@@ -357,7 +357,7 @@
   padding: 0 var(--space-3);
   background: var(--surface-card);
   color: var(--state-hover-text);
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
   text-align: left;
 }
 
@@ -377,7 +377,7 @@
 .review-directory-error {
   color: var(--text-muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--font-weight-regular);
 }
 
 .review-directory-empty {
@@ -407,7 +407,7 @@
   background: transparent;
   color: var(--text-secondary);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--font-weight-semibold);
   white-space: nowrap;
 }
 
@@ -501,7 +501,7 @@
   gap: var(--space-3);
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--font-weight-medium);
 }
 
 .review-product-list-head strong {
@@ -555,14 +555,14 @@
 .review-product-items button span {
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--font-weight-regular);
 }
 
 .review-product-items button em {
   color: var(--danger);
   font-size: 12px;
   font-style: normal;
-  font-weight: 900;
+  font-weight: var(--font-weight-medium);
 }
 
 .review-product-items button.active span,
@@ -599,7 +599,7 @@
 .review-product-head span {
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
 }
 
 .review-product-head strong {
@@ -607,7 +607,7 @@
   overflow: hidden;
   color: var(--state-hover-text);
   font-size: 18px;
-  font-weight: 900;
+  font-weight: var(--font-weight-bold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -675,7 +675,7 @@
   min-height: 34px;
   border-radius: 6px;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: var(--font-weight-medium);
 }
 
 .review-image-stage {
@@ -737,7 +737,7 @@
   gap: var(--space-2);
   color: var(--text-muted);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--font-weight-regular);
 }
 
 .review-file-meta {
@@ -830,7 +830,7 @@
   width: 100%;
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--font-weight-regular);
 }
 
 .review-file-meta dl {
@@ -850,7 +850,7 @@
 .review-file-meta dt {
   color: var(--text-muted);
   font-size: 11px;
-  font-weight: 900;
+  font-weight: var(--font-weight-medium);
 }
 
 .review-file-meta dd {
@@ -859,7 +859,7 @@
   overflow: hidden;
   color: var(--state-hover-text);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--font-weight-regular);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -892,7 +892,7 @@
   color: var(--input-text);
   font: inherit;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--font-weight-regular);
   line-height: 1.5;
   box-shadow: none;
 }
@@ -917,7 +917,7 @@
   background: var(--state-active-bg);
   color: var(--state-active-text);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--font-weight-semibold);
   box-shadow: var(--shadow-ui);
   transition:
     background 160ms ease,
@@ -944,7 +944,7 @@
 .review-report-error {
   color: var(--danger);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
 }
 
 .review-check-actions {
@@ -1034,7 +1034,7 @@
 .review-side-list-head span {
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
 }
 
 .review-pair-list {
@@ -1076,7 +1076,7 @@
   justify-self: center;
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: var(--font-weight-semibold);
 }
 
 .review-pair-list button.active span,
@@ -1112,7 +1112,7 @@
   color: var(--text-muted);
   text-align: center;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--font-weight-regular);
 }
 
 .review-bottom-bar {
@@ -1130,7 +1130,7 @@
   overflow: hidden;
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--font-weight-regular);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

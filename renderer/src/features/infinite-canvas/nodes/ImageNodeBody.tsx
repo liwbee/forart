@@ -1,24 +1,21 @@
-import { Download, Images, Sparkles, UploadCloud } from "lucide-react";
+import { Download, Image as ImageIcon, Images, Upload } from "lucide-react";
 import { useEffect, useState, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
-import type { CanvasNode, CropRect } from "../types";
-
-function formatElapsedTime(totalSeconds: number) {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
+import { formatGenerationDuration, getGenerationElapsedMs } from "../generation/generationTaskTime";
+import { isGenerationTaskActive } from "../generation/generationTaskRuntime";
+import type { CanvasGenerationTask, CanvasNode, CropRect } from "../types";
 
 interface ImageNodeBodyProps {
   node: CanvasNode;
   cropRect: CropRect | null;
   setFileInputRef: (input: HTMLInputElement | null) => void;
   onFiles: (files: FileList | File[]) => void;
-  onUploadClick: () => void;
+  onLoadClick: () => void;
   onLibraryClick: () => void;
   onPreview: () => void;
   onDownload: () => void;
   isDownloadBusy: boolean;
+  generationTask: CanvasGenerationTask | null;
   onStartCropInteraction: (event: PointerEvent<HTMLDivElement | HTMLButtonElement>, mode: "move" | "resize") => void;
   onCropPointerMove: (event: PointerEvent<HTMLElement>) => void;
   onStopCropInteraction: (event: PointerEvent<HTMLElement>) => void;
@@ -29,11 +26,12 @@ export function ImageNodeBody({
   cropRect,
   setFileInputRef,
   onFiles,
-  onUploadClick,
+  onLoadClick,
   onLibraryClick,
   onPreview,
   onDownload,
   isDownloadBusy,
+  generationTask,
   onStartCropInteraction,
   onCropPointerMove,
   onStopCropInteraction,
@@ -41,16 +39,18 @@ export function ImageNodeBody({
   const { t } = useTranslation();
   const hasImage = Boolean(node.url);
   const isImageGenerator = node.type === "imageGenerator";
-  const isLibtv = node.type === "libtvImage";
-  const isGeneratorLike = isImageGenerator || isLibtv;
-  const isGenerating = isGeneratorLike && Boolean(node.running);
+  const isLibtvImageGenerator = node.type === "libtvImageGenerator";
+  const isGeneratorLike = isImageGenerator || isLibtvImageGenerator;
+  const activeTask = generationTask || undefined;
+  const isGenerating = isImageGenerator ? isGenerationTaskActive(activeTask) : Boolean(node.libtvImageGeneration?.running);
   const showGeneratorDownload = hasImage && isGeneratorLike && !isGenerating;
   const isPendingDownload = showGeneratorDownload && node.outputDownloadState === "pending";
   const [loadedSize, setLoadedSize] = useState<{ width: number; height: number } | null>(null);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [timerNow, setTimerNow] = useState(Date.now());
   const imageWidth = Math.round(node.imageNaturalWidth || loadedSize?.width || 0);
   const imageHeight = Math.round(node.imageNaturalHeight || loadedSize?.height || 0);
   const imageResolution = imageWidth > 0 && imageHeight > 0 ? `${imageWidth} x ${imageHeight}` : "";
+  const elapsedText = formatGenerationDuration(getGenerationElapsedMs(activeTask, timerNow));
 
   useEffect(() => {
     setLoadedSize(null);
@@ -58,13 +58,11 @@ export function ImageNodeBody({
 
   useEffect(() => {
     if (!isGenerating) {
-      setElapsedSeconds(0);
       return;
     }
-    const startedAt = Date.now();
-    setElapsedSeconds(0);
+    setTimerNow(Date.now());
     const interval = window.setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+      setTimerNow(Date.now());
     }, 1000);
     return () => window.clearInterval(interval);
   }, [isGenerating]);
@@ -86,7 +84,7 @@ export function ImageNodeBody({
         className={`ic-image-drop${hasImage ? " has-image" : ""}${isGenerating ? " is-generating" : ""}`}
         role={hasImage ? "button" : undefined}
         tabIndex={hasImage ? 0 : undefined}
-        aria-label={hasImage ? t("infiniteCanvas.viewLargeImage") : isGeneratorLike ? t(isLibtv ? "infiniteCanvas.libtvImage" : "infiniteCanvas.imageGeneratorNode") : t("infiniteCanvas.uploadNodeTitle")}
+        aria-label={hasImage ? t("infiniteCanvas:viewLargeImage") : isGeneratorLike ? t("infiniteCanvas:imageGeneratorNode") : t("infiniteCanvas:loadNodeTitle")}
         onClick={(event) => {
           if (hasImage) return;
           event.preventDefault();
@@ -116,24 +114,10 @@ export function ImageNodeBody({
             {!isGeneratorLike ? (
               <div className="ic-image-source-actions nodrag nopan">
                 <button
-                  className="ic-image-replace-button"
-                  type="button"
-                  aria-label={t("common.actions.uploadImage")}
-                  title={t("common.actions.uploadImage")}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onUploadClick();
-                  }}
-                >
-                  <UploadCloud size={14} aria-hidden="true" />
-                </button>
-                <button
                   className="ic-image-library-button"
                   type="button"
-                  aria-label={t("infiniteCanvas.importFromLibrary")}
-                  title={t("infiniteCanvas.importFromLibrary")}
+                  aria-label={t("infiniteCanvas:importFromLibrary")}
+                  title={t("infiniteCanvas:importFromLibrary")}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.preventDefault();
@@ -143,14 +127,28 @@ export function ImageNodeBody({
                 >
                   <Images size={14} aria-hidden="true" />
                 </button>
+                <button
+                  className="ic-image-replace-button"
+                  type="button"
+                  aria-label={t("infiniteCanvas:loadImage")}
+                  title={t("infiniteCanvas:loadImage")}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onLoadClick();
+                  }}
+                >
+                  <Upload size={14} aria-hidden="true" />
+                </button>
               </div>
             ) : null}
             {showGeneratorDownload ? (
               <button
                 className={`ic-image-download-button nodrag nopan${isPendingDownload ? " is-pending-download" : ""}`}
                 type="button"
-                aria-label={t("infiniteCanvas.downloadImage")}
-                title={t("infiniteCanvas.downloadImage")}
+                aria-label={t("infiniteCanvas:downloadImage")}
+                title={t("infiniteCanvas:downloadImage")}
                 disabled={isDownloadBusy}
                 onPointerDown={(event) => event.stopPropagation()}
                 onDoubleClick={(event) => {
@@ -169,52 +167,47 @@ export function ImageNodeBody({
             {imageResolution && !isGenerating ? <span className="ic-image-resolution-badge">{imageResolution}</span> : null}
           </>
         ) : (
-          <div className={`ic-upload-node-card${isGeneratorLike ? " is-generator" : " is-uploader"}`}>
-            <span className="ic-upload-node-main" aria-hidden="true">
-              {isGeneratorLike ? <Sparkles size={24} /> : <UploadCloud size={24} />}
-            </span>
+          <div className={`ic-load-node-card${isGeneratorLike ? " is-generator" : " is-loader"}`}>
             {isGeneratorLike ? (
-              <>
-                <span className="ic-upload-node-title">{t(isLibtv ? "infiniteCanvas.libtvImage" : "infiniteCanvas.imageGeneratorNode")}</span>
-                <span className="ic-upload-node-sub">{t(isLibtv ? "infiniteCanvas.libtvPromptPlaceholder" : "infiniteCanvas.imageGeneratorNodeEmptyAction")}</span>
-              </>
-            ) : (
-              <span className="ic-upload-node-actions nodrag nopan">
+              <ImageIcon size={32} strokeWidth={1.8} aria-hidden="true" />
+            ) : null}
+            {!isGeneratorLike ? (
+              <span className="ic-load-node-actions nodrag nopan">
                 <button
-                  className="ic-upload-node-button"
+                  className="ic-load-node-button"
                   type="button"
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    onUploadClick();
-                  }}
-                >
-                  <UploadCloud size={14} aria-hidden="true" />
-                  <span>{t("infiniteCanvas.imageNode")}</span>
+                    onLoadClick();
+                }}
+              >
+                  <Upload size={14} aria-hidden="true" />
+                  <span>{t("common:actions.uploadImage")}</span>
                 </button>
                 <button
-                  className="ic-upload-node-button"
+                  className="ic-load-node-button"
                   type="button"
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    onLibraryClick();
-                  }}
-                >
-                  <Images size={14} aria-hidden="true" />
-                  <span>{t("infiniteCanvas.libraryImageNode")}</span>
+                  onLibraryClick();
+                }}
+              >
+                <Images size={14} aria-hidden="true" />
+                  <span>{t("infiniteCanvas:importFromLibrary")}</span>
                 </button>
               </span>
-            )}
+            ) : null}
           </div>
         )}
         {isGenerating ? (
           <>
-            <span className="ic-generator-timer" aria-label={`Generation elapsed ${formatElapsedTime(elapsedSeconds)}`}>
-              {formatElapsedTime(elapsedSeconds)}
+            <span className="ic-generator-timer" aria-label={`Generation elapsed ${elapsedText}`}>
+              {elapsedText}
             </span>
             <div className="ic-generator-running" role="status" aria-live="polite">
-              <span>{node.generationStatus || t("infiniteCanvas.running")}</span>
+              <span>{node.libtvImageGeneration?.status || activeTask?.message || t("infiniteCanvas:running")}</span>
             </div>
           </>
         ) : null}
@@ -238,7 +231,7 @@ export function ImageNodeBody({
               <button
                 className="ic-inline-crop__handle nodrag nopan"
                 type="button"
-                aria-label={t("infiniteCanvas.resizeCropBox")}
+                aria-label={t("infiniteCanvas:resizeCropBox")}
                 onPointerDown={(event) => onStartCropInteraction(event, "resize")}
                 onPointerMove={onCropPointerMove}
                 onPointerUp={onStopCropInteraction}

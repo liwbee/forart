@@ -5,15 +5,25 @@ export const modelLibraryKeys = {
   projects: ["modelProjects"] as const,
   tagRoot: ["modelTags"] as const,
   tags: (projectId: string) => ["modelTags", projectId] as const,
-  models: (projectId: string, tagId = "", gender = "") => ["models", projectId, tagId, gender] as const,
+  models: (projectId: string, tagIds: readonly string[] = [], gender = "") => ["models", projectId, [...tagIds].sort().join(","), gender] as const,
   images: (modelId: string) => ["modelImages", modelId] as const,
   storageSettings: ["storageSettings"] as const,
 };
 
-function queryString(params: Record<string, string | undefined>) {
+function isStringArray(value: string | readonly string[] | undefined): value is readonly string[] {
+  return Array.isArray(value);
+}
+
+function queryString(params: Record<string, string | readonly string[] | undefined>) {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value) search.set(key, value);
+    if (isStringArray(value)) {
+      for (const item of value) {
+        if (item) search.append(key, item);
+      }
+    } else if (value) {
+      search.set(key, value);
+    }
   }
   const text = search.toString();
   return text ? `?${text}` : "";
@@ -50,9 +60,9 @@ export function uploadModelProjectCover(projectId: string, payload: AssetUploadP
   });
 }
 
-export function listModels({ projectId, tagId = "", gender = "" }: ModelFilters) {
+export function listModels({ projectId, tagIds = [], gender = "" }: ModelFilters) {
   return apiRequest<{ models: ModelEntry[] }>(
-    `/api/model-projects/${encodeURIComponent(projectId)}/models${queryString({ tag_id: tagId, gender })}`
+    `/api/model-projects/${encodeURIComponent(projectId)}/models${queryString({ tag_id: tagIds, gender })}`
   );
 }
 

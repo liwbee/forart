@@ -13,17 +13,25 @@ function newCanvasId() {
   return `canvas_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function newProjectId() {
+  return `project_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const DEFAULT_PROJECT_ID = 'project_default';
+const DEFAULT_PROJECT_TITLE = 'Default project';
+
+function normalizeProjectId(projectId) {
+  return sanitizeCanvasId(projectId || '');
+}
+
 function canvasRecord(canvas) {
-  const hasLibtvNodes = Array.isArray(canvas.nodes) && canvas.nodes.some((node) => ['libtvImage', 'libtvPrompt', 'libtvUpload'].includes(node?.type) || node?.libtvProjectId);
-  const canvasType = canvas.canvasType === 'forart-libtv' || canvas.source === 'libtv' ? 'forart-libtv' : 'forart';
   return {
     id: canvas.id,
     title: String(canvas.title || 'Untitled canvas'),
-    icon: hasLibtvNodes ? 'libtv' : String(canvas.icon || 'layers'),
-    canvasType,
-    source: canvasType === 'forart-libtv' ? 'libtv' : String(canvas.source || 'forart'),
-    libtvProjectId: String(canvas.libtvProjectId || ''),
-    libtvProjectName: String(canvas.libtvProjectName || ''),
+    icon: String(canvas.icon || 'layers'),
+    canvasType: 'forart',
+    source: String(canvas.source || 'forart'),
+    projectId: normalizeProjectId(canvas.projectId),
     color: String(canvas.color || ''),
     pinned: Boolean(canvas.pinned),
     createdAt: Number(canvas.createdAt || 0),
@@ -32,17 +40,71 @@ function canvasRecord(canvas) {
   };
 }
 
-function normalizeCanvasProject(input, fallback = {}) {
+function normalizeCanvasRecord(input, fallback = {}) {
+  const timestamp = nowMs();
+  return {
+    id: sanitizeCanvasId(input?.id || fallback.id || ''),
+    title: String(input?.title || fallback.title || 'Untitled canvas'),
+    icon: String(input?.icon || fallback.icon || 'layers'),
+    canvasType: 'forart',
+    source: String(input?.source || fallback.source || 'forart'),
+    projectId: normalizeProjectId(input?.projectId || fallback.projectId),
+    color: String(input?.color || fallback.color || ''),
+    pinned: Boolean(input?.pinned || fallback.pinned),
+    createdAt: Number(input?.createdAt || fallback.createdAt || timestamp),
+    updatedAt: Number(input?.updatedAt || fallback.updatedAt || fallback.createdAt || timestamp),
+    nodeCount: Number(input?.nodeCount || fallback.nodeCount || 0),
+  };
+}
+
+function normalizeProjectRecord(input, fallback = {}) {
+  const timestamp = nowMs();
+  const id = normalizeProjectId(input?.id || fallback.id || newProjectId());
+  return {
+    id,
+    title: String(input?.title || fallback.title || 'New project').trim().slice(0, 80) || 'New project',
+    color: String(input?.color || fallback.color || ''),
+    createdAt: Number(input?.createdAt || fallback.createdAt || timestamp),
+    updatedAt: Number(input?.updatedAt || fallback.updatedAt || fallback.createdAt || timestamp),
+  };
+}
+
+function defaultProjectRecord(timestamp = nowMs()) {
+  return normalizeProjectRecord({
+    id: DEFAULT_PROJECT_ID,
+    title: DEFAULT_PROJECT_TITLE,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+}
+
+function ensureDefaultProject(projects) {
+  const normalizedProjects = (projects || []).map((project) => normalizeProjectRecord(project)).filter((project) => project.id);
+  if (normalizedProjects.length) return normalizedProjects;
+  return [defaultProjectRecord()];
+}
+
+function sortCanvasRecords(canvases) {
+  return canvases.sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0);
+  });
+}
+
+function sortProjectRecords(projects) {
+  return projects.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), undefined, { numeric: true, sensitivity: 'base' }));
+}
+
+function normalizeCanvasDocument(input, fallback = {}) {
   const timestamp = nowMs();
   const viewport = input?.viewport && typeof input.viewport === 'object' ? input.viewport : {};
   return {
     id: sanitizeCanvasId(input?.id || fallback.id || newCanvasId()),
     title: String(input?.title || fallback.title || 'Untitled canvas').slice(0, 80),
     icon: String(input?.icon || fallback.icon || 'layers').slice(0, 32),
-    canvasType: input?.canvasType === 'forart-libtv' || fallback.canvasType === 'forart-libtv' || input?.source === 'libtv' ? 'forart-libtv' : 'forart',
-    source: input?.source === 'libtv' || fallback.source === 'libtv' || input?.canvasType === 'forart-libtv' ? 'libtv' : 'forart',
-    libtvProjectId: String(input?.libtvProjectId || fallback.libtvProjectId || ''),
-    libtvProjectName: String(input?.libtvProjectName || fallback.libtvProjectName || ''),
+    canvasType: 'forart',
+    source: String(input?.source || fallback.source || 'forart'),
+    projectId: normalizeProjectId(input?.projectId || fallback.projectId),
     color: String(input?.color || fallback.color || ''),
     pinned: Boolean(input?.pinned || fallback.pinned),
     createdAt: Number(input?.createdAt || fallback.createdAt || timestamp),
@@ -71,59 +133,147 @@ function createCanvasStore({ rootDir }) {
     return directory;
   }
 
-  function projectPath(canvasId) {
+  function indexPath() {
+    return path.join(storageRoot(), 'canvas-index.json');
+  }
+
+  function canvasPath(canvasId) {
     const safeId = sanitizeCanvasId(canvasId);
     if (!safeId) return '';
     return path.join(jsonRoot(), safeId + '.json');
   }
 
-  function readProject(canvasId) {
-    const filePath = projectPath(canvasId);
+  function readCanvas(canvasId) {
+    const filePath = canvasPath(canvasId);
     if (!filePath || !fs.existsSync(filePath)) return null;
     try {
-      return normalizeCanvasProject(JSON.parse(fs.readFileSync(filePath, 'utf8')), { id: canvasId });
+      return normalizeCanvasDocument(JSON.parse(fs.readFileSync(filePath, 'utf8')), { id: canvasId });
     } catch {
       return null;
     }
   }
 
-  function writeProject(canvas) {
-    const normalized = normalizeCanvasProject(canvas);
-    const filePath = projectPath(normalized.id);
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(normalized, null, 2) + '\n', 'utf8');
-    return { canvas: normalized, filePath };
+  function readIndexPayload() {
+    const filePath = indexPath();
+    if (!fs.existsSync(filePath)) return { canvases: [], projects: ensureDefaultProject([]), valid: true };
+    try {
+      const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      if (payload?.version !== 3) return { canvases: [], projects: [], valid: false };
+      const canvases = Array.isArray(payload?.canvases) ? payload.canvases : [];
+      const projects = ensureDefaultProject(Array.isArray(payload?.projects) ? payload.projects : []);
+      return {
+        canvases: canvases.map((record) => normalizeCanvasRecord(record)).filter((record) => record.id),
+        projects,
+        valid: true,
+      };
+    } catch {
+      return { canvases: [], projects: [], valid: false };
+    }
   }
 
-  function listProjects() {
-    const records = [];
+  function writeIndexPayload(inputPayload) {
+    const nextPayload = {
+      version: 3,
+      updatedAt: nowMs(),
+      canvases: sortCanvasRecords([...(inputPayload.canvases || [])]),
+      projects: sortProjectRecords(ensureDefaultProject(inputPayload.projects || [])),
+    };
+    fs.writeFileSync(indexPath(), JSON.stringify(nextPayload, null, 2) + '\n', 'utf8');
+  }
+
+  function canvasIdsFromDisk() {
+    return fs.readdirSync(jsonRoot())
+      .filter((fileName) => fileName.endsWith('.json'))
+      .map((fileName) => sanitizeCanvasId(path.basename(fileName, '.json')))
+      .filter(Boolean);
+  }
+
+  function indexMatchesDisk(payload, canvasIds) {
+    const canvases = payload?.canvases || [];
+    if (canvases.length !== canvasIds.length) return false;
+    const diskIds = new Set(canvasIds);
+    return canvases.every((record) => diskIds.has(record.id));
+  }
+
+  function rebuildIndex() {
+    const indexPayload = readIndexPayload();
+    const projectById = new Map(indexPayload.projects.map((project) => [project.id, project]));
+    const canvases = [];
     for (const fileName of fs.readdirSync(jsonRoot())) {
       if (!fileName.endsWith('.json')) continue;
       try {
         const parsed = JSON.parse(fs.readFileSync(path.join(jsonRoot(), fileName), 'utf8'));
-        const canvas = normalizeCanvasProject(parsed, { id: path.basename(fileName, '.json') });
+        const canvas = normalizeCanvasDocument(parsed, { id: path.basename(fileName, '.json') });
         if (!canvas.id) continue;
-        records.push(canvasRecord(canvas));
+        canvases.push({
+          ...canvasRecord(canvas),
+          projectId: projectById.has(canvas.projectId) ? canvas.projectId : indexPayload.projects[0]?.id || DEFAULT_PROJECT_ID,
+        });
       } catch {
-        // Skip malformed project files so one bad JSON does not hide the rest.
+        // Skip malformed canvas files so one bad JSON does not hide the rest.
       }
     }
-    return records.sort((a, b) => {
-      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-      return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0);
-    });
+    writeIndexPayload({ canvases, projects: indexPayload.projects });
+    return sortCanvasRecords(canvases);
   }
 
-  function createProject(payload = {}) {
+  function updateIndexCanvas(record) {
+    const payload = readIndexPayload();
+    const nextRecord = normalizeCanvasRecord(record);
+    const next = payload.canvases.some((item) => item.id === nextRecord.id)
+      ? payload.canvases.map((item) => (item.id === nextRecord.id ? nextRecord : item))
+      : [nextRecord, ...payload.canvases];
+    writeIndexPayload({ ...payload, canvases: next });
+  }
+
+  function removeIndexCanvas(canvasId) {
+    const payload = readIndexPayload();
+    writeIndexPayload({ ...payload, canvases: payload.canvases.filter((record) => record.id !== canvasId) });
+  }
+
+  function updateIndexProject(project) {
+    const payload = readIndexPayload();
+    const nextProject = normalizeProjectRecord(project);
+    const next = payload.projects.some((item) => item.id === nextProject.id)
+      ? payload.projects.map((item) => (item.id === nextProject.id ? nextProject : item))
+      : [nextProject, ...payload.projects];
+    writeIndexPayload({ ...payload, projects: next });
+    return nextProject;
+  }
+
+  function writeCanvas(canvas) {
+    const normalized = normalizeCanvasDocument(canvas);
+    const filePath = canvasPath(normalized.id);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(normalized, null, 2) + '\n', 'utf8');
+    updateIndexCanvas(canvasRecord(normalized));
+    return { canvas: normalized, filePath };
+  }
+
+  function listCanvases() {
+    const canvasIds = canvasIdsFromDisk();
+    const indexedPayload = readIndexPayload();
+    if (!indexedPayload.valid) {
+      writeIndexPayload({ canvases: [], projects: [] });
+      return [];
+    }
+    if (indexMatchesDisk(indexedPayload, canvasIds)) return sortCanvasRecords(indexedPayload.canvases);
+    return rebuildIndex();
+  }
+
+  function listProjects() {
+    return sortProjectRecords(readIndexPayload().projects);
+  }
+
+  function createCanvas(payload = {}) {
     const timestamp = nowMs();
-    const result = writeProject({
+    const result = writeCanvas({
       id: newCanvasId(),
       title: String(payload?.title || 'Untitled canvas').trim() || 'Untitled canvas',
       icon: payload?.icon || 'layers',
-      canvasType: payload?.canvasType === 'forart-libtv' || payload?.source === 'libtv' ? 'forart-libtv' : 'forart',
-      source: payload?.source === 'libtv' || payload?.canvasType === 'forart-libtv' ? 'libtv' : 'forart',
-      libtvProjectId: String(payload?.libtvProjectId || ''),
-      libtvProjectName: String(payload?.libtvProjectName || ''),
+      canvasType: 'forart',
+      source: payload?.source || 'forart',
+      projectId: normalizeProjectId(payload?.projectId) || listProjects()[0]?.id || DEFAULT_PROJECT_ID,
       color: '',
       pinned: false,
       createdAt: timestamp,
@@ -136,32 +286,32 @@ function createCanvasStore({ rootDir }) {
     return { ok: true, canvas: result.canvas, record: canvasRecord(result.canvas), filePath: result.filePath };
   }
 
-  function saveProject(canvasId, payload = {}) {
-    const existing = readProject(canvasId);
-    if (!existing) throw new Error('Canvas project not found.');
-    const result = writeProject({
+  function saveCanvas(canvasId, payload = {}) {
+    const existing = readCanvas(canvasId);
+    if (!existing) throw new Error('Canvas not found.');
+    const result = writeCanvas({
       ...existing,
       ...(payload || {}),
       id: existing.id,
       createdAt: existing.createdAt,
       title: String(payload?.title || existing.title || 'Untitled canvas').slice(0, 80),
       icon: String(payload?.icon || existing.icon || 'layers').slice(0, 32),
-      canvasType: existing.canvasType,
+      canvasType: 'forart',
       source: existing.source,
-      libtvProjectId: existing.libtvProjectId,
-      libtvProjectName: existing.libtvProjectName,
+      projectId: payload?.projectId !== undefined ? normalizeProjectId(payload.projectId) : existing.projectId,
       updatedAt: nowMs(),
     });
     return { ok: true, canvas: result.canvas, record: canvasRecord(result.canvas), filePath: result.filePath };
   }
 
-  function updateMeta(canvasId, patch = {}) {
-    const existing = readProject(canvasId);
-    if (!existing) throw new Error('Canvas project not found.');
-    const result = writeProject({
+  function updateCanvasMeta(canvasId, patch = {}) {
+    const existing = readCanvas(canvasId);
+    if (!existing) throw new Error('Canvas not found.');
+    const result = writeCanvas({
       ...existing,
       title: patch?.title !== undefined ? String(patch.title || existing.title || 'Untitled canvas').slice(0, 80) : existing.title,
       icon: patch?.icon !== undefined ? String(patch.icon || 'layers').slice(0, 32) : existing.icon,
+      projectId: patch?.projectId !== undefined ? normalizeProjectId(patch.projectId) || listProjects()[0]?.id || DEFAULT_PROJECT_ID : existing.projectId,
       color: patch?.color !== undefined ? String(patch.color || '') : existing.color,
       pinned: patch?.pinned !== undefined ? Boolean(patch.pinned) : existing.pinned,
       updatedAt: nowMs(),
@@ -169,23 +319,88 @@ function createCanvasStore({ rootDir }) {
     return { ok: true, canvas: result.canvas, record: canvasRecord(result.canvas), filePath: result.filePath };
   }
 
-  function deleteProject(canvasId) {
-    const filePath = projectPath(canvasId);
+  function createProject(payload = {}) {
+    const timestamp = nowMs();
+    const project = normalizeProjectRecord({
+      id: newProjectId(),
+      title: payload?.title,
+      color: payload?.color,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    const saved = updateIndexProject(project);
+    return { ok: true, project: saved };
+  }
+
+  function updateProject(projectId, patch = {}) {
+    const safeId = normalizeProjectId(projectId);
+    const payload = readIndexPayload();
+    const existing = payload.projects.find((project) => project.id === safeId);
+    if (!existing) throw new Error('Canvas project not found.');
+    const project = normalizeProjectRecord({
+      ...existing,
+      title: patch?.title !== undefined ? patch.title : existing.title,
+      color: patch?.color !== undefined ? patch.color : existing.color,
+      updatedAt: nowMs(),
+    });
+    const nextProjects = payload.projects.map((item) => (item.id === safeId ? project : item));
+    writeIndexPayload({ ...payload, projects: nextProjects });
+    return { ok: true, project };
+  }
+
+  function deleteProject(projectId) {
+    const safeId = normalizeProjectId(projectId);
+    const payload = readIndexPayload();
+    if (payload.projects.length <= 1) {
+      return { ok: true, deletedCanvasIds: [] };
+    }
+    const deletedCanvasIds = payload.canvases.filter((record) => record.projectId === safeId).map((record) => record.id);
+    for (const canvasId of deletedCanvasIds) {
+      const filePath = canvasPath(canvasId);
+      if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+    const nextCanvases = payload.canvases.filter((record) => record.projectId !== safeId);
+    const nextProjects = ensureDefaultProject(payload.projects.filter((project) => project.id !== safeId));
+    writeIndexPayload({ ...payload, canvases: nextCanvases, projects: nextProjects });
+    return { ok: true, deletedCanvasIds };
+  }
+
+  function moveCanvasToProject(canvasId, projectId) {
+    return updateCanvasMeta(canvasId, { projectId });
+  }
+
+  function deleteCanvas(canvasId) {
+    const filePath = canvasPath(canvasId);
     if (!filePath || !fs.existsSync(filePath)) return { ok: true };
     fs.unlinkSync(filePath);
+    removeIndexCanvas(sanitizeCanvasId(canvasId));
     return { ok: true, filePath };
   }
 
   return {
+    canvasPath,
+    createCanvas,
     createProject,
+    deleteCanvas,
     deleteProject,
+    listCanvases,
     listProjects,
-    projectPath,
-    readProject,
-    saveProject,
-    updateMeta,
-    writeProject,
+    moveCanvasToProject,
+    readCanvas,
+    saveCanvas,
+    updateCanvasMeta,
+    updateProject,
+    writeCanvas,
   };
 }
 
-module.exports = { canvasRecord, createCanvasStore, newCanvasId, normalizeCanvasProject, nowMs, sanitizeCanvasId };
+module.exports = {
+  canvasRecord,
+  createCanvasStore,
+  newCanvasId,
+  newProjectId,
+  normalizeCanvasDocument,
+  normalizeProjectRecord,
+  nowMs,
+  sanitizeCanvasId,
+};

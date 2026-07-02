@@ -33,12 +33,12 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
     setError("");
 
     if (mode === "local" && !localLibraryPath.trim()) {
-      setError(t("setup.saveLocalPathRequired"));
+      setError(t("setup:saveLocalPathRequired"));
       return;
     }
 
     if (mode === "remote" && !serverUrl.trim()) {
-      setError(t("setup.saveServerUrlRequired"));
+      setError(t("setup:saveServerUrlRequired"));
       return;
     }
 
@@ -66,17 +66,17 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
 
   return (
     <main className="setup-shell">
-      <section className="setup-panel" aria-label={t("setup.label")}>
+      <section className="setup-panel" aria-label={t("setup:label")}>
         <div className="setup-head">
           <div className="brand setup-brand" aria-label="Forart">
             <span className="brand-mark" aria-hidden="true" />
             <strong className="brand-name">Forart</strong>
           </div>
-          <p>{t("setup.description")}</p>
+          <p>{t("setup:description")}</p>
         </div>
 
         <form className="setup-form" onSubmit={handleSubmit}>
-          <div className="setup-mode-grid" role="radiogroup" aria-label={t("setup.usageMode")}>
+          <div className="setup-mode-grid" role="radiogroup" aria-label={t("setup:usageMode")}>
             <button
               className={`setup-mode${mode === "local" ? " active" : ""}`}
               type="button"
@@ -85,8 +85,8 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
             >
               <Monitor size={22} aria-hidden="true" />
               <span>
-                <strong>{t("setup.localUse")}</strong>
-                <small>{t("setup.localUseDescription")}</small>
+                <strong>{t("setup:localUse")}</strong>
+                <small>{t("setup:localUseDescription")}</small>
               </span>
             </button>
 
@@ -98,34 +98,34 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
             >
               <Server size={22} aria-hidden="true" />
               <span>
-                <strong>{t("setup.remoteUse")}</strong>
-                <small>{t("setup.remoteUseDescription")}</small>
+                <strong>{t("setup:remoteUse")}</strong>
+                <small>{t("setup:remoteUseDescription")}</small>
               </span>
             </button>
           </div>
 
           {mode === "local" ? (
             <label className="setup-field">
-              <span>{t("setup.localLibraryPath")}</span>
+              <span>{t("setup:localLibraryPath")}</span>
               <div className="setup-path-row">
                 <input value={localLibraryPath} onChange={(event) => setLocalLibraryPath(event.target.value)} placeholder="D:/ForartLibrary" />
-                <button className="setup-icon-button" type="button" title={t("setup.chooseDirectory")} aria-label={t("setup.chooseDirectory")} onClick={chooseDirectory}>
+                <button className="setup-icon-button" type="button" title={t("setup:chooseDirectory")} aria-label={t("setup:chooseDirectory")} onClick={chooseDirectory}>
                   <FolderOpen size={18} aria-hidden="true" />
                 </button>
               </div>
             </label>
           ) : (
             <label className="setup-field">
-              <span>{t("setup.serverUrl")}</span>
-              <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://192.168.1.20:5175" />
+              <span>{t("setup:serverUrl")}</span>
+              <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://192.168.1.20:6980" />
             </label>
           )}
 
           <div className="settings-section__head">
             <Languages size={18} aria-hidden="true" />
-            <h2>{t("settings.languageSection")}</h2>
+            <h2>{t("settings:languageSection")}</h2>
           </div>
-          <div className="settings-mode-group" role="radiogroup" aria-label={t("settings.language")}>
+          <div className="settings-mode-group" role="radiogroup" aria-label={t("settings:language")}>
             {SUPPORTED_LANGUAGES.map((language) => (
               <button
                 key={language}
@@ -134,7 +134,7 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
                 aria-pressed={i18n.language === language}
                 onClick={() => changeLanguage(language)}
               >
-                <strong>{language === "zh-CN" ? t("settings.chinese") : t("settings.english")}</strong>
+                <strong>{language === "zh-CN" ? t("settings:chinese") : t("settings:english")}</strong>
               </button>
             ))}
           </div>
@@ -142,7 +142,7 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
           {error ? <div className="setup-error">{error}</div> : null}
 
           <button className="setup-submit" type="submit" disabled={!canSubmit || saving}>
-            {saving ? t("setup.saving") : t("setup.enter")}
+            {saving ? t("setup:saving") : t("setup:enter")}
           </button>
         </form>
       </section>

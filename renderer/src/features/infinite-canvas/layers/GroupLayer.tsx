@@ -99,8 +99,8 @@ const GroupItem = memo(function GroupItem({
             <button
               type="button"
               className="ic-group-frame__action"
-              aria-label={t("infiniteCanvas.ungroup")}
-              title={t("infiniteCanvas.ungroup")}
+              aria-label={t("infiniteCanvas:ungroup")}
+              title={t("infiniteCanvas:ungroup")}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => onUngroup(group.id)}
             >
@@ -112,7 +112,7 @@ const GroupItem = memo(function GroupItem({
           <button
             className="ic-group-resize-handle nodrag"
             type="button"
-            aria-label={t("infiniteCanvas.resizeNode")}
+            aria-label={t("infiniteCanvas:resizeNode")}
             onPointerDown={(event) => onStartGroupResize(event, group)}
           />
         ) : null}

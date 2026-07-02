@@ -1,19 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useMemo, useRef, type MutableRefObject } from "react";
 import type { TFunction } from "i18next";
-import type { LibtvModelOption } from "../../app/appConfig";
 import type { ApiProvider } from "../settings/apiProviders";
 import { generateChatWithProvider } from "./core/apiChatGeneration";
-import { fitImageNodeSize, readImageDimensions } from "./imageCrop";
 import { buildLlmNodeRequest } from "./llm/llmNodeRequest";
-import type { CanvasConnection, CanvasGroup, CanvasNode, CanvasProjectRecord, Viewport } from "./types";
+import type { CanvasConnection, CanvasDocumentRecord, CanvasGroup, CanvasNode, Viewport } from "./types";
 import { useCanvasGenerationPersistence } from "./generation/canvasGenerationPersistence";
 import { useImageGenerationActions } from "./generation/useImageGenerationActions";
-
-interface SavedCanvasAsset {
-  url: string;
-  fileName?: string;
-  filePath?: string;
-}
+import { useGenerationTaskWriteback } from "./generation/generationTaskWriteback";
 
 interface UseCanvasGenerationActionsOptions {
   nodes: CanvasNode[];
@@ -21,18 +14,15 @@ interface UseCanvasGenerationActionsOptions {
   groups: CanvasGroup[];
   viewport: Viewport;
   apiProviders: ApiProvider[];
-  defaultImageProviderId: string;
   imageProviders: ApiProvider[];
   defaultChatProvider: ApiProvider | null;
   chatProviders: ApiProvider[];
   activeCanvasId: string;
   activeCanvasTitle: string;
-  activeProject: CanvasProjectRecord | null;
+  activeProject: CanvasDocumentRecord | null;
   activeCanvasIdRef: MutableRefObject<string>;
   patchNode: (nodeId: string, patch: Partial<CanvasNode>) => void;
   setNodes: (updater: CanvasNode[] | ((current: CanvasNode[]) => CanvasNode[])) => void;
-  saveCanvasImageAsset: (source: { url?: string; dataUrl?: string; defaultName?: string; kind: "input" | "output" }) => Promise<SavedCanvasAsset>;
-  setLibtvStatus: (status: string) => void;
   t: TFunction;
 }
 
@@ -42,7 +32,6 @@ export function useCanvasGenerationActions({
   groups,
   viewport,
   apiProviders,
-  defaultImageProviderId,
   imageProviders,
   defaultChatProvider,
   chatProviders,
@@ -52,15 +41,11 @@ export function useCanvasGenerationActions({
   activeCanvasIdRef,
   patchNode,
   setNodes,
-  saveCanvasImageAsset,
-  setLibtvStatus,
   t,
 }: UseCanvasGenerationActionsOptions) {
-  const [libtvModels, setLibtvModels] = useState<LibtvModelOption[]>([]);
-  const [libtvModelsLoading, setLibtvModelsLoading] = useState(false);
   const generationAbortControllersRef = useRef<Record<string, AbortController>>({});
   const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
-  const { patchGenerationNode, persistActiveGenerationNode } = useCanvasGenerationPersistence({
+  const { persistActiveGenerationNode } = useCanvasGenerationPersistence({
     activeCanvasTitle,
     activeProject,
     connections,
@@ -68,6 +53,17 @@ export function useCanvasGenerationActions({
     viewport,
     activeCanvasIdRef,
     setNodes,
+  });
+  const { writebackGenerationTask } = useGenerationTaskWriteback({
+    nodes,
+    activeCanvasTitle,
+    activeProject,
+    activeCanvasIdRef,
+    connections,
+    groups,
+    viewport,
+    setNodes,
+    t,
   });
   const {
     resumeImageGenerationTasks,
@@ -77,135 +73,13 @@ export function useCanvasGenerationActions({
     nodes,
     connections,
     apiProviders,
-    defaultImageProviderId,
     imageProviders,
     activeCanvasId,
     patchNode,
-    saveCanvasImageAsset,
-    patchGenerationNode,
     persistActiveGenerationNode,
+    writebackGenerationTask,
     t,
   });
-
-  const refreshLibtvModels = useCallback(async () => {
-    if (!window.libtv?.imageModels || libtvModelsLoading) return;
-    setLibtvModelsLoading(true);
-    try {
-      const result = await window.libtv.imageModels();
-      setLibtvModels(result.models || []);
-    } catch (error) {
-      setLibtvStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      setLibtvModelsLoading(false);
-    }
-  }, [libtvModelsLoading, setLibtvStatus]);
-
-  useEffect(() => {
-    if (!window.libtv?.imageModels) return;
-    void refreshLibtvModels();
-  }, [refreshLibtvModels]);
-
-  const runLibtvImageNode = useCallback(async (nodeId: string) => {
-    const node = nodeMap.get(nodeId);
-    if (!node || node.type !== "libtvImage" || node.running) return;
-    if (!window.libtv?.runImageNode) {
-      patchNode(nodeId, { generationError: t("infiniteCanvas.libtvBridgeUnavailable") });
-      return;
-    }
-    if (!node.libtvProjectId || !node.libtvNodeId) {
-      patchNode(nodeId, { generationError: t("infiniteCanvas.libtvMissingBinding") });
-      return;
-    }
-    patchNode(nodeId, { generationError: "", generationStatus: t("infiniteCanvas.libtvSubmitting"), running: true });
-    try {
-      const result = await window.libtv.runImageNode({
-        projectId: node.libtvProjectId,
-        nodeId: node.libtvNodeId,
-      });
-      if (!result.url) {
-        patchNode(nodeId, { running: false, generationStatus: "", generationError: t("infiniteCanvas.libtvNoImageResult") });
-        return;
-      }
-      patchNode(nodeId, { generationStatus: t("infiniteCanvas.savingImage") });
-      const saved = await saveCanvasImageAsset({ url: result.url, defaultName: result.fileName || "libtv-image.png", kind: "output" });
-      const dimensions = await readImageDimensions(saved.url);
-      const nextSize = dimensions ? fitImageNodeSize(dimensions.width, dimensions.height) : {};
-      setNodes((current) => current.map((currentNode) => {
-        if (currentNode.id !== nodeId) return currentNode;
-        return {
-          ...currentNode,
-          url: saved.url,
-          fileName: saved.fileName || result.fileName || "libtv-image.png",
-          libtvOriginalUrl: result.url,
-          imageSource: "generated",
-          outputDownloadState: "pending",
-          outputDownloadedAt: undefined,
-          imageNaturalWidth: dimensions?.width,
-          imageNaturalHeight: dimensions?.height,
-          running: false,
-          generationError: "",
-          generationStatus: "",
-          ...nextSize,
-        };
-      }));
-    } catch (error) {
-      patchNode(nodeId, {
-        running: false,
-        generationError: error instanceof Error ? error.message : String(error),
-        generationStatus: "",
-      });
-    }
-  }, [nodeMap, patchNode, saveCanvasImageAsset, setNodes, t]);
-
-  const stopLibtvImageNode = useCallback((nodeId: string) => {
-    patchNode(nodeId, {
-      running: false,
-      generationError: "",
-      generationStatus: "",
-    });
-  }, [patchNode]);
-
-  const syncLibtvImageNode = useCallback(async (nodeId: string) => {
-    const node = nodeMap.get(nodeId);
-    if (!node || node.type !== "libtvImage" || !window.libtv?.syncNode) return;
-    if (!node.libtvProjectId || !node.libtvNodeId) {
-      patchNode(nodeId, { generationError: t("infiniteCanvas.libtvMissingBinding") });
-      return;
-    }
-    patchNode(nodeId, { generationError: "", generationStatus: t("infiniteCanvas.libtvSyncing") });
-    try {
-      const result = await window.libtv.syncNode({ projectId: node.libtvProjectId, nodeId: node.libtvNodeId });
-      if (!result.url) {
-        patchNode(nodeId, { generationStatus: "", generationError: t("infiniteCanvas.libtvNoImageResult") });
-        return;
-      }
-      const saved = await saveCanvasImageAsset({ url: result.url, defaultName: result.fileName || "libtv-image.png", kind: "output" });
-      const dimensions = await readImageDimensions(saved.url);
-      const nextSize = dimensions ? fitImageNodeSize(dimensions.width, dimensions.height) : {};
-      setNodes((current) => current.map((currentNode) => {
-        if (currentNode.id !== nodeId) return currentNode;
-        return {
-          ...currentNode,
-          url: saved.url,
-          fileName: saved.fileName || result.fileName || "libtv-image.png",
-          libtvOriginalUrl: result.url,
-          imageSource: "generated",
-          outputDownloadState: "pending",
-          outputDownloadedAt: undefined,
-          imageNaturalWidth: dimensions?.width,
-          imageNaturalHeight: dimensions?.height,
-          generationError: "",
-          generationStatus: "",
-          ...nextSize,
-        };
-      }));
-    } catch (error) {
-      patchNode(nodeId, {
-        generationError: error instanceof Error ? error.message : String(error),
-        generationStatus: "",
-      });
-    }
-  }, [nodeMap, patchNode, saveCanvasImageAsset, setNodes, t]);
 
   const runLlmNode = useCallback(async (nodeId: string) => {
     const node = nodeMap.get(nodeId);
@@ -216,12 +90,12 @@ export function useCanvasGenerationActions({
       || null;
     const model = node.chatModel && provider?.chatModels.includes(node.chatModel) ? node.chatModel : provider?.chatModels[0] || "";
     if (!provider || !model) {
-      patchNode(nodeId, { generationError: t("infiniteCanvas.noChatApiConfigured") });
+      patchNode(nodeId, { generationError: t("infiniteCanvas:noChatApiConfigured") });
       return;
     }
     const request = buildLlmNodeRequest({ node, nodes, connections, t });
     if (!request.hasInput) {
-      patchNode(nodeId, { generationError: t("infiniteCanvas.llmInputRequired") });
+      patchNode(nodeId, { generationError: t("infiniteCanvas:llmInputRequired") });
       return;
     }
 
@@ -233,7 +107,7 @@ export function useCanvasGenerationActions({
       chatProviderId: provider.id,
       chatModel: model,
       generationError: "",
-      generationStatus: t("infiniteCanvas.llmRunning"),
+      generationStatus: t("infiniteCanvas:llmRunning"),
     });
 
     try {
@@ -268,15 +142,10 @@ export function useCanvasGenerationActions({
   }, [patchNode]);
 
   return {
-    libtvModels,
-    libtvModelsLoading,
-    refreshLibtvModels,
     resumeImageGenerationTasks,
+    writebackGenerationTask,
     runImageComposer,
     stopImageComposer,
-    runLibtvImageNode,
-    stopLibtvImageNode,
-    syncLibtvImageNode,
     runLlmNode,
     stopLlmNode,
   };

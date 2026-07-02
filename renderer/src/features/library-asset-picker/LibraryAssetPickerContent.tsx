@@ -7,9 +7,9 @@ import { cacheBustedLibraryAssetUrl, useLibraryAssetPickerData } from "./useLibr
 import type { LibraryAssetItem, LibraryAssetPickerSource, LibraryAssetSelection, LibraryAssetTab } from "./types";
 
 const allLibrarySources: Array<LibraryAssetPickerSource & { icon: LucideIcon }> = [
-  { id: "models", labelKey: "resourceLibrary.models", icon: Users },
-  { id: "outfits", labelKey: "resourceLibrary.outfits", icon: Images },
-  { id: "actions", labelKey: "resourceLibrary.actions", icon: PersonStanding },
+  { id: "models", labelKey: "resourceLibrary:models", icon: Users },
+  { id: "outfits", labelKey: "resourceLibrary:outfits", icon: Images },
+  { id: "actions", labelKey: "resourceLibrary:actions", icon: PersonStanding },
 ];
 
 function GenderSymbol({ gender, className }: { gender: "female" | "male"; className: string }) {
@@ -99,7 +99,7 @@ export function LibraryAssetPickerContent({
   return (
     <div ref={contentRef} className={`library-asset-picker-content${className ? ` ${className}` : ""}`}>
       {visibleSources.length > 1 ? (
-        <div className="library-asset-picker__tabs" role="tablist" aria-label={t("resourceLibrary.navigation")}>
+        <div className="library-asset-picker__tabs" role="tablist" aria-label={t("resourceLibrary:navigation")}>
           {visibleSources.map((tab) => {
             const Icon = tab.icon;
             return (
@@ -116,28 +116,28 @@ export function LibraryAssetPickerContent({
         <Select
           value={picker.activeProjectId}
           disabled={!picker.activeProjects.length}
-          options={picker.activeProjects.map((project) => ({ value: project.id, label: project.name || t("infiniteCanvas.untitledCanvas") }))}
+          options={picker.activeProjects.map((project) => ({ value: project.id, label: project.name || t("infiniteCanvas:untitledCanvas") }))}
           onChange={picker.changeProject}
-          ariaLabel={t("freeCanvas.project")}
+          ariaLabel={t("freeCanvas:project")}
           portal
           menuPlacement="bottom"
         />
         <LibraryTagFilterButton
           tags={picker.activeTags}
-          activeTagId={picker.activeTagId}
-          allLabel={t("infiniteCanvas.allLibraryTags")}
-          ariaLabel={t("infiniteCanvas.libraryTagFilter")}
+          activeTagIds={picker.activeTagIds}
+          allLabel={t("infiniteCanvas:allLibraryTags")}
+          ariaLabel={t("infiniteCanvas:libraryTagFilter")}
           onChange={picker.changeTag}
-          active={Boolean(picker.activeTagId || (picker.activeTab === "models" && picker.activeModelGender))}
+          active={Boolean(picker.activeTagIds.length || (picker.activeTab === "models" && picker.activeModelGender))}
           menuContentBefore={picker.activeTab === "models" ? (
-            <div className="library-asset-picker__filter-menu-section" aria-label={t("modelLibrary.genderCategory")}>
-              <span>{t("modelLibrary.gender")}</span>
+            <div className="library-asset-picker__filter-menu-section" aria-label={t("modelLibrary:genderCategory")}>
+              <span>{t("modelLibrary:gender")}</span>
               <div className="library-asset-picker__gender-filter">
                 <button
                   className={`gender-icon-filter female${picker.activeModelGender === "female" ? " active" : ""}`}
                   type="button"
-                  aria-label={t("modelLibrary.femaleModel")}
-                  title={t("modelLibrary.femaleModel")}
+                  aria-label={t("modelLibrary:femaleModel")}
+                  title={t("modelLibrary:femaleModel")}
                   onClick={() => picker.toggleModelGender("female")}
                 >
                   <GenderSymbol gender="female" className="gender-symbol-icon" />
@@ -145,8 +145,8 @@ export function LibraryAssetPickerContent({
                 <button
                   className={`gender-icon-filter male${picker.activeModelGender === "male" ? " active" : ""}`}
                   type="button"
-                  aria-label={t("modelLibrary.maleModel")}
-                  title={t("modelLibrary.maleModel")}
+                  aria-label={t("modelLibrary:maleModel")}
+                  title={t("modelLibrary:maleModel")}
                   onClick={() => picker.toggleModelGender("male")}
                 >
                   <GenderSymbol gender="male" className="gender-symbol-icon" />
@@ -158,19 +158,19 @@ export function LibraryAssetPickerContent({
       </div>
 
       <div className="library-asset-picker__body">
-        {picker.errorMessage ? <div className="library-asset-picker__state library-asset-picker__state--error">{t("infiniteCanvas.libraryRequestFailed", { message: picker.errorMessage })}</div> : null}
-        {!picker.storageConfigured && !picker.storageSettingsLoading ? <div className="library-asset-picker__state">{t("outfitLibrary.storageUnavailable")}</div> : null}
-        {picker.storageConfigured && !picker.isLoading && !picker.activeProjects.length ? <div className="library-asset-picker__state">{t("common.empty.noProjects")}</div> : null}
-        {picker.isLoading ? <div className="library-asset-picker__state">{t("common.states.loading")}</div> : null}
-        {picker.storageConfigured && !picker.isLoading && picker.activeProjects.length && !picker.activeItems.length ? <div className="library-asset-picker__state">{t("infiniteCanvas.noLibraryImages")}</div> : null}
+        {picker.errorMessage ? <div className="library-asset-picker__state library-asset-picker__state--error">{t("infiniteCanvas:libraryRequestFailed", { message: picker.errorMessage })}</div> : null}
+        {!picker.storageConfigured && !picker.storageSettingsLoading ? <div className="library-asset-picker__state">{t("outfitLibrary:storageUnavailable")}</div> : null}
+        {picker.storageConfigured && !picker.isLoading && !picker.activeProjects.length ? <div className="library-asset-picker__state">{t("common:empty.noProjects")}</div> : null}
+        {picker.isLoading ? <div className="library-asset-picker__state">{t("common:states.loading")}</div> : null}
+        {picker.storageConfigured && !picker.isLoading && picker.activeProjects.length && !picker.activeItems.length ? <div className="library-asset-picker__state">{t("infiniteCanvas:noLibraryImages")}</div> : null}
         {!picker.isLoading && picker.activeItems.length ? (
           <div className="library-asset-picker__grid">
             {picker.activeItems.map((item) => {
               const src = item.url ? cacheBustedLibraryAssetUrl(item.url, item.updatedAt || item.assetId || item.id) : "";
               return (
                 <button key={item.id} type="button" data-kind={item.kind} disabled={!src} onClick={(event) => selectItem(item, event.currentTarget)}>
-                  {src ? <img src={src} alt={item.name} loading="lazy" draggable={false} /> : <span>{t("common.empty.noImage")}</span>}
-                  <strong>{item.name || t("infiniteCanvas.untitledCanvas")}</strong>
+                  {src ? <img src={src} alt={item.name} loading="lazy" draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
+                  <strong>{item.name || t("infiniteCanvas:untitledCanvas")}</strong>
                 </button>
               );
             })}
@@ -183,7 +183,7 @@ export function LibraryAssetPickerContent({
           ref={choicesRef}
           className="library-asset-picker__choices"
           role="dialog"
-          aria-label={t("infiniteCanvas.chooseModelImage", { name: modelChoiceFor.name })}
+          aria-label={t("infiniteCanvas:chooseModelImage", { name: modelChoiceFor.name })}
           style={variant === "rail" ? ({
             "--library-asset-choice-left": `${railChoicesPosition.left}px`,
             "--library-asset-choice-top": `${railChoicesPosition.top}px`,
@@ -194,13 +194,13 @@ export function LibraryAssetPickerContent({
         >
           <div className="library-asset-picker__choices-head">
             <strong>{modelChoiceFor.name}</strong>
-            <button type="button" aria-label={t("common.actions.back")} title={t("common.actions.back")} onClick={() => picker.setModelChoiceFor(null)}>
+            <button type="button" aria-label={t("common:actions.back")} title={t("common:actions.back")} onClick={() => picker.setModelChoiceFor(null)}>
               <X size={16} aria-hidden="true" />
             </button>
           </div>
           <div className="library-asset-picker__choice-grid">
-            {picker.modelChoicesQuery.isLoading ? <div className="library-asset-picker__state">{t("freeCanvasEditor.loadingImages")}</div> : null}
-            {!picker.modelChoicesQuery.isLoading && !(picker.modelChoicesQuery.data?.images || []).length ? <div className="library-asset-picker__state">{t("freeCanvasEditor.noModelImages")}</div> : null}
+            {picker.modelChoicesQuery.isLoading ? <div className="library-asset-picker__state">{t("freeCanvasEditor:loadingImages")}</div> : null}
+            {!picker.modelChoicesQuery.isLoading && !(picker.modelChoicesQuery.data?.images || []).length ? <div className="library-asset-picker__state">{t("freeCanvasEditor:noModelImages")}</div> : null}
             {(picker.modelChoicesQuery.data?.images || []).map((image) => {
               const src = image.asset_url ? cacheBustedLibraryAssetUrl(image.asset_url, image.created_at || image.asset_id || image.id) : "";
               return (
@@ -220,7 +220,7 @@ export function LibraryAssetPickerContent({
                     });
                   }}
                 >
-                  {src ? <img src={src} alt={image.caption || image.filename || modelChoiceFor.name} loading="lazy" draggable={false} /> : <span>{t("common.empty.noImage")}</span>}
+                  {src ? <img src={src} alt={image.caption || image.filename || modelChoiceFor.name} loading="lazy" draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
                 </button>
               );
             })}

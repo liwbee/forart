@@ -1,33 +1,40 @@
-import { ChevronDown, Play, Square, X } from "lucide-react";
-import type { CSSProperties } from "react";
+import { Play, Square } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { useTranslation } from "react-i18next";
 import { Select } from "../../../components/Select";
+import { SizePresetPicker } from "../../../components/SizePresetPicker";
 import { getModelDisplayName, type ApiProvider } from "../../settings/apiProviders";
 import { clamp, WORLD_CENTER } from "../canvasGeometry";
-import { IMAGE_ASPECT_RATIO_OPTIONS, IMAGE_RESOLUTION_OPTIONS } from "../constants";
 import type { ImageGenerationReadiness } from "../core/imageGenerationReadiness";
-import type { CanvasNode, Viewport } from "../types";
+import { isGenerationTaskActive } from "../generation/generationTaskRuntime";
+import type { CanvasGenerationTask, CanvasNode, Viewport } from "../types";
+import { ReferenceImageStrip, ReferenceImageUploadButton } from "../components/ReferenceImageStrip";
+import { listLibtvImageModels, listLibtvWorkspaces } from "../libtv-generation/libtvGenerationApi";
+import type { LibtvImageModelRecord, LibtvWorkspaceRecord } from "../libtv-generation/libtvGenerationTypes";
 import type { ImageGeneratorInputPreview } from "./composerTypes";
+import { detectImageModelRuleId, getImageModelRule, normalizeImageModelSizeSelection } from "../../settings/imageModelRules";
+
+const AUTO_SIZE_VALUE = "auto";
 
 interface ImageGeneratorComposerProps {
   node: CanvasNode | null;
   viewport: Viewport;
   selectedProvider: ApiProvider | null;
   selectedModel: string;
+  imageProviders: ApiProvider[];
   inputPreviews: ImageGeneratorInputPreview[];
   generationReadiness: ImageGenerationReadiness;
+  generationTask?: CanvasGenerationTask | null;
   openSelectId: string;
   draggedInputConnectionId: string;
-  inputInsertIndex: number | null;
   onOpenSelectChange: (updater: string | ((current: string) => string)) => void;
   onPatchNode: (nodeId: string, patch: Partial<CanvasNode>) => void;
   onRun: (nodeId: string) => void;
   onStop: (nodeId: string) => void;
   onRemoveInput: (connectionId: string) => void;
   onReorderInput: (nodeId: string, connectionId: string, imageInsertIndex: number) => void;
+  onCreateImageReference: (nodeId: string, files: FileList | File[]) => void;
   onDraggedInputConnectionIdChange: (connectionId: string) => void;
-  onInputInsertIndexChange: (index: number | null) => void;
-  getInputInsertIndex: (container: HTMLDivElement, clientX: number) => number;
   t: ReturnType<typeof useTranslation>["t"];
 }
 
@@ -36,46 +43,112 @@ export function ImageGeneratorComposer({
   viewport,
   selectedProvider,
   selectedModel,
+  imageProviders,
   inputPreviews,
   generationReadiness,
+  generationTask,
   openSelectId,
   draggedInputConnectionId,
-  inputInsertIndex,
   onOpenSelectChange,
   onPatchNode,
   onRun,
   onStop,
   onRemoveInput,
   onReorderInput,
+  onCreateImageReference,
   onDraggedInputConnectionIdChange,
-  onInputInsertIndexChange,
-  getInputInsertIndex,
   t,
 }: ImageGeneratorComposerProps) {
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [libtvWorkspaces, setLibtvWorkspaces] = useState<LibtvWorkspaceRecord[]>([]);
+  const [libtvModels, setLibtvModels] = useState<LibtvImageModelRecord[]>([]);
+  const [libtvLoadError, setLibtvLoadError] = useState("");
+
+  useEffect(() => {
+    if (!node || node.type !== "imageGenerator" || node.imageGenerationApiType !== "libtv-api") return;
+    let canceled = false;
+    setLibtvLoadError("");
+    void Promise.all([listLibtvWorkspaces(), listLibtvImageModels()])
+      .then(([workspaceResult, modelResult]) => {
+        if (canceled) return;
+        setLibtvWorkspaces(workspaceResult.workspaces || []);
+        setLibtvModels(modelResult.models || []);
+      })
+      .catch((error) => {
+        if (!canceled) setLibtvLoadError(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [node?.id, node?.type, node?.imageGenerationApiType]);
+
   if (!node || node.type !== "imageGenerator") return null;
 
-  const selectedResolution = IMAGE_RESOLUTION_OPTIONS.includes(node.imageResolution || "1k") ? node.imageResolution || "1k" : "1k";
-  const selectedAspectRatio = IMAGE_ASPECT_RATIO_OPTIONS.includes(node.imageAspectRatio || "1:1") ? node.imageAspectRatio || "1:1" : "1:1";
-  const promptInputCount = inputPreviews.filter((item) => item.kind === "prompt").length;
+  const apiType = node.imageGenerationApiType || "third-party-api";
+  const isLibtvApi = apiType === "libtv-api";
+  const libtvState = node.libtvImageGeneration || {};
+  const selectedRule = selectedProvider && selectedModel
+    ? getImageModelRule(selectedProvider.modelRules.image[selectedModel] || detectImageModelRuleId(selectedModel))
+    : getImageModelRule("generic-image");
+  const selectedSize = isLibtvApi
+    ? {
+      resolution: node.imageResolution || "1k",
+      aspectRatio: node.imageAspectRatio || "1:1",
+    }
+    : normalizeImageModelSizeSelection(selectedRule, node.imageResolution, node.imageAspectRatio);
+  const selectedResolution = selectedSize.resolution || AUTO_SIZE_VALUE;
+  const selectedAspectRatio = selectedSize.aspectRatio;
+  const resolutionValues = isLibtvApi
+    ? ["1k", "2k", "4k"]
+    : selectedRule.sizeRule.resolutions.length ? selectedRule.sizeRule.resolutions : [AUTO_SIZE_VALUE];
+  const aspectRatioValues = isLibtvApi
+    ? ["1:1", "2:3", "3:2", "4:3", "3:4", "16:9", "9:16"]
+    : selectedRule.sizeRule.aspectRatios;
+  const formatSizeValueLabel = (value: string) => value === AUTO_SIZE_VALUE ? t("infiniteCanvas:auto") : value.toUpperCase();
+  const promptInputs = inputPreviews.filter((item): item is Extract<ImageGeneratorInputPreview, { kind: "prompt" }> => item.kind === "prompt");
+  const imageInputs = inputPreviews.filter((item): item is Extract<ImageGeneratorInputPreview, { kind: "image" }> => item.kind === "image");
   const width = clamp(Math.round(node.w + 260), 520, 720);
   const composerGap = 14 / viewport.scale;
   const composerLeft = WORLD_CENTER + node.x + node.w / 2 - width / 2 / viewport.scale;
   const selectId = (name: string) => `${node.id}:${name}`;
   const sizePanelId = selectId("size");
-  const isSizePanelOpen = openSelectId === sizePanelId;
   const patchNode = (patch: Partial<CanvasNode>) => onPatchNode(node.id, patch);
-  const canRun = Boolean(selectedProvider && selectedModel && generationReadiness.canRun);
+  const canRun = isLibtvApi
+    ? Boolean(libtvState.workspaceId && libtvState.modelName && ((node.text || "").trim() || promptInputs.length))
+    : Boolean(selectedProvider && selectedModel && generationReadiness.canRun);
+  const isRunning = isLibtvApi ? Boolean(libtvState.running) : isGenerationTaskActive(generationTask || undefined);
   const generationReadinessMessage = generationReadiness.message || (
     generationReadiness.reason === "missing_prompt"
-      ? t("infiniteCanvas.imageGenerationMissingPrompt")
+      ? t("infiniteCanvas:imageGenerationMissingPrompt")
       : generationReadiness.reason === "missing_reference_image"
-        ? t("infiniteCanvas.imageGenerationMissingReferenceImage")
+        ? t("infiniteCanvas:imageGenerationMissingReferenceImage")
         : generationReadiness.reason === "reference_not_supported"
-          ? t("infiniteCanvas.imageGenerationReferenceNotSupported")
+          ? t("infiniteCanvas:imageGenerationReferenceNotSupported")
           : generationReadiness.reason === "too_many_reference_images"
-            ? t("infiniteCanvas.imageGenerationTooManyReferenceImages", { count: generationReadiness.maxReferenceImages || 0 })
+            ? t("infiniteCanvas:imageGenerationTooManyReferenceImages", { count: generationReadiness.maxReferenceImages || 0 })
             : ""
   );
+  const apiOptions = [
+    ...imageProviders.map((provider) => ({ value: provider.id, label: provider.name || provider.id })),
+    { value: "libtv-api", label: "LibTV" },
+  ];
+  const selectedApiValue = isLibtvApi ? "libtv-api" : selectedProvider?.id || "";
+  const libtvWorkspaceOptions = (
+    libtvWorkspaces.length
+      ? libtvWorkspaces.map((item) => ({ value: item.id, label: item.name || item.id }))
+      : [{ value: "", label: t("infiniteCanvas:libtvNoWorkspaces") }]
+  );
+  const modelOptions = isLibtvApi
+    ? (
+      libtvModels.length
+        ? libtvModels.map((item) => ({ value: item.modelName || item.modelKey, label: item.modelName || item.modelKey }))
+        : [{ value: "", label: t("infiniteCanvas:libtvNoModels") }]
+    )
+    : (
+      selectedProvider?.imageModels.length
+        ? selectedProvider.imageModels.map((model) => ({ value: model, label: getModelDisplayName(selectedProvider, "image", model) }))
+        : [{ value: "", label: t("settings:noImageModels") }]
+    );
 
   const renderComposerSelect = (
     name: string,
@@ -99,80 +172,6 @@ export function ImageGeneratorComposer({
     );
   };
 
-  const renderSizePanel = () => (
-    <div className={`ic-composer-size${isSizePanelOpen ? " open" : ""}`}>
-      <button
-        type="button"
-        className="ic-composer-select__trigger ic-composer-size__trigger"
-        aria-label={`${t("infiniteCanvas.resolution")} / ${t("infiniteCanvas.ratio")}`}
-        aria-haspopup="dialog"
-        aria-expanded={isSizePanelOpen}
-        onClick={() => onOpenSelectChange((current) => (current === sizePanelId ? "" : sizePanelId))}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") onOpenSelectChange("");
-        }}
-      >
-        <span>{`${selectedResolution.toUpperCase()} / ${selectedAspectRatio}`}</span>
-        <ChevronDown size={18} aria-hidden="true" />
-      </button>
-      {isSizePanelOpen ? (
-        <div className="ic-composer-size__panel" role="dialog" aria-label={`${t("infiniteCanvas.resolution")} / ${t("infiniteCanvas.ratio")}`}>
-          <div className="ic-composer-size__section">
-            <span>{t("infiniteCanvas.resolution")}</span>
-            <div className="ic-composer-size__resolution" role="radiogroup" aria-label={t("infiniteCanvas.resolution")}>
-              {[
-                { value: "1k", label: t("infiniteCanvas.resolution1k") },
-                { value: "2k", label: t("infiniteCanvas.resolution2k") },
-                { value: "4k", label: t("infiniteCanvas.resolution4k") },
-              ].map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={option.value === selectedResolution ? "selected" : ""}
-                  role="radio"
-                  aria-checked={option.value === selectedResolution}
-                  onClick={() => patchNode({ imageResolution: option.value as CanvasNode["imageResolution"] })}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="ic-composer-size__section">
-            <span>{t("infiniteCanvas.ratio")}</span>
-            <div className="ic-composer-size__ratios" role="radiogroup" aria-label={t("infiniteCanvas.ratio")}>
-              {IMAGE_ASPECT_RATIO_OPTIONS.map((ratio) => {
-                const [rawW, rawH] = ratio.split(":").map(Number);
-                const w = rawW || 1;
-                const h = rawH || 1;
-                const isWide = w >= h;
-                return (
-                  <button
-                    key={ratio}
-                    type="button"
-                    className={ratio === selectedAspectRatio ? "selected" : ""}
-                    role="radio"
-                    aria-checked={ratio === selectedAspectRatio}
-                    onClick={() => patchNode({ imageAspectRatio: ratio as CanvasNode["imageAspectRatio"] })}
-                  >
-                    <i
-                      aria-hidden="true"
-                      style={{
-                        width: isWide ? 18 : Math.max(8, Math.round(18 * w / h)),
-                        height: isWide ? Math.max(8, Math.round(18 * h / w)) : 18,
-                      }}
-                    />
-                    <span>{ratio === "1:1" ? t("infiniteCanvas.ratioSquare") : ratio}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-
   return (
     <div
       className="ic-image-composer nodrag nopan nowheel"
@@ -184,123 +183,155 @@ export function ImageGeneratorComposer({
         if (!(event.target as HTMLElement).closest(".ic-composer-select, .ic-composer-size")) onOpenSelectChange("");
       }}
     >
-      {inputPreviews.length ? (
-        <div
-          className={`ic-image-composer__inputs${draggedInputConnectionId ? " sorting" : ""}${inputInsertIndex !== null ? " has-insert" : ""}`}
-          aria-label={t("infiniteCanvas.imageComposerParams")}
-          style={inputInsertIndex !== null ? {
-            "--ic-input-insert-index": inputInsertIndex,
-            "--ic-prompt-input-count": promptInputCount,
-          } as CSSProperties : undefined}
-          onDragOver={(event) => {
-            if (!draggedInputConnectionId) return;
-            event.preventDefault();
-            event.stopPropagation();
-            event.dataTransfer.dropEffect = "move";
-            onInputInsertIndexChange(getInputInsertIndex(event.currentTarget, event.clientX));
-          }}
-          onDragLeave={(event) => {
-            if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-            onInputInsertIndexChange(null);
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const connectionId = event.dataTransfer.getData("text/plain");
-            onReorderInput(node.id, connectionId, inputInsertIndex ?? getInputInsertIndex(event.currentTarget, event.clientX));
-            onDraggedInputConnectionIdChange("");
-            onInputInsertIndexChange(null);
-          }}
-        >
-          {inputPreviews.map((item) => (
-            <div
-              key={item.connectionId}
-              className={`ic-image-composer__input ic-image-composer__input--${item.kind}${draggedInputConnectionId === item.connectionId ? " dragging" : ""}`}
-              title={item.title}
-              draggable={item.kind === "image"}
-              onDragStart={(event) => {
-                if (item.kind !== "image") return;
-                event.stopPropagation();
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("text/plain", item.connectionId);
-                onDraggedInputConnectionIdChange(item.connectionId);
-                onInputInsertIndexChange(item.order - 1);
-              }}
-              onDragEnd={() => {
-                onDraggedInputConnectionIdChange("");
-                onInputInsertIndexChange(null);
-              }}
-            >
-              {item.kind === "image" ? (
-                <>
-                  <img src={item.url} alt={item.title} draggable={false} />
-                  <span className="ic-image-composer__input-order">{item.order}</span>
-                </>
-              ) : (
-                <>
-                  <span>{item.title}</span>
-                  <p>{item.text}</p>
-                </>
-              )}
-              <button
-                type="button"
-                className="ic-image-composer__input-remove"
-                aria-label={t("infiniteCanvas.deleteConnection")}
-                title={t("infiniteCanvas.deleteConnection")}
-                draggable={false}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onRemoveInput(item.connectionId);
-                }}
-              >
-                <X size={11} aria-hidden="true" />
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
+      <input
+        ref={uploadInputRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(event) => {
+          if (event.target.files?.length) onCreateImageReference(node.id, event.target.files);
+          event.target.value = "";
+        }}
+      />
+      <div className={`ic-image-composer__top${isLibtvApi ? " is-libtv" : ""}`}>
+        {renderComposerSelect(
+          "api",
+          t("infiniteCanvas:platform"),
+          selectedApiValue,
+          apiOptions,
+          (value) => {
+            if (value === "libtv-api") {
+              patchNode({
+                imageGenerationApiType: "libtv-api",
+                generationError: "",
+                libtvImageGeneration: {
+                  ...libtvState,
+                  aspectRatio: selectedAspectRatio,
+                  quality: selectedResolution.toUpperCase() as NonNullable<CanvasNode["libtvImageGeneration"]>["quality"],
+                },
+              });
+              return;
+            }
+            const provider = imageProviders.find((item) => item.id === value) || null;
+            const nextModel = provider?.imageModels.includes(node.imageModel || "") ? node.imageModel || "" : provider?.imageModels[0] || "";
+            const nextRule = provider && nextModel ? getImageModelRule(provider.modelRules.image[nextModel] || detectImageModelRuleId(nextModel)) : getImageModelRule("generic-image");
+            const nextSize = normalizeImageModelSizeSelection(nextRule, node.imageResolution, node.imageAspectRatio);
+            patchNode({
+              imageGenerationApiType: "third-party-api",
+              imageProviderId: provider?.id || "",
+              imageModel: nextModel,
+              imageResolution: nextSize.resolution,
+              imageAspectRatio: nextSize.aspectRatio,
+              generationError: "",
+            });
+          },
+        )}
+        {isLibtvApi ? renderComposerSelect(
+          "libtv-workspace",
+          t("infiniteCanvas:libtvWorkspace"),
+          libtvState.workspaceId || "",
+          libtvWorkspaceOptions,
+          (value) => {
+            const workspace = libtvWorkspaces.find((item) => item.id === value);
+            patchNode({
+              libtvImageGeneration: {
+                ...libtvState,
+                workspaceId: value,
+                workspaceName: workspace?.name || "",
+                projectUuid: "",
+                projectName: "",
+                error: "",
+              },
+            });
+          },
+        ) : null}
+      </div>
+      <ReferenceImageStrip
+        targetId={node.id}
+        promptItems={promptInputs}
+        imageItems={imageInputs}
+        draggedConnectionId={draggedInputConnectionId}
+        className="ic-image-composer__input-row"
+        ariaLabel={t("infiniteCanvas:imageComposerParams")}
+        uploadButton={(
+          <ReferenceImageUploadButton
+            ariaLabel={t("common:actions.uploadImage")}
+            title={t("common:actions.uploadImage")}
+            onClick={() => uploadInputRef.current?.click()}
+          />
+        )}
+        deleteLabel={t("infiniteCanvas:deleteConnection")}
+        onRemove={onRemoveInput}
+        onReorder={onReorderInput}
+        onDraggedConnectionIdChange={onDraggedInputConnectionIdChange}
+      />
       <textarea
         className="ic-image-composer__prompt"
         value={node.text || ""}
-        placeholder={t("infiniteCanvas.imageComposerPlaceholder")}
+        placeholder={t("infiniteCanvas:imageComposerPlaceholder")}
         onChange={(event) => patchNode({ text: event.target.value })}
       />
       <div className="ic-image-composer__bottom">
-        <div className="ic-image-composer__params" aria-label={t("infiniteCanvas.imageComposerParams")}>
+        <div className="ic-image-composer__params" aria-label={t("infiniteCanvas:imageComposerParams")}>
           {renderComposerSelect(
             "model",
-            t("infiniteCanvas.model"),
-            selectedModel,
-            selectedProvider?.imageModels.length
-              ? selectedProvider.imageModels.map((model) => ({ value: model, label: getModelDisplayName(selectedProvider, "image", model) }))
-              : [{ value: "", label: t("settings.noImageModels") }],
-            (value) => patchNode({ imageModel: value, imageProviderId: selectedProvider?.id || "", generationError: "" }),
-            !selectedProvider,
+            isLibtvApi ? t("infiniteCanvas:libtvModel") : t("infiniteCanvas:model"),
+            isLibtvApi ? libtvState.modelName || "" : selectedModel,
+            modelOptions,
+            (value) => {
+              if (isLibtvApi) {
+                patchNode({
+                  libtvImageGeneration: {
+                    ...libtvState,
+                    modelName: value,
+                    error: "",
+                  },
+                });
+                return;
+              }
+              const nextRule = selectedProvider ? getImageModelRule(selectedProvider.modelRules.image[value] || detectImageModelRuleId(value)) : getImageModelRule("generic-image");
+              const nextSize = normalizeImageModelSizeSelection(nextRule, node.imageResolution, node.imageAspectRatio);
+              patchNode({
+                imageModel: value,
+                imageProviderId: selectedProvider?.id || "",
+                imageResolution: nextSize.resolution,
+                imageAspectRatio: nextSize.aspectRatio,
+                generationError: "",
+              });
+            },
+            isLibtvApi ? false : !selectedProvider,
           )}
-          {renderSizePanel()}
-          {renderComposerSelect(
-            "auto",
-            t("infiniteCanvas.auto"),
-            "auto",
-            [{ value: "auto", label: t("infiniteCanvas.auto") }],
-            () => undefined,
-          )}
+          <SizePresetPicker
+            open={openSelectId === sizePanelId}
+            resolution={selectedResolution}
+            aspectRatio={selectedAspectRatio}
+            resolutionOptions={resolutionValues.map((value) => ({ value, label: formatSizeValueLabel(value) }))}
+            aspectRatioOptions={aspectRatioValues.map((value) => ({ value, label: value === "1:1" ? t("infiniteCanvas:ratioSquare") : value === AUTO_SIZE_VALUE ? t("infiniteCanvas:auto") : value }))}
+            labels={{
+              trigger: `${t("infiniteCanvas:resolution")} / ${t("infiniteCanvas:ratio")}`,
+              resolution: t("infiniteCanvas:resolution"),
+              aspectRatio: t("infiniteCanvas:ratio"),
+            }}
+            formatTrigger={(resolution, aspectRatio) => [formatSizeValueLabel(resolution), aspectRatio === AUTO_SIZE_VALUE ? t("infiniteCanvas:auto") : aspectRatio].filter(Boolean).join(" / ")}
+            onOpenChange={(open) => onOpenSelectChange((current) => (open ? sizePanelId : current === sizePanelId ? "" : current))}
+            onResolutionChange={(value) => patchNode({ imageResolution: value === AUTO_SIZE_VALUE ? "" : value })}
+            onAspectRatioChange={(value) => patchNode({ imageAspectRatio: value })}
+          />
         </div>
         <button
           type="button"
-          className={`ic-image-composer__run${node.running ? " is-stop" : ""}`}
-          aria-label={node.running ? t("infiniteCanvas.stopRun") : t("infiniteCanvas.run")}
-          title={node.running ? t("infiniteCanvas.stopRun") : t("infiniteCanvas.run")}
-          disabled={!node.running && !canRun}
-          onClick={() => (node.running ? onStop(node.id) : onRun(node.id))}
+          className={`ic-image-composer__run${isRunning ? " is-stop" : ""}`}
+          aria-label={isRunning ? t("infiniteCanvas:stopRun") : t("infiniteCanvas:run")}
+          title={isRunning ? t("infiniteCanvas:stopRun") : t("infiniteCanvas:run")}
+          disabled={!isRunning && !canRun}
+          onClick={() => (isRunning ? onStop(node.id) : onRun(node.id))}
         >
-          {node.running ? <Square size={15} aria-hidden="true" fill="currentColor" /> : <Play size={18} aria-hidden="true" fill="currentColor" />}
+          {isRunning ? <Square size={15} aria-hidden="true" fill="currentColor" /> : <Play size={18} aria-hidden="true" fill="currentColor" />}
         </button>
       </div>
-      {!node.running && generationReadinessMessage ? <div className="ic-image-composer__hint">{generationReadinessMessage}</div> : null}
-      {node.generationError ? <div className="ic-image-composer__error">{node.generationError}</div> : null}
+      {!isRunning && !isLibtvApi && generationReadinessMessage ? <div className="ic-image-composer__hint">{generationReadinessMessage}</div> : null}
+      {isLibtvApi && libtvState.status ? <div className="ic-image-composer__status">{libtvState.status}</div> : null}
+      {node.generationError || libtvState.error || libtvLoadError ? <div className="ic-image-composer__error">{node.generationError || libtvState.error || libtvLoadError}</div> : null}
     </div>
   );
 }

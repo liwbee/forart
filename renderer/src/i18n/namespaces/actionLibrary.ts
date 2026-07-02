@@ -1,0 +1,43 @@
+export const zhCN = {
+  projectRail: "动作项目栏",
+  projectActions: "{{name}} 操作",
+  addAction: "添加动作",
+  actionImage: "动作图片",
+  promptLabel: "动作提示词",
+  actionTags: "动作标签",
+  backToImage: "返回动作图片",
+  inputText: "请输入文本...",
+  actionActions: "动作操作",
+  chooseTags: "选择标签",
+  noTags: "还没有标签。",
+  createProjectDescription: "为动作图片建立一个独立项目。",
+  projectPlaceholder: "例如：站姿动作",
+  tagManagerDescription: "标签用于动作筛选和图片归类。",
+  title: "动作库",
+  requestFailed: "动作库请求失败：{{message}}",
+  storageUnavailable: "资源库存储目录暂不可用，请检查服务器数据目录配置。",
+  noActionTags: "还没有标签。",
+  modelImage: "模特图片"
+} as const;
+
+export const enUS = {
+  projectRail: "Action project rail",
+  projectActions: "{{name}} actions",
+  addAction: "Add action",
+  actionImage: "Action image",
+  promptLabel: "Action prompt",
+  actionTags: "Action tags",
+  backToImage: "Back to action image",
+  inputText: "Enter text...",
+  actionActions: "Action actions",
+  chooseTags: "Choose tags",
+  noTags: "No tags yet.",
+  createProjectDescription: "Create a separate project for action images.",
+  projectPlaceholder: "Example: Standing action",
+  tagManagerDescription: "Tags are used for action filtering and image grouping.",
+  title: "Action Library",
+  requestFailed: "Action library request failed: {{message}}",
+  storageUnavailable: "Asset library storage is unavailable. Check the server data directory configuration.",
+  noActionTags: "No tags yet.",
+  modelImage: "Model image"
+} as const;

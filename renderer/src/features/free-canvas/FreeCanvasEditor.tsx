@@ -13,7 +13,6 @@ import { useTranslation } from "react-i18next";
 import {
   ArrowDown,
   ArrowUp,
-  ChevronDown,
   ChevronsDown,
   ChevronsUp,
   Copy,
@@ -27,6 +26,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import { SizePresetPicker } from "../../components/SizePresetPicker";
 import { LibraryAssetPickerRail } from "../library-asset-picker/LibraryAssetPickerRail";
 import type { LibraryAssetSelection } from "../library-asset-picker/types";
 import {
@@ -284,7 +284,6 @@ export function FreeCanvasEditor() {
   const [isFileDropActive, setIsFileDropActive] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const canvasSizePanelRef = useRef<HTMLDivElement | null>(null);
   const objectUrlsRef = useRef<string[]>([]);
   const fileDragDepthRef = useRef(0);
   const interactionRef = useRef<StageInteraction | null>(null);
@@ -314,27 +313,6 @@ export function FreeCanvasEditor() {
       objectUrlsRef.current = [];
     };
   }, []);
-
-  useEffect(() => {
-    if (!isCanvasSizePanelOpen) return;
-
-    function closeCanvasSizePanel(event: globalThis.PointerEvent) {
-      const target = event.target as Node | null;
-      if (target && canvasSizePanelRef.current?.contains(target)) return;
-      setIsCanvasSizePanelOpen(false);
-    }
-
-    function closeCanvasSizePanelByKey(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") setIsCanvasSizePanelOpen(false);
-    }
-
-    window.addEventListener("pointerdown", closeCanvasSizePanel);
-    window.addEventListener("keydown", closeCanvasSizePanelByKey);
-    return () => {
-      window.removeEventListener("pointerdown", closeCanvasSizePanel);
-      window.removeEventListener("keydown", closeCanvasSizePanelByKey);
-    };
-  }, [isCanvasSizePanelOpen]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -413,7 +391,7 @@ export function FreeCanvasEditor() {
       id: `text-${Date.now()}`,
       type: "text",
       assetId: "text",
-      name: t("freeCanvasEditor.defaultTextLayer"),
+      name: t("freeCanvasEditor:defaultTextLayer"),
       text,
       x: clamp(origin.x, 0, Math.max(0, canvasSize.width - textSize.width)),
       y: clamp(origin.y, 0, Math.max(0, canvasSize.height - textSize.height)),
@@ -447,7 +425,7 @@ export function FreeCanvasEditor() {
       return createImageItem({
         id: `local-${Date.now()}-${index}`,
         assetId: file.name || `local-${index}`,
-        name: file.name || t("freeCanvasEditor.droppedImage"),
+        name: file.name || t("freeCanvasEditor:droppedImage"),
         src,
         canvasSize,
         point: offsetPoint,
@@ -904,7 +882,7 @@ export function FreeCanvasEditor() {
 
   async function copyCanvasImage() {
     if (!("ClipboardItem" in window)) {
-      setExportError(t("freeCanvasEditor.copyUnsupported"));
+      setExportError(t("freeCanvasEditor:copyUnsupported"));
       return;
     }
     setCopying(true);
@@ -932,79 +910,32 @@ export function FreeCanvasEditor() {
     <div className="free-canvas-editor" onKeyDown={handleEditorKeyDown}>
       <main className="free-canvas-editor__stage-wrap">
         <div className="free-canvas-editor__stage-toolbar">
-          <div className="free-canvas-editor__stage-settings" aria-label={t("freeCanvasEditor.canvasSettings")}>
-            <div ref={canvasSizePanelRef} className={`ic-composer-size free-canvas-editor__canvas-size${isCanvasSizePanelOpen ? " open" : ""}`}>
-              <button
-                type="button"
-                className="ic-composer-select__trigger ic-composer-size__trigger free-canvas-editor__canvas-size-trigger"
-                aria-label={`${t("freeCanvasEditor.resolution")} / ${t("freeCanvasEditor.aspectRatio")}`}
-                aria-haspopup="dialog"
-                aria-expanded={isCanvasSizePanelOpen}
-                onClick={() => setIsCanvasSizePanelOpen((open) => !open)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") setIsCanvasSizePanelOpen(false);
-                }}
-              >
-                <span>{`${canvasSize.label} / ${canvasPreset.label}`}</span>
-                <ChevronDown size={18} aria-hidden="true" />
-              </button>
-              {isCanvasSizePanelOpen ? (
-                <div className="ic-composer-size__panel free-canvas-editor__canvas-size-panel" role="dialog" aria-label={`${t("freeCanvasEditor.resolution")} / ${t("freeCanvasEditor.aspectRatio")}`}>
-                  <div className="ic-composer-size__section">
-                    <span>{t("freeCanvasEditor.resolution")}</span>
-                    <div className="ic-composer-size__resolution" role="radiogroup" aria-label={t("freeCanvasEditor.resolution")}>
-                      {canvasPreset.sizes.map((size) => (
-                        <button
-                          key={size.key}
-                          type="button"
-                          className={size.key === canvasSizeKey ? "selected" : ""}
-                          role="radio"
-                          aria-checked={size.key === canvasSizeKey}
-                          onClick={() => changeCanvasSize(size.key)}
-                        >
-                          {size.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="ic-composer-size__section">
-                    <span>{t("freeCanvasEditor.aspectRatio")}</span>
-                    <div className="ic-composer-size__ratios free-canvas-editor__canvas-ratios" role="radiogroup" aria-label={t("freeCanvasEditor.aspectRatio")}>
-                      {CANVAS_PRESETS.map((preset) => {
-                        const [rawW, rawH] = preset.key.split(":").map(Number);
-                        const w = rawW || 1;
-                        const h = rawH || 1;
-                        const isWide = w >= h;
-                        return (
-                          <button
-                            key={preset.key}
-                            type="button"
-                            className={preset.key === canvasAspectKey ? "selected" : ""}
-                            role="radio"
-                            aria-checked={preset.key === canvasAspectKey}
-                            onClick={() => changeCanvasAspect(preset.key)}
-                          >
-                            <i
-                              aria-hidden="true"
-                              style={{
-                                width: isWide ? 18 : Math.max(8, Math.round(18 * w / h)),
-                                height: isWide ? Math.max(8, Math.round(18 * h / w)) : 18,
-                              }}
-                            />
-                            <span>{preset.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-            </div>
+          <div className="free-canvas-editor__stage-settings" aria-label={t("freeCanvasEditor:canvasSettings")}>
+            <SizePresetPicker
+              open={isCanvasSizePanelOpen}
+              resolution={canvasSizeKey}
+              aspectRatio={canvasAspectKey}
+              resolutionOptions={canvasPreset.sizes.map((size) => ({ value: size.key, label: size.label }))}
+              aspectRatioOptions={CANVAS_PRESETS.map((preset) => ({ value: preset.key, label: preset.label }))}
+              labels={{
+                trigger: `${t("freeCanvasEditor:resolution")} / ${t("freeCanvasEditor:aspectRatio")}`,
+                resolution: t("freeCanvasEditor:resolution"),
+                aspectRatio: t("freeCanvasEditor:aspectRatio"),
+              }}
+              className="free-canvas-editor__canvas-size"
+              triggerClassName="free-canvas-editor__canvas-size-trigger"
+              panelClassName="free-canvas-editor__canvas-size-panel"
+              aspectRatioClassName="free-canvas-editor__canvas-ratios"
+              formatTrigger={() => `${canvasSize.label} / ${canvasPreset.label}`}
+              onOpenChange={setIsCanvasSizePanelOpen}
+              onResolutionChange={changeCanvasSize}
+              onAspectRatioChange={changeCanvasAspect}
+            />
             <button
               className={`button secondary free-canvas-editor__icon-button${activeCanvasTool === "text" ? " active" : ""}`}
               type="button"
-              aria-label={t("freeCanvasEditor.addText")}
-              title={t("freeCanvasEditor.addText")}
+              aria-label={t("freeCanvasEditor:addText")}
+              title={t("freeCanvasEditor:addText")}
               aria-pressed={activeCanvasTool === "text"}
               onClick={() => {
                 if (editingTextItemId) stopTextEditing();
@@ -1014,7 +945,7 @@ export function FreeCanvasEditor() {
             >
               <Type size={18} aria-hidden="true" />
             </button>
-            <button className="button secondary free-canvas-editor__icon-button" type="button" aria-label={t("freeCanvasEditor.uploadLocalImage")} title={t("freeCanvasEditor.uploadLocalImage")} onClick={() => fileInputRef.current?.click()}>
+            <button className="button secondary free-canvas-editor__icon-button" type="button" aria-label={t("freeCanvasEditor:uploadLocalImage")} title={t("freeCanvasEditor:uploadLocalImage")} onClick={() => fileInputRef.current?.click()}>
               <Upload size={18} aria-hidden="true" />
             </button>
             <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => handleLocalImageInput(event.currentTarget.files)} />
@@ -1034,15 +965,15 @@ export function FreeCanvasEditor() {
               }}
             >
               <X size={18} aria-hidden="true" />
-              <span>{t("freeCanvasEditor.clear")}</span>
+              <span>{t("freeCanvasEditor:clear")}</span>
             </button>
             <button className="button secondary free-canvas-editor__copy-button" type="button" disabled={!items.length || copying} onClick={copyCanvasImage}>
               <Copy size={18} aria-hidden="true" />
-              <span>{copying ? t("freeCanvasEditor.copying") : t("freeCanvasEditor.copyImage")}</span>
+              <span>{copying ? t("freeCanvasEditor:copying") : t("freeCanvasEditor:copyImage")}</span>
             </button>
             <button className="button primary free-canvas-editor__export-button" type="button" disabled={!items.length || exporting} onClick={exportCanvas}>
               <Download size={18} aria-hidden="true" />
-              <span>{exporting ? t("freeCanvasEditor.exporting") : t("freeCanvasEditor.exportPng")}</span>
+              <span>{exporting ? t("freeCanvasEditor:exporting") : t("freeCanvasEditor:exportPng")}</span>
             </button>
           </div>
         </div>
@@ -1081,7 +1012,7 @@ export function FreeCanvasEditor() {
                   className={`free-canvas-editor__canvas-item${item.type === "text" ? " free-canvas-editor__canvas-item--text" : ""}${selectedItemId === item.id ? " selected" : ""}`}
                   role="button"
                   tabIndex={0}
-                  aria-label={t("freeCanvasEditor.layer", { name: item.name })}
+                  aria-label={t("freeCanvasEditor:layer", { name: item.name })}
                   style={{
                     left: `${item.x}px`,
                     top: `${item.y}px`,
@@ -1118,7 +1049,7 @@ export function FreeCanvasEditor() {
                     <FreeCanvasTextLayer
                       item={item}
                       editing={editingTextItemId === item.id}
-                      editLabel={t("freeCanvasEditor.editText")}
+                      editLabel={t("freeCanvasEditor:editText")}
                       onTextChange={(text) => updateTextItemWithoutHistory(item.id, { text })}
                       onMeasureChange={(size) => handleTextLayerMeasure(item.id, size)}
                       onStopEditing={stopTextEditing}
@@ -1129,7 +1060,7 @@ export function FreeCanvasEditor() {
               {isFileDropActive ? (
                 <div className="free-canvas-editor__drop-hint">
                   <Layers size={34} aria-hidden="true" />
-                  <span>{t("freeCanvasEditor.dropHint")}</span>
+                  <span>{t("freeCanvasEditor:dropHint")}</span>
                 </div>
               ) : null}
             </div>
@@ -1151,8 +1082,8 @@ export function FreeCanvasEditor() {
                 <button
                   className="free-canvas-editor__resize-handle"
                   type="button"
-                  aria-label={t("infiniteCanvas.dragResize")}
-                  title={t("infiniteCanvas.dragResize")}
+                  aria-label={t("infiniteCanvas:dragResize")}
+                  title={t("infiniteCanvas:dragResize")}
                   onPointerDown={(event) => startItemResize(event, selectedItem)}
                 />
               ) : null}
@@ -1162,7 +1093,7 @@ export function FreeCanvasEditor() {
           {selectedItem && selectedToolbarPosition && editingTextItemId !== selectedItem.id ? (
             <div
               className="free-canvas-editor__floating-toolbar"
-              aria-label={t("freeCanvasEditor.layerActions")}
+              aria-label={t("freeCanvasEditor:layerActions")}
               style={{ left: `${selectedToolbarPosition.x}px`, top: `${selectedToolbarPosition.y}px` }}
               onPointerDown={(event) => event.stopPropagation()}
             >
@@ -1171,8 +1102,8 @@ export function FreeCanvasEditor() {
                   <button
                     type="button"
                     className={activeTextTool?.itemId === selectedItem.id && activeTextTool.tool === "fontSize" ? "active" : ""}
-                    aria-label={t("freeCanvasEditor.fontSize")}
-                    title={t("freeCanvasEditor.fontSize")}
+                    aria-label={t("freeCanvasEditor:fontSize")}
+                    title={t("freeCanvasEditor:fontSize")}
                     onClick={() => setActiveTextTool((currentTool) => (currentTool?.itemId === selectedItem.id && currentTool.tool === "fontSize" ? null : { itemId: selectedItem.id, tool: "fontSize" }))}
                   >
                     <Type size={16} aria-hidden="true" />
@@ -1180,8 +1111,8 @@ export function FreeCanvasEditor() {
                   <button
                     type="button"
                     className={`free-canvas-editor__color-tool${activeTextTool?.itemId === selectedItem.id && activeTextTool.tool === "color" ? " active" : ""}`}
-                    aria-label={t("freeCanvasEditor.textColor")}
-                    title={t("freeCanvasEditor.textColor")}
+                    aria-label={t("freeCanvasEditor:textColor")}
+                    title={t("freeCanvasEditor:textColor")}
                     onClick={() => setActiveTextTool((currentTool) => (currentTool?.itemId === selectedItem.id && currentTool.tool === "color" ? null : { itemId: selectedItem.id, tool: "color" }))}
                   >
                     <Palette size={16} aria-hidden="true" />
@@ -1189,34 +1120,34 @@ export function FreeCanvasEditor() {
                   </button>
                 </>
               ) : null}
-              <button type="button" aria-label={t("freeCanvasEditor.moveLayerUp")} title={t("freeCanvasEditor.moveLayerUp")} onClick={() => moveLayer(selectedItem.id, "up")}>
+              <button type="button" aria-label={t("freeCanvasEditor:moveLayerUp")} title={t("freeCanvasEditor:moveLayerUp")} onClick={() => moveLayer(selectedItem.id, "up")}>
                 <ArrowUp size={16} aria-hidden="true" />
               </button>
-              <button type="button" aria-label={t("freeCanvasEditor.moveLayerDown")} title={t("freeCanvasEditor.moveLayerDown")} onClick={() => moveLayer(selectedItem.id, "down")}>
+              <button type="button" aria-label={t("freeCanvasEditor:moveLayerDown")} title={t("freeCanvasEditor:moveLayerDown")} onClick={() => moveLayer(selectedItem.id, "down")}>
                 <ArrowDown size={16} aria-hidden="true" />
               </button>
-              <button type="button" aria-label={t("freeCanvasEditor.bringToFront")} title={t("freeCanvasEditor.bringToFront")} onClick={() => moveLayerToEdge(selectedItem.id, "front")}>
+              <button type="button" aria-label={t("freeCanvasEditor:bringToFront")} title={t("freeCanvasEditor:bringToFront")} onClick={() => moveLayerToEdge(selectedItem.id, "front")}>
                 <ChevronsUp size={16} aria-hidden="true" />
               </button>
-              <button type="button" aria-label={t("freeCanvasEditor.sendToBack")} title={t("freeCanvasEditor.sendToBack")} onClick={() => moveLayerToEdge(selectedItem.id, "back")}>
+              <button type="button" aria-label={t("freeCanvasEditor:sendToBack")} title={t("freeCanvasEditor:sendToBack")} onClick={() => moveLayerToEdge(selectedItem.id, "back")}>
                 <ChevronsDown size={16} aria-hidden="true" />
               </button>
-              <button className="danger" type="button" aria-label={t("freeCanvasEditor.deleteLayer")} title={t("freeCanvasEditor.deleteLayer")} onClick={removeSelectedItem}>
+              <button className="danger" type="button" aria-label={t("freeCanvasEditor:deleteLayer")} title={t("freeCanvasEditor:deleteLayer")} onClick={removeSelectedItem}>
                 <Trash2 size={16} aria-hidden="true" />
               </button>
               {selectedItem.type === "text" && activeTextTool?.itemId === selectedItem.id && activeTextTool.tool === "fontSize" ? (
-                <FontSizePanel item={selectedItem} fontSizeLabel={t("freeCanvasEditor.fontSize")} onFontSizeChange={(fontSize) => updateTextFontSize(selectedItem.id, fontSize)} />
+                <FontSizePanel item={selectedItem} fontSizeLabel={t("freeCanvasEditor:fontSize")} onFontSizeChange={(fontSize) => updateTextFontSize(selectedItem.id, fontSize)} />
               ) : null}
               {selectedItem.type === "text" && activeTextTool?.itemId === selectedItem.id && activeTextTool.tool === "color" ? (
-                <TextColorPanel item={selectedItem} textColorLabel={t("freeCanvasEditor.textColor")} onColorChange={(color) => updateTextItem(selectedItem.id, { color })} />
+                <TextColorPanel item={selectedItem} textColorLabel={t("freeCanvasEditor:textColor")} onColorChange={(color) => updateTextItem(selectedItem.id, { color })} />
               ) : null}
             </div>
           ) : null}
 
-          <aside className="free-canvas-editor__inspector" aria-label={t("freeCanvasEditor.layers")} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+          <aside className="free-canvas-editor__inspector" aria-label={t("freeCanvasEditor:layers")} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
             <div className="free-canvas-editor__panel-title">
               <Layers size={16} aria-hidden="true" />
-              <strong>{t("freeCanvasEditor.layers")}</strong>
+              <strong>{t("freeCanvasEditor:layers")}</strong>
             </div>
             <div className="free-canvas-editor__layer-list">
               {layerItems.map((item) => {
@@ -1256,13 +1187,13 @@ export function FreeCanvasEditor() {
                   >
                     <button type="button" className="free-canvas-editor__layer-select" onClick={() => setSelectedItemId(item.id)}>
                       <Icon size={15} aria-hidden="true" />
-                      <span>{item.name || (item.type === "text" ? t("freeCanvasEditor.textLayer") : t("freeCanvasEditor.imageLayer"))}</span>
+                      <span>{item.name || (item.type === "text" ? t("freeCanvasEditor:textLayer") : t("freeCanvasEditor:imageLayer"))}</span>
                     </button>
-                    <div className="free-canvas-editor__layer-order-actions" aria-label={t("freeCanvasEditor.layerActions")}>
-                      <button type="button" aria-label={t("freeCanvasEditor.moveLayerUp")} title={t("freeCanvasEditor.moveLayerUp")} onClick={() => moveLayer(item.id, "up")}>
+                    <div className="free-canvas-editor__layer-order-actions" aria-label={t("freeCanvasEditor:layerActions")}>
+                      <button type="button" aria-label={t("freeCanvasEditor:moveLayerUp")} title={t("freeCanvasEditor:moveLayerUp")} onClick={() => moveLayer(item.id, "up")}>
                         <ArrowUp size={14} aria-hidden="true" />
                       </button>
-                      <button type="button" aria-label={t("freeCanvasEditor.moveLayerDown")} title={t("freeCanvasEditor.moveLayerDown")} onClick={() => moveLayer(item.id, "down")}>
+                      <button type="button" aria-label={t("freeCanvasEditor:moveLayerDown")} title={t("freeCanvasEditor:moveLayerDown")} onClick={() => moveLayer(item.id, "down")}>
                         <ArrowDown size={14} aria-hidden="true" />
                       </button>
                     </div>
@@ -1272,7 +1203,7 @@ export function FreeCanvasEditor() {
             </div>
           </aside>
         </div>
-        {exportError ? <div className="free-canvas-editor__error">{t("freeCanvasEditor.exportFailed", { message: exportError })}</div> : null}
+        {exportError ? <div className="free-canvas-editor__error">{t("freeCanvasEditor:exportFailed", { message: exportError })}</div> : null}
       </main>
 
     </div>

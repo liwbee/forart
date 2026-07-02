@@ -5,10 +5,11 @@
   "type": "module",
   "main": "electron/main/electron-main.cjs",
   "scripts": {
-    "dev": "concurrently -k \"vite --host 127.0.0.1 --strictPort\" \"wait-on http://127.0.0.1:5174 && electron .\"",
+    "dev": "concurrently -k \"vite --host 127.0.0.1 --strictPort\" \"wait-on http://127.0.0.1:6981 && electron .\"",
     "dev:web": "vite --host 127.0.0.1 --strictPort",
     "electron": "electron .",
     "build": "tsc -b && vite build",
+    "validate:i18n": "node scripts/validate-i18n.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

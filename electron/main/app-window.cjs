@@ -19,7 +19,7 @@ async function createWindow({ rootDir, isDev }) {
   win.setMenuBarVisibility(false);
 
   if (isDev) {
-    await win.loadURL('http://127.0.0.1:5174');
+    await win.loadURL('http://127.0.0.1:6981');
   } else {
     await win.loadFile(path.join(rootDir, 'dist', 'index.html'));
   }

@@ -2,18 +2,18 @@ import { create } from "zustand";
 
 interface OutfitLibraryState {
   activeProjectId: string;
-  activeTagId: string;
+  activeTagIds: string[];
   setActiveProjectId: (projectId: string) => void;
-  setActiveTagId: (tagId: string) => void;
+  setActiveTagIds: (tagIds: string[]) => void;
 }
 
 export const useOutfitLibraryStore = create<OutfitLibraryState>((set) => ({
   activeProjectId: "",
-  activeTagId: "",
+  activeTagIds: [],
   setActiveProjectId: (projectId) =>
     set({
       activeProjectId: projectId,
-      activeTagId: "",
+      activeTagIds: [],
     }),
-  setActiveTagId: (tagId) => set({ activeTagId: tagId }),
+  setActiveTagIds: (tagIds) => set({ activeTagIds: tagIds }),
 }));

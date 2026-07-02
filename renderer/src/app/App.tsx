@@ -17,10 +17,10 @@ const navItems: Array<{
   shortKey: string;
   icon: typeof Users;
 }> = [
-  { id: "library", labelKey: "nav.library", shortKey: "nav.short.library", icon: LibraryBig },
-  { id: "free-canvas", labelKey: "nav.freeCanvas", shortKey: "nav.short.freeCanvas", icon: LayoutTemplate },
-  { id: "image-review", labelKey: "nav.imageReview", shortKey: "nav.short.imageReview", icon: ScanSearch },
-  { id: "canvas", labelKey: "nav.canvas", shortKey: "nav.short.canvas", icon: Layers3 },
+  { id: "library", labelKey: "nav:library", shortKey: "nav:short.library", icon: LibraryBig },
+  { id: "free-canvas", labelKey: "nav:freeCanvas", shortKey: "nav:short.freeCanvas", icon: LayoutTemplate },
+  { id: "image-review", labelKey: "nav:imageReview", shortKey: "nav:short.imageReview", icon: ScanSearch },
+  { id: "canvas", labelKey: "nav:canvas", shortKey: "nav:short.canvas", icon: Layers3 },
 ];
 
 const VIEW_TRANSITION_MS = 500;
@@ -74,7 +74,7 @@ const updateText = {
 function formatUpdateDate(value: string) {
   if (!value) return "--";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "--";
+  if (Number.isNaN(date.getTime())) return value;
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -125,7 +125,7 @@ export function App() {
   const ThemeIcon = theme === "dark" ? Sun : Moon;
   const currentLanguage = i18n.language === "en-US" ? "en-US" : "zh-CN";
   const nextLanguage = currentLanguage === "zh-CN" ? "en-US" : "zh-CN";
-  const nextLanguageLabel = nextLanguage === "zh-CN" ? t("settings.chinese") : t("settings.english");
+  const nextLanguageLabel = nextLanguage === "zh-CN" ? t("settings:chinese") : t("settings:english");
   const previousViewRef = useRef(activeView);
   const [exitingView, setExitingView] = useState<AppView | null>(null);
   const [mountedKeepAliveViews, setMountedKeepAliveViews] = useState<Set<AppView>>(() => (isKeepAliveView(activeView) ? new Set([activeView]) : new Set()));
@@ -359,7 +359,7 @@ export function App() {
     : updateStatus === "current"
       ? `${currentLanguage === "zh-CN" ? "\u5df2\u662f\u6700\u65b0\u7248\u672c" : "Already up to date"} ${currentUpdateDateLabel}`
       : updateMessage || (currentLanguage === "zh-CN" ? updateText.connectivityWarn : "Check status before updating");
-  const sidebarToggleLabel = sidebarCollapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar");
+  const sidebarToggleLabel = sidebarCollapsed ? t("nav:expandSidebar") : t("nav:collapseSidebar");
   const SidebarToggleIcon = sidebarCollapsed ? PanelLeftOpen : PanelLeftClose;
 
   const keepAliveViewsToRender = isKeepAliveView(activeView)
@@ -369,12 +369,12 @@ export function App() {
   if (!configLoaded) {
     return (
       <main className="setup-shell">
-        <section className="setup-panel setup-panel--loading" aria-label={t("app.loadingLabel")}>
+        <section className="setup-panel setup-panel--loading" aria-label={t("app:loadingLabel")}>
           <div className="brand setup-brand" aria-label={appTitle}>
             <span className="brand-mark" aria-hidden="true" />
             <strong className="brand-name">{appTitle}</strong>
           </div>
-          <p>{t("app.loadingConfig")}</p>
+          <p>{t("app:loadingConfig")}</p>
         </section>
       </main>
     );
@@ -405,7 +405,7 @@ export function App() {
           </button>
         </div>
 
-        <nav className="side-nav" aria-label={t("app.mainNavigation")}>
+        <nav className="side-nav" aria-label={t("app:mainNavigation")}>
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;
@@ -426,17 +426,17 @@ export function App() {
           })}
         </nav>
 
-        <div className="side-footer" aria-label={t("app.settingsNavigation")}>
+        <div className="side-footer" aria-label={t("app:settingsNavigation")}>
           <button
             className={`side-nav-item side-footer-button${activeView === "settings" ? " active" : ""}`}
             type="button"
-            data-short={t("nav.short.settings")}
-            data-tooltip={t("nav.settings")}
+            data-short={t("nav:short.settings")}
+            data-tooltip={t("nav:settings")}
             aria-current={activeView === "settings" ? "page" : undefined}
             onClick={() => setActiveView("settings")}
           >
             <Settings className="nav-icon" aria-hidden="true" size={20} />
-            <span className="nav-label">{t("nav.settings")}</span>
+            <span className="nav-label">{t("nav:settings")}</span>
           </button>
 
           <button
@@ -457,11 +457,11 @@ export function App() {
             <button
               className="side-nav-item side-footer-button side-icon-button theme-toggle"
               type="button"
-              data-short={theme === "dark" ? t("nav.short.light") : t("nav.short.dark")}
-              data-tooltip={theme === "dark" ? t("nav.theme.switchToLight") : t("nav.theme.switchToDark")}
+              data-short={theme === "dark" ? t("nav:short.light") : t("nav:short.dark")}
+              data-tooltip={theme === "dark" ? t("nav:theme.switchToLight") : t("nav:theme.switchToDark")}
               aria-pressed={theme === "dark"}
-              aria-label={theme === "dark" ? t("nav.theme.switchToLight") : t("nav.theme.switchToDark")}
-              title={theme === "dark" ? t("nav.theme.switchToLight") : t("nav.theme.switchToDark")}
+              aria-label={theme === "dark" ? t("nav:theme.switchToLight") : t("nav:theme.switchToDark")}
+              title={theme === "dark" ? t("nav:theme.switchToLight") : t("nav:theme.switchToDark")}
               onClick={toggleTheme}
             >
               <ThemeIcon className="nav-icon" aria-hidden="true" size={20} />
@@ -470,9 +470,9 @@ export function App() {
             <button
               className="side-nav-item side-footer-button side-icon-button language-toggle"
               type="button"
-              data-tooltip={`${t("settings.language")}: ${nextLanguageLabel}`}
-              aria-label={`${t("settings.language")}: ${nextLanguageLabel}`}
-              title={`${t("settings.language")}: ${nextLanguageLabel}`}
+              data-tooltip={`${t("settings:language")}: ${nextLanguageLabel}`}
+              aria-label={`${t("settings:language")}: ${nextLanguageLabel}`}
+              title={`${t("settings:language")}: ${nextLanguageLabel}`}
               onClick={toggleLanguage}
             >
               <Languages className="nav-icon" aria-hidden="true" size={20} />

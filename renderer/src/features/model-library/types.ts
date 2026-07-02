@@ -40,7 +40,6 @@ export interface ModelTag {
   kind: "model";
   project_id: string;
   name: string;
-  color: string;
   sort_order: number;
   usage_count: number;
   created_at: string;
@@ -55,7 +54,7 @@ export interface AssetUploadPayload {
 
 export interface ModelFilters {
   projectId: string;
-  tagId?: string;
+  tagIds?: string[];
   gender?: Exclude<ModelGender, "unknown"> | "";
 }
 

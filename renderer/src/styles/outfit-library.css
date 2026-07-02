@@ -26,7 +26,7 @@
   background: transparent;
   color: var(--text-secondary);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--font-weight-semibold);
   transition:
     background 160ms ease,
     color 160ms ease;
@@ -103,7 +103,7 @@
 
 .outfit-add-button strong {
   font-size: 0.92rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
 }
 
 .outfit-card__image {
@@ -201,7 +201,7 @@
   grid-template-rows: minmax(0, 1fr);
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
 }
 
 .action-card__prompt-field textarea {
@@ -214,7 +214,7 @@
   background: var(--input-bg);
   color: var(--input-text);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--font-weight-regular);
   line-height: 1.55;
 }
 
@@ -254,18 +254,55 @@
   pointer-events: none;
 }
 
+.outfit-card__name {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 2;
+  max-width: calc(100% - 64px);
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-card) 88%, transparent);
+  color: var(--state-hover-text);
+  font-size: 0.76rem;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  transform: translateY(-2px);
+  transition: opacity 160ms ease, transform 160ms ease;
+  white-space: nowrap;
+}
+
+.outfit-card:hover .outfit-card__name,
+.outfit-card:focus-within .outfit-card__name,
+.outfit-card:has(.outfit-card__menu-button[aria-expanded="true"]) .outfit-card__name {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.action-card--flipped .outfit-card__name {
+  opacity: 0;
+}
+
 .outfit-card__tags span {
   max-width: 100%;
   min-height: 24px;
   display: inline-flex;
   align-items: center;
   padding: 0 8px;
+  border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-card) 88%, transparent);
+  background: color-mix(in srgb, var(--surface-card-muted) 64%, color-mix(in srgb, var(--surface-card) 88%, transparent));
   color: var(--state-hover-text);
   font-size: 0.72rem;
-  font-weight: 700;
-  box-shadow: var(--shadow-ui);
+  font-weight: var(--font-weight-medium);
 }
 
 .outfit-card__menu-button {
@@ -322,15 +359,25 @@
   background: transparent;
   color: var(--text-secondary);
   font-size: 0.86rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
   text-align: left;
+}
+
+.outfit-card-menu > button span {
+  flex: 1 1 auto;
+}
+
+.outfit-card-menu__chevron {
+  flex: 0 0 auto;
+  color: var(--text-muted);
 }
 
 .outfit-card-menu > button[hidden] {
   display: none;
 }
 
-.outfit-card-menu > button:hover:not(:disabled) {
+.outfit-card-menu > button:hover:not(:disabled),
+.outfit-card-menu > button.active {
   border-color: var(--button-functional-border);
   background: var(--button-functional-hover-bg);
   color: var(--button-functional-text);
@@ -358,18 +405,24 @@
 }
 
 .outfit-tag-menu {
+  position: fixed;
+  z-index: 1101;
+  width: 184px;
+  max-height: 280px;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: -2px;
-  padding: 4px 4px 8px 28px;
-  border-bottom: 1px solid var(--border-subtle);
-  border-radius: 0;
-  background: color-mix(in srgb, var(--surface-card-muted) 54%, transparent);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-floating);
 }
 
 .outfit-tag-menu button {
   min-height: 30px;
+  min-width: 30px;
   max-width: 100%;
   padding: 0 9px;
   border: 1px solid var(--button-functional-border);
@@ -377,7 +430,7 @@
   background: var(--button-functional-bg);
   color: var(--button-functional-muted-text);
   font-size: 0.78rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
 }
 
 .outfit-tag-menu button:hover {

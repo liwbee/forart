@@ -186,7 +186,7 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
       className={`model-image-viewer-backdrop${isClosing ? " closing" : ""}`}
       role="dialog"
       aria-modal="true"
-      aria-label={ariaLabel || t("shared.imagePreview")}
+      aria-label={ariaLabel || t("shared:imagePreview")}
       onPointerDown={isolateViewerEvent}
       onPointerMove={isolateViewerEvent}
       onPointerUp={isolateViewerEvent}
@@ -226,7 +226,7 @@ export function ImageViewer({ src, alt, ariaLabel, onClose }: ImageViewerProps) 
         <button
           className="model-image-viewer-close"
           type="button"
-          aria-label={t("common.actions.back")}
+          aria-label={t("common:actions.back")}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();

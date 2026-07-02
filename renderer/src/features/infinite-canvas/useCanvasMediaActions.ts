@@ -1,6 +1,12 @@
 import { PointerEvent, useCallback, useMemo, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import {
+  countDirectActionFissionImageConnections,
+} from "./action-fission/actionFissionReferences";
+import {
+  BASE_PUBLIC_REFERENCE_LIMIT,
+} from "./action-fission/actionFissionTypes";
+import {
   constrainCropRect,
   constrainCropResizeRect,
   cropImageToRect,
@@ -15,6 +21,7 @@ import type { CanvasConnection, CanvasGroup, CanvasNode, CanvasNodeType, CropAsp
 import type { LibraryAssetSelection } from "../library-asset-picker/types";
 
 type StateUpdater<T> = T | ((current: T) => T);
+const CANVAS_TOAST_AUTO_HIDE_MS = 2000;
 
 interface DownloadStatus {
   nodeId: string;
@@ -32,7 +39,6 @@ interface UseCanvasMediaActionsOptions {
   nodes: CanvasNode[];
   connections: CanvasConnection[];
   imageDownloadPath: string;
-  isLibtvCanvas: boolean;
   setNodes: (updater: StateUpdater<CanvasNode[]>) => void;
   setCanvasDocument: (updater: StateUpdater<{ nodes: CanvasNode[]; connections: CanvasConnection[]; groups: CanvasGroup[] }>) => void;
   patchNode: (nodeId: string, patch: Partial<CanvasNode>) => void;
@@ -43,8 +49,6 @@ interface UseCanvasMediaActionsOptions {
   setSelectedConnectionId: (connectionId: string) => void;
   setConnectionAction: (action: { id: string; left: number; top: number } | null) => void;
   setContextMenu: (menu: { x: number; y: number; worldX: number; worldY: number } | null) => void;
-  showLibtvSyncStatus: (tone: "busy" | "ready" | "error", text: string) => void;
-  deleteLibtvRemoteNodeIfNeeded: (node: CanvasNode) => Promise<void>;
   t: TFunction;
 }
 
@@ -91,7 +95,6 @@ export function useCanvasMediaActions({
   nodes,
   connections,
   imageDownloadPath,
-  isLibtvCanvas,
   setNodes,
   setCanvasDocument,
   patchNode,
@@ -102,8 +105,6 @@ export function useCanvasMediaActions({
   setSelectedConnectionId,
   setConnectionAction,
   setContextMenu,
-  showLibtvSyncStatus,
-  deleteLibtvRemoteNodeIfNeeded,
   t,
 }: UseCanvasMediaActionsOptions) {
   const [imagePreview, setImagePreview] = useState<ImageDialogState | null>(null);
@@ -122,6 +123,42 @@ export function useCanvasMediaActions({
     }
     return window.easyTool.saveCanvasAsset(source);
   }, []);
+
+  const showMediaStatus = useCallback((status: DownloadStatus) => {
+    setDownloadStatus(status);
+    if (status.tone === "busy") return;
+    window.setTimeout(() => {
+      setDownloadStatus((current) => (current?.nodeId === status.nodeId && current.tone !== "busy" ? null : current));
+    }, CANVAS_TOAST_AUTO_HIDE_MS);
+  }, []);
+
+  const downloadCanvasImageAsset = useCallback(async (source: { url: string; defaultName: string; statusKey: string; onDownloaded?: () => void }) => {
+    const clearDownloadStatus = () => {
+      window.setTimeout(() => setDownloadStatus((current) => (current?.nodeId === source.statusKey && current.tone !== "busy" ? null : current)), CANVAS_TOAST_AUTO_HIDE_MS);
+    };
+    setDownloadStatus({ nodeId: source.statusKey, tone: "busy", text: t("infiniteCanvas:downloadBusy") });
+    if (window.easyTool?.saveResult) {
+      try {
+        const result = await window.easyTool.saveResult({ url: source.url, dataUrl: source.url, defaultName: source.defaultName, directory: imageDownloadPath });
+        source.onDownloaded?.();
+        setDownloadStatus({ nodeId: source.statusKey, tone: "ready", text: result.filePath ? t("infiniteCanvas:downloadSaved", { path: result.filePath }) : t("infiniteCanvas:downloadComplete") });
+        clearDownloadStatus();
+      } catch (error) {
+        setDownloadStatus({ nodeId: source.statusKey, tone: "error", text: error instanceof Error ? error.message : String(error) });
+        clearDownloadStatus();
+      }
+      return;
+    }
+    const link = document.createElement("a");
+    link.href = source.url;
+    link.download = source.defaultName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    source.onDownloaded?.();
+    setDownloadStatus({ nodeId: source.statusKey, tone: "ready", text: t("infiniteCanvas:downloadComplete") });
+    clearDownloadStatus();
+  }, [imageDownloadPath, t]);
 
   const readImagePatch = useCallback(async (file: File): Promise<Partial<CanvasNode>> => {
     const dataUrl = await readFileAsDataUrl(file);
@@ -165,155 +202,13 @@ export function useCanvasMediaActions({
     };
   }, []);
 
-  const getLibtvLeftOrderForReplacement = useCallback((targetId: string, oldLocalNodeId: string, oldRemoteNodeId: string, nextRemoteNodeId: string) => {
-    const orderedLeft = connections
-      .filter((connection) => connection.to === targetId)
-      .map((connection) => {
-        if (connection.from === oldLocalNodeId) return nextRemoteNodeId;
-        const sourceNode = nodeMap.get(connection.from);
-        return sourceNode?.libtvNodeId || "";
-      })
-      .filter(Boolean);
-    return Array.from(new Set(orderedLeft)).filter((nodeId) => nodeId !== oldRemoteNodeId);
-  }, [connections, nodeMap]);
-
-  const replaceLibtvUploadNode = useCallback(async (source: CanvasNode, patches: Partial<CanvasNode>[]) => {
-    const primaryPatch = patches[0];
-    if (!primaryPatch?.url) return;
-    if (!isLibtvCanvas || !source.libtvProjectId || !source.libtvNodeId) {
-      setNodes((current) => current.map((node) => (node.id === source.id ? { ...node, ...primaryPatch } : node)));
-      setSelectedIds(new Set([source.id]));
-      setSelectedGroupId("");
-      return;
-    }
-    if (!primaryPatch.filePath) {
-      showLibtvSyncStatus("error", t("infiniteCanvas.libtvUploadNeedsLocalFile"));
-      return;
-    }
-    if (!window.libtv?.uploadNode || !window.libtv.updateNode) {
-      showLibtvSyncStatus("error", t("infiniteCanvas.libtvBridgeUnavailable"));
-      return;
-    }
-    try {
-      showLibtvSyncStatus("busy", t("infiniteCanvas.libtvSyncBusy"));
-      const uploaded = await window.libtv.uploadNode({
-        projectId: source.libtvProjectId,
-        title: primaryPatch.title || primaryPatch.fileName || "Forart image",
-        filePath: primaryPatch.filePath,
-        x: source.x,
-        y: source.y,
-      });
-      const nextRemoteNodeId = uploaded.nodeId || "";
-      if (!nextRemoteNodeId) throw new Error(t("infiniteCanvas.libtvMissingBinding"));
-      const downstreamLibtvNodes = connections
-        .filter((connection) => connection.from === source.id)
-        .map((connection) => nodeMap.get(connection.to))
-        .filter((target): target is CanvasNode => Boolean(target && target.type === "libtvImage" && target.libtvProjectId && target.libtvNodeId));
-      await Promise.all(downstreamLibtvNodes.map((target) => window.libtv!.updateNode({
-        projectId: target.libtvProjectId!,
-        nodeId: target.libtvNodeId!,
-        left: getLibtvLeftOrderForReplacement(target.id, source.id, source.libtvNodeId!, nextRemoteNodeId),
-      })));
-      await deleteLibtvRemoteNodeIfNeeded(source);
-      const updatedNode: CanvasNode = {
-        ...source,
-        ...primaryPatch,
-        id: source.id,
-        type: "libtvUpload",
-        title: String(primaryPatch.title || primaryPatch.fileName || source.title || "LibTV Upload"),
-        text: "",
-        x: Math.round(source.x),
-        y: Math.round(source.y),
-        url: primaryPatch.url,
-        fileName: primaryPatch.fileName || uploaded.fileName || source.fileName,
-        filePath: primaryPatch.filePath,
-        imageMode: "asset",
-        imageSource: "uploaded",
-        libtvProjectId: source.libtvProjectId,
-        libtvNodeId: nextRemoteNodeId,
-        libtvOriginalUrl: uploaded.url || primaryPatch.url,
-        generationError: "",
-        generationStatus: "",
-      };
-      setCanvasDocument((current) => ({
-        nodes: current.nodes.map((node) => (node.id === source.id ? updatedNode : node)),
-        connections: current.connections,
-        groups: current.groups,
-      }));
-      setSelectedIds(new Set([source.id]));
-      setSelectedGroupId("");
-      showLibtvSyncStatus("ready", t("infiniteCanvas.libtvSyncIdle"));
-    } catch (error) {
-      showLibtvSyncStatus("error", error instanceof Error ? error.message : String(error));
-      patchNode(source.id, {
-        generationError: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }, [connections, deleteLibtvRemoteNodeIfNeeded, getLibtvLeftOrderForReplacement, isLibtvCanvas, nodeMap, patchNode, setCanvasDocument, setNodes, setSelectedGroupId, setSelectedIds, showLibtvSyncStatus, t]);
-
-  const syncLibtvBoundNode = useCallback(async (nodeId: string, patch: Partial<CanvasNode>) => {
-    const node = nodeMap.get(nodeId);
-    if (!isLibtvCanvas || !node) return;
-    if (!window.libtv?.updateNode) return;
-    if (!node.libtvProjectId || !node.libtvNodeId) return;
-    const nextNode = { ...node, ...patch };
-    try {
-      if (node.type === "libtvUpload" && patch.url !== undefined) {
-        if (!nextNode.filePath) {
-          showLibtvSyncStatus("error", t("infiniteCanvas.libtvUploadNeedsLocalFile"));
-          return;
-        }
-        if (!window.libtv.uploadNode) {
-          showLibtvSyncStatus("error", t("infiniteCanvas.libtvBridgeUnavailable"));
-          return;
-        }
-        showLibtvSyncStatus("busy", t("infiniteCanvas.libtvSyncBusy"));
-        const uploaded = await window.libtv.uploadNode({
-          projectId: node.libtvProjectId,
-          title: nextNode.title || nextNode.fileName || "Forart image",
-          filePath: nextNode.filePath,
-          x: node.x,
-          y: node.y,
-        });
-        const nextRemoteNodeId = uploaded.nodeId || node.libtvNodeId;
-        const downstreamLibtvNodes = connections
-          .filter((connection) => connection.from === nodeId)
-          .map((connection) => nodeMap.get(connection.to))
-          .filter((target): target is CanvasNode => Boolean(target && target.type === "libtvImage" && target.libtvProjectId && target.libtvNodeId));
-        await Promise.all(downstreamLibtvNodes.map((target) => window.libtv!.updateNode({
-          projectId: target.libtvProjectId!,
-          nodeId: target.libtvNodeId!,
-          left: getLibtvLeftOrderForReplacement(target.id, node.id, node.libtvNodeId!, nextRemoteNodeId),
-        })));
-        if (nextRemoteNodeId !== node.libtvNodeId) {
-          await deleteLibtvRemoteNodeIfNeeded(node);
-        }
-        patchNode(nodeId, {
-          generationError: "",
-          libtvNodeId: nextRemoteNodeId,
-          libtvOriginalUrl: uploaded.url || nextNode.libtvOriginalUrl,
-        });
-        showLibtvSyncStatus("ready", t("infiniteCanvas.libtvSyncIdle"));
-      }
-    } catch (error) {
-      showLibtvSyncStatus("error", error instanceof Error ? error.message : String(error));
-      patchNode(nodeId, {
-        generationError: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }, [connections, deleteLibtvRemoteNodeIfNeeded, getLibtvLeftOrderForReplacement, isLibtvCanvas, nodeMap, patchNode, showLibtvSyncStatus, t]);
-
   const handleImageFiles = useCallback(async (nodeId: string, files: FileList | File[]) => {
     const imageFiles = Array.from(files).filter(isImageFile);
     if (!imageFiles.length) return;
     const patches = await Promise.all(imageFiles.map(readImagePatch));
     const source = nodeMap.get(nodeId);
-    if (source?.type === "libtvUpload") {
-      await replaceLibtvUploadNode(source, patches);
-      return;
-    }
     const extraNodes = patches.slice(1).map((patch, index) => ({
-      ...createNode("image"),
+      ...createNode("imageLoader"),
       ...patch,
       id: `image_${Math.random().toString(36).slice(2, 9)}_${Date.now().toString(36)}`,
       x: Math.round((source?.x || 0) + (index + 1) * 36),
@@ -321,43 +216,23 @@ export function useCanvasMediaActions({
     }));
     const primaryPatch = patches[0];
     setNodes((current) => current.map((node) => (node.id === nodeId ? { ...node, ...primaryPatch } : node)).concat(extraNodes));
-    void syncLibtvBoundNode(nodeId, primaryPatch);
     setSelectedIds(new Set([extraNodes[extraNodes.length - 1]?.id || nodeId]));
     setSelectedGroupId("");
-  }, [createNode, nodeMap, readImagePatch, replaceLibtvUploadNode, setNodes, setSelectedGroupId, setSelectedIds, syncLibtvBoundNode]);
+  }, [createNode, nodeMap, readImagePatch, setNodes, setSelectedGroupId, setSelectedIds]);
 
   const importLibraryImageToNode = useCallback(async (nodeId: string, selection: LibraryAssetSelection) => {
     if (!selection.url) return;
     const patch = await readLibraryImagePatch(selection);
-    const source = nodeMap.get(nodeId);
-    if (source?.type === "libtvUpload") {
-      setNodes((current) => current.map((node) => (node.id === nodeId ? {
-        ...node,
-        ...patch,
-        id: node.id,
-        type: "libtvUpload",
-        title: String(patch.title || node.title || "LibTV Upload"),
-        text: "",
-        generationError: "",
-        generationStatus: "",
-      } : node)));
-      setSelectedIds(new Set([nodeId]));
-      setSelectedGroupId("");
-      if (isLibtvCanvas && source.libtvProjectId && source.libtvNodeId) {
-        showLibtvSyncStatus("ready", t("infiniteCanvas.libraryReferenceLocalOnly"));
-      }
-      return;
-    }
     setNodes((current) => current.map((node) => (node.id === nodeId ? { ...node, ...patch } : node)));
     setSelectedIds(new Set([nodeId]));
     setSelectedGroupId("");
-  }, [isLibtvCanvas, nodeMap, readLibraryImagePatch, setNodes, setSelectedGroupId, setSelectedIds, showLibtvSyncStatus, t]);
+  }, [readLibraryImagePatch, setNodes, setSelectedGroupId, setSelectedIds]);
 
-  const createLibraryImageNodeAtWorldPoint = useCallback(async (selection: LibraryAssetSelection, point: { x: number; y: number }, nodeType: "image" | "libtvUpload" = "image") => {
+  const createLibraryImageNodeAtWorldPoint = useCallback(async (selection: LibraryAssetSelection, point: { x: number; y: number }) => {
     if (!selection.url) return "";
     const patch = await readLibraryImagePatch(selection);
     const node = {
-      ...createNode(nodeType),
+      ...createNode("imageLoader"),
       ...patch,
     };
     node.x = Math.round(point.x - node.w / 2);
@@ -379,7 +254,7 @@ export function useCanvasMediaActions({
     const patches = await Promise.all(imageFiles.map(readImagePatch));
     const createdNodes = patches.map((patch, index) => {
       const node = {
-        ...createNode("image"),
+        ...createNode("imageLoader"),
         ...patch,
         id: `image_${Math.random().toString(36).slice(2, 9)}_${Date.now().toString(36)}`,
       };
@@ -408,6 +283,36 @@ export function useCanvasMediaActions({
     return createImageNodesAtClientPoint(imageFilesFromTransfer(dataTransfer), clientX, clientY);
   }, [createImageNodesAtClientPoint]);
 
+  const createImageReferenceForNode = useCallback(async (targetNodeId: string, files: FileList | File[]) => {
+    const imageFile = Array.from(files).find(isImageFile);
+    const target = nodeMap.get(targetNodeId);
+    if (!imageFile || !target) return;
+    if (target.type === "actionFission" && countDirectActionFissionImageConnections(targetNodeId, nodes, connections) >= BASE_PUBLIC_REFERENCE_LIMIT) return;
+    const patch = await readImagePatch(imageFile);
+    const imageNode: CanvasNode = {
+      ...createNode("imageLoader"),
+      ...patch,
+      id: `image_${Math.random().toString(36).slice(2, 9)}_${Date.now().toString(36)}`,
+    };
+    imageNode.x = Math.round(target.x - imageNode.w - 48);
+    imageNode.y = Math.round(target.y);
+    const connectionId = `link_${Math.random().toString(36).slice(2, 9)}_${Date.now().toString(36)}`;
+    setCanvasDocument((current) => {
+      if (current.connections.some((connection) => connection.from === imageNode.id && connection.to === targetNodeId)) return current;
+      return {
+        nodes: current.nodes.concat(imageNode),
+        connections: current.connections.concat({ id: connectionId, from: imageNode.id, to: targetNodeId }),
+        groups: current.groups,
+      };
+    });
+    setSelectedIds(new Set([imageNode.id]));
+    setSelectedGroupId("");
+    setSelectedConnectionId("");
+    setConnectionAction(null);
+    setContextMenu(null);
+    setImageCrop(null);
+  }, [connections, createNode, nodeMap, nodes, readImagePatch, setCanvasDocument, setConnectionAction, setContextMenu, setSelectedConnectionId, setSelectedGroupId, setSelectedIds]);
+
   const openImagePreview = useCallback((nodeId: string) => {
     const node = nodeMap.get(nodeId);
     if (!node || !isImageLikeNode(node) || !node.url) return;
@@ -424,36 +329,20 @@ export function useCanvasMediaActions({
     const node = nodeMap.get(nodeId);
     if (!node || !isImageLikeNode(node) || !node.url) return;
     const markDownloaded = () => {
-      if (node.type !== "imageGenerator" && node.type !== "libtvImage") return;
+      if (node.type !== "imageGenerator" && node.type !== "libtvImageGenerator") return;
       patchNode(nodeId, { outputDownloadState: "downloaded", outputDownloadedAt: Date.now() });
     };
-    const defaultName = node.fileName || `${node.type}-${Date.now()}.png`;
-    setDownloadStatus({ nodeId, tone: "busy", text: t("infiniteCanvas.downloadBusy") });
-    if (window.easyTool?.saveResult) {
-      try {
-        const result = await window.easyTool.saveResult({ url: node.url, dataUrl: node.url, defaultName, directory: imageDownloadPath });
-        markDownloaded();
-        setDownloadStatus({ nodeId, tone: "ready", text: result.filePath ? t("infiniteCanvas.downloadSaved", { path: result.filePath }) : t("infiniteCanvas.downloadComplete") });
-        window.setTimeout(() => setDownloadStatus((current) => (current?.nodeId === nodeId && current.tone === "ready" ? null : current)), 4500);
-      } catch (error) {
-        setDownloadStatus({ nodeId, tone: "error", text: error instanceof Error ? error.message : String(error) });
-      }
-      return;
-    }
-    const link = document.createElement("a");
-    link.href = node.url;
-    link.download = defaultName;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    markDownloaded();
-    setDownloadStatus({ nodeId, tone: "ready", text: t("infiniteCanvas.downloadComplete") });
-    window.setTimeout(() => setDownloadStatus((current) => (current?.nodeId === nodeId && current.tone === "ready" ? null : current)), 3000);
-  }, [imageDownloadPath, nodeMap, patchNode, t]);
+    await downloadCanvasImageAsset({
+      url: node.url,
+      defaultName: node.fileName || `${node.type}-${Date.now()}.png`,
+      statusKey: nodeId,
+      onDownloaded: markDownloaded,
+    });
+  }, [downloadCanvasImageAsset, nodeMap, patchNode]);
 
   const changeCropAspect = useCallback((nodeId: string, aspect: CropAspectKey) => {
     const node = nodeMap.get(nodeId);
-    if (node?.type !== "image" || imageCrop?.nodeId !== nodeId) return;
+    if (node?.type !== "imageLoader" || imageCrop?.nodeId !== nodeId) return;
     setImageCrop({ nodeId, aspect, rect: cropRectForAspect(imageCrop.rect, node, aspect) });
   }, [imageCrop, nodeMap]);
 
@@ -499,7 +388,7 @@ export function useCanvasMediaActions({
 
   const applyCrop = useCallback(async (nodeId: string) => {
     const node = nodeMap.get(nodeId);
-    if (!node || (node.type !== "image" && node.type !== "libtvUpload") || !node.url || imageCrop?.nodeId !== nodeId) return;
+    if (!node || node.type !== "imageLoader" || !node.url || imageCrop?.nodeId !== nodeId) return;
     const contentRect = imageContentRect(node);
     const rect = constrainCropRect(imageCrop.rect, node, imageCrop.aspect);
     const naturalWidth = node.imageNaturalWidth || node.w;
@@ -517,9 +406,8 @@ export function useCanvasMediaActions({
       ...nextSize,
     };
     patchNode(nodeId, patch);
-    void syncLibtvBoundNode(nodeId, patch);
     setImageCrop(null);
-  }, [imageCrop, nodeMap, patchNode, saveCanvasImageAsset, syncLibtvBoundNode]);
+  }, [imageCrop, nodeMap, patchNode, saveCanvasImageAsset]);
 
   return {
     imagePreview,
@@ -527,14 +415,17 @@ export function useCanvasMediaActions({
     imageCrop,
     setImageCrop,
     downloadStatus,
+    showMediaStatus,
     isImageDropActive,
     setIsImageDropActive,
     saveCanvasImageAsset,
+    downloadCanvasImageAsset,
     handleImageFiles,
     importLibraryImageToNode,
     createLibraryImageNodeAtWorldPoint,
     createImageNodesFromDrop,
     createImageNodesFromClipboardData,
+    createImageReferenceForNode,
     openImagePreview,
     openImageCrop,
     downloadNodeImage,

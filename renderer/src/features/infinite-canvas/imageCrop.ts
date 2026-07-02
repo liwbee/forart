@@ -9,7 +9,7 @@ import { clamp } from "./canvasGeometry";
 import type { CanvasNode, CropAspectKey, CropRect } from "./types";
 
 export function fitImageNodeSize(naturalWidth: number, naturalHeight: number) {
-  if (!naturalWidth || !naturalHeight) return { w: NODE_DEFAULTS.image.w, h: NODE_DEFAULTS.image.h };
+  if (!naturalWidth || !naturalHeight) return { w: NODE_DEFAULTS.imageLoader.w, h: NODE_DEFAULTS.imageLoader.h };
   let width = naturalWidth;
   let height = naturalHeight;
   const downScale = Math.min(IMAGE_NODE_MAX_WIDTH / width, IMAGE_NODE_MAX_HEIGHT / height, 1);

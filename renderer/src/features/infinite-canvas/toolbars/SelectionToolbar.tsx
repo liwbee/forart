@@ -40,12 +40,12 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         top,
       }}
       role="toolbar"
-      aria-label={t("infiniteCanvas.selectionActions")}
+      aria-label={t("infiniteCanvas:selectionActions")}
     >
-      <span>{t("infiniteCanvas.selectedCount", { count: selectedCount })}</span>
+      <span>{t("infiniteCanvas:selectedCount", { count: selectedCount })}</span>
       <button type="button" onClick={onCreateGroup}>
         <Layers size={14} aria-hidden="true" />
-        <span>{t("infiniteCanvas.groupSelection")}</span>
+        <span>{t("infiniteCanvas:groupSelection")}</span>
       </button>
     </div>
   );

@@ -5,14 +5,24 @@ export const outfitLibraryKeys = {
   projects: ["outfitProjects"] as const,
   tagRoot: ["outfitTags"] as const,
   tags: (projectId: string) => ["outfitTags", projectId] as const,
-  outfits: (projectId: string, tagId = "") => ["outfits", projectId, tagId] as const,
+  outfits: (projectId: string, tagIds: readonly string[] = []) => ["outfits", projectId, [...tagIds].sort().join(",")] as const,
   storageSettings: ["storageSettings"] as const,
 };
 
-function queryString(params: Record<string, string | undefined>) {
+function isStringArray(value: string | readonly string[] | undefined): value is readonly string[] {
+  return Array.isArray(value);
+}
+
+function queryString(params: Record<string, string | readonly string[] | undefined>) {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value) search.set(key, value);
+    if (isStringArray(value)) {
+      for (const item of value) {
+        if (item) search.append(key, item);
+      }
+    } else if (value) {
+      search.set(key, value);
+    }
   }
   const text = search.toString();
   return text ? `?${text}` : "";
@@ -49,9 +59,9 @@ export function uploadOutfitProjectCover(projectId: string, payload: AssetUpload
   });
 }
 
-export function listOutfits({ projectId, tagId = "" }: OutfitFilters) {
+export function listOutfits({ projectId, tagIds = [] }: OutfitFilters) {
   return apiRequest<{ outfits: OutfitEntry[] }>(
-    `/api/outfit-projects/${encodeURIComponent(projectId)}/outfits${queryString({ tag_id: tagId })}`
+    `/api/outfit-projects/${encodeURIComponent(projectId)}/outfits${queryString({ tag_id: tagIds })}`
   );
 }
 

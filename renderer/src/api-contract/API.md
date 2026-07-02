@@ -49,4 +49,9 @@ The current remote API supports model, outfit, and action libraries:
 /api/libraries/action/tags?project_id=:projectId
 ```
 
+Library tag records include `id`, `kind`, `project_id`, `name`, `sort_order`, `usage_count`, `created_at`, and `updated_at`.
+`POST /api/libraries/:kind/tags` accepts `name`.
+`PATCH /api/libraries/:kind/tags/:tagId` accepts `name` and `sort_order`.
+Library entry list endpoints accept repeated `tag_id` query params and return entries that contain every selected tag.
+
 Use `server/forart-server.mjs` as the full route source of truth.

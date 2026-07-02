@@ -1,7 +1,7 @@
 import type { CanvasConnection, CanvasNode } from "../types";
 
 export function collectPrompt(node: CanvasNode, nodes: CanvasNode[], connections: CanvasConnection[]): string {
-  if (node.type === "prompt" || node.type === "libtvPrompt" || node.type === "llm") return node.text || "";
+  if (node.type === "prompt" || node.type === "llm") return node.text || "";
   const upstream = connections
     .filter((connection) => connection.to === node.id)
     .map((connection) => nodes.find((candidate) => candidate.id === connection.from))
@@ -38,7 +38,7 @@ export function collectReferenceImages(node: CanvasNode, nodes: CanvasNode[], co
   function visit(candidate: CanvasNode | undefined) {
     if (!candidate || seenNodes.has(candidate.id)) return;
     seenNodes.add(candidate.id);
-    if ((candidate.type === "image" || candidate.type === "libtvUpload" || candidate.type === "imageGenerator" || candidate.type === "libtvImage") && candidate.url) addUrl(candidate.url);
+    if ((candidate.type === "imageLoader" || candidate.type === "imageGenerator" || candidate.type === "libtvImageGenerator") && candidate.url) addUrl(candidate.url);
     connections
       .filter((connection) => connection.to === candidate.id)
       .forEach((connection) => visit(nodes.find((item) => item.id === connection.from)));

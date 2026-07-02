@@ -74,6 +74,19 @@
     flex-wrap: wrap;
   }
 
+  .resource-library-nav {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .resource-library-tabs {
+    flex-wrap: wrap;
+  }
+
+  .resource-library-search {
+    margin-left: 0;
+  }
+
   .model-inline-editor {
     padding: var(--space-4);
   }
@@ -147,6 +160,42 @@
   .settings-layout {
     grid-template-columns: 1fr;
     width: 100%;
+  }
+
+  .settings-cache-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-cache-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-cache-segmented,
+  .settings-cache-segmented--status {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .settings-cache-row {
+    grid-template-columns: 22px 64px minmax(0, 1fr);
+  }
+
+  .settings-cache-thumb {
+    width: 64px;
+  }
+
+  .settings-cache-row-actions {
+    grid-column: 2 / -1;
+    justify-content: flex-start;
+  }
+
+  .settings-cache-selection-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-cache-selection-bar > div {
+    flex-wrap: wrap;
   }
 
   .settings-api-layout {
@@ -226,6 +275,11 @@
     width: 100%;
     min-width: 0;
     flex-basis: auto;
+  }
+
+  .resource-library-tabs,
+  .resource-library-tabs button {
+    width: 100%;
   }
 
   .model-toolbar-search-slot {
@@ -323,6 +377,49 @@
   .review-key-hint {
     order: -1;
     text-align: center;
+  }
+
+  .settings-cache-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-cache-segmented--status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-cache-list-head {
+    align-items: stretch;
+    flex-direction: column;
+    padding-bottom: var(--space-2);
+  }
+
+  .settings-cache-row {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .settings-cache-thumb {
+    width: 100%;
+    max-width: 180px;
+    grid-column: 2;
+  }
+
+  .settings-cache-info,
+  .settings-cache-row-actions {
+    grid-column: 2;
+  }
+
+  .settings-cache-title-line,
+  .settings-cache-meta {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .settings-cache-row-actions .settings-api-small-button {
+    flex: 1;
+  }
+
+  .settings-cache-actions .settings-api-action-button {
+    flex: 1;
   }
 }
 

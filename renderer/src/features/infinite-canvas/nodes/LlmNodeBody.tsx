@@ -35,7 +35,7 @@ export function LlmNodeBody({
     model,
   })));
   const selectedValue = selectedProvider && selectedModel ? `${selectedProvider.id}:${selectedModel}` : "";
-  const options = modelOptions.length ? modelOptions : [{ value: "", label: t("settings.noChatModels"), providerId: "", model: "" }];
+  const options = modelOptions.length ? modelOptions : [{ value: "", label: t("settings:noChatModels"), providerId: "", model: "" }];
 
   return (
     <div className="ic-node-body ic-llm-node-body nowheel">
@@ -44,7 +44,7 @@ export function LlmNodeBody({
           className="ic-llm-node__model"
           value={selectedValue}
           options={options}
-          ariaLabel={t("infiniteCanvas.chatModel")}
+          ariaLabel={t("infiniteCanvas:chatModel")}
           disabled={!modelOptions.length}
           open={selectOpen && Boolean(modelOptions.length)}
           onOpenChange={onSelectOpenChange}
@@ -62,8 +62,8 @@ export function LlmNodeBody({
         <button
           type="button"
           className={`ic-llm-node__run${node.running ? " is-stop" : ""}`}
-          aria-label={node.running ? t("infiniteCanvas.stopRun") : t("infiniteCanvas.run")}
-          title={node.running ? t("infiniteCanvas.stopRun") : t("infiniteCanvas.run")}
+          aria-label={node.running ? t("infiniteCanvas:stopRun") : t("infiniteCanvas:run")}
+          title={node.running ? t("infiniteCanvas:stopRun") : t("infiniteCanvas:run")}
           disabled={!node.running && (!selectedProvider || !selectedModel)}
           onClick={() => (node.running ? onStop() : onRun())}
         >
@@ -73,13 +73,13 @@ export function LlmNodeBody({
       <textarea
         className="ic-llm-node__instruction nodrag nopan nowheel"
         value={node.variablePrompt || ""}
-        placeholder={t("infiniteCanvas.llmInstructionPlaceholder")}
+        placeholder={t("infiniteCanvas:llmInstructionPlaceholder")}
         onChange={(event) => onPatch({ variablePrompt: event.target.value })}
       />
       <div className={`ic-llm-node__output${node.text ? "" : " empty"}`}>
         {node.running ? (
-          <span className="ic-llm-node__status"><Bot size={14} aria-hidden="true" />{node.generationStatus || t("infiniteCanvas.running")}</span>
-        ) : node.text || t("infiniteCanvas.llmOutputPlaceholder")}
+          <span className="ic-llm-node__status"><Bot size={14} aria-hidden="true" />{node.generationStatus || t("infiniteCanvas:running")}</span>
+        ) : node.text || t("infiniteCanvas:llmOutputPlaceholder")}
       </div>
       {node.generationError ? <div className="ic-llm-node__error">{node.generationError}</div> : null}
     </div>

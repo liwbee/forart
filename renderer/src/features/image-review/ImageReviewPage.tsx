@@ -115,35 +115,35 @@ function RootFolderPicker({
   return (
     <div className="review-folder-picker review-folder-picker--root">
       <span className="review-folder-current" title={selectedRoot || ""}>
-        {displayName || t("imageReview.choosePathFirst")}
+        {displayName || t("imageReview:choosePathFirst")}
       </span>
       <div className="review-folder-actions">
         <button className="button secondary review-folder-button" type="button" disabled={loading} onClick={onChoose}>
           <FolderOpen size={18} aria-hidden="true" />
-          <span>{t("imageReview.choose")}</span>
+          <span>{t("imageReview:choose")}</span>
         </button>
         <button className="button secondary review-folder-button" type="button" disabled={loading || !selectedRoot} onClick={onScan}>
-          <span>{loading ? t("imageReview.scanning") : t("imageReview.refresh")}</span>
+          <span>{loading ? t("imageReview:scanning") : t("imageReview:refresh")}</span>
         </button>
         <div className="review-folder-guide">
-          <button className="button secondary review-folder-guide-button" type="button" aria-label={t("imageReview.pathGuideTitle")}>
+          <button className="button secondary review-folder-guide-button" type="button" aria-label={t("imageReview:pathGuideTitle")}>
             <CircleHelp size={18} aria-hidden="true" />
           </button>
           <div className="review-folder-guide-popover" role="tooltip">
-            <div className="review-folder-guide-tree" aria-label={t("imageReview.pathGuideStructureLabel")}>
+            <div className="review-folder-guide-tree" aria-label={t("imageReview:pathGuideStructureLabel")}>
               <div className="review-folder-guide-node review-folder-guide-node--root">
-                <span>{t("imageReview.pathGuideRootFolder")}</span>
+                <span>{t("imageReview:pathGuideRootFolder")}</span>
               </div>
               <div className="review-folder-guide-branch">
                 <div className="review-folder-guide-node">
-                  <span>{t("imageReview.pathGuideProductFolder")}</span>
+                  <span>{t("imageReview:pathGuideProductFolder")}</span>
                 </div>
                 <div className="review-folder-guide-children">
                   <div className="review-folder-guide-node review-folder-guide-node--model">
-                    <span>{modelFolderName || t("imageReview.defaultModelFolder")}</span>
+                    <span>{modelFolderName || t("imageReview:defaultModelFolder")}</span>
                   </div>
                   <div className="review-folder-guide-node review-folder-guide-node--detail">
-                    <span>{detailFolderName || t("imageReview.defaultDetailFolder")}</span>
+                    <span>{detailFolderName || t("imageReview:defaultDetailFolder")}</span>
                   </div>
                 </div>
               </div>
@@ -175,19 +175,19 @@ const ProductList = memo(function ProductList({
     : products;
 
   return (
-    <aside className="review-product-list" aria-label={t("imageReview.productList")}>
+    <aside className="review-product-list" aria-label={t("imageReview:productList")}>
       <div className="review-product-search">
         <Search size={17} aria-hidden="true" />
-        <input value={searchQuery} onChange={(event) => onSearchChange(event.target.value)} placeholder={t("imageReview.searchProductId")} aria-label={t("imageReview.searchProductId")} />
+        <input value={searchQuery} onChange={(event) => onSearchChange(event.target.value)} placeholder={t("imageReview:searchProductId")} aria-label={t("imageReview:searchProductId")} />
         {searchQuery ? (
-          <button type="button" aria-label={t("imageReview.clearSearch")} onClick={() => onSearchChange("")}>
+          <button type="button" aria-label={t("imageReview:clearSearch")} onClick={() => onSearchChange("")}>
             <X size={15} aria-hidden="true" />
           </button>
         ) : null}
       </div>
 
       <div className="review-product-list-head">
-        <strong>{t("imageReview.productId")}</strong>
+        <strong>{t("imageReview:productId")}</strong>
         <span>{filteredProducts.length} / {products.length}</span>
       </div>
 
@@ -204,12 +204,12 @@ const ProductList = memo(function ProductList({
               onClick={() => onSelectProduct(product.id)}
             >
               <strong>{product.id}</strong>
-              {missingModel ? <em>{t("imageReview.missingModelImage")}</em> : null}
+              {missingModel ? <em>{t("imageReview:missingModelImage")}</em> : null}
             </button>
           );
         })}
-        {!products.length ? <div className="review-pair-empty">{t("imageReview.mountReviewFolders")}</div> : null}
-        {products.length && !filteredProducts.length ? <div className="review-pair-empty">{t("imageReview.noMatchingProductIds")}</div> : null}
+        {!products.length ? <div className="review-pair-empty">{t("imageReview:mountReviewFolders")}</div> : null}
+        {products.length && !filteredProducts.length ? <div className="review-pair-empty">{t("imageReview:noMatchingProductIds")}</div> : null}
       </div>
     </aside>
   );
@@ -244,7 +244,7 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
       <button
         className="review-thumb-nav-button"
         type="button"
-        aria-label={t("imageReview.scrollThumbsLeft")}
+        aria-label={t("imageReview:scrollThumbsLeft")}
         disabled={!images.length}
         onClick={() => {
           onActivate(group);
@@ -253,14 +253,14 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
       >
         <ChevronLeft size={24} aria-hidden="true" />
       </button>
-      <div className="review-thumb-strip" ref={(node) => { thumbStripRef.current = node; }} aria-label={t("imageReview.thumbsLabel", { title })} onWheel={onWheel}>
+      <div className="review-thumb-strip" ref={(node) => { thumbStripRef.current = node; }} aria-label={t("imageReview:thumbsLabel", { title })} onWheel={onWheel}>
         {images.map((item, index) => (
           <button
             key={item.id}
             ref={index === activeIndex ? (node) => { activeThumbRef.current = node; } : undefined}
             className={index === activeIndex ? "active" : ""}
             type="button"
-            aria-label={t("imageReview.viewImage", { name: item.name })}
+            aria-label={t("imageReview:viewImage", { name: item.name })}
             aria-current={index === activeIndex ? "true" : undefined}
             onClick={() => {
               onActivate(group);
@@ -270,12 +270,12 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
             <img src={item.url} alt="" loading={index === activeIndex ? "eager" : "lazy"} decoding="async" draggable={false} />
           </button>
         ))}
-        {!images.length ? <div className="review-thumb-empty">{t("imageReview.noImages")}</div> : null}
+        {!images.length ? <div className="review-thumb-empty">{t("imageReview:noImages")}</div> : null}
       </div>
       <button
         className="review-thumb-nav-button"
         type="button"
-        aria-label={t("imageReview.scrollThumbsRight")}
+        aria-label={t("imageReview:scrollThumbsRight")}
         disabled={!images.length}
         onClick={() => {
           onActivate(group);
@@ -524,10 +524,10 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
     setIssueEditorOpen(true);
     try {
       const existingIssue = await onLoadIssue(image);
-      setIssueText(existingIssue === t("imageReview.pass") ? "" : existingIssue);
+      setIssueText(existingIssue === t("imageReview:pass") ? "" : existingIssue);
     } catch {
       setIssueText("");
-      setIssueError(t("imageReview.loadExistingIssueFailed"));
+      setIssueError(t("imageReview:loadExistingIssueFailed"));
     }
   }
 
@@ -535,7 +535,7 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
     if (!image) return;
     const nextIssue = issue.trim();
     if (!nextIssue) {
-      setIssueError(t("imageReview.issueRequired"));
+      setIssueError(t("imageReview:issueRequired"));
       return;
     }
 
@@ -546,7 +546,7 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
       setIssueEditorOpen(false);
       setIssueText(nextIssue);
     } catch {
-      setIssueError(t("imageReview.saveFailed"));
+      setIssueError(t("imageReview:saveFailed"));
     } finally {
       setIssueSaving(false);
     }
@@ -558,12 +558,12 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
     setIssueSaving(true);
     setIssueError("");
     try {
-      await onReportIssue(image, t("imageReview.pass"));
+      await onReportIssue(image, t("imageReview:pass"));
       setIssueEditorOpen(false);
       setIssueText("");
       if (activeIndex < images.length - 1) setActiveIndex(activeIndex + 1);
     } catch {
-      setIssueError(t("imageReview.saveFailed"));
+      setIssueError(t("imageReview:saveFailed"));
     } finally {
       setIssueSaving(false);
     }
@@ -577,7 +577,7 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
             value={folderValue}
             onChange={(event) => onFolderValueChange(event.target.value)}
             onFocus={() => onActivate(group)}
-            placeholder={t("imageReview.examplePlaceholder", { title })}
+            placeholder={t("imageReview:examplePlaceholder", { title })}
           />
         </label>
       </div>
@@ -603,7 +603,7 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
           ) : (
             <div className="review-empty-image">
               <ImageOff size={34} aria-hidden="true" />
-              <span>{t("imageReview.noProductImage", { title })}</span>
+              <span>{t("imageReview:noProductImage", { title })}</span>
             </div>
           )}
         </div>
@@ -624,11 +624,11 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
                   }}
                   autoFocus
                   rows={3}
-                  placeholder={t("imageReview.issuePlaceholder")}
+                  placeholder={t("imageReview:issuePlaceholder")}
                 />
                 <button className="review-issue-save-button" type="button" disabled={!image || issueSaving} onClick={() => saveCurrentIssue(issueText)}>
                   <Save size={14} aria-hidden="true" />
-                  <span>{issueSaving ? t("common.states.saving") : t("common.actions.save")}</span>
+                  <span>{issueSaving ? t("common:states.saving") : t("common:actions.save")}</span>
                 </button>
               </div>
             ) : null}
@@ -636,11 +636,11 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
             <div className="review-check-actions">
               <button className="button review-check-button review-check-button--issue" type="button" disabled={!image || issueSaving} onClick={openIssueEditor}>
                 <Flag size={15} aria-hidden="true" />
-                <span>{t("imageReview.reportIssue")}</span>
+                <span>{t("imageReview:reportIssue")}</span>
               </button>
               <button className="button review-check-button review-check-button--approve" type="button" disabled={!image || issueSaving} onClick={approveCurrentImage}>
                 <CircleCheck size={15} aria-hidden="true" />
-                <span>{t("imageReview.approve")}</span>
+                <span>{t("imageReview:approve")}</span>
               </button>
             </div>
           </div>
@@ -661,11 +661,11 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
       <div className="review-file-meta">
         <dl>
           <div>
-            <dt>{t("imageReview.file")}</dt>
+            <dt>{t("imageReview:file")}</dt>
             <dd title={image?.relativePath || ""}>{image?.relativePath || "-"}</dd>
           </div>
           <div>
-            <dt>{t("imageReview.size")}</dt>
+            <dt>{t("imageReview:size")}</dt>
             <dd>{image ? formatBytes(image.size) : "-"}</dd>
           </div>
         </dl>
@@ -680,8 +680,8 @@ export function ImageReviewPage() {
   const [products, setProducts] = useState<ReviewProduct[]>([]);
   const [activeProductId, setActiveProductId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [modelFolderValue, setModelFolderValue] = useState(() => t("imageReview.defaultModelFolder"));
-  const [detailFolderValue, setDetailFolderValue] = useState(() => t("imageReview.defaultDetailFolder"));
+  const [modelFolderValue, setModelFolderValue] = useState(() => t("imageReview:defaultModelFolder"));
+  const [detailFolderValue, setDetailFolderValue] = useState(() => t("imageReview:defaultDetailFolder"));
   const [activeImageGroup, setActiveImageGroup] = useState<ImageGroupKey>("detail");
   const [folderLoading, setFolderLoading] = useState(false);
   const [productImagesLoading, setProductImagesLoading] = useState(false);
@@ -721,7 +721,7 @@ export function ImageReviewPage() {
     if (!rootPath) {
       setProducts([]);
       setActiveProductId("");
-      setFolderError(t("imageReview.rootRequired"));
+      setFolderError(t("imageReview:rootRequired"));
       return;
     }
     setFolderLoading(true);
@@ -741,7 +741,7 @@ export function ImageReviewPage() {
       setSearchQuery("");
       setProductListVersion((version) => version + 1);
     } catch (error) {
-      setFolderError(error instanceof Error ? error.message : t("imageReview.scanFailed"));
+      setFolderError(error instanceof Error ? error.message : t("imageReview:scanFailed"));
     } finally {
       setFolderLoading(false);
     }
@@ -765,8 +765,8 @@ export function ImageReviewPage() {
       const savedDetailFolders = String(settings?.detailFolders || "").trim();
       hasSavedFolderSettingsRef.current = Boolean(savedModelFolders || savedDetailFolders);
       folderSettingsDirtyRef.current = false;
-      setModelFolderValue(savedModelFolders || t("imageReview.defaultModelFolder"));
-      setDetailFolderValue(savedDetailFolders || t("imageReview.defaultDetailFolder"));
+      setModelFolderValue(savedModelFolders || t("imageReview:defaultModelFolder"));
+      setDetailFolderValue(savedDetailFolders || t("imageReview:defaultDetailFolder"));
       settingsLoadedRef.current = true;
     }
 
@@ -779,8 +779,8 @@ export function ImageReviewPage() {
 
   useEffect(() => {
     if (!settingsLoadedRef.current || hasSavedFolderSettingsRef.current) return;
-    setModelFolderValue(t("imageReview.defaultModelFolder"));
-    setDetailFolderValue(t("imageReview.defaultDetailFolder"));
+    setModelFolderValue(t("imageReview:defaultModelFolder"));
+    setDetailFolderValue(t("imageReview:defaultDetailFolder"));
   }, [i18n.language, t]);
 
   useEffect(() => {
@@ -851,7 +851,7 @@ export function ImageReviewPage() {
         setProducts((currentProducts) => currentProducts.map((product) => (product.id === loadedProduct.id ? loadedProduct : product)));
       })
       .catch(() => {
-        if (!ignore) setFolderError(t("imageReview.readProductImagesFailed"));
+        if (!ignore) setFolderError(t("imageReview:readProductImagesFailed"));
       })
       .finally(() => {
         if (!ignore) setProductImagesLoading(false);
@@ -873,11 +873,11 @@ export function ImageReviewPage() {
   async function chooseReviewRoot() {
     setFolderError("");
     try {
-      const result = await window.forartConfig?.chooseDirectory({ title: t("imageReview.chooseDirectory") });
+      const result = await window.forartConfig?.chooseDirectory({ title: t("imageReview:chooseDirectory") });
       if (!result || result.canceled || !result.path) return;
       selectReviewRoot(result.path);
     } catch (error) {
-      setFolderError(error instanceof Error ? error.message : t("imageReview.readDirectoryFailed"));
+      setFolderError(error instanceof Error ? error.message : t("imageReview:readDirectoryFailed"));
     }
   }
 
@@ -894,7 +894,7 @@ export function ImageReviewPage() {
       <div className="image-review-header">
         <div>
           <h1 id="image-review-title" className="model-library-title">
-            {t("imageReview.title")}
+            {t("imageReview:title")}
           </h1>
         </div>
         <RootFolderPicker
@@ -921,15 +921,15 @@ export function ImageReviewPage() {
           <div className="review-product-workspace">
             <div className="review-product-head">
               <div>
-                <span>{t("imageReview.currentProduct")}</span>
-                <strong>{activeProduct?.id || t("common.labels.notSelected")}</strong>
+                <span>{t("imageReview:currentProduct")}</span>
+                <strong>{activeProduct?.id || t("common:labels.notSelected")}</strong>
               </div>
             </div>
 
             <div className="review-compare">
               <ProductImagePane
                 ref={modelPaneRef}
-                title={t("imageReview.modelPaneTitle")}
+                title={t("imageReview:modelPaneTitle")}
                 group="model"
                 isActive={activeImageGroup === "model"}
                 folderValue={modelFolderValue}
@@ -942,7 +942,7 @@ export function ImageReviewPage() {
               />
               <ProductImagePane
                 ref={detailPaneRef}
-                title={t("imageReview.detailPaneTitle")}
+                title={t("imageReview:detailPaneTitle")}
                 group="detail"
                 isActive={activeImageGroup === "detail"}
                 folderValue={detailFolderValue}
@@ -960,11 +960,11 @@ export function ImageReviewPage() {
         <div className="review-bottom-bar">
           <button className="button secondary" type="button" disabled={!activeProduct || activeProductIndex <= 0} onClick={() => goProduct(-1)}>
             <ChevronUp size={18} aria-hidden="true" />
-            <span>{t("imageReview.previousProduct")}</span>
+            <span>{t("imageReview:previousProduct")}</span>
           </button>
-          <span className="review-key-hint">{t("imageReview.keyHint")}</span>
+          <span className="review-key-hint">{t("imageReview:keyHint")}</span>
           <button className="button primary" type="button" disabled={!activeProduct || activeProductIndex >= products.length - 1} onClick={() => goProduct(1)}>
-            <span>{t("imageReview.nextProduct")}</span>
+            <span>{t("imageReview:nextProduct")}</span>
             <ChevronDown size={18} aria-hidden="true" />
           </button>
         </div>

@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Copy, Download, ImagePlus, MoreHorizontal, Pencil, Plus, Tags, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronRight, Copy, Download, ImagePlus, MoreHorizontal, Pencil, Plus, Tags, Trash2 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
 import { copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
@@ -141,10 +141,10 @@ function ActionProjectSidebar({
   }
 
   return (
-    <aside className="model-project-rail" aria-label={t("actionLibrary.projectRail")}>
+    <aside className="model-project-rail" aria-label={t("actionLibrary:projectRail")}>
       <button className="model-project-add" type="button" onClick={onCreateProject}>
         <Plus size={18} aria-hidden="true" />
-        <span>{t("common.labels.newProject")}</span>
+        <span>{t("common:labels.newProject")}</span>
       </button>
 
       <div className="model-project-list">
@@ -164,7 +164,7 @@ function ActionProjectSidebar({
                     onKeyDown={(event) => handleRenameKeyDown(event, project.id)}
                     autoFocus
                     maxLength={120}
-                    aria-label={t("common.labels.projectName")}
+                    aria-label={t("common:labels.projectName")}
                   />
                 ) : (
                   <button
@@ -184,7 +184,7 @@ function ActionProjectSidebar({
                 <button
                   className="model-project-menu-button"
                   type="button"
-                  aria-label={t("actionLibrary.projectActions", { name: project.name || "Untitled Project" })}
+                  aria-label={t("actionLibrary:projectActions", { name: project.name || "Untitled Project" })}
                   aria-expanded={menuProjectId === project.id}
                   onClick={(event) => toggleMenu(event, project.id)}
                 >
@@ -194,7 +194,7 @@ function ActionProjectSidebar({
             );
           })
         ) : (
-          <div className="model-project-list-empty">{t("common.empty.noProjects")}</div>
+          <div className="model-project-list-empty">{t("common:empty.noProjects")}</div>
         )}
       </div>
 
@@ -215,7 +215,7 @@ function ActionProjectSidebar({
             }}
           >
             <Pencil size={16} aria-hidden="true" />
-            <span>{t("common.actions.rename")}</span>
+            <span>{t("common:actions.rename")}</span>
           </button>
           <button
             className={deleteConfirmProjectId === menuProjectId ? "danger confirming" : "danger"}
@@ -228,7 +228,7 @@ function ActionProjectSidebar({
             }}
           >
             <Trash2 size={16} aria-hidden="true" />
-            <span>{deleteConfirmProjectId === menuProjectId ? t("common.confirm.delete") : t("common.actions.delete")}</span>
+            <span>{deleteConfirmProjectId === menuProjectId ? t("common:confirm.delete") : t("common:actions.delete")}</span>
           </button>
         </div>,
         document.body,
@@ -239,34 +239,38 @@ function ActionProjectSidebar({
 
 function ActionToolbar({
   tags,
-  activeTagId,
-  onTagChange,
+  activeTagIds,
+  onTagToggle,
+  onTagClear,
   onOpenTagManager,
 }: {
   tags: ActionTag[];
-  activeTagId: string;
-  onTagChange: (tagId: string) => void;
+  activeTagIds: string[];
+  onTagToggle: (tagId: string) => void;
+  onTagClear: () => void;
   onOpenTagManager: () => void;
 }) {
   const { t } = useTranslation();
+  const activeTagSet = useMemo(() => new Set(activeTagIds), [activeTagIds]);
   return (
     <div className="model-toolbar outfit-toolbar">
       <div className="library-tag-section">
-        <span className="library-filter-label">{t("common.labels.tags")}</span>
-        <button className="model-tag-add-button" type="button" aria-label={t("common.labels.manageTags")} title={t("common.labels.manageTags")} onClick={onOpenTagManager}>
+        <span className="library-filter-label">{t("common:labels.tags")}</span>
+        <button className="model-tag-add-button" type="button" aria-label={t("common:labels.manageTags")} title={t("common:labels.manageTags")} onClick={onOpenTagManager}>
           <Pencil size={18} aria-hidden="true" />
         </button>
         <div className="library-tag-controls">
           <div className="library-tag-filter">
-            <button className={activeTagId ? "" : "active"} type="button" onClick={() => onTagChange("")}>
-              {t("common.labels.all")}
+            <button className={activeTagIds.length ? "" : "active"} type="button" onClick={onTagClear}>
+              {t("common:labels.all")}
             </button>
             {tags.map((tag) => (
               <button
                 key={tag.id}
-                className={activeTagId === tag.id ? "active" : ""}
+                className={activeTagSet.has(tag.id) ? "active" : ""}
                 type="button"
-                onClick={() => onTagChange(tag.id)}
+                aria-pressed={activeTagSet.has(tag.id)}
+                onClick={() => onTagToggle(tag.id)}
               >
                 {tag.name}
               </button>
@@ -292,7 +296,7 @@ function AddActionCard({ disabled, onCreate }: { disabled: boolean; onCreate: (f
     <div className="outfit-add-card">
       <button className="outfit-add-button" type="button" disabled={disabled} onClick={() => inputRef.current?.click()}>
         <ImagePlus size={28} aria-hidden="true" />
-        <strong>{disabled ? t("common.states.uploading") : t("actionLibrary.addAction")}</strong>
+        <strong>{disabled ? t("common:states.uploading") : t("actionLibrary:addAction")}</strong>
       </button>
       <input ref={inputRef} type="file" accept="image/*" onChange={handleFileChange} hidden />
     </div>
@@ -320,13 +324,13 @@ function ActionCard({
 }) {
   const { t } = useTranslation();
   const [menuState, setMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
-  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const [tagMenuState, setTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
   const [promptOpen, setPromptOpen] = useState(false);
   const [draftPrompt, setDraftPrompt] = useState(action.prompt || "");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const committedPromptRef = useRef(action.prompt || "");
   const assetUrl = action.asset_url ? `${action.asset_url}?t=${encodeURIComponent(action.updated_at || action.asset_id)}` : "";
-  const imageAlt = action.name || t("actionLibrary.actionImage");
+  const imageAlt = action.name || t("actionLibrary:actionImage");
 
   useEffect(() => {
     setDraftPrompt(action.prompt || "");
@@ -338,10 +342,10 @@ function ActionCard({
   }, [promptOpen]);
 
   useEffect(() => {
-    if (!menuState.open && !tagMenuOpen) return;
+    if (!menuState.open && !tagMenuState.open) return;
     function closeMenu() {
       setMenuState({ open: false, x: 0, y: 0 });
-      setTagMenuOpen(false);
+      setTagMenuState({ open: false, x: 0, y: 0 });
     }
     function handleKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") closeMenu();
@@ -352,7 +356,7 @@ function ActionCard({
       window.removeEventListener("pointerdown", closeMenu);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [menuState.open, tagMenuOpen]);
+  }, [menuState.open, tagMenuState.open]);
 
   function openMenu(event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
@@ -368,31 +372,51 @@ function ActionCard({
       x: Math.max(pad, Math.min(x, window.innerWidth - menuWidth - pad)),
       y: Math.max(pad, Math.min(preferredY, window.innerHeight - menuMaxHeight - pad)),
     });
+    setTagMenuState({ open: false, x: 0, y: 0 });
+  }
+
+  function toggleTagMenu(event: MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    if (tagMenuState.open) {
+      setTagMenuState({ open: false, x: 0, y: 0 });
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 184;
+    const menuMaxHeight = 280;
+    const pad = 8;
+    const preferredX = rect.right + 8;
+    const x = preferredX + menuWidth <= window.innerWidth - pad ? preferredX : rect.left - menuWidth - 8;
+    setTagMenuState({
+      open: true,
+      x: Math.max(pad, Math.min(x, window.innerWidth - menuWidth - pad)),
+      y: Math.max(pad, Math.min(rect.top, window.innerHeight - menuMaxHeight - pad)),
+    });
   }
 
   async function handleCopyImage() {
     if (!assetUrl) return;
     setMenuState({ open: false, x: 0, y: 0 });
-    setTagMenuOpen(false);
-    onImageActionStatus("busy", t("common.states.copyingImage"));
+    setTagMenuState({ open: false, x: 0, y: 0 });
+    onImageActionStatus("busy", t("common:states.copyingImage"));
     try {
       await copyLibraryImage(assetUrl);
-      onImageActionStatus("ready", t("common.states.imageCopied"));
+      onImageActionStatus("ready", t("common:states.imageCopied"));
     } catch (error) {
-      onImageActionStatus("error", t("common.errors.imageActionFailed", { message: error instanceof Error ? error.message : String(error) }));
+      onImageActionStatus("error", t("common:errors.imageActionFailed", { message: error instanceof Error ? error.message : String(error) }));
     }
   }
 
   async function handleDownloadOriginalImage() {
     if (!assetUrl) return;
     setMenuState({ open: false, x: 0, y: 0 });
-    setTagMenuOpen(false);
-    onImageActionStatus("busy", t("common.states.downloadingImage"));
+    setTagMenuState({ open: false, x: 0, y: 0 });
+    onImageActionStatus("busy", t("common:states.downloadingImage"));
     try {
       await downloadLibraryOriginalImage(assetUrl, action.name || `action-${action.id}`);
-      onImageActionStatus("ready", t("common.states.imageDownloadStarted"));
+      onImageActionStatus("ready", t("common:states.imageDownloadStarted"));
     } catch (error) {
-      onImageActionStatus("error", t("common.errors.imageActionFailed", { message: error instanceof Error ? error.message : String(error) }));
+      onImageActionStatus("error", t("common:errors.imageActionFailed", { message: error instanceof Error ? error.message : String(error) }));
     }
   }
 
@@ -416,7 +440,7 @@ function ActionCard({
             className="outfit-card__image"
             role="button"
             tabIndex={promptOpen ? -1 : 0}
-            aria-label={t("actionLibrary.promptLabel", { name: imageAlt })}
+            aria-label={t("actionLibrary:promptLabel", { name: imageAlt })}
             aria-hidden={promptOpen}
             aria-pressed={promptOpen}
             onClick={() => setPromptOpen(true)}
@@ -430,11 +454,14 @@ function ActionCard({
             {assetUrl ? (
               <img src={assetUrl} alt={imageAlt} loading="lazy" draggable={false} onDragStart={(event) => event.preventDefault()} />
             ) : (
-              <div className="placeholder">{t("common.empty.noImage")}</div>
+              <div className="placeholder">{t("common:empty.noImage")}</div>
             )}
           </div>
+          <div className="outfit-card__name" title={action.name}>
+            {action.name}
+          </div>
           {action.tags.length ? (
-            <div className="outfit-card__tags" aria-label={t("actionLibrary.actionTags")}>
+            <div className="outfit-card__tags" aria-label={t("actionLibrary:actionTags")}>
               {action.tags.slice(0, 3).map((tag) => (
                 <span key={tag}>{tag}</span>
               ))}
@@ -442,7 +469,7 @@ function ActionCard({
           ) : null}
         </div>
         <div className="action-card__face action-card__face--back" aria-hidden={!promptOpen}>
-          <button className="action-card__back-button" type="button" tabIndex={promptOpen ? 0 : -1} aria-label={t("actionLibrary.backToImage")} title={t("common.actions.back")} onClick={closePromptEditor}>
+          <button className="action-card__back-button" type="button" tabIndex={promptOpen ? 0 : -1} aria-label={t("actionLibrary:backToImage")} title={t("common:actions.back")} onClick={closePromptEditor}>
             <ArrowLeft size={18} aria-hidden="true" />
           </button>
           <label className="action-card__prompt-field">
@@ -451,7 +478,7 @@ function ActionCard({
               value={draftPrompt}
               maxLength={4000}
               tabIndex={promptOpen ? 0 : -1}
-              placeholder={t("actionLibrary.inputText")}
+              placeholder={t("actionLibrary:inputText")}
               onChange={(event) => setDraftPrompt(event.target.value)}
               onBlur={commitPrompt}
               onKeyDown={(event) => {
@@ -464,7 +491,7 @@ function ActionCard({
           </label>
         </div>
       </div>
-      <button className="outfit-card__menu-button" type="button" aria-label={t("actionLibrary.actionActions")} aria-expanded={menuState.open} onClick={openMenu}>
+      <button className="outfit-card__menu-button" type="button" aria-label={t("actionLibrary:actionActions")} aria-expanded={menuState.open} onClick={openMenu}>
         <MoreHorizontal size={18} aria-hidden="true" />
       </button>
       {menuState.open
@@ -475,35 +502,25 @@ function ActionCard({
               style={{ left: menuState.x, top: menuState.y }}
               onPointerDown={(event) => event.stopPropagation()}
             >
-              <button type="button" role="menuitem" onClick={() => setTagMenuOpen((open) => !open)}>
+              <button
+                className={tagMenuState.open ? "active" : ""}
+                type="button"
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={tagMenuState.open}
+                onClick={toggleTagMenu}
+              >
                 <Tags size={16} aria-hidden="true" />
-                <span>{t("common.labels.tags")}</span>
+                <span>{t("common:labels.tags")}</span>
+                <ChevronRight className="outfit-card-menu__chevron" size={15} aria-hidden="true" />
               </button>
-              {tagMenuOpen ? (
-                <div className="outfit-tag-menu" aria-label={t("actionLibrary.chooseTags")}>
-                  {tags.length ? (
-                    tags.map((tag) => (
-                      <button
-                        key={tag.id}
-                        className={action.tags.includes(tag.name) ? "selected" : ""}
-                        type="button"
-                        onClick={() => onToggleTag(action.id, tag.name)}
-                      >
-                        {tag.name}
-                      </button>
-                    ))
-                  ) : (
-                    <div className="outfit-tag-menu__empty">{t("actionLibrary.noTags")}</div>
-                  )}
-                </div>
-              ) : null}
               <button type="button" role="menuitem" disabled={!assetUrl} onClick={() => void handleDownloadOriginalImage()}>
                 <Download size={16} aria-hidden="true" />
-                <span>{t("common.actions.downloadOriginalImage")}</span>
+                <span>{t("common:actions.downloadOriginalImage")}</span>
               </button>
               <button type="button" role="menuitem" disabled={!assetUrl} onClick={() => void handleCopyImage()}>
                 <Copy size={16} aria-hidden="true" />
-                <span>{t("common.actions.copyImage")}</span>
+                <span>{t("common:actions.copyImage")}</span>
               </button>
               <button
                 className={deleteConfirmActionId === action.id ? "danger confirming" : "danger"}
@@ -513,8 +530,37 @@ function ActionCard({
                 onClick={() => onDelete(action.id, deleteConfirmActionId === action.id)}
               >
                 <Trash2 size={16} aria-hidden="true" />
-                <span>{deleteConfirmActionId === action.id ? t("common.confirm.delete") : t("common.actions.delete")}</span>
+                <span>{deleteConfirmActionId === action.id ? t("common:confirm.delete") : t("common:actions.delete")}</span>
               </button>
+            </div>,
+            document.body,
+          )
+        : null}
+      {tagMenuState.open
+        ? createPortal(
+            <div
+              className="outfit-tag-menu outfit-tag-menu--submenu"
+              role="menu"
+              aria-label={t("actionLibrary:chooseTags")}
+              style={{ left: tagMenuState.x, top: tagMenuState.y }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              {tags.length ? (
+                tags.map((tag) => (
+                  <button
+                    key={tag.id}
+                    className={action.tags.includes(tag.name) ? "selected" : ""}
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={action.tags.includes(tag.name)}
+                    onClick={() => onToggleTag(action.id, tag.name)}
+                  >
+                    {tag.name}
+                  </button>
+                ))
+              ) : (
+                <div className="outfit-tag-menu__empty">{t("actionLibrary:noTags")}</div>
+              )}
             </div>,
             document.body,
           )
@@ -602,19 +648,19 @@ function CreateProjectDialog({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="dialog__head">
-          <h2 id="create-action-project-title">{t("common.labels.newProject")}</h2>
-          <p>{t("actionLibrary.createProjectDescription")}</p>
+          <h2 id="create-action-project-title">{t("common:labels.newProject")}</h2>
+          <p>{t("actionLibrary:createProjectDescription")}</p>
         </div>
         <label className="dialog-field">
-          <span>{t("common.labels.projectName")}</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} autoFocus maxLength={120} placeholder={t("actionLibrary.projectPlaceholder")} />
+          <span>{t("common:labels.projectName")}</span>
+          <input value={name} onChange={(event) => setName(event.target.value)} autoFocus maxLength={120} placeholder={t("actionLibrary:projectPlaceholder")} />
         </label>
         <div className="dialog__actions">
           <button className="button secondary" type="button" onClick={onClose} disabled={isCreating}>
-            {t("common.actions.cancel")}
+            {t("common:actions.cancel")}
           </button>
           <button className="button primary" type="submit" disabled={isCreating}>
-            {isCreating ? t("common.states.creating") : t("common.actions.create")}
+            {isCreating ? t("common:states.creating") : t("common:actions.create")}
           </button>
         </div>
       </form>
@@ -683,14 +729,14 @@ function ActionTagManager({
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="model-tag-manager" role="dialog" aria-modal="true" aria-labelledby="action-tag-manager-title" onMouseDown={(event) => event.stopPropagation()}>
         <div className="dialog__head">
-          <h2 id="action-tag-manager-title">{t("common.labels.manageTags")}</h2>
-          <p>{t("actionLibrary.tagManagerDescription")}</p>
+          <h2 id="action-tag-manager-title">{t("common:labels.manageTags")}</h2>
+          <p>{t("actionLibrary:tagManagerDescription")}</p>
         </div>
 
         <div className="dialog-field">
-          <span>{t("common.labels.newTag")}</span>
+          <span>{t("common:labels.newTag")}</span>
           <div className="tag-create-row">
-            <input value={newTagName} onChange={(event) => setNewTagName(event.target.value)} maxLength={24} placeholder={t("common.labels.tagNamePlaceholder")} />
+            <input value={newTagName} onChange={(event) => setNewTagName(event.target.value)} maxLength={24} placeholder={t("common:labels.tagNamePlaceholder")} />
             <button
               className="button primary"
               type="button"
@@ -700,13 +746,13 @@ function ActionTagManager({
                 setNewTagName("");
               }}
             >
-              {t("common.actions.add")}
+              {t("common:actions.add")}
             </button>
           </div>
         </div>
 
         <div className="model-tag-manager__body">
-          <div className="model-tag-manager__list" aria-label={t("common.labels.tagList")}>
+          <div className="model-tag-manager__list" aria-label={t("common:labels.tagList")}>
             {tags.map((tag) => {
               const selected = selectedTagId === tag.id;
               return (
@@ -715,13 +761,13 @@ function ActionTagManager({
                 </button>
               );
             })}
-            {!tags.length ? <div className="model-tag-manager__empty">{t("actionLibrary.noTags")}</div> : null}
+            {!tags.length ? <div className="model-tag-manager__empty">{t("actionLibrary:noTags")}</div> : null}
           </div>
 
           {selectedTag ? (
             <div className="model-tag-manager__editor">
               <label className="dialog-field">
-                <span>{t("common.labels.editTag")}</span>
+                <span>{t("common:labels.editTag")}</span>
                 <input
                   value={draftTagName}
                   onChange={(event) => setDraftTagName(event.target.value)}
@@ -744,11 +790,11 @@ function ActionTagManager({
                 type="button"
                 onClick={() => onDeleteTag(selectedTag.id, deleteConfirmTagId === selectedTag.id)}
               >
-                {deleteConfirmTagId === selectedTag.id ? t("common.confirm.delete") : t("common.actions.delete")}
+                {deleteConfirmTagId === selectedTag.id ? t("common:confirm.delete") : t("common:actions.delete")}
               </button>
             </div>
           ) : (
-            <div className="model-tag-manager__editor model-tag-manager__editor--empty">{t("common.labels.emptyTagEditor")}</div>
+            <div className="model-tag-manager__editor model-tag-manager__editor--empty">{t("common:labels.emptyTagEditor")}</div>
           )}
         </div>
       </section>
@@ -756,7 +802,7 @@ function ActionTagManager({
   );
 }
 
-export function ActionLibraryPage() {
+export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
@@ -768,9 +814,9 @@ export function ActionLibraryPage() {
   const [closeMenuToken, setCloseMenuToken] = useState(0);
   const { toast: imageActionToast, showToast: showImageActionToast } = useLibraryImageActionToast();
   const activeProjectId = useActionLibraryStore((state) => state.activeProjectId);
-  const activeTagId = useActionLibraryStore((state) => state.activeTagId);
+  const activeTagIds = useActionLibraryStore((state) => state.activeTagIds);
   const setActiveProjectId = useActionLibraryStore((state) => state.setActiveProjectId);
-  const setActiveTagId = useActionLibraryStore((state) => state.setActiveTagId);
+  const setActiveTagIds = useActionLibraryStore((state) => state.setActiveTagIds);
 
   const storageSettingsQuery = useQuery({
     queryKey: actionLibraryKeys.storageSettings,
@@ -802,23 +848,24 @@ export function ActionLibraryPage() {
 
   useEffect(() => {
     const tags = tagsQuery.data?.tags || [];
-    if (activeTagId && !tags.some((tag) => tag.id === activeTagId)) setActiveTagId("");
-  }, [activeTagId, setActiveTagId, tagsQuery.data?.tags]);
+    const validTagIds = activeTagIds.filter((tagId) => tags.some((tag) => tag.id === tagId));
+    if (validTagIds.length !== activeTagIds.length) setActiveTagIds(validTagIds);
+  }, [activeTagIds, setActiveTagIds, tagsQuery.data?.tags]);
 
   const actionsQuery = useQuery({
-    queryKey: activeProjectId ? actionLibraryKeys.actions(activeProjectId, activeTagId) : ["actions", "empty"],
-    queryFn: () => listActions({ projectId: activeProjectId, tagId: activeTagId }),
+    queryKey: activeProjectId ? actionLibraryKeys.actions(activeProjectId, activeTagIds) : ["actions", "empty"],
+    queryFn: () => listActions({ projectId: activeProjectId, tagIds: activeTagIds }),
     enabled: Boolean(activeProjectId),
   });
 
   const createActionMutation = useMutation({
     mutationFn: async (file: File) => {
-      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
       const payload = await fileToUploadPayload(file);
       return createAction(activeProjectId, payload);
     },
     onSuccess: async () => {
-      if (activeTagId) setActiveTagId("");
+      if (activeTagIds.length) setActiveTagIds([]);
       setDeleteConfirmActionId("");
       await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.projects });
@@ -884,7 +931,7 @@ export function ActionLibraryPage() {
 
   const createTagMutation = useMutation({
     mutationFn: (name: string) => {
-      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
       return createActionTag(activeProjectId, name);
     },
     onSuccess: async () => {
@@ -892,10 +939,10 @@ export function ActionLibraryPage() {
     },
   });
 
-  const renameTagMutation = useMutation({
-    mutationFn: ({ tagId, name }: { tagId: string; name: string }) => {
-      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
-      return updateActionTag(activeProjectId, tagId, { name });
+  const updateTagMutation = useMutation({
+    mutationFn: ({ tagId, name }: { tagId: string; name?: string }) => {
+      if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
+      return updateActionTag(activeProjectId, tagId, { ...(name !== undefined ? { name } : {}) });
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
@@ -904,12 +951,12 @@ export function ActionLibraryPage() {
 
   const deleteTagMutation = useMutation({
     mutationFn: (tagId: string) => {
-      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
       return deleteActionTag(activeProjectId, tagId);
     },
     onSuccess: async (_result, tagId) => {
       setDeleteConfirmTagId("");
-      if (activeTagId === tagId) setActiveTagId("");
+      if (activeTagIds.includes(tagId)) setActiveTagIds(activeTagIds.filter((activeTagId) => activeTagId !== tagId));
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
       await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
     },
@@ -957,7 +1004,11 @@ export function ActionLibraryPage() {
   function handleRenameTag(tagId: string, name: string) {
     const next = normalizeTags([name])[0];
     if (!next) return;
-    renameTagMutation.mutate({ tagId, name: next });
+    updateTagMutation.mutate({ tagId, name: next });
+  }
+
+  function handleToggleTagFilter(tagId: string) {
+    setActiveTagIds(activeTagIds.includes(tagId) ? activeTagIds.filter((activeTagId) => activeTagId !== tagId) : [...activeTagIds, tagId]);
   }
 
   function handleDeleteTag(tagId: string, isConfirming: boolean) {
@@ -969,6 +1020,14 @@ export function ActionLibraryPage() {
   }
 
   const actions = useMemo(() => sortByName(actionsQuery.data?.actions || [], (action) => action.name), [actionsQuery.data?.actions]);
+  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
+  const filteredActions = useMemo(() => {
+    if (!normalizedSearchQuery) return actions;
+    return actions.filter((action) => {
+      const searchableText = [action.name, ...action.tags].join(" ").toLocaleLowerCase();
+      return searchableText.includes(normalizedSearchQuery);
+    });
+  }, [actions, normalizedSearchQuery]);
   const tags = tagsQuery.data?.tags || [];
   const activeProject = projects.find((project) => project.id === activeProjectId) || null;
   const errorMessage = getRequestError([
@@ -984,12 +1043,12 @@ export function ActionLibraryPage() {
     renameProjectMutation.error,
     deleteProjectMutation.error,
     createTagMutation.error,
-    renameTagMutation.error,
+    updateTagMutation.error,
     deleteTagMutation.error,
   ]);
 
   return (
-    <section className="model-library-page action-library-page" aria-label={t("actionLibrary.title")}>
+    <section className="model-library-page action-library-page" aria-label={t("actionLibrary:title")}>
       <div className="model-library">
         <ActionProjectSidebar
           projects={projects}
@@ -1016,20 +1075,21 @@ export function ActionLibraryPage() {
           <div className="model-content-head">
             <ActionToolbar
               tags={tags}
-              activeTagId={activeTagId}
-              onTagChange={setActiveTagId}
+              activeTagIds={activeTagIds}
+              onTagToggle={handleToggleTagFilter}
+              onTagClear={() => setActiveTagIds([])}
               onOpenTagManager={() => setTagManagerOpen(true)}
             />
           </div>
 
           <div className="model-lib-body">
-            {errorMessage ? <div className="model-lib-error">{t("actionLibrary.requestFailed", { message: errorMessage })}</div> : null}
-            {storageSettingsQuery.isLoading || projectsQuery.isLoading ? <div className="model-lib-empty">{t("common.states.loadingProjects")}</div> : null}
-            {!storageConfigured ? <div className="model-lib-empty">{t("actionLibrary.storageUnavailable")}</div> : null}
-            {storageConfigured && !projectsQuery.isLoading && !projects.length ? <div className="model-lib-empty">{t("common.empty.noProjects")}</div> : null}
+            {errorMessage ? <div className="model-lib-error">{t("actionLibrary:requestFailed", { message: errorMessage })}</div> : null}
+            {storageSettingsQuery.isLoading || projectsQuery.isLoading ? <div className="model-lib-empty">{t("common:states.loadingProjects")}</div> : null}
+            {!storageConfigured ? <div className="model-lib-empty">{t("actionLibrary:storageUnavailable")}</div> : null}
+            {storageConfigured && !projectsQuery.isLoading && !projects.length ? <div className="model-lib-empty">{t("common:empty.noProjects")}</div> : null}
             {activeProject ? (
               <ActionGrid
-                actions={actions}
+                actions={filteredActions}
                 tags={tags}
                 creating={createActionMutation.isPending}
                 deletingActionId={deleteActionMutation.isPending ? deleteActionMutation.variables || "" : ""}

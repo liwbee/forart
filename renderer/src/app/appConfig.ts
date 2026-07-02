@@ -68,6 +68,10 @@ export interface ForartUpdateRunResult {
   stdout?: string;
   stderr?: string;
   restartRequired?: boolean;
+  backupDir?: string;
+  updated?: string[];
+  count?: number;
+  version?: string;
   error?: string;
 }
 
@@ -114,13 +118,81 @@ export interface ForartConfigApi {
 
 export interface EasyToolApi {
   saveResult: (payload: { dataUrl?: string; url?: string; defaultName?: string; directory?: string }) => Promise<{ canceled: boolean; filePath?: string }>;
-  listCanvases: () => Promise<{ canvases: Array<{ id: string; title: string; icon?: string; canvasType?: string; source?: string; libtvProjectId?: string; libtvProjectName?: string; color?: string; pinned?: boolean; createdAt: number; updatedAt: number; nodeCount: number }> }>;
-  createCanvas: (payload: { title?: string; icon?: string; canvasType?: string; source?: string; libtvProjectId?: string; libtvProjectName?: string; nodes?: unknown[]; connections?: unknown[]; groups?: unknown[]; viewport?: unknown }) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
-  loadCanvasProject: (canvasId: string) => Promise<unknown | null>;
-  saveCanvasProject: (canvasId: string, payload: unknown) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
-  updateCanvasMeta: (canvasId: string, patch: { title?: string; icon?: string; color?: string; pinned?: boolean }) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
+  listCanvases: () => Promise<{
+    canvases: Array<{ id: string; title: string; icon?: string; canvasType?: string; source?: string; projectId?: string; color?: string; pinned?: boolean; createdAt: number; updatedAt: number; nodeCount: number }>;
+    projects: Array<{ id: string; title: string; color?: string; createdAt: number; updatedAt: number }>;
+  }>;
+  createCanvas: (payload: { title?: string; icon?: string; canvasType?: string; source?: string; projectId?: string; nodes?: unknown[]; connections?: unknown[]; groups?: unknown[]; viewport?: unknown }) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
+  createCanvasProject: (payload: { title?: string; color?: string }) => Promise<{ ok: true; project: unknown }>;
+  loadCanvas: (canvasId: string) => Promise<unknown | null>;
+  saveCanvas: (canvasId: string, payload: unknown) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
+  updateCanvasMeta: (canvasId: string, patch: { title?: string; icon?: string; projectId?: string; color?: string; pinned?: boolean }) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
+  updateCanvasProject: (projectId: string, patch: { title?: string; color?: string }) => Promise<{ ok: true; project: unknown }>;
   deleteCanvas: (canvasId: string) => Promise<{ ok: true; filePath?: string }>;
+  deleteCanvasProject: (projectId: string) => Promise<{ ok: true; deletedCanvasIds?: string[] }>;
+  moveCanvasToProject: (canvasId: string, projectId: string) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
   saveCanvasAsset: (payload: { dataUrl?: string; url?: string; defaultName?: string; kind?: "input" | "output" }) => Promise<{ url: string; fileName: string; filePath?: string }>;
+  scanCanvasCache: () => Promise<CanvasCacheScanResult>;
+  deleteCanvasCacheAssets: (payload: { ids: string[]; olderThanDays?: number }) => Promise<CanvasCacheDeleteResult>;
+  revealCanvasCacheAsset: (payload: { id?: string; filePath?: string }) => Promise<{ ok: true }>;
+  openCanvasCacheRoot: () => Promise<{ ok: true }>;
+  getGenerationTask: (taskId: string) => Promise<unknown | null>;
+  createGenerationTask: (payload: unknown) => Promise<unknown>;
+  updateGenerationTask: (taskId: string, patch: unknown) => Promise<unknown>;
+  resumeGenerationTask: (taskId: string, payload?: unknown) => Promise<unknown>;
+  stopGenerationTask: (taskId: string) => Promise<unknown>;
+  stopGenerationTasksForTarget: (canvasId: string, target: unknown) => Promise<{ ok: true; tasks: unknown[]; taskIds: string[] }>;
+  stopGenerationTasksForNode: (canvasId: string, nodeId: string) => Promise<{ ok: true; tasks: unknown[]; taskIds: string[] }>;
+  stopGenerationTasksForCanvas: (canvasId: string) => Promise<{ ok: true; tasks: unknown[]; taskIds: string[] }>;
+  writeCanvasClipboard: (payload: unknown) => Promise<{ ok: true }>;
+}
+
+export interface CanvasCacheReference {
+  canvasId: string;
+  canvasTitle: string;
+  nodeId?: string;
+  nodeTitle?: string;
+  source: string;
+}
+
+export interface CanvasCacheAsset {
+  id: string;
+  kind: "input" | "output" | "missing";
+  url: string;
+  filePath: string;
+  fileName: string;
+  sizeBytes: number;
+  modifiedAt: number;
+  exists: boolean;
+  referenced: boolean;
+  references: CanvasCacheReference[];
+}
+
+export interface CanvasCacheScanResult {
+  rootPath: string;
+  scannedAt: number;
+  assets: CanvasCacheAsset[];
+  missingReferences: CanvasCacheAsset[];
+  totals: {
+    inputCount: number;
+    inputBytes: number;
+    outputCount: number;
+    outputBytes: number;
+    referencedCount: number;
+    referencedBytes: number;
+    cleanableCount: number;
+    cleanableBytes: number;
+    missingReferenceCount: number;
+  };
+}
+
+export interface CanvasCacheDeleteResult {
+  ok: true;
+  deletedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  freedBytes: number;
+  failures: Array<{ id: string; message: string }>;
 }
 
 export interface ImageReviewImage {
@@ -147,97 +219,6 @@ export interface ImageReviewApi {
   saveIssue: (payload: { root: string; path: string; issue: string }) => Promise<{ ok: true }>;
 }
 
-export interface LibtvModelOption {
-  key: string;
-  name: string;
-  label: string;
-}
-
-export interface LibtvImportResult {
-  title?: string;
-  nodes: unknown[];
-  connections: unknown[];
-  groups: unknown[];
-  viewport?: unknown;
-}
-
-export interface LibtvProjectRecord {
-  id?: number;
-  uuid: string;
-  name: string;
-  teamId?: number;
-  updatedAtMs?: number;
-  createdAtMs?: number;
-  coverUrl?: string;
-}
-
-export interface LibtvGeneratePayload {
-  projectId: string;
-  nodeId: string;
-  prompt?: string;
-  model?: string;
-  resolution?: string;
-  aspectRatio?: string;
-  content?: string | string[];
-  url?: string | string[];
-  originalUrl?: string | string[];
-  left?: string | string[];
-  leftAdd?: string | string[];
-  leftRemove?: string | string[];
-  right?: string | string[];
-  rightAdd?: string | string[];
-  rightRemove?: string | string[];
-}
-
-export interface LibtvGenerateResult {
-  nodeId: string;
-  projectId: string;
-  url?: string;
-  fileName?: string;
-  status?: string;
-  raw?: unknown;
-}
-
-export interface LibtvCreateNodePayload {
-  projectId: string;
-  title?: string;
-  type: "image" | "text";
-  x?: number;
-  y?: number;
-  prompt?: string;
-  model?: string;
-  resolution?: string;
-  aspectRatio?: string;
-  content?: string | string[];
-}
-
-export interface LibtvCreateNodeResult {
-  nodeId: string;
-  projectId: string;
-  title?: string;
-  type?: string;
-  url?: string;
-  fileName?: string;
-  raw?: unknown;
-}
-
-export interface LibtvUploadNodeResult {
-  nodeId: string;
-  projectId: string;
-  title?: string;
-  url?: string;
-  fileName?: string;
-  raw?: unknown;
-}
-
-export interface LibtvImportProgress {
-  projectId?: string;
-  stage: "loadingProject" | "loadingNodeDetails" | "mappingNodes" | "creatingCanvas" | "done";
-  current?: number;
-  total?: number;
-  message?: string;
-}
-
 export interface LibtvAccountRecord {
   accountId?: number | string;
   accountName?: string;
@@ -251,6 +232,60 @@ export interface LibtvAccountRecord {
   };
 }
 
+export interface LibtvWorkspaceRecord {
+  id: string;
+  name: string;
+  fileCnt?: number;
+}
+
+export interface LibtvProjectRecord {
+  uuid: string;
+  name: string;
+}
+
+export interface LibtvImageModelRecord {
+  modelKey: string;
+  modelName: string;
+}
+
+export interface LibtvImageGenerationResult {
+  ok: true;
+  url: string;
+  localUrl: string;
+  fileName: string;
+  filePath?: string;
+  remoteNodeId: string;
+  remoteNodeTitle?: string;
+  remoteReferenceNodeIds: string[];
+  remoteReferenceNodeTitles?: string[];
+  groupNodeId?: string;
+  groupTitle?: string;
+  projectUuid?: string;
+  projectName?: string;
+  createdAt: number;
+}
+
+export interface LibtvBatchGenerationFailureResult {
+  ok: false;
+  id?: string;
+  error: string;
+  remoteNodeId?: string;
+  remoteNodeTitle?: string;
+  remoteReferenceNodeIds?: string[];
+  remoteReferenceNodeTitles?: string[];
+  createdAt: number;
+}
+
+export interface LibtvBatchGenerationResult {
+  ok: true;
+  projectUuid?: string;
+  projectName?: string;
+  groupNodeId?: string;
+  groupTitle?: string;
+  results: Array<(LibtvImageGenerationResult & { id?: string }) | LibtvBatchGenerationFailureResult>;
+  createdAt: number;
+}
+
 export interface LibtvApi {
   status: () => Promise<{ ok: boolean; available: boolean; path?: string; version?: string; error?: string }>;
   install: () => Promise<{ ok: true; path?: string; stdout?: string; stderr?: string }>;
@@ -259,16 +294,41 @@ export interface LibtvApi {
   useAccount: (account: string | number) => Promise<{ ok: true }>;
   loginWeb: () => Promise<{ ok: true }>;
   logout: () => Promise<{ ok: true }>;
-  imageModels: () => Promise<{ models: LibtvModelOption[] }>;
-  searchProjects: (payload: { name?: string; page?: number; pageSize?: number; teamId?: number | null }) => Promise<{ projects: LibtvProjectRecord[]; total: number }>;
-  importProject: (projectId: string) => Promise<LibtvImportResult>;
-  onImportProgress?: (callback: (payload: LibtvImportProgress) => void) => () => void;
-  createNode: (payload: LibtvCreateNodePayload) => Promise<LibtvCreateNodeResult>;
-  deleteNode: (payload: { projectId: string; nodeId: string; title?: string; type?: string }) => Promise<{ ok: true; projectId: string; nodeId: string }>;
-  runImageNode: (payload: LibtvGeneratePayload) => Promise<LibtvGenerateResult>;
-  updateNode: (payload: LibtvGeneratePayload) => Promise<LibtvGenerateResult>;
-  uploadNode: (payload: { projectId: string; title?: string; filePath: string; x?: number; y?: number }) => Promise<LibtvUploadNodeResult>;
-  syncNode: (payload: { projectId: string; nodeId: string }) => Promise<LibtvGenerateResult>;
+  workspaces: (payload?: { page?: number; pageSize?: number }) => Promise<{ ok: true; workspaces: LibtvWorkspaceRecord[] }>;
+  projects: (payload: { workspaceId: string; page?: number; pageSize?: number }) => Promise<{ ok: true; projects: LibtvProjectRecord[] }>;
+  imageModels: () => Promise<{ ok: true; models: LibtvImageModelRecord[] }>;
+  generateImage: (payload: {
+    workspaceId?: string;
+    projectUuid?: string;
+    prompt: string;
+    modelName: string;
+    aspectRatio?: string;
+    quality?: string;
+    referenceImages?: string[];
+    nodeTitle?: string;
+    x?: number;
+    y?: number;
+  }) => Promise<LibtvImageGenerationResult>;
+  generateBatch: (payload: {
+    workspaceId?: string;
+    projectUuid?: string;
+    modelName?: string;
+    aspectRatio?: string;
+    quality?: string;
+    groupTitle?: string;
+    jobs: Array<{
+      id?: string;
+      localTargetId?: string;
+      prompt: string;
+      modelName?: string;
+      aspectRatio?: string;
+      quality?: string;
+      referenceImages?: string[];
+      nodeTitle?: string;
+      x?: number;
+      y?: number;
+    }>;
+  }) => Promise<LibtvBatchGenerationResult>;
 }
 
 declare global {

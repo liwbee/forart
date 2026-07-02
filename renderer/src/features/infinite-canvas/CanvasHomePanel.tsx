@@ -1,84 +1,66 @@
-import { ChevronDown, Download, Layers, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Check, Copy, FolderInput, Layers, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import type { LibtvImportProgress, LibtvProjectRecord } from "../../app/appConfig";
-import type { CanvasProjectRecord } from "./types";
+import type { CanvasDocumentRecord, CanvasProjectRecord } from "./types";
 
-export type CanvasHomeMode = "local" | "libtv";
+export type CanvasHomeMode = "local";
 export type CanvasSortMode = "recent" | "name";
 
-export type LibtvImportCardRecord = CanvasProjectRecord & {
-  isLibtvImporting: true;
-  libtvProjectId: string;
-  libtvImportProgress: LibtvImportProgress | null;
-};
+export type HomeCanvasRecord = CanvasDocumentRecord;
 
-export type HomeCanvasRecord = CanvasProjectRecord | LibtvImportCardRecord;
+type CanvasCardMenuTarget = { kind: "canvas"; id: string };
+type ProjectMenuTarget = { id: string };
+
+interface CanvasCardMenuState {
+  target: CanvasCardMenuTarget | null;
+  x: number;
+  y: number;
+}
+
+interface ProjectMenuState {
+  target: ProjectMenuTarget | null;
+  x: number;
+  y: number;
+}
+
+interface CanvasMoveMenuState {
+  canvasId: string;
+  x: number;
+  y: number;
+}
 
 interface CanvasHomePanelProps {
   mode: CanvasHomeMode;
-  projects: HomeCanvasRecord[];
-  selectedProjectId: string;
+  documents: HomeCanvasRecord[];
+  projects: CanvasProjectRecord[];
+  activeProjectId: string;
+  selectedDocumentId: string;
+  renamingDocumentId: string;
   renamingProjectId: string;
   renamingTitle: string;
+  confirmingDeleteDocumentId: string;
   confirmingDeleteProjectId: string;
   sortMode: CanvasSortMode;
-  projectStatus: string;
-  libtvProjectResults: LibtvProjectRecord[];
-  libtvProjectFilter: string;
-  libtvImporting: boolean;
-  selectedLibtvProjectUuid: string;
-  onModeChange: (mode: CanvasHomeMode) => void;
-  onOpenLibtvHome: () => void;
   onRefreshLocal: () => void;
   onCreateCanvas: () => void;
+  onCreateProject: () => void;
+  onSelectDocument: (canvasId: string) => void;
+  onOpenDocument: (canvasId: string) => void;
   onSelectProject: (projectId: string) => void;
-  onOpenProject: (projectId: string) => void;
-  onStartRename: (projectId: string, title: string) => void;
+  onStartRenameDocument: (canvasId: string, title: string) => void;
+  onStartRenameProject: (projectId: string, title: string) => void;
   onCancelRename: () => void;
   onRenamingTitleChange: (title: string) => void;
-  onSubmitRename: (projectId: string) => void;
-  onConfirmDelete: (projectId: string) => void;
-  onCancelDelete: () => void;
+  onSubmitRenameDocument: (canvasId: string) => void;
+  onSubmitRenameProject: (projectId: string) => void;
+  onDuplicateDocument: (canvasId: string) => void;
+  onMoveDocumentToProject: (canvasId: string, projectId: string) => void;
+  onConfirmDeleteDocument: (canvasId: string) => void;
+  onConfirmDeleteProject: (projectId: string) => void;
+  onDeleteDocument: (canvasId: string) => void;
   onDeleteProject: (projectId: string) => void;
   onSortModeChange: (mode: CanvasSortMode) => void;
-  onRefreshLibtvProjects: () => void;
-  onLibtvProjectFilterChange: (value: string) => void;
-  onSelectLibtvProject: (projectUuid: string) => void;
-  onImportLibtvProject: (projectUuid: string) => void;
-}
-
-function isLibtvImportCard(project: HomeCanvasRecord): project is LibtvImportCardRecord {
-  return "isLibtvImporting" in project && project.isLibtvImporting;
-}
-
-function getLibtvImportProgressPercent(progress: LibtvImportProgress | null | undefined) {
-  if (!progress) return 0;
-  const current = Number(progress.current || 0);
-  const total = Number(progress.total || 0);
-  const detailRatio = total > 0 ? Math.max(0, Math.min(1, current / total)) : 0;
-  if (progress.stage === "loadingProject") return 12;
-  if (progress.stage === "loadingNodeDetails") return Math.round(16 + detailRatio * 72);
-  if (progress.stage === "mappingNodes") return 92;
-  if (progress.stage === "creatingCanvas") return 96;
-  if (progress.stage === "done") return 100;
-  return 0;
-}
-
-function formatLibtvProgressValue(progress: LibtvImportProgress | null | undefined) {
-  const percent = getLibtvImportProgressPercent(progress);
-  const current = Number(progress?.current || 0);
-  const total = Number(progress?.total || 0);
-  return total > 0 ? `${percent}% - ${Math.min(current, total)} / ${total}` : `${percent}%`;
-}
-
-function LibtvLogoMark({ size = 22 }: { size?: number }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={Math.round(size * 0.68)} fill="currentColor" viewBox="0 0 25.206 16.616" aria-hidden="true" focusable="false">
-      <path d="M16.576 16.616H0l.833-4.418H17.65z" />
-      <path d="m0 16.616 2.314-12.27h4.448l-2.316 12.27zM8.27 0h16.936l-.832 4.416H7.544z" />
-      <path d="m25.206 0-2.314 12.27-4.512.002L20.76 0z" />
-    </svg>
-  );
 }
 
 function formatProjectDate(timestamp: number) {
@@ -88,249 +70,439 @@ function formatProjectDate(timestamp: number) {
 }
 
 export function CanvasHomePanel({
-  mode,
+  documents,
   projects,
-  selectedProjectId,
+  activeProjectId,
+  selectedDocumentId,
+  renamingDocumentId,
   renamingProjectId,
   renamingTitle,
+  confirmingDeleteDocumentId,
   confirmingDeleteProjectId,
   sortMode,
-  projectStatus,
-  libtvProjectResults,
-  libtvProjectFilter,
-  libtvImporting,
-  selectedLibtvProjectUuid,
-  onModeChange,
-  onOpenLibtvHome,
   onRefreshLocal,
   onCreateCanvas,
+  onCreateProject,
+  onSelectDocument,
+  onOpenDocument,
   onSelectProject,
-  onOpenProject,
-  onStartRename,
+  onStartRenameDocument,
+  onStartRenameProject,
   onCancelRename,
   onRenamingTitleChange,
-  onSubmitRename,
-  onConfirmDelete,
-  onCancelDelete,
+  onSubmitRenameDocument,
+  onSubmitRenameProject,
+  onDuplicateDocument,
+  onMoveDocumentToProject,
+  onConfirmDeleteDocument,
+  onConfirmDeleteProject,
+  onDeleteDocument,
   onDeleteProject,
   onSortModeChange,
-  onRefreshLibtvProjects,
-  onLibtvProjectFilterChange,
-  onSelectLibtvProject,
-  onImportLibtvProject,
 }: CanvasHomePanelProps) {
   const { t } = useTranslation();
-  const selectedProject = projects.find((project) => project.id === selectedProjectId) || projects[0] || null;
-  const filteredLibtvProjects = libtvProjectResults.filter((project) => {
-    const query = libtvProjectFilter.trim().toLowerCase();
-    if (!query) return true;
-    return String(project.name || "").toLowerCase().includes(query);
-  });
+  const [cardMenu, setCardMenu] = useState<CanvasCardMenuState>({ target: null, x: 0, y: 0 });
+  const [projectMenu, setProjectMenu] = useState<ProjectMenuState>({ target: null, x: 0, y: 0 });
+  const [moveMenu, setMoveMenu] = useState<CanvasMoveMenuState>({ canvasId: "", x: 0, y: 0 });
+  const cardMenuRef = useRef<HTMLDivElement | null>(null);
+  const projectMenuRef = useRef<HTMLDivElement | null>(null);
+  const moveMenuRef = useRef<HTMLDivElement | null>(null);
+  const selectedDocument = documents.find((document) => document.id === selectedDocumentId) || documents[0] || null;
 
-  const renderLibtvResults = () => (
-    <>
-      {filteredLibtvProjects.length ? (
-        <div className="ic-libtv-project-results ic-libtv-project-card-grid" aria-label={t("infiniteCanvas.libtvProjectResults")}>
-          {filteredLibtvProjects.map((project) => (
-            <article
-              key={project.uuid}
-              className={`ic-project-card ic-libtv-project-card${selectedLibtvProjectUuid === project.uuid ? " active" : ""}`}
-              onClick={() => onSelectLibtvProject(project.uuid)}
-              onDoubleClick={() => onImportLibtvProject(project.uuid)}
+  useEffect(() => {
+    if (!cardMenu.target && !projectMenu.target && !moveMenu.canvasId) return undefined;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (cardMenuRef.current?.contains(target) || projectMenuRef.current?.contains(target) || moveMenuRef.current?.contains(target)) return;
+      closeMenus();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenus();
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [cardMenu.target, projectMenu.target, moveMenu.canvasId]);
+
+  const projectMoveTargets = projects.map((project) => ({ id: project.id, title: project.title || t("infiniteCanvas:untitledProject") }));
+
+  const activeProjectTitle = activeProjectId
+    ? projects.find((project) => project.id === activeProjectId)?.title || t("infiniteCanvas:untitledProject")
+    : projects[0]?.title || t("infiniteCanvas:untitledProject");
+
+  const openCardMenu = (event: MouseEvent<HTMLButtonElement>, target: CanvasCardMenuTarget) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 192;
+    const menuHeight = 184;
+    const pad = 8;
+    setCardMenu({
+      target,
+      x: Math.max(pad, Math.min(rect.left, window.innerWidth - menuWidth - pad)),
+      y: Math.max(pad, Math.min(rect.bottom + 8, window.innerHeight - menuHeight - pad)),
+    });
+    setProjectMenu({ target: null, x: 0, y: 0 });
+    setMoveMenu({ canvasId: "", x: 0, y: 0 });
+  };
+
+  const openProjectMenu = (event: MouseEvent<HTMLButtonElement>, id: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 184;
+    const menuHeight = 96;
+    const pad = 8;
+    setProjectMenu({
+      target: { id },
+      x: Math.max(pad, Math.min(rect.left, window.innerWidth - menuWidth - pad)),
+      y: Math.max(pad, Math.min(rect.bottom + 8, window.innerHeight - menuHeight - pad)),
+    });
+    setCardMenu({ target: null, x: 0, y: 0 });
+    setMoveMenu({ canvasId: "", x: 0, y: 0 });
+  };
+
+  const openMoveMenu = (element: HTMLElement, canvasId: string) => {
+    const rect = element.getBoundingClientRect();
+    const menuWidth = 184;
+    const menuMaxHeight = 280;
+    const pad = 8;
+    const preferredX = rect.right + 8;
+    const x = preferredX + menuWidth <= window.innerWidth - pad ? preferredX : rect.left - menuWidth - 8;
+    setMoveMenu({
+      canvasId,
+      x: Math.max(pad, Math.min(x, window.innerWidth - menuWidth - pad)),
+      y: Math.max(pad, Math.min(rect.top, window.innerHeight - menuMaxHeight - pad)),
+    });
+  };
+
+  const closeMenus = () => {
+    setCardMenu({ target: null, x: 0, y: 0 });
+    setProjectMenu({ target: null, x: 0, y: 0 });
+    setMoveMenu({ canvasId: "", x: 0, y: 0 });
+  };
+
+  const renderCardMenu = () => {
+    if (!cardMenu.target || typeof document === "undefined") return null;
+    const target = cardMenu.target;
+    const canvas = documents.find((item) => item.id === target.id);
+    return createPortal(
+      <div
+        ref={cardMenuRef}
+        className="ic-project-card-menu"
+        role="menu"
+        style={{ left: cardMenu.x, top: cardMenu.y }}
+        onPointerDown={(event) => event.stopPropagation()}
+        onPointerLeave={(event) => {
+          const nextTarget = event.relatedTarget as Node | null;
+          if (nextTarget && moveMenuRef.current?.contains(nextTarget)) return;
+          setMoveMenu({ canvasId: "", x: 0, y: 0 });
+        }}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          onPointerEnter={() => setMoveMenu({ canvasId: "", x: 0, y: 0 })}
+          onClick={() => {
+            closeMenus();
+            if (canvas) onStartRenameDocument(canvas.id, canvas.title || "");
+          }}
+        >
+          <Pencil size={16} aria-hidden="true" />
+          <span>{t("infiniteCanvas:renameCanvas")}</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onPointerEnter={() => setMoveMenu({ canvasId: "", x: 0, y: 0 })}
+          onClick={() => {
+            closeMenus();
+            onDuplicateDocument(target.id);
+          }}
+        >
+          <Copy size={16} aria-hidden="true" />
+          <span>{t("infiniteCanvas:duplicateCanvas")}</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className={moveMenu.canvasId === target.id ? "active" : ""}
+          aria-haspopup="menu"
+          aria-expanded={moveMenu.canvasId === target.id}
+          onPointerEnter={(event) => openMoveMenu(event.currentTarget, target.id)}
+          onFocus={(event) => openMoveMenu(event.currentTarget, target.id)}
+          onClick={(event) => openMoveMenu(event.currentTarget, target.id)}
+        >
+          <FolderInput size={16} aria-hidden="true" />
+          <span>{t("infiniteCanvas:moveToProject")}</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className={confirmingDeleteDocumentId === target.id ? "danger confirming" : "danger"}
+          onPointerEnter={() => setMoveMenu({ canvasId: "", x: 0, y: 0 })}
+          onClick={() => {
+            onSelectDocument(target.id);
+            if (confirmingDeleteDocumentId === target.id) {
+              closeMenus();
+              onDeleteDocument(target.id);
+              return;
+            }
+            onConfirmDeleteDocument(target.id);
+          }}
+        >
+          <Trash2 size={16} aria-hidden="true" />
+          <span>{confirmingDeleteDocumentId === target.id ? t("common:confirm.delete") : t("infiniteCanvas:deleteCanvas")}</span>
+        </button>
+      </div>,
+      document.body,
+    );
+  };
+
+  const renderProjectMenu = () => {
+    if (!projectMenu.target || typeof document === "undefined") return null;
+    const project = projects.find((item) => item.id === projectMenu.target?.id);
+    if (!project) return null;
+    return createPortal(
+      <div
+        ref={projectMenuRef}
+        className="ic-project-card-menu"
+        role="menu"
+        style={{ left: projectMenu.x, top: projectMenu.y }}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            closeMenus();
+            onStartRenameProject(project.id, project.title || "");
+          }}
+        >
+          <Pencil size={16} aria-hidden="true" />
+          <span>{t("common:actions.rename")}</span>
+        </button>
+        {projects.length > 1 ? (
+          <button
+            type="button"
+            role="menuitem"
+            className={confirmingDeleteProjectId === project.id ? "danger confirming" : "danger"}
+            onClick={() => {
+              if (confirmingDeleteProjectId === project.id) {
+                closeMenus();
+                onDeleteProject(project.id);
+                return;
+              }
+              onConfirmDeleteProject(project.id);
+            }}
+          >
+            <Trash2 size={16} aria-hidden="true" />
+            <span>{confirmingDeleteProjectId === project.id ? t("common:confirm.delete") : t("common:actions.delete")}</span>
+          </button>
+        ) : null}
+      </div>,
+      document.body,
+    );
+  };
+
+  const renderMoveMenu = () => {
+    if (!moveMenu.canvasId || typeof document === "undefined") return null;
+    const canvas = documents.find((item) => item.id === moveMenu.canvasId);
+    const currentProjectId = canvas?.projectId || "";
+    const projectItems = projectMoveTargets;
+    return createPortal(
+      <div
+        ref={moveMenuRef}
+        className="ic-project-move-menu"
+        role="menu"
+        aria-label={t("infiniteCanvas:moveToProject")}
+        style={{ left: moveMenu.x, top: moveMenu.y }}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        {projectItems.map((project) => {
+          const selected = project.id === currentProjectId;
+          return (
+            <button
+              key={project.id}
+              type="button"
+              role="menuitemradio"
+              aria-checked={selected}
+              className={selected ? "selected" : ""}
+              disabled={selected}
+              onClick={() => {
+                closeMenus();
+                onMoveDocumentToProject(moveMenu.canvasId, project.id);
+              }}
             >
-              <button className="ic-project-card__main" type="button" onClick={() => onSelectLibtvProject(project.uuid)}>
-                <small>{project.teamId ? t("infiniteCanvas.libtvTeamProject", { teamId: project.teamId }) : t("infiniteCanvas.libtvPersonalProject")}</small>
-                <strong title={project.name || t("infiniteCanvas.untitledCanvas")}>{project.name || t("infiniteCanvas.untitledCanvas")}</strong>
-                <small>{project.updatedAtMs ? formatProjectDate(project.updatedAtMs) : "--"}</small>
-              </button>
-              <button
-                type="button"
-                className="ic-libtv-project-card__import"
-                aria-label={t("infiniteCanvas.libtvImportCanvas")}
-                title={t("infiniteCanvas.libtvImportCanvas")}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onImportLibtvProject(project.uuid);
-                }}
-              >
-                <Download size={15} aria-hidden="true" />
-              </button>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <div className="ic-project-empty">{libtvImporting ? t("infiniteCanvas.libtvSearchingProjects") : t("infiniteCanvas.libtvNoProjectsFound")}</div>
-      )}
-    </>
-  );
+              {selected ? <Check size={14} aria-hidden="true" /> : <span className="ic-menu-check-spacer" />}
+              <span>{project.title}</span>
+            </button>
+          );
+        })}
+      </div>,
+      document.body,
+    );
+  };
 
   return (
-    <div className="ic-project-home" aria-label={t("infiniteCanvas.homeAriaLabel")}>
-      <div className={`ic-project-home__panel${mode === "libtv" ? " is-libtv" : ""}`}>
+    <div className="ic-project-home" aria-label={t("infiniteCanvas:homeAriaLabel")}>
+      <aside className="ic-project-sidebar" aria-label={t("infiniteCanvas:projectSidebar")}>
+        <div className="ic-project-sidebar__header">
+          <strong>{t("infiniteCanvas:projectsTitle")}</strong>
+          <button type="button" title={t("infiniteCanvas:newProject")} aria-label={t("infiniteCanvas:newProject")} onClick={onCreateProject}>
+            <Plus size={16} aria-hidden="true" />
+          </button>
+        </div>
+        <div className="ic-project-sidebar__list">
+          {projects.map((project) => {
+            const isRenaming = project.id === renamingProjectId;
+            return (
+              <div key={project.id} className={`ic-project-sidebar__row${project.id === activeProjectId ? " active" : ""}${isRenaming ? " is-renaming" : ""}`}>
+                {isRenaming ? (
+                  <form
+                    className="ic-project-sidebar__rename"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      onSubmitRenameProject(project.id);
+                    }}
+                  >
+                    <input
+                      value={renamingTitle}
+                      autoFocus
+                      maxLength={80}
+                      onChange={(event) => onRenamingTitleChange(event.target.value)}
+                      onBlur={() => onSubmitRenameProject(project.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          onCancelRename();
+                        }
+                      }}
+                    />
+                  </form>
+                ) : (
+                  <>
+                    <button type="button" className="ic-project-sidebar__item" onClick={() => onSelectProject(project.id)}>
+                      <span>{project.title || t("infiniteCanvas:untitledProject")}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="ic-project-sidebar__menu"
+                      title={t("infiniteCanvas:projectActions")}
+                      aria-label={t("infiniteCanvas:projectActions")}
+                      aria-haspopup="menu"
+                      aria-expanded={projectMenu.target?.id === project.id}
+                      onClick={(event) => openProjectMenu(event, project.id)}
+                    >
+                      <MoreHorizontal size={16} aria-hidden="true" />
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </aside>
+      <div className="ic-project-home__panel">
         <div className="ic-project-home__head">
           <div className="ic-project-home__title">
             <div>
-              {mode === "libtv" ? (
-                <button
-                  className="ic-home-icon-button ic-home-back-button"
-                  type="button"
-                  title={t("infiniteCanvas.backToCanvases")}
-                  aria-label={t("infiniteCanvas.backToCanvases")}
-                  onClick={() => onModeChange("local")}
-                >
-                  <ChevronDown size={16} aria-hidden="true" />
-                </button>
-              ) : null}
-              <strong>{mode === "libtv" ? t("infiniteCanvas.libtvCanvasHomeTitle") : t("infiniteCanvas.homeTitle")}</strong>
-              <span>{mode === "libtv" ? libtvProjectResults.length : projects.length}</span>
+              <strong>{activeProjectTitle}</strong>
+              <button
+                className="ic-title-refresh-button"
+                type="button"
+                title={t("infiniteCanvas:refreshCanvases")}
+                aria-label={t("infiniteCanvas:refreshCanvases")}
+                onClick={onRefreshLocal}
+              >
+                <RefreshCw size={17} aria-hidden="true" />
+              </button>
+              <span>{documents.length}</span>
             </div>
           </div>
           <div className="ic-project-home__actions">
-            {mode === "libtv" ? (
-              <>
-                <button className="ic-home-icon-button" type="button" title={t("infiniteCanvas.libtvRefreshCanvases")} aria-label={t("infiniteCanvas.libtvRefreshCanvases")} disabled={libtvImporting} onClick={onRefreshLibtvProjects}>
-                  <RefreshCw size={17} aria-hidden="true" />
-                </button>
-                <input
-                  className="ic-libtv-local-search"
-                  value={libtvProjectFilter}
-                  maxLength={80}
-                  placeholder={t("infiniteCanvas.libtvLocalSearchPlaceholder")}
-                  onChange={(event) => onLibtvProjectFilterChange(event.target.value)}
-                />
-              </>
-            ) : (
-              <>
-                <div className="ic-project-sort" role="group" aria-label={t("infiniteCanvas.sortCanvases")}>
-                  <button type="button" className={sortMode === "recent" ? "active" : ""} onClick={() => onSortModeChange("recent")}>{t("infiniteCanvas.sortRecent")}</button>
-                  <button type="button" className={sortMode === "name" ? "active" : ""} onClick={() => onSortModeChange("name")}>{t("infiniteCanvas.sortName")}</button>
-                </div>
-                <button className="ic-home-icon-button" type="button" title={t("infiniteCanvas.refreshCanvases")} aria-label={t("infiniteCanvas.refreshCanvases")} onClick={onRefreshLocal}>
-                  <RefreshCw size={17} aria-hidden="true" />
-                </button>
-                <button className="ic-home-create-button" type="button" onClick={onCreateCanvas}>
-                  <Plus size={17} aria-hidden="true" />
-                  <span>{t("infiniteCanvas.newCanvas")}</span>
-                </button>
-              </>
-            )}
+            <div className="ic-project-sort" role="group" aria-label={t("infiniteCanvas:sortCanvases")}>
+              <button type="button" className={sortMode === "recent" ? "active" : ""} onClick={() => onSortModeChange("recent")}>{t("infiniteCanvas:sortRecent")}</button>
+              <button type="button" className={sortMode === "name" ? "active" : ""} onClick={() => onSortModeChange("name")}>{t("infiniteCanvas:sortName")}</button>
+            </div>
+            <button
+              className="ic-home-create-button"
+              type="button"
+              aria-label={t("infiniteCanvas:newCanvas")}
+              title={t("infiniteCanvas:newCanvas")}
+              onClick={onCreateCanvas}
+            >
+              <Plus size={17} aria-hidden="true" />
+            </button>
           </div>
         </div>
-        {mode === "libtv" ? renderLibtvResults() : (
-          <>
-            {projectStatus ? <div className="ic-project-status">{projectStatus}</div> : null}
-            <div className="ic-project-card-grid">
-              {projects.length ? projects.map((project) => {
-                const isImportingCard = isLibtvImportCard(project);
-                const isActive = project.id === selectedProjectId || (!selectedProjectId && project.id === selectedProject?.id);
-                const isRenaming = !isImportingCard && project.id === renamingProjectId;
-                const isConfirmingDelete = !isImportingCard && project.id === confirmingDeleteProjectId;
-                const importPercent = isImportingCard ? getLibtvImportProgressPercent(project.libtvImportProgress) : 0;
-                const importProgressValue = isImportingCard ? formatLibtvProgressValue(project.libtvImportProgress) : "";
-                const isLibtvCanvas = isImportingCard || project.icon === "libtv";
-                return (
-                  <article key={project.id} className={`ic-project-card${isActive ? " active" : ""}${isConfirmingDelete ? " confirming-delete" : ""}${isImportingCard ? " is-importing" : ""}`} onClick={() => onSelectProject(project.id)} onDoubleClick={() => {
-                    if (!isConfirmingDelete && !isImportingCard) onOpenProject(project.id);
-                  }}>
-                    {isRenaming ? (
-                      <form
-                        className="ic-project-rename"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          onSubmitRename(project.id);
+        <div className="ic-project-home__body">
+          <div className="ic-project-card-grid">
+            {documents.length ? documents.map((document) => {
+              const isActive = document.id === selectedDocumentId || (!selectedDocumentId && document.id === selectedDocument?.id);
+              const isRenaming = document.id === renamingDocumentId;
+              return (
+                <article key={document.id} className={`ic-project-card${isActive ? " active" : ""}`} onClick={() => onSelectDocument(document.id)} onDoubleClick={() => {
+                  onOpenDocument(document.id);
+                }}>
+                  {isRenaming ? (
+                    <form
+                      className="ic-project-rename"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        onSubmitRenameDocument(document.id);
+                      }}
+                    >
+                      <input
+                        value={renamingTitle}
+                        autoFocus
+                        maxLength={80}
+                        onChange={(event) => onRenamingTitleChange(event.target.value)}
+                        onBlur={() => onSubmitRenameDocument(document.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            onCancelRename();
+                          }
                         }}
-                      >
-                        <input
-                          value={renamingTitle}
-                          autoFocus
-                          maxLength={80}
-                          onChange={(event) => onRenamingTitleChange(event.target.value)}
-                          onBlur={() => onSubmitRename(project.id)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              onCancelRename();
-                            }
-                          }}
-                        />
-                      </form>
-                    ) : (
-                      <>
-                        {!isImportingCard ? (
-                          <div className="ic-project-card__actions" onDoubleClick={(event) => event.stopPropagation()}>
-                            <button
-                              className="ic-project-icon-button"
-                              type="button"
-                              title={t("infiniteCanvas.renameCanvas")}
-                              aria-label={t("infiniteCanvas.renameCanvas")}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onStartRename(project.id, project.title || "");
-                              }}
-                            >
-                              <Pencil size={14} aria-hidden="true" />
-                            </button>
-                            <button
-                              className="ic-project-icon-button"
-                              type="button"
-                              title={t("infiniteCanvas.deleteCanvas")}
-                              aria-label={t("infiniteCanvas.deleteCanvas")}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onSelectProject(project.id);
-                                onConfirmDelete(project.id);
-                              }}
-                            >
-                              <Trash2 size={14} aria-hidden="true" />
-                            </button>
-                          </div>
-                        ) : null}
-                        <button className="ic-project-card__main" type="button" disabled={isImportingCard} onClick={() => onSelectProject(project.id)}>
-                          <span className={`ic-project-card__icon${isLibtvCanvas ? " is-libtv" : ""}`}>
-                            {isLibtvCanvas ? <LibtvLogoMark size={24} /> : <Layers size={18} aria-hidden="true" />}
-                          </span>
-                          <strong>{project.title || t("infiniteCanvas.untitledCanvas")}</strong>
-                          {isImportingCard ? (
-                            <div className="ic-project-card__import-progress" role="status" aria-live="polite">
-                              <span>
-                                <span>{t("infiniteCanvas.libtvImportingCard")}</span>
-                                <strong>{importProgressValue}</strong>
-                              </span>
-                              <div aria-hidden="true">
-                                <i style={{ width: `${importPercent}%` }} />
-                              </div>
-                            </div>
-                          ) : (
-                            <small>{formatProjectDate(project.updatedAt || project.createdAt)}</small>
-                          )}
+                      />
+                    </form>
+                  ) : (
+                    <>
+                      <div className="ic-project-card__actions" onDoubleClick={(event) => event.stopPropagation()}>
+                        <button
+                          className="ic-project-card__menu-button"
+                          type="button"
+                          title={t("infiniteCanvas:canvasActions")}
+                          aria-label={t("infiniteCanvas:canvasActions")}
+                          aria-haspopup="menu"
+                          aria-expanded={cardMenu.target?.id === document.id}
+                          onClick={(event) => openCardMenu(event, { kind: "canvas", id: document.id })}
+                        >
+                          <MoreHorizontal size={18} aria-hidden="true" />
                         </button>
-                        {isConfirmingDelete ? (
-                          <div className="ic-project-delete-confirm" role="alert" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
-                            <span>{t("infiniteCanvas.deleteThisCanvas")}</span>
-                            <div>
-                              <button type="button" className="ic-project-delete-cancel" onClick={onCancelDelete}>
-                                {t("common.actions.cancel")}
-                              </button>
-                              <button type="button" className="ic-project-delete-confirm__danger" onClick={() => onDeleteProject(project.id)}>
-                                {t("common.actions.delete")}
-                              </button>
-                            </div>
-                          </div>
-                        ) : null}
-                      </>
-                    )}
-                  </article>
-                );
-              }) : <div className="ic-project-empty">{t("infiniteCanvas.noCanvases")}</div>}
-            </div>
-            <button className="ic-libtv-home-entry" type="button" onClick={onOpenLibtvHome}>
-              <RefreshCw size={17} aria-hidden="true" />
-              <span>{t("infiniteCanvas.openLibtvCanvases")}</span>
-            </button>
-          </>
-        )}
+                      </div>
+                      <button className="ic-project-card__main" type="button" onClick={() => onSelectDocument(document.id)}>
+                        <span className="ic-project-card__icon">
+                          <Layers size={18} aria-hidden="true" />
+                        </span>
+                        <strong>{document.title || t("infiniteCanvas:untitledCanvas")}</strong>
+                        <small>{formatProjectDate(document.updatedAt || document.createdAt)}</small>
+                      </button>
+                    </>
+                  )}
+                </article>
+              );
+            }) : <div className="ic-project-empty">{t("infiniteCanvas:noCanvases")}</div>}
+          </div>
+        </div>
       </div>
+      {renderCardMenu()}
+      {renderProjectMenu()}
+      {renderMoveMenu()}
     </div>
   );
 }

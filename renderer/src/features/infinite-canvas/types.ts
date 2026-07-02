@@ -1,4 +1,33 @@
-export type CanvasNodeType = "imageGenerator" | "image" | "prompt" | "llm" | "libtvImage" | "libtvPrompt" | "libtvUpload";
+import type { ActionFissionState } from "./action-fission/actionFissionTypes";
+
+export type CanvasNodeType = "imageGenerator" | "imageLoader" | "prompt" | "llm" | "actionFission" | "libtvImageGenerator";
+
+export interface LibtvImageGenerationState {
+  workspaceId?: string;
+  workspaceName?: string;
+  projectUuid?: string;
+  projectName?: string;
+  modelName?: string;
+  aspectRatio?: string;
+  quality?: string;
+  prompt?: string;
+  running?: boolean;
+  status?: string;
+  error?: string;
+  latestRun?: {
+    remoteNodeId?: string;
+    remoteNodeTitle?: string;
+    remoteReferenceNodeIds?: string[];
+    remoteReferenceNodeTitles?: string[];
+    groupNodeId?: string;
+    groupTitle?: string;
+    projectUuid?: string;
+    projectName?: string;
+    resultUrl?: string;
+    localUrl?: string;
+    createdAt: number;
+  };
+}
 
 export interface CanvasNode {
   id: string;
@@ -24,18 +53,14 @@ export interface CanvasNode {
     name?: string;
   };
   imageProviderId?: string;
+  imageGenerationApiType?: "third-party-api" | "libtv-api";
   imageModel?: string;
-  imageResolution?: "1k" | "2k" | "4k";
-  imageAspectRatio?: "1:1" | "2:3" | "3:2" | "4:3" | "3:4" | "16:9" | "9:16";
+  imageResolution?: string;
+  imageAspectRatio?: string;
   chatProviderId?: string;
   chatModel?: string;
-  libtvProjectId?: string;
-  libtvNodeId?: string;
-  libtvModel?: string;
-  libtvModelName?: string;
-  libtvResolution?: "1k" | "2k" | "4k";
-  libtvAspectRatio?: "1:1" | "2:3" | "3:2" | "4:3" | "3:4" | "16:9" | "9:16";
-  libtvOriginalUrl?: string;
+  actionFission?: ActionFissionState;
+  libtvImageGeneration?: LibtvImageGenerationState;
   generationError?: string;
   generationStatus?: string;
   generationTask?: CanvasGenerationTask;
@@ -45,22 +70,61 @@ export interface CanvasNode {
   running?: boolean;
 }
 
+export type CanvasGenerationTaskStatus =
+  | "queued"
+  | "submitting"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "interrupted"
+  | "superseded";
+
+export type CanvasGenerationInterruptReason = "user_stop" | "app_restart" | "provider_lost" | "superseded";
+
 export interface CanvasGenerationTask {
   id: string;
   canvasId: string;
   nodeId: string;
+  target?: CanvasGenerationTarget;
+  kind?: "image";
   providerId: string;
   model: string;
   upstreamTaskId?: string;
-  status: "submitting" | "running" | "succeeded" | "failed" | "interrupted";
+  status: CanvasGenerationTaskStatus;
   startedAt: number;
   updatedAt: number;
+  completedAt?: number;
+  durationMs?: number;
   prompt?: string;
   referenceImages?: string[];
-  resolution?: "1k" | "2k" | "4k";
+  resolution?: string;
   aspectRatio?: string;
+  message?: string;
   error?: string;
+  interruptReason?: CanvasGenerationInterruptReason;
+  result?: {
+    url?: string;
+    localUrl?: string;
+    fileName?: string;
+    width?: number;
+    height?: number;
+  };
+  writeback?: {
+    terminalStatus?: CanvasGenerationTaskStatus;
+    [key: string]: unknown;
+  };
 }
+
+export type CanvasGenerationTarget =
+  | {
+      type: "imageGenerator";
+      nodeId: string;
+    }
+  | {
+      type: "actionFissionRow";
+      nodeId: string;
+      rowId: string;
+    };
 
 export interface CanvasConnection {
   id: string;
@@ -124,31 +188,37 @@ export interface CanvasSnapshot {
   viewport: Viewport;
 }
 
-export interface CanvasProject extends CanvasSnapshot {
+export interface CanvasDocument extends CanvasSnapshot {
   id: string;
   title: string;
   icon?: string;
-  canvasType?: "forart" | "forart-libtv";
-  source?: "forart" | "libtv";
-  libtvProjectId?: string;
-  libtvProjectName?: string;
+  canvasType?: "forart";
+  source?: "forart";
+  projectId?: string;
   color?: string;
   pinned?: boolean;
   createdAt: number;
   updatedAt: number;
 }
 
-export interface CanvasProjectRecord {
+export interface CanvasDocumentRecord {
   id: string;
   title: string;
   icon?: string;
-  canvasType?: "forart" | "forart-libtv";
-  source?: "forart" | "libtv";
-  libtvProjectId?: string;
-  libtvProjectName?: string;
+  canvasType?: "forart";
+  source?: "forart";
+  projectId?: string;
   color?: string;
   pinned?: boolean;
   createdAt: number;
   updatedAt: number;
   nodeCount: number;
+}
+
+export interface CanvasProjectRecord {
+  id: string;
+  title: string;
+  color?: string;
+  createdAt: number;
+  updatedAt: number;
 }

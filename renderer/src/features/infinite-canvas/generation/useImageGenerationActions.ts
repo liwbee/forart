@@ -1,31 +1,23 @@
 import { useCallback, useMemo, useRef } from "react";
 import type { TFunction } from "i18next";
 import type { ApiProvider } from "../../settings/apiProviders";
-import { generateImageWithProvider, recoverImageGenerationTask } from "../core/apiImageGeneration";
 import { collectPrompt, collectReferenceImages } from "../core/workflow";
-import { IMAGE_ASPECT_RATIO_OPTIONS, IMAGE_RESOLUTION_OPTIONS } from "../constants";
 import { fitImageNodeSize } from "../imageCrop";
 import type { CanvasConnection, CanvasGenerationTask, CanvasNode } from "../types";
-import { applyImageGenerationResult } from "./imageGenerationResult";
-import { generationTaskRuntimeKey, isRecoverableImageGenerationTask } from "./generationTaskRuntime";
-
-interface SavedCanvasAsset {
-  url: string;
-  fileName?: string;
-  filePath?: string;
-}
+import { generationTaskRuntimeKey, isGenerationTaskActive } from "./generationTaskRuntime";
+import { createLocalGenerationTask, getLocalGenerationTask, resumeLocalGenerationTask, stopLocalGenerationTasksForNode, updateLocalGenerationTask, waitForLocalGenerationTask } from "./generationTaskRegistry";
+import { detectImageModelRuleId, getImageModelRule, normalizeImageModelSizeSelection } from "../../settings/imageModelRules";
+import { collectGenerationTasksFromNodes } from "./nodeGenerationTaskAnchors";
 
 interface UseImageGenerationActionsOptions {
   nodes: CanvasNode[];
   connections: CanvasConnection[];
   apiProviders: ApiProvider[];
-  defaultImageProviderId: string;
   imageProviders: ApiProvider[];
   activeCanvasId: string;
   patchNode: (nodeId: string, patch: Partial<CanvasNode>) => void;
-  saveCanvasImageAsset: (source: { url?: string; dataUrl?: string; defaultName?: string; kind: "input" | "output" }) => Promise<SavedCanvasAsset>;
-  patchGenerationNode: (canvasId: string, nodeId: string, resolvePatch: (node: CanvasNode) => Partial<CanvasNode>) => Promise<void>;
-  persistActiveGenerationNode: (canvasId: string, nodeId: string, patch: Partial<CanvasNode>) => void;
+  persistActiveGenerationNode: (canvasId: string, nodeId: string, patch: Partial<CanvasNode>) => Promise<void>;
+  writebackGenerationTask: (task: CanvasGenerationTask) => Promise<void>;
   t: TFunction;
 }
 
@@ -44,135 +36,113 @@ export function useImageGenerationActions({
   nodes,
   connections,
   apiProviders,
-  defaultImageProviderId,
   imageProviders,
   activeCanvasId,
   patchNode,
-  saveCanvasImageAsset,
-  patchGenerationNode,
   persistActiveGenerationNode,
+  writebackGenerationTask,
   t,
 }: UseImageGenerationActionsOptions) {
   const generationAbortControllersRef = useRef<Record<string, AbortController>>({});
   const activeGenerationTaskKeysRef = useRef<Set<string>>(new Set());
   const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
 
-  const applyResult = useCallback((options: {
-    canvasId: string;
-    nodeId: string;
-    provider: ApiProvider;
-    model: string;
-    resolution?: CanvasNode["imageResolution"];
-    aspectRatio?: CanvasNode["imageAspectRatio"];
-    result: { url: string; fileName: string; width?: number; height?: number };
-    task?: CanvasGenerationTask;
-    signal?: AbortSignal;
-  }) => applyImageGenerationResult({
-    ...options,
-    saveCanvasImageAsset,
-    patchGenerationNode,
-  }), [patchGenerationNode, saveCanvasImageAsset]);
-
-  const resumeImageGenerationTask = useCallback(async (node: CanvasNode) => {
-    const task = node.generationTask;
-    if (!isRecoverableImageGenerationTask(task)) return;
+  const resumeImageGenerationTask = useCallback(async (task: CanvasGenerationTask) => {
+    if (task.target?.type && task.target.type !== "imageGenerator") return;
+    if (!isGenerationTaskActive(task)) return;
     const taskKey = generationTaskRuntimeKey(task);
     if (activeGenerationTaskKeysRef.current.has(taskKey)) return;
     const provider = apiProviders.find((item) => item.id === task.providerId && supportsStandardImageGeneration(item));
     if (!provider) {
-      await patchGenerationNode(task.canvasId, task.nodeId, () => ({
-        running: false,
-        generationStatus: "",
-        generationError: t("infiniteCanvas.noImageApiConfigured"),
-        generationTask: { ...task, status: "interrupted", error: t("infiniteCanvas.noImageApiConfigured"), updatedAt: Date.now() },
-      }));
+      const interruptedTask = await updateLocalGenerationTask(task.id, {
+        status: "interrupted",
+        error: t("infiniteCanvas:noImageApiConfigured"),
+        interruptReason: "provider_lost",
+        updatedAt: Date.now(),
+      });
+      await writebackGenerationTask(interruptedTask || {
+        ...task,
+        status: "interrupted",
+        error: t("infiniteCanvas:noImageApiConfigured"),
+        interruptReason: "provider_lost",
+        updatedAt: Date.now(),
+      });
       return;
     }
     activeGenerationTaskKeysRef.current.add(taskKey);
-    await patchGenerationNode(task.canvasId, task.nodeId, (currentNode) => ({
-      running: true,
-      generationError: "",
-      generationStatus: currentNode.generationStatus || t("infiniteCanvas.running"),
-      generationTask: { ...(currentNode.generationTask || task), status: "running", updatedAt: Date.now() },
-    }));
     try {
-      const result = await recoverImageGenerationTask({
-        provider,
-        taskId: task.upstreamTaskId,
-        onStatus: (message) => {
-          void patchGenerationNode(task.canvasId, task.nodeId, (currentNode) => ({
-            generationStatus: message,
-            generationTask: currentNode.generationTask ? { ...currentNode.generationTask, status: "running", updatedAt: Date.now() } : task,
-          }));
-        },
+      const localTask = await getLocalGenerationTask(task.id);
+      if (localTask && isGenerationTaskActive(localTask)) {
+        patchNode(task.nodeId, { generationTask: localTask });
+      }
+      await resumeLocalGenerationTask(task.id, { ...task, provider, model: task.model, modelRule: getImageModelRule(provider.modelRules.image[task.model] || detectImageModelRuleId(task.model)) });
+      const completedTask = await waitForLocalGenerationTask(task.id, (nextTask) => {
+        patchNode(task.nodeId, { generationTask: nextTask });
       });
-      await applyResult({
-        canvasId: task.canvasId,
-        nodeId: task.nodeId,
-        provider,
-        model: task.model,
-        resolution: task.resolution,
-        aspectRatio: task.aspectRatio as CanvasNode["imageAspectRatio"],
-        result,
-        task,
-      });
+      if (completedTask.status !== "succeeded" || !completedTask.result?.localUrl) {
+        throw new Error(completedTask.error || "Image generation failed.");
+      }
+      await writebackGenerationTask(completedTask);
     } catch (error) {
-      await patchGenerationNode(task.canvasId, task.nodeId, (currentNode) => ({
-        running: false,
-        generationStatus: "",
-        generationError: error instanceof Error ? error.message : String(error),
-        generationTask: currentNode.generationTask ? {
-          ...currentNode.generationTask,
-          status: "failed",
-          error: error instanceof Error ? error.message : String(error),
-          updatedAt: Date.now(),
-        } : task,
-      }));
+      const failedTask = await updateLocalGenerationTask(task.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+        updatedAt: Date.now(),
+      });
+      await writebackGenerationTask(failedTask || {
+        ...task,
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+        updatedAt: Date.now(),
+      });
     } finally {
       activeGenerationTaskKeysRef.current.delete(taskKey);
     }
-  }, [apiProviders, applyResult, patchGenerationNode, t]);
+  }, [apiProviders, patchNode, t, writebackGenerationTask]);
 
   const resumeImageGenerationTasks = useCallback((canvasNodes: CanvasNode[]) => {
-    canvasNodes.forEach((node) => {
-      if (node.type === "imageGenerator" && node.generationTask?.upstreamTaskId) {
-        void resumeImageGenerationTask(node);
+    collectGenerationTasksFromNodes(canvasNodes).forEach((task) => {
+      if ((task.target?.type === "imageGenerator" || !task.target) && isGenerationTaskActive(task)) {
+        void resumeImageGenerationTask(task);
       }
     });
   }, [resumeImageGenerationTask]);
 
   const runImageComposer = useCallback(async (nodeId: string) => {
     const node = nodeMap.get(nodeId);
-    if (!node || node.type !== "imageGenerator" || node.running) return;
+    if (!node || node.type !== "imageGenerator") return;
     if (!activeCanvasId) {
-      patchNode(nodeId, { generationError: t("infiniteCanvas.canvasDesktopRequired") });
+      patchNode(nodeId, { generationError: t("infiniteCanvas:canvasDesktopRequired") });
       return;
     }
+    if (isGenerationTaskActive(node.generationTask)) return;
     const provider = apiProviders.find((item) => item.id === node.imageProviderId && supportsStandardImageGeneration(item))
-      || apiProviders.find((item) => item.id === defaultImageProviderId && supportsStandardImageGeneration(item))
       || imageProviders[0]
       || null;
     const model = node.imageModel && provider?.imageModels.includes(node.imageModel) ? node.imageModel : provider?.imageModels[0] || "";
-    const resolution = IMAGE_RESOLUTION_OPTIONS.includes(node.imageResolution || "1k") ? node.imageResolution || "1k" : "1k";
-    const aspectRatio = IMAGE_ASPECT_RATIO_OPTIONS.includes(node.imageAspectRatio || "1:1") ? node.imageAspectRatio || "1:1" : "1:1";
     if (!provider || !model) {
-      patchNode(nodeId, { generationError: t("infiniteCanvas.noImageApiConfigured") });
+      patchNode(nodeId, { generationError: t("infiniteCanvas:noImageApiConfigured") });
       return;
     }
+    const modelRule = getImageModelRule(provider.modelRules.image[model] || detectImageModelRuleId(model));
+    const normalizedSize = normalizeImageModelSizeSelection(modelRule, node.imageResolution, node.imageAspectRatio);
+    const { resolution, aspectRatio } = normalizedSize;
 
     const prompt = [node.text || "", collectPrompt(node, nodes, connections)].filter(Boolean).join("\n\n").trim();
     const referenceImages = collectReferenceImages(node, nodes, connections);
     if (!prompt) {
-      patchNode(nodeId, { generationError: t("infiniteCanvas.promptRequired") });
+      patchNode(nodeId, { generationError: t("infiniteCanvas:promptRequired") });
       return;
     }
 
     const runningSize = fitGenerationNodeSize(aspectRatio);
     const taskStartedAt = Date.now();
-    const taskBase: CanvasGenerationTask = {
+    let taskBase: CanvasGenerationTask = {
       id: `${activeCanvasId}:${nodeId}:${taskStartedAt}`,
       canvasId: activeCanvasId,
       nodeId,
+      target: { type: "imageGenerator", nodeId },
+      kind: "image",
       providerId: provider.id,
       model,
       status: "submitting",
@@ -183,21 +153,26 @@ export function useImageGenerationActions({
       resolution,
       aspectRatio,
     };
+    taskBase = await createLocalGenerationTask({
+      ...taskBase,
+      provider,
+      modelRule,
+    } as CanvasGenerationTask & { provider: ApiProvider; modelRule: unknown });
     const initialTaskKey = generationTaskRuntimeKey(taskBase);
     let upstreamTaskKey = "";
     activeGenerationTaskKeysRef.current.add(initialTaskKey);
-    persistActiveGenerationNode(activeCanvasId, nodeId, {
-      running: true,
+    await persistActiveGenerationNode(activeCanvasId, nodeId, {
       x: Math.round(node.x + (node.w - runningSize.w) / 2),
       y: Math.round(node.y + (node.h - runningSize.h) / 2),
       ...runningSize,
       generationError: "",
-      generationStatus: t("infiniteCanvas.running"),
       imageProviderId: provider.id,
       imageModel: model,
       imageResolution: resolution,
       imageAspectRatio: aspectRatio,
       imageMode: "imageGenerator",
+      outputDownloadState: undefined,
+      outputDownloadedAt: undefined,
       generationTask: taskBase,
     });
 
@@ -206,61 +181,35 @@ export function useImageGenerationActions({
     generationAbortControllersRef.current[nodeId] = abortController;
 
     try {
-      const setGenerationStatus = (message: string) => {
-        void patchGenerationNode(activeCanvasId, nodeId, (currentNode) => ({
-          generationStatus: message,
-          generationTask: currentNode.generationTask ? { ...currentNode.generationTask, status: "running", updatedAt: Date.now() } : taskBase,
-        }));
-      };
-      const result = await generateImageWithProvider({
-        provider,
-        model,
-        prompt,
-        referenceImages,
-        resolution,
-        aspectRatio,
-        onStatus: setGenerationStatus,
-        onTaskId: (upstreamTaskId) => {
-          upstreamTaskKey = `${activeCanvasId}:${nodeId}:${upstreamTaskId}`;
+      const completedTask = await waitForLocalGenerationTask(taskBase.id, (nextTask) => {
+        patchNode(nodeId, { generationTask: nextTask });
+        if (nextTask.upstreamTaskId && !upstreamTaskKey) {
+          upstreamTaskKey = `${activeCanvasId}:${nodeId}:${nextTask.upstreamTaskId}`;
           activeGenerationTaskKeysRef.current.delete(initialTaskKey);
           activeGenerationTaskKeysRef.current.add(upstreamTaskKey);
-          void patchGenerationNode(activeCanvasId, nodeId, (currentNode) => ({
-            generationTask: {
-              ...(currentNode.generationTask || taskBase),
-              upstreamTaskId,
-              status: "running",
-              updatedAt: Date.now(),
-            },
-          }));
-        },
-        signal: abortController.signal,
-      });
+          void persistActiveGenerationNode(activeCanvasId, nodeId, { generationTask: nextTask });
+        }
+      }, abortController.signal);
       if (abortController.signal.aborted) throw new DOMException("Aborted", "AbortError");
-      setGenerationStatus(t("infiniteCanvas.savingImage"));
-      await applyResult({
-        canvasId: activeCanvasId,
-        nodeId,
-        provider,
-        model,
-        resolution,
-        aspectRatio,
-        result,
-        task: taskBase,
-        signal: abortController.signal,
-      });
+      if (completedTask.status !== "succeeded" || !completedTask.result?.localUrl) {
+        throw new Error(completedTask.error || "Image generation failed.");
+      }
+      await writebackGenerationTask(completedTask);
     } catch (error) {
       const isAbort = error instanceof DOMException && error.name === "AbortError";
-      await patchGenerationNode(activeCanvasId, nodeId, (currentNode) => ({
-        running: false,
-        generationError: isAbort ? "" : error instanceof Error ? error.message : String(error),
-        generationStatus: "",
-        generationTask: currentNode.generationTask ? {
-          ...currentNode.generationTask,
-          status: isAbort ? "interrupted" : "failed",
-          error: isAbort ? "" : error instanceof Error ? error.message : String(error),
-          updatedAt: Date.now(),
-        } : undefined,
-      }));
+      const terminalTask = await updateLocalGenerationTask(taskBase.id, {
+        status: isAbort ? "interrupted" : "failed",
+        error: isAbort ? "" : error instanceof Error ? error.message : String(error),
+        interruptReason: isAbort ? "user_stop" : undefined,
+        updatedAt: Date.now(),
+      });
+      await writebackGenerationTask(terminalTask || {
+        ...taskBase,
+        status: isAbort ? "interrupted" : "failed",
+        error: isAbort ? "" : error instanceof Error ? error.message : String(error),
+        interruptReason: isAbort ? "user_stop" : undefined,
+        updatedAt: Date.now(),
+      });
     } finally {
       activeGenerationTaskKeysRef.current.delete(initialTaskKey);
       if (upstreamTaskKey) activeGenerationTaskKeysRef.current.delete(upstreamTaskKey);
@@ -268,17 +217,21 @@ export function useImageGenerationActions({
         delete generationAbortControllersRef.current[nodeId];
       }
     }
-  }, [activeCanvasId, apiProviders, applyResult, connections, defaultImageProviderId, imageProviders, nodeMap, nodes, patchGenerationNode, patchNode, persistActiveGenerationNode, t]);
+  }, [activeCanvasId, apiProviders, connections, imageProviders, nodeMap, nodes, patchNode, persistActiveGenerationNode, t, writebackGenerationTask]);
 
   const stopImageComposer = useCallback((nodeId: string) => {
     generationAbortControllersRef.current[nodeId]?.abort();
     delete generationAbortControllersRef.current[nodeId];
+    if (activeCanvasId) {
+      void (async () => {
+        await stopLocalGenerationTasksForNode(activeCanvasId, nodeId);
+      })();
+    }
     patchNode(nodeId, {
-      running: false,
       generationError: "",
-      generationStatus: "",
+      generationTask: undefined,
     });
-  }, [patchNode]);
+  }, [activeCanvasId, patchNode]);
 
   return {
     resumeImageGenerationTasks,

@@ -1,25 +1,26 @@
-import { Check, Clock, Crosshair, Crop, Eye, Images, Layers, Map as MapIcon, Play, Ratio, RefreshCw, Square, Trash2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Check, Crosshair, Crop, Eye, Images, Layers, Map as MapIcon, Play, Ratio, Square, Trash2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
 import { PointerEvent, WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ImageViewer } from "../../lib/ImageViewer";
-import { API_PROVIDER_CHANGED_EVENT, getModelDisplayName, loadApiSettings, readApiProviders, readDefaultImageProviderId, type ApiProvider } from "../settings/apiProviders";
+import { API_PROVIDER_CHANGED_EVENT, getModelDisplayName, loadApiSettings, readApiProviders, type ApiProvider } from "../settings/apiProviders";
 import { CanvasHomePanel } from "./CanvasHomePanel";
 import { CanvasTabsBar } from "./CanvasTabsBar";
+import { ACTION_FISSION_NODE_MIN_HEIGHT, ACTION_FISSION_NODE_MIN_WIDTH } from "./constants";
 import { canConnect } from "./core/rules";
 import { collectPrompt } from "./core/workflow";
 import { clamp, getGroupBounds, linkMidpoint, WORLD_CENTER } from "./canvasGeometry";
-import { useLibtvNodeSync } from "./libtv/useLibtvNodeSync";
 import { ImageGeneratorComposer } from "./composers/ImageGeneratorComposer";
-import { LibtvComposer } from "./composers/LibtvComposer";
+import { useLibtvGenerationActions } from "./libtv-generation/useLibtvGenerationActions";
 import { LibraryAssetPickerRail } from "../library-asset-picker/LibraryAssetPickerRail";
 import type { LibraryAssetSelection } from "../library-asset-picker/types";
+import type { ActionEntry, ActionTag } from "../action-library/types";
 import type { ImageGeneratorInputPreview } from "./composers/composerTypes";
 import { getImageGenerationReadiness } from "./core/imageGenerationReadiness";
 import { ConnectionLayer } from "./layers/ConnectionLayer";
 import { GroupLayer } from "./layers/GroupLayer";
 import { NodeLayer, type NodeBodyRenderState } from "./layers/NodeLayer";
 import { SelectionPreviewLayer } from "./layers/SelectionPreviewLayer";
-import { isImageLikeNode, isLibtvBoundCanvasNode } from "./nodePredicates";
+import { isImageLikeNode } from "./nodePredicates";
 import { NodeToolbar } from "./toolbars/NodeToolbar";
 import { SelectionToolbar } from "./toolbars/SelectionToolbar";
 import { CanvasNodeBodyRenderer, type CanvasNodeBodyActions } from "./nodes/CanvasNodeBodyRenderer";
@@ -31,13 +32,20 @@ import {
   useCanvasStore,
   type CanvasDocument,
 } from "./canvasStore";
+import { cloneCanvasNodeForNewTarget } from "./canvasNodeClone";
 import { useCanvasUiStore } from "./canvasUiStore";
 import { createCanvasNode, getNodeDefinition } from "./nodes/registry";
 import { createInitialCanvas, useCanvasProjects } from "./useCanvasProjects";
 import { useCanvasGenerationActions } from "./useCanvasGenerationActions";
+import { useActionFissionGenerationActions } from "./generation/useActionFissionGenerationActions";
+import { stopLocalGenerationTasksForNode, stopLocalGenerationTasksForTarget } from "./generation/generationTaskRegistry";
+import { getGenerationTaskForNodeTarget, isGenerationTargetActiveFromNodes, isNodeGenerationActiveFromAnchor } from "./generation/nodeGenerationTaskAnchors";
 import { hasClipboardImage, hasDraggedImageFile, useCanvasMediaActions } from "./useCanvasMediaActions";
+import type { ActionFissionRow } from "./action-fission/actionFissionTypes";
 import { detectImageModelRuleId, getImageModelRule } from "../settings/imageModelRules";
-import type { CanvasConnection, CanvasGroup, CanvasNode, CanvasNodeType, Viewport } from "./types";
+import { countDirectActionFissionImageConnections } from "./action-fission/actionFissionReferences";
+import { BASE_PUBLIC_REFERENCE_LIMIT } from "./action-fission/actionFissionTypes";
+import type { CanvasConnection, CanvasGenerationTarget, CanvasGroup, CanvasNode, CanvasNodeType, Viewport } from "./types";
 
 const uid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 9)}_${Date.now().toString(36)}`;
 const MIN_SCALE = 0.25;
@@ -51,28 +59,21 @@ const GROUP_PADDING = 32;
 const EMPTY_GROUP_DEFAULT_WIDTH = 360;
 const EMPTY_GROUP_DEFAULT_HEIGHT = 240;
 const CANVAS_LIBRARY_PICKER_TARGET = "__canvas__";
-const LIBTV_CREATABLE_NODE_TYPES = ["libtvImage", "libtvPrompt"] as const satisfies readonly CanvasNodeType[];
-const LOCAL_CONTEXT_MENU_NODE_TYPES = ["imageGenerator", "image", "llm", "prompt"] as const satisfies readonly CanvasNodeType[];
-type LibtvCreatableNodeType = typeof LIBTV_CREATABLE_NODE_TYPES[number];
-
-function isLibtvCreatableNodeType(type: CanvasNodeType): type is LibtvCreatableNodeType {
-  return (LIBTV_CREATABLE_NODE_TYPES as readonly CanvasNodeType[]).includes(type);
-}
-
-function isLibtvNodeType(type: CanvasNodeType) {
-  return type === "libtvImage" || type === "libtvPrompt" || type === "libtvUpload";
-}
+const LOCAL_CONTEXT_MENU_NODE_TYPES = ["imageGenerator", "imageLoader", "actionFission", "llm", "prompt"] as const satisfies readonly CanvasNodeType[];
 
 interface DragState {
   pointerId: number;
   startClientX: number;
   startClientY: number;
+  pendingSelectNodeId: string;
+  selectionIds: Set<string>;
   nodes: Array<{
     id: string;
     startX: number;
     startY: number;
   }>;
   active: boolean;
+  copyOnDrag: boolean;
 }
 
 interface GroupDragState {
@@ -82,9 +83,9 @@ interface GroupDragState {
   startClientY: number;
   startX: number;
   startY: number;
-  nodes: Array<{
-    id: string;
-    startX: number;
+    nodes: Array<{
+      id: string;
+      startX: number;
     startY: number;
   }>;
   active: boolean;
@@ -153,11 +154,12 @@ interface SelectionBox {
   height: number;
 }
 
-interface LibtvSyncCommands {
-  clearAllPending: () => void;
-  flushAll: () => void;
-  getPendingNodeIds: () => string[];
+interface CopiedCanvasSelection {
+  nodes: CanvasNode[];
+  connections: CanvasConnection[];
 }
+
+const CANVAS_NODES_CLIPBOARD_KIND = "forart.canvas.nodes";
 
 function nodeDefaults(type: CanvasNodeType): CanvasNode {
   return createCanvasNode(type, uid(type));
@@ -202,6 +204,57 @@ function isEditingTarget(target: EventTarget | null) {
   return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
+function isCanvasNodeType(value: unknown): value is CanvasNodeType {
+  return value === "imageGenerator"
+    || value === "libtvImageGenerator"
+    || value === "imageLoader"
+    || value === "prompt"
+    || value === "llm"
+    || value === "actionFission";
+}
+
+function normalizeClipboardSelection(input: unknown): CopiedCanvasSelection | null {
+  const parsed = input as (Partial<CopiedCanvasSelection> & { kind?: unknown }) | null;
+  if (!parsed || !Array.isArray(parsed.nodes)) return null;
+  if (parsed.kind !== CANVAS_NODES_CLIPBOARD_KIND) return null;
+  const nodes = parsed.nodes.flatMap((nodeInput) => {
+    const node = nodeInput as Partial<CanvasNode> | null;
+    if (!node?.id || !isCanvasNodeType(node.type)) return [];
+    if (!Number.isFinite(node.x) || !Number.isFinite(node.y) || !Number.isFinite(node.w) || !Number.isFinite(node.h)) return [];
+    return [{
+      ...node,
+      id: String(node.id),
+      type: node.type,
+      x: Number(node.x),
+      y: Number(node.y),
+      w: Number(node.w),
+      h: Number(node.h),
+      title: String(node.title || ""),
+    } as CanvasNode];
+  });
+  if (!nodes.length) return null;
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const connections = Array.isArray(parsed.connections)
+    ? parsed.connections.flatMap((connectionInput) => {
+      const connection = connectionInput as Partial<CanvasConnection> | null;
+      if (!connection?.id || !connection.from || !connection.to) return [];
+      if (!nodeIds.has(connection.from) || !nodeIds.has(connection.to)) return [];
+      return [{ id: String(connection.id), from: String(connection.from), to: String(connection.to) }];
+    })
+    : [];
+  return { nodes, connections };
+}
+
+function readClipboardSelection(dataTransfer: DataTransfer | null) {
+  const text = dataTransfer?.getData("text/plain");
+  if (!text) return null;
+  try {
+    return normalizeClipboardSelection(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
 function useStableEvent<T extends (...args: never[]) => unknown>(handler: T): T {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
@@ -224,7 +277,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   const selectionDragRef = useRef<SelectionDragState | null>(null);
   const resizeRef = useRef<ResizeState | null>(null);
   const groupResizeRef = useRef<GroupResizeState | null>(null);
-  const copiedSelectionRef = useRef<{ nodes: CanvasNode[]; connections: CanvasConnection[] } | null>(null);
   const minimapRef = useRef<HTMLDivElement | null>(null);
   const minimapDragRef = useRef<MinimapDragState | null>(null);
   const zoomInputRef = useRef<HTMLInputElement | null>(null);
@@ -265,7 +317,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   const [isZoomMenuOpen, setIsZoomMenuOpen] = useState(false);
   const [zoomInput, setZoomInput] = useState(() => String(Math.round(initialRef.current.viewport.scale * 100)));
   const [apiProviders, setApiProviders] = useState<ApiProvider[]>(readApiProviders);
-  const [defaultImageProviderId, setDefaultImageProviderId] = useState(readDefaultImageProviderId);
+  const defaultImageProviderId = "";
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [draggedInputConnectionId, setDraggedInputConnectionId] = useState("");
   const [inputInsertIndex, setInputInsertIndex] = useState<number | null>(null);
@@ -274,6 +326,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   const [editingGroupId, setEditingGroupId] = useState("");
   const [openImageComposerSelect, setOpenImageComposerSelect] = useState("");
   const [libraryPickerNodeId, setLibraryPickerNodeId] = useState("");
+  const [actionFissionPreview, setActionFissionPreview] = useState<{ src: string; alt: string } | null>(null);
 
   const scheduleFrame = useCallback(<T,>(slot: React.MutableRefObject<ScheduledFrame<T>>, value: T, apply: (value: T) => void) => {
     slot.current.value = value;
@@ -331,6 +384,29 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     }));
   }, [setCanvasDocumentWithoutHistory]);
 
+  function nodeDragPositions(drag: DragState, clientX: number, clientY: number) {
+    const dx = (clientX - drag.startClientX) / viewport.scale;
+    const dy = (clientY - drag.startClientY) / viewport.scale;
+    return new Map(drag.nodes.map((draggedNode) => [draggedNode.id, {
+      x: Math.round(draggedNode.startX + dx),
+      y: Math.round(draggedNode.startY + dy),
+    }]));
+  }
+
+  function groupDragSnapshot(groupDrag: GroupDragState, clientX: number, clientY: number) {
+    const dx = (clientX - groupDrag.startClientX) / viewport.scale;
+    const dy = (clientY - groupDrag.startClientY) / viewport.scale;
+    return {
+      groupId: groupDrag.groupId,
+      groupX: Math.round(groupDrag.startX + dx),
+      groupY: Math.round(groupDrag.startY + dy),
+      positions: new Map(groupDrag.nodes.map((draggedNode) => [draggedNode.id, {
+        x: Math.round(draggedNode.startX + dx),
+        y: Math.round(draggedNode.startY + dy),
+      }])),
+    };
+  }
+
   const applyNodeResizeFrame = useCallback(({ nodeId, w, h }: { nodeId: string; w: number; h: number }) => {
     setNodesWithoutHistory((current) => current.map((node) => (node.id === nodeId ? { ...node, w, h } : node)));
   }, [setNodesWithoutHistory]);
@@ -385,11 +461,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
       : { x: window.innerWidth / 2, y: window.innerHeight / 2 };
   }, []);
 
-  const defaultImageProvider = useMemo(() => (
-    apiProviders.find((provider) => provider.id === defaultImageProviderId && provider.protocol !== "gemini")
-    || imageProviders[0]
-    || null
-  ), [apiProviders, defaultImageProviderId, imageProviders]);
+  const defaultImageProvider = useMemo(() => imageProviders[0] || null, [imageProviders]);
   const defaultChatProvider = useMemo(() => chatProviders[0] || apiProviders.find((provider) => provider.chatModels.length) || null, [apiProviders, chatProviders]);
   const minimap = useMemo(() => {
     const viewportWorld = {
@@ -442,12 +514,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setConnectionAction((current) => (current?.id === connectionId ? null : current));
   }, [setConnections]);
 
-  const libtvSyncRef = useRef<LibtvSyncCommands>({
-    clearAllPending: () => undefined,
-    flushAll: () => undefined,
-    getPendingNodeIds: () => [] as string[],
-  });
-
   const clearCanvasTransientState = useCallback(() => {
     setSelectedIds(new Set());
     setSelectedGroupId("");
@@ -465,8 +531,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setEditingGroupId("");
     setOpenImageComposerSelect("");
     setIsImageDropActive(false);
-    libtvSyncRef.current.clearAllPending();
-    copiedSelectionRef.current = null;
     dragRef.current = null;
     groupDragRef.current = null;
     panRef.current = null;
@@ -475,9 +539,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     groupResizeRef.current = null;
     dragHistoryRef.current = null;
   }, []);
-
-  const flushLibtvPendingStable = useStableEvent(() => libtvSyncRef.current.flushAll());
-  const getPendingLibtvNodeIdsStable = useStableEvent(() => libtvSyncRef.current.getPendingNodeIds());
 
   const {
     activeProject,
@@ -488,39 +549,38 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     showCanvasHome,
     returnToCanvasHome,
     canvasHomeMode,
-    setCanvasHomeMode,
     selectedHomeCanvasId,
     setSelectedHomeCanvasId,
+    activeProjectId,
+    canvasProjects,
     renamingCanvasId,
     setRenamingCanvasId,
+    renamingProjectId,
+    setRenamingProjectId,
     renamingTitle,
     setRenamingTitle,
     confirmingDeleteCanvasId,
     setConfirmingDeleteCanvasId,
+    confirmingDeleteProjectId,
+    setConfirmingDeleteProjectId,
     canvasSortMode,
     setCanvasSortMode,
     projectStatus,
-    sortedCanvasProjects,
-    libtvProjectResults,
-    libtvProjectFilter,
-    setLibtvProjectFilter,
-    libtvImporting,
-    libtvStatus,
-    libtvStatusTone,
-    setLibtvStatus,
-    selectedLibtvProjectUuid,
-    setSelectedLibtvProjectUuid,
-    openLibtvHome,
-    refreshCanvasProjects,
-    refreshLibtvCanvasFromRemote,
-    openCanvasProject,
+    projectStatusTone,
+    sortedCanvasDocuments,
+    refreshCanvasWorkspace,
+    openCanvasDocument,
     closeCanvasTab,
     reorderCanvasTabs,
-    createCanvasProjectFromDraft,
+    createCanvasDocumentFromDraft,
+    createCanvasProject,
+    selectCanvasProject,
+    submitRenameCanvasDocument,
     submitRenameCanvasProject,
+    duplicateCanvasDocument,
+    moveCanvasToProject,
+    deleteCanvasDocument,
     deleteCanvasProject,
-    searchLibtvProjects,
-    importLibtvProjectFromDraft,
   } = useCanvasProjects({
     nodes,
     connections,
@@ -529,31 +589,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setViewport,
     setZoomInput,
     clearCanvasTransientState,
-    flushLibtvPending: flushLibtvPendingStable,
-    getPendingLibtvNodeIds: getPendingLibtvNodeIdsStable,
     t,
   });
-
-  const libtvSync = useLibtvNodeSync({
-    isEnabled: activeProject?.canvasType === "forart-libtv",
-    nodes,
-    onPatchNode: patchNode,
-    getBusyText: () => t("infiniteCanvas.libtvSyncBusy"),
-    getIdleText: () => t("infiniteCanvas.libtvSyncIdle"),
-    getDirtyText: () => t("infiniteCanvas.libtvSyncDirty"),
-    getBridgeUnavailableText: () => t("infiniteCanvas.libtvBridgeUnavailable"),
-    getMissingBindingText: () => t("infiniteCanvas.libtvMissingBinding"),
-  });
-  libtvSyncRef.current = {
-    clearAllPending: libtvSync.clearAllPending,
-    flushAll: libtvSync.flushAll,
-    getPendingNodeIds: libtvSync.getPendingNodeIds,
-  };
-
-  const showLibtvSyncStatus = useCallback((tone: "busy" | "ready" | "error", text: string) => {
-    libtvSync.setStatus({ tone, text });
-  }, [libtvSync]);
-
   const {
     imagePreview,
     setImagePreview,
@@ -563,14 +600,17 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     isImageDropActive,
     setIsImageDropActive,
     saveCanvasImageAsset,
+    downloadCanvasImageAsset,
     handleImageFiles,
     importLibraryImageToNode,
     createLibraryImageNodeAtWorldPoint,
     createImageNodesFromDrop,
     createImageNodesFromClipboardData,
+    createImageReferenceForNode,
     openImagePreview,
     openImageCrop,
     downloadNodeImage,
+    showMediaStatus,
     changeCropAspect,
     startCropInteraction,
     handleCropPointerMove,
@@ -580,7 +620,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     nodes,
     connections,
     imageDownloadPath,
-    isLibtvCanvas: activeProject?.canvasType === "forart-libtv",
     setNodes,
     setCanvasDocument,
     patchNode,
@@ -591,30 +630,22 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setSelectedConnectionId,
     setConnectionAction,
     setContextMenu,
-    showLibtvSyncStatus,
-    deleteLibtvRemoteNodeIfNeeded,
     t,
   });
 
   const {
-    libtvModels,
-    libtvModelsLoading,
-    refreshLibtvModels,
     resumeImageGenerationTasks,
     runImageComposer,
     stopImageComposer,
-    runLibtvImageNode,
-    stopLibtvImageNode,
-    syncLibtvImageNode,
     runLlmNode,
     stopLlmNode,
+    writebackGenerationTask,
   } = useCanvasGenerationActions({
     nodes,
     connections,
     groups,
     viewport,
     apiProviders,
-    defaultImageProviderId,
     imageProviders,
     defaultChatProvider,
     chatProviders,
@@ -624,15 +655,50 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     activeCanvasIdRef,
     patchNode,
     setNodes,
-    saveCanvasImageAsset,
-    setLibtvStatus,
+    t,
+  });
+
+  const {
+    refreshActionFissionRow,
+    resumeActionFissionTasks,
+    runActionFissionRow,
+    runAllActionFissionRows,
+    switchAllActionFissionRows,
+    stopActionFissionRow,
+    stopAllActionFissionRows,
+  } = useActionFissionGenerationActions({
+    nodes,
+    connections,
+    groups,
+    viewport,
+    apiProviders,
+    defaultImageProviderId,
+    imageProviders,
+    activeCanvasId,
+    activeCanvasTitle,
+    activeProject,
+    activeCanvasIdRef,
+    patchNode,
+    setNodes,
+    writebackGenerationTask,
+    t,
+  });
+
+  const {
+    runLibtvImageGenerator,
+    stopLibtvImageGenerator,
+  } = useLibtvGenerationActions({
+    nodes,
+    connections,
+    patchNode,
     t,
   });
 
   useEffect(() => {
     if (!activeProject || showCanvasHome) return;
     resumeImageGenerationTasks(nodes);
-  }, [activeProject?.id, nodes, showCanvasHome, resumeImageGenerationTasks]);
+    resumeActionFissionTasks(nodes);
+  }, [activeProject?.id, nodes, showCanvasHome, resumeActionFissionTasks, resumeImageGenerationTasks]);
 
   const toolbarNode = imageCrop?.nodeId ? nodeMap.get(imageCrop.nodeId) || null : selectedId ? nodeMap.get(selectedId) || null : null;
   const previewNode = imagePreview ? nodeMap.get(imagePreview.nodeId) : null;
@@ -640,11 +706,9 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   useEffect(() => {
     const syncApiProviders = () => {
       setApiProviders(readApiProviders());
-      setDefaultImageProviderId(readDefaultImageProviderId());
     };
     void loadApiSettings().then((settings) => {
       setApiProviders(settings.providers);
-      setDefaultImageProviderId(settings.defaultImageProviderId);
     });
     window.addEventListener("storage", syncApiProviders);
     window.addEventListener("focus", syncApiProviders);
@@ -722,6 +786,11 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
           void deleteSelectedNodes();
           return;
         }
+        if (selectedGroupId) {
+          event.preventDefault();
+          void deleteSelectedGroup();
+          return;
+        }
         if (selectedConnectionId) {
           event.preventDefault();
           deleteConnection(selectedConnectionId);
@@ -747,15 +816,18 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
 
     function handlePaste(event: ClipboardEvent) {
       if (isEditingTarget(event.target)) return;
+      const copiedSelection = readClipboardSelection(event.clipboardData);
+      if (copiedSelection?.nodes.length) {
+        event.preventDefault();
+        pasteCopiedNodes(copiedSelection);
+        return;
+      }
       if (hasClipboardImage(event.clipboardData)) {
         event.preventDefault();
         const point = getPasteClientPoint();
         void createImageNodesFromClipboardData(event.clipboardData, point.x, point.y);
         return;
       }
-      if (!copiedSelectionRef.current?.nodes.length) return;
-      event.preventDefault();
-      pasteCopiedNodes();
     }
 
     window.addEventListener("keydown", handleKeyDown);
@@ -809,10 +881,11 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   }, [setNodesWithoutHistory]);
 
   function getKindLabel(type: CanvasNodeType) {
-    return t(`infiniteCanvas.${type}`);
+    return t(`infiniteCanvas:${type}`);
   }
 
   function getImageGeneratorInputPreviews(nodeId: string): ImageGeneratorInputPreview[] {
+    const targetNode = nodeMap.get(nodeId);
     const promptPreviews: ImageGeneratorInputPreview[] = [];
     const imagePreviews: ImageGeneratorInputPreview[] = [];
     connections
@@ -831,6 +904,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
           });
           return;
         }
+        if (targetNode?.type === "actionFission") return;
         const text = collectPrompt(source, nodes, connections).trim();
         if (!text) return;
         promptPreviews.push({
@@ -845,52 +919,11 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   }
 
   async function addNode(type: CanvasNodeType, worldPosition?: { x: number; y: number }) {
-    if (activeProject?.canvasType !== "forart-libtv" && isLibtvNodeType(type)) return;
     const definition = getNodeDefinition(type);
     const node = nodeDefaults(type);
     const center = worldPosition || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
     node.x = Math.round(center.x - definition.defaultSize.w / 2);
     node.y = Math.round(center.y - definition.defaultSize.h / 2);
-
-    if (activeProject?.canvasType === "forart-libtv") {
-      if (!activeProject.libtvProjectId || !window.libtv?.createNode) {
-        showLibtvSyncStatus("error", t("infiniteCanvas.libtvBridgeUnavailable"));
-        return;
-      }
-      if (!isLibtvCreatableNodeType(type)) {
-        showLibtvSyncStatus("error", t("infiniteCanvas.libtvNodeTypeNotSupported"));
-        return;
-      }
-      try {
-        showLibtvSyncStatus("busy", t("infiniteCanvas.libtvSyncBusy"));
-        const created = await window.libtv.createNode({
-          projectId: activeProject.libtvProjectId,
-          title: node.title || getKindLabel(type),
-          type: type === "libtvPrompt" ? "text" : "image",
-          x: node.x,
-          y: node.y,
-          aspectRatio: type === "libtvImage" ? node.libtvAspectRatio : undefined,
-        });
-        const nextNode: CanvasNode = {
-          ...node,
-          title: created.title || node.title,
-          libtvProjectId: activeProject.libtvProjectId,
-          libtvNodeId: created.nodeId,
-          url: created.url || node.url,
-          fileName: created.fileName || node.fileName,
-        };
-        setNodes((current) => [...current, nextNode]);
-        setSelectedIds(new Set([nextNode.id]));
-        setSelectedGroupId("");
-        setSelectedConnectionId("");
-        setConnectionAction(null);
-        setContextMenu(null);
-        showLibtvSyncStatus("ready", t("infiniteCanvas.libtvSyncIdle"));
-      } catch (error) {
-        showLibtvSyncStatus("error", error instanceof Error ? error.message : String(error));
-      }
-      return;
-    }
 
     setNodes((current) => [...current, node]);
     setSelectedIds(new Set([node.id]));
@@ -900,34 +933,13 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setContextMenu(null);
   }
 
-  async function deleteLibtvRemoteNodeIfNeeded(node: CanvasNode) {
-    if (activeProject?.canvasType !== "forart-libtv") return;
-    if (!node.libtvProjectId || !node.libtvNodeId) return;
-    if (!window.libtv?.deleteNode) {
-      throw new Error(t("infiniteCanvas.libtvBridgeUnavailable"));
-    }
-    libtvSync.clearNodePending(node.id);
-    await window.libtv.deleteNode({
-      projectId: node.libtvProjectId,
-      nodeId: node.libtvNodeId,
-      title: node.title,
-      type: node.type === "libtvPrompt" ? "text" : "image",
-    });
-  }
-
   async function deleteNode(nodeId: string) {
     const node = nodeMap.get(nodeId);
     if (!node) return;
-    if (activeProject?.canvasType === "forart-libtv") {
-      try {
-        showLibtvSyncStatus("busy", t("infiniteCanvas.libtvSyncBusy"));
-        await deleteLibtvRemoteNodeIfNeeded(node);
-        showLibtvSyncStatus("ready", t("infiniteCanvas.libtvSyncIdle"));
-      } catch (error) {
-        showLibtvSyncStatus("error", error instanceof Error ? error.message : String(error));
-        return;
-      }
+    if (activeCanvasId) {
+      await stopLocalGenerationTasksForNode(activeCanvasId, nodeId);
     }
+    if (node.type === "libtvImageGenerator") stopLibtvImageGenerator(nodeId);
     setCanvasDocument((current) => ({
       nodes: current.nodes.filter((node) => node.id !== nodeId),
       connections: current.connections.filter((connection) => connection.from !== nodeId && connection.to !== nodeId),
@@ -944,18 +956,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   async function deleteSelectedNodes() {
     const ids = new Set(selectedIds);
     if (!ids.size) return;
-    if (activeProject?.canvasType === "forart-libtv") {
-      const selectedNodes = nodes.filter((node) => ids.has(node.id));
-      try {
-        showLibtvSyncStatus("busy", t("infiniteCanvas.libtvSyncBusy"));
-        for (const node of selectedNodes) {
-          await deleteLibtvRemoteNodeIfNeeded(node);
-        }
-        showLibtvSyncStatus("ready", t("infiniteCanvas.libtvSyncIdle"));
-      } catch (error) {
-        showLibtvSyncStatus("error", error instanceof Error ? error.message : String(error));
-        return;
-      }
+    if (activeCanvasId) {
+      await Promise.all(Array.from(ids).map((nodeId) => stopLocalGenerationTasksForNode(activeCanvasId, nodeId)));
     }
     setCanvasDocument((current) => ({
       nodes: current.nodes.filter((node) => !ids.has(node.id)),
@@ -970,31 +972,58 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setImagePreview((current) => (current && ids.has(current.nodeId) ? null : current));
   }
 
+  async function deleteSelectedGroup() {
+    const group = groups.find((item) => item.id === selectedGroupId);
+    if (!group) return;
+    const ids = new Set(group.nodeIds);
+    if (activeCanvasId) {
+      await Promise.all(Array.from(ids).map((nodeId) => stopLocalGenerationTasksForNode(activeCanvasId, nodeId)));
+    }
+    setCanvasDocument((current) => ({
+      nodes: current.nodes.filter((node) => !ids.has(node.id)),
+      connections: current.connections.filter((connection) => !ids.has(connection.from) && !ids.has(connection.to)),
+      groups: current.groups
+        .filter((item) => item.id !== group.id)
+        .map((item) => ({ ...item, nodeIds: item.nodeIds.filter((id) => !ids.has(id)) })),
+    }));
+    setSelectedIds(new Set());
+    setSelectedGroupId("");
+    setSelectedConnectionId("");
+    setConnectionAction(null);
+    setEditingGroupId("");
+    setImageCrop((current) => (current && ids.has(current.nodeId) ? null : current));
+    setImagePreview((current) => (current && ids.has(current.nodeId) ? null : current));
+  }
+
+  function writeCopiedSelectionToClipboard(selection: CopiedCanvasSelection) {
+    void window.easyTool?.writeCanvasClipboard?.(selection);
+  }
+
   function copySelectedNodes() {
     if (!selectedIds.size) return;
     const ids = new Set(selectedIds);
-    const copiedNodes = nodes.filter((node) => ids.has(node.id)).map((node) => ({ ...node }));
+    const copiedNodes = nodes.filter((node) => ids.has(node.id)).map((node) => cloneCanvasNodeForNewTarget(node));
     if (!copiedNodes.length) return;
-    copiedSelectionRef.current = {
+    const copied = {
       nodes: copiedNodes,
       connections: connections.filter((connection) => ids.has(connection.from) && ids.has(connection.to)).map((connection) => ({ ...connection })),
     };
+    writeCopiedSelectionToClipboard(copied);
   }
 
-  function pasteCopiedNodes() {
-    const copied = copiedSelectionRef.current;
+  function pasteCopiedNodes(copied: CopiedCanvasSelection) {
     if (!copied?.nodes.length) return;
     const idMap = new Map<string, string>();
     const offset = 36;
     const nextNodes = copied.nodes.map((node) => {
       const nextId = uid(node.type);
       idMap.set(node.id, nextId);
+      const clonedNode = cloneCanvasNodeForNewTarget(node, nextId);
       return {
-        ...node,
-        id: nextId,
-        x: Math.round(node.x + offset),
-        y: Math.round(node.y + offset),
-        title: node.title,
+        ...clonedNode,
+        x: Math.round(clonedNode.x + offset),
+        y: Math.round(clonedNode.y + offset),
+        title: clonedNode.title,
       };
     });
     const nextConnections = copied.connections.flatMap((connection) => {
@@ -1013,7 +1042,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setConnectionAction(null);
     setContextMenu(null);
     setImageCrop(null);
-    copiedSelectionRef.current = { nodes: nextNodes.map((node) => ({ ...node })), connections: nextConnections.map((connection) => ({ ...connection })) };
   }
 
   function createGroupFromSelection() {
@@ -1029,7 +1057,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         ...current.groups.filter((group) => !groupNodeIds.every((nodeId) => group.nodeIds.includes(nodeId))),
         {
           id: groupId,
-          title: `${t("infiniteCanvas.group")} ${current.groups.length + 1}`,
+          title: `${t("infiniteCanvas:group")} ${current.groups.length + 1}`,
           x: Math.round(selectionGroupBounds.x),
           y: Math.round(selectionGroupBounds.y),
           w: Math.round(selectionGroupBounds.width),
@@ -1046,13 +1074,12 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   }
 
   function createEmptyGroup(worldPosition: { x: number; y: number }) {
-    if (activeProject?.canvasType === "forart-libtv") return;
     const groupId = uid("group");
     setGroups((current) => [
       ...current,
       {
         id: groupId,
-        title: `${t("infiniteCanvas.group")} ${current.length + 1}`,
+        title: `${t("infiniteCanvas:group")} ${current.length + 1}`,
         x: Math.round(worldPosition.x - EMPTY_GROUP_DEFAULT_WIDTH / 2),
         y: Math.round(worldPosition.y - EMPTY_GROUP_DEFAULT_HEIGHT / 2),
         w: EMPTY_GROUP_DEFAULT_WIDTH,
@@ -1111,6 +1138,47 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     });
   }
 
+  function duplicateNodesForDrag(draggedNodes: DragState["nodes"]) {
+    const sourceIds = new Set(draggedNodes.map((node) => node.id));
+    const sourceStartById = new Map(draggedNodes.map((node) => [node.id, node]));
+    const sourceNodes = nodes.filter((node) => sourceIds.has(node.id));
+    if (!sourceNodes.length) return null;
+    const idMap = new Map<string, string>();
+    const nextNodes = sourceNodes.map((node) => {
+      const nextId = uid(node.type);
+      idMap.set(node.id, nextId);
+      return {
+        ...node,
+        id: nextId,
+        title: node.title,
+      };
+    });
+    const nextConnections = connections.flatMap((connection) => {
+      const from = idMap.get(connection.from);
+      const to = idMap.get(connection.to);
+      return from && to ? [{ ...connection, id: uid("link"), from, to }] : [];
+    });
+    setCanvasDocument((current) => ({
+      nodes: [...current.nodes, ...nextNodes],
+      connections: [...current.connections, ...nextConnections],
+      groups: current.groups,
+    }));
+    setSelectedIds(new Set(nextNodes.map((node) => node.id)));
+    setSelectedGroupId("");
+    setSelectedConnectionId("");
+    setConnectionAction(null);
+    setContextMenu(null);
+    setImageCrop(null);
+    return nextNodes.map((node, index) => {
+      const sourceStart = sourceStartById.get(sourceNodes[index]?.id || "");
+      return {
+        id: node.id,
+        startX: sourceStart?.startX ?? node.x,
+        startY: sourceStart?.startY ?? node.y,
+      };
+    });
+  }
+
   function removeImageGeneratorInput(connectionId: string) {
     setConnections((current) => current.filter((connection) => connection.id !== connectionId));
   }
@@ -1121,7 +1189,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
       const imageInputIds = imageGeneratorInputs
         .filter((connection) => {
           const source = nodeMap.get(connection.from);
-          return Boolean(source && (source.type === "image" || source.type === "imageGenerator") && source.url);
+          return Boolean(isImageLikeNode(source) && source.url);
         })
         .map((connection) => connection.id);
       const fromImageIndex = imageInputIds.indexOf(fromConnectionId);
@@ -1135,8 +1203,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
       const nextImageGeneratorInputs = [...imageGeneratorInputs].sort((a, b) => {
         const sourceA = nodeMap.get(a.from);
         const sourceB = nodeMap.get(b.from);
-        const imageA = Boolean(sourceA && (sourceA.type === "image" || sourceA.type === "imageGenerator") && sourceA.url);
-        const imageB = Boolean(sourceB && (sourceB.type === "image" || sourceB.type === "imageGenerator") && sourceB.url);
+        const imageA = Boolean(isImageLikeNode(sourceA) && sourceA.url);
+        const imageB = Boolean(isImageLikeNode(sourceB) && sourceB.url);
         if (imageA && imageB) return (imageOrder.get(a.id) || 0) - (imageOrder.get(b.id) || 0);
         if (imageA !== imageB) return imageA ? 1 : -1;
         return (imageGeneratorInputOrder.get(a.id) || 0) - (imageGeneratorInputOrder.get(b.id) || 0);
@@ -1203,6 +1271,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setIsZoomMenuOpen(false);
     setEditingPromptId("");
     setEditingGroupId("");
+    setOpenImageComposerSelect("");
     setSelectedIds(new Set());
     setSelectedGroupId("");
     setSelectedConnectionId("");
@@ -1233,8 +1302,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     if (target.closest(".ic-context-menu")) return;
     if (event.button === 0 && target.closest(".ic-node, .nodrag")) return;
     event.preventDefault();
-    libtvSync.flushNodes(selectedIds);
-    clearCanvasSelection();
     if (event.button === 1) {
       panRef.current = {
         pointerId: event.pointerId,
@@ -1244,6 +1311,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
       };
       setSelectionBox(null);
     } else {
+      clearCanvasSelection();
       const start = screenToWorld(event.clientX, event.clientY);
       selectionDragRef.current = {
         pointerId: event.pointerId,
@@ -1303,16 +1371,16 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         const distance = Math.hypot(clientDx, clientDy);
         if (distance < NODE_DRAG_START_THRESHOLD) return;
         drag.active = true;
-        setIsNodeDragging(true);
         dragHistoryRef.current = { nodes, connections, groups };
+        if (drag.copyOnDrag) {
+          const copiedDragNodes = duplicateNodesForDrag(drag.nodes);
+          if (copiedDragNodes?.length) drag.nodes = copiedDragNodes;
+          drag.copyOnDrag = false;
+        }
+        setIsNodeDragging(true);
       }
       event.preventDefault();
-      const dx = (event.clientX - drag.startClientX) / viewport.scale;
-      const dy = (event.clientY - drag.startClientY) / viewport.scale;
-      const positions = new Map(drag.nodes.map((draggedNode) => [draggedNode.id, {
-        x: Math.round(draggedNode.startX + dx),
-        y: Math.round(draggedNode.startY + dy),
-      }]));
+      const positions = nodeDragPositions(drag, event.clientX, event.clientY);
       scheduleFrame(nodeDragFrameRef, { positions }, ({ positions: latestPositions }) => {
         applyNodeDragFrame({ positions: latestPositions });
       });
@@ -1330,36 +1398,25 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         dragHistoryRef.current = { nodes, connections, groups };
       }
       event.preventDefault();
-      const dx = (event.clientX - groupDrag.startClientX) / viewport.scale;
-      const dy = (event.clientY - groupDrag.startClientY) / viewport.scale;
-      const positions = new Map(groupDrag.nodes.map((draggedNode) => [draggedNode.id, {
-        x: Math.round(draggedNode.startX + dx),
-        y: Math.round(draggedNode.startY + dy),
-      }]));
-      scheduleFrame(groupDragFrameRef, {
-        groupId: groupDrag.groupId,
-        groupX: Math.round(groupDrag.startX + dx),
-        groupY: Math.round(groupDrag.startY + dy),
-        positions,
-      }, applyGroupDragFrame);
+      scheduleFrame(groupDragFrameRef, groupDragSnapshot(groupDrag, event.clientX, event.clientY), applyGroupDragFrame);
       return;
     }
     const resize = resizeRef.current;
     if (resize && resize.pointerId === event.pointerId) {
       const node = nodeMap.get(resize.nodeId);
       if (!node) return;
-      if (node.type === "image" || node.type === "imageGenerator") {
+      if (isImageLikeNode(node)) {
         resizeRef.current = null;
         return;
       }
       const dx = (event.clientX - resize.startClientX) / viewport.scale;
       const dy = (event.clientY - resize.startClientY) / viewport.scale;
-      const minW = 180;
-      const minH = 140;
+      const minW = node.type === "actionFission" ? ACTION_FISSION_NODE_MIN_WIDTH : 180;
+      const minH = node.type === "actionFission" ? ACTION_FISSION_NODE_MIN_HEIGHT : 140;
       const maxW = 1200;
-      const maxH = 900;
       const nextW = clamp(Math.round(resize.startW + dx), minW, maxW);
-      const nextH = clamp(Math.round(resize.startH + dy), minH, maxH);
+      const nextRawH = Math.round(resize.startH + dy);
+      const nextH = node.type === "actionFission" ? Math.max(minH, nextRawH) : clamp(nextRawH, minH, 900);
       scheduleFrame(nodeResizeFrameRef, { nodeId: resize.nodeId, w: nextW, h: nextH }, applyNodeResizeFrame);
       return;
     }
@@ -1454,9 +1511,19 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     }
     if (dragRef.current?.pointerId === event.pointerId) {
       const previous = dragHistoryRef.current;
-      const draggedNodeIds = dragRef.current.nodes.map((node) => node.id);
-      flushScheduledFrame(nodeDragFrameRef, applyNodeDragFrame);
-      if (dragRef.current.active) syncDraggedNodesIntoGroups(draggedNodeIds);
+      const drag = dragRef.current;
+      const draggedNodeIds = drag.nodes.map((node) => node.id);
+      cancelScheduledFrame(nodeDragFrameRef);
+      if (drag.active) {
+        applyNodeDragFrame({ positions: nodeDragPositions(drag, event.clientX, event.clientY) });
+        syncDraggedNodesIntoGroups(draggedNodeIds);
+      } else {
+        setSelectedIds(new Set([drag.pendingSelectNodeId]));
+        setSelectedGroupId("");
+        setSelectedConnectionId("");
+        setConnectionAction(null);
+        setContextMenu(null);
+      }
       dragRef.current = null;
       setIsNodeDragging(false);
       dragHistoryRef.current = null;
@@ -1464,8 +1531,11 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     }
     if (groupDragRef.current?.pointerId === event.pointerId) {
       const previous = dragHistoryRef.current;
-      const draggedNodeIds = groupDragRef.current.nodes.map((node) => node.id);
-      flushScheduledFrame(groupDragFrameRef, applyGroupDragFrame);
+      const groupDrag = groupDragRef.current;
+      cancelScheduledFrame(groupDragFrameRef);
+      if (groupDrag.active) {
+        applyGroupDragFrame(groupDragSnapshot(groupDrag, event.clientX, event.clientY));
+      }
       groupDragRef.current = null;
       setIsNodeDragging(false);
       dragHistoryRef.current = null;
@@ -1600,17 +1670,16 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         startX: currentNode.x,
         startY: currentNode.y,
       }));
-    setSelectedIds(dragSelectionIds);
-    setSelectedGroupId("");
-    setSelectedConnectionId("");
-    setConnectionAction(null);
     setContextMenu(null);
     dragRef.current = {
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
+      pendingSelectNodeId: node.id,
+      selectionIds: dragSelectionIds,
       nodes: draggedNodes.length ? draggedNodes : [{ id: node.id, startX: node.x, startY: node.y }],
       active: false,
+      copyOnDrag: event.altKey,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -1624,7 +1693,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
       openImagePreview(node.id);
       return;
     }
-    if (node.type !== "prompt" && node.type !== "libtvPrompt") return;
+    if (node.type !== "prompt") return;
     if (blockedByInteractive) return;
 
     event.preventDefault();
@@ -1640,7 +1709,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   function startNodeResize(event: PointerEvent<HTMLButtonElement>, node: CanvasNode) {
     event.preventDefault();
     event.stopPropagation();
-    if (node.type === "image" || node.type === "imageGenerator") return;
+    if (isImageLikeNode(node)) return;
     resizeRef.current = {
       pointerId: event.pointerId,
       nodeId: node.id,
@@ -1668,9 +1737,17 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     event.preventDefault();
     event.stopPropagation();
     const from = nodeMap.get(draft.from);
-    if (!from || !canConnect(from, target, activeProject?.canvasType || "forart")) {
+    if (!from || !canConnect(from, target)) {
       setLinkDraft(null);
       return;
+    }
+    if (target.type === "actionFission" && isImageLikeNode(from)) {
+      const currentCount = countDirectActionFissionImageConnections(target.id, nodes, connections);
+      const duplicate = connections.some((connection) => connection.from === draft.from && connection.to === target.id);
+      if (!duplicate && currentCount >= BASE_PUBLIC_REFERENCE_LIMIT) {
+        setLinkDraft(null);
+        return;
+      }
     }
     setConnections((current) => current.some((connection) => connection.from === draft.from && connection.to === target.id)
       ? current
@@ -1681,8 +1758,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   const setNodeFileInputRefStable = useStableEvent((nodeId: string, input: HTMLInputElement | null) => {
     fileInputRefs.current[nodeId] = input;
   });
-  const uploadNodeFilesStable = useStableEvent((nodeId: string, files: FileList | File[]) => void handleImageFiles(nodeId, files));
-  const clickNodeUploadStable = useStableEvent((nodeId: string) => fileInputRefs.current[nodeId]?.click());
+  const loadNodeFilesStable = useStableEvent((nodeId: string, files: FileList | File[]) => void handleImageFiles(nodeId, files));
+  const clickNodeLoadStable = useStableEvent((nodeId: string) => fileInputRefs.current[nodeId]?.click());
   const clickNodeLibraryStable = useStableEvent((nodeId: string) => setLibraryPickerNodeId(nodeId));
   const previewNodeImageStable = useStableEvent(openImagePreview);
   const downloadNodeImageStable = useStableEvent((nodeId: string) => void downloadNodeImage(nodeId));
@@ -1695,22 +1772,74 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setEditingPromptId(editing ? nodeId : "");
   });
   const commitPromptStable = useStableEvent((nodeId: string, text: string) => {
-    const promptNode = nodeMapRef.current.get(nodeId);
-    if (promptNode?.type === "libtvPrompt") {
-      libtvSync.queueNodePatch(nodeId, { text }, { flush: true });
-    }
+    void nodeId;
+    void text;
   });
   const patchPromptStable = useStableEvent((nodeId: string, patch: Partial<CanvasNode>) => {
     patchNode(nodeId, patch);
-    const promptNode = nodeMapRef.current.get(nodeId);
-    if (promptNode?.type === "libtvPrompt" && patch.text !== undefined) libtvSync.queueNodePatch(nodeId, { text: String(patch.text || "") }, { debounceMs: null });
   });
+  const removeInputStable = useStableEvent(removeImageGeneratorInput);
+  const reorderInputStable = useStableEvent(reorderImageGeneratorInput);
+  const createImageReferenceStable = useStableEvent((nodeId: string, files: FileList | File[]) => void createImageReferenceForNode(nodeId, files));
+  const refreshActionFissionRowStable = useStableEvent(refreshActionFissionRow);
+  const runActionFissionRowStable = useStableEvent((nodeId: string, rowId: string, actions: ActionEntry[], tags: ActionTag[]) => void runActionFissionRow(nodeId, rowId, actions, tags));
+  const stopActionFissionRowStable = useStableEvent(stopActionFissionRow);
+  const getGenerationTaskForTargetStable = useStableEvent((target: CanvasGenerationTarget) => getGenerationTaskForNodeTarget(nodes, target));
+  const isGenerationTargetActiveStable = useStableEvent((target: CanvasGenerationTarget) => isGenerationTargetActiveFromNodes(nodes, target));
+  const isNodeRunningStable = useStableEvent((node: CanvasNode) => {
+    return isNodeGenerationActiveFromAnchor(node) || Boolean(node.libtvImageGeneration?.running);
+  });
+  const beforeRemoveActionFissionRowStable = useStableEvent(async (nodeId: string, rowId: string) => {
+    if (!activeCanvasId) return;
+    await stopLocalGenerationTasksForTarget(activeCanvasId, { type: "actionFissionRow", nodeId, rowId });
+  });
+  const runAllActionFissionRowsStable = useStableEvent((nodeId: string, rowsData: Array<{ rowId: string; actions: ActionEntry[]; tags: ActionTag[] }>) => void runAllActionFissionRows(nodeId, rowsData));
+  const switchAllActionFissionRowsStable = useStableEvent((nodeId: string, rowsData: Array<{ rowId: string; actions: ActionEntry[]; tags: ActionTag[] }>) => void switchAllActionFissionRows(nodeId, rowsData));
+  const stopAllActionFissionRowsStable = useStableEvent(stopAllActionFissionRows);
+  const previewActionFissionResultStable = useStableEvent((nodeId: string, row: ActionFissionRow) => {
+    if (!row.resultUrl) return;
+    setActionFissionPreview({ src: row.resultUrl, alt: row.resultFileName || row.selectedActionName || `${nodeId}-${row.id}` });
+  });
+  const previewActionFissionActionStable = useStableEvent((nodeId: string, row: ActionFissionRow) => {
+    if (!row.selectedActionAssetUrl) return;
+    setActionFissionPreview({ src: row.selectedActionAssetUrl, alt: row.selectedActionName || `${nodeId}-${row.id}-action` });
+  });
+  const downloadActionFissionResultStable = useStableEvent((nodeId: string, row: ActionFissionRow) => {
+    if (!row.resultUrl) return;
+    void downloadCanvasImageAsset({
+      url: row.resultUrl,
+      defaultName: row.resultFileName || `action-fission-${row.id}.png`,
+      statusKey: `action-fission-result:${nodeId}:${row.id}`,
+      onDownloaded: () => {
+        const node = nodeMapRef.current.get(nodeId);
+        if (!node?.actionFission) return;
+        patchNode(nodeId, {
+          actionFission: {
+            ...node.actionFission,
+            rows: node.actionFission.rows.map((item) => (
+              item.id === row.id ? { ...item, resultDownloadState: "downloaded", resultDownloadedAt: Date.now() } : item
+            )),
+          },
+        });
+      },
+    });
+  });
+  const downloadAllActionFissionRowsStable = useStableEvent((nodeId: string, rowsData: Array<{ rowId: string }>) => {
+    const node = nodeMapRef.current.get(nodeId);
+    if (!node?.actionFission) return;
+    const rowIds = new Set(rowsData.map((rowData) => rowData.rowId));
+    node.actionFission.rows
+      .filter((row) => rowIds.has(row.id) && row.resultUrl)
+      .forEach((row) => downloadActionFissionResultStable(nodeId, row));
+  });
+  const runLibtvImageGeneratorStable = useStableEvent((nodeId: string) => void runLibtvImageGenerator(nodeId));
+  const stopLibtvImageGeneratorStable = useStableEvent(stopLibtvImageGenerator);
 
   const nodeBodyActions = useMemo<CanvasNodeBodyActions>(() => ({
     openSelectChange: setOpenImageComposerSelect,
     setFileInputRef: setNodeFileInputRefStable,
-    uploadFiles: uploadNodeFilesStable,
-    uploadClick: clickNodeUploadStable,
+    loadFiles: loadNodeFilesStable,
+    loadClick: clickNodeLoadStable,
     libraryClick: clickNodeLibraryStable,
     previewImage: previewNodeImageStable,
     downloadImage: downloadNodeImageStable,
@@ -1720,25 +1849,74 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     stopCropInteraction: stopCropInteractionStable,
     runLlm: runLlmNodeStable,
     stopLlm: stopLlmNodeStable,
+    runLibtvImageGenerator: runLibtvImageGeneratorStable,
+    stopLibtvImageGenerator: stopLibtvImageGeneratorStable,
     editingPromptChange: editingPromptChangeStable,
     commitPrompt: commitPromptStable,
     patchPrompt: patchPromptStable,
+    imageProviders,
+    defaultImageProvider,
+    draggedInputConnectionId,
+    removeInput: removeInputStable,
+    reorderInput: reorderInputStable,
+    createImageReference: createImageReferenceStable,
+    draggedInputConnectionIdChange: setDraggedInputConnectionId,
+    refreshActionFissionRow: refreshActionFissionRowStable,
+    runActionFissionRow: runActionFissionRowStable,
+    stopActionFissionRow: stopActionFissionRowStable,
+    beforeRemoveActionFissionRow: beforeRemoveActionFissionRowStable,
+    runAllActionFissionRows: runAllActionFissionRowsStable,
+    switchAllActionFissionRows: switchAllActionFissionRowsStable,
+    downloadAllActionFissionRows: downloadAllActionFissionRowsStable,
+    stopAllActionFissionRows: stopAllActionFissionRowsStable,
+    previewActionFissionResult: previewActionFissionResultStable,
+    previewActionFissionAction: previewActionFissionActionStable,
+    downloadActionFissionResult: downloadActionFissionResultStable,
+    actionFissionDownloadStatusKey: downloadStatus?.tone === "busy" ? downloadStatus.nodeId.replace(/^action-fission-result:/, "") : "",
+    showMediaStatus,
+    getGenerationTaskForTarget: getGenerationTaskForTargetStable,
+    isGenerationTargetActive: isGenerationTargetActiveStable,
+    saveCanvasImageAsset,
   }), [
-    clickNodeUploadStable,
+    clickNodeLoadStable,
     clickNodeLibraryStable,
     commitPromptStable,
+    createImageReferenceStable,
     cropPointerMoveStable,
+    downloadActionFissionResultStable,
+    downloadAllActionFissionRowsStable,
     downloadNodeImageStable,
+    downloadStatus,
     editingPromptChangeStable,
+    defaultImageProvider,
+    draggedInputConnectionId,
+    getGenerationTaskForTargetStable,
     patchNode,
     patchPromptStable,
     previewNodeImageStable,
+    previewActionFissionResultStable,
+    previewActionFissionActionStable,
+    imageProviders,
+    isGenerationTargetActiveStable,
+    beforeRemoveActionFissionRowStable,
+    refreshActionFissionRowStable,
+    removeInputStable,
+    reorderInputStable,
+    runActionFissionRowStable,
+    runAllActionFissionRowsStable,
+    saveCanvasImageAsset,
+    showMediaStatus,
     runLlmNodeStable,
+    runLibtvImageGeneratorStable,
     setNodeFileInputRefStable,
     startCropInteractionStable,
+    stopActionFissionRowStable,
+    switchAllActionFissionRowsStable,
+    stopAllActionFissionRowsStable,
     stopCropInteractionStable,
+    stopLibtvImageGeneratorStable,
     stopLlmNodeStable,
-    uploadNodeFilesStable,
+    loadNodeFilesStable,
   ]);
 
   async function importLibraryImage(selection: LibraryAssetSelection) {
@@ -1810,8 +1988,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   function renderImageComposer() {
     const node = selectedId ? nodeMap.get(selectedId) : null;
     if (isNodeDragging || !node || node.type !== "imageGenerator" || imageCrop?.nodeId === node.id) return null;
-    const selectedProvider = defaultImageProvider
-      || imageProviders.find((provider) => provider.id === node.imageProviderId)
+    const selectedProvider = imageProviders.find((provider) => provider.id === node.imageProviderId)
+      || imageProviders[0]
       || null;
     const selectedModel = node.imageModel && selectedProvider?.imageModels.includes(node.imageModel) ? node.imageModel : selectedProvider?.imageModels[0] || "";
     const inputPreviews = getImageGeneratorInputPreviews(node.id);
@@ -1830,46 +2008,28 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         viewport={viewport}
         selectedProvider={selectedProvider}
         selectedModel={selectedModel}
+        imageProviders={imageProviders}
         inputPreviews={inputPreviews}
         generationReadiness={generationReadiness}
+        generationTask={getGenerationTaskForNodeTarget(nodes, { type: "imageGenerator", nodeId: node.id })}
         openSelectId={openImageComposerSelect}
         draggedInputConnectionId={draggedInputConnectionId}
-        inputInsertIndex={inputInsertIndex}
         onOpenSelectChange={setOpenImageComposerSelect}
         onPatchNode={patchNode}
-        onRun={runImageComposer}
-        onStop={stopImageComposer}
+        onRun={(nodeId) => {
+          const target = nodeMap.get(nodeId);
+          if (target?.imageGenerationApiType === "libtv-api") runLibtvImageGeneratorStable(nodeId);
+          else runImageComposer(nodeId);
+        }}
+        onStop={(nodeId) => {
+          const target = nodeMap.get(nodeId);
+          if (target?.imageGenerationApiType === "libtv-api") stopLibtvImageGeneratorStable(nodeId);
+          else stopImageComposer(nodeId);
+        }}
         onRemoveInput={removeImageGeneratorInput}
         onReorderInput={reorderImageGeneratorInput}
+        onCreateImageReference={createImageReferenceForNode}
         onDraggedInputConnectionIdChange={setDraggedInputConnectionId}
-        onInputInsertIndexChange={setInputInsertIndex}
-        getInputInsertIndex={getImageInputInsertIndex}
-        t={t}
-      />
-    );
-  }
-
-  function renderLibtvComposer() {
-    const node = selectedId ? nodeMap.get(selectedId) : null;
-    if (isNodeDragging || !node || node.type !== "libtvImage" || imageCrop?.nodeId === node.id) return null;
-    return (
-      <LibtvComposer
-        node={node}
-        viewport={viewport}
-        models={libtvModels}
-        modelsLoading={libtvModelsLoading}
-        inputPreviews={getImageGeneratorInputPreviews(node.id)}
-        openSelectId={openImageComposerSelect}
-        draggedInputConnectionId={draggedInputConnectionId}
-        inputInsertIndex={inputInsertIndex}
-        onOpenSelectChange={setOpenImageComposerSelect}
-        onPatchNode={patchNode}
-        onQueueNodePatch={libtvSync.queueNodePatch}
-        onRefreshModels={refreshLibtvModels}
-        onSyncNode={syncLibtvImageNode}
-        onRun={runLibtvImageNode}
-        onStop={stopLibtvImageNode}
-        onRemoveInput={removeImageGeneratorInput}
         t={t}
       />
     );
@@ -1884,24 +2044,17 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     );
   }
 
-  function renderLibtvSyncToast() {
-    const status = libtvSync.status;
+  function renderPageToast() {
+    const status = projectStatus;
     if (!status) return null;
+    const tone = projectStatusTone;
+    const shouldShowReadyToast = status === t("infiniteCanvas:canvasDuplicated") || status === t("infiniteCanvas:canvasMoved");
+    if (tone !== "error" && !shouldShowReadyToast) return null;
+    const Icon = tone === "error" ? X : Check;
     return (
-      <div className={`ic-libtv-sync-toast ic-libtv-sync-toast--${status.tone}`} role={status.tone === "error" ? "alert" : "status"} aria-live={status.tone === "error" ? "assertive" : "polite"}>
-        {status.tone === "busy" ? <RefreshCw size={14} aria-hidden="true" /> : status.tone === "ready" ? <Check size={14} aria-hidden="true" /> : status.tone === "dirty" ? <Clock size={14} aria-hidden="true" /> : <X size={14} aria-hidden="true" />}
-        <span>{status.text}</span>
-      </div>
-    );
-  }
-
-  function renderLibtvHomeToast() {
-    if (!showCanvasHome || !libtvStatus) return null;
-    const Icon = libtvStatusTone === "busy" ? RefreshCw : libtvStatusTone === "error" ? X : Check;
-    return (
-      <div className={`ic-page-toast ic-page-toast--${libtvStatusTone}`} role={libtvStatusTone === "error" ? "alert" : "status"} aria-live={libtvStatusTone === "error" ? "assertive" : "polite"}>
+      <div className={`ic-page-toast ic-page-toast--${tone}`} role={tone === "error" ? "alert" : "status"} aria-live={tone === "error" ? "assertive" : "polite"}>
         <Icon size={14} aria-hidden="true" />
-        <span>{libtvStatus}</span>
+        <span>{status}</span>
       </div>
     );
   }
@@ -1910,58 +2063,81 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     return (
       <CanvasHomePanel
         mode={canvasHomeMode}
-        projects={sortedCanvasProjects}
-        selectedProjectId={selectedHomeCanvasId}
-        renamingProjectId={renamingCanvasId}
+        documents={sortedCanvasDocuments}
+        projects={canvasProjects}
+        activeProjectId={activeProjectId}
+        selectedDocumentId={selectedHomeCanvasId}
+        renamingDocumentId={renamingCanvasId}
+        renamingProjectId={renamingProjectId}
         renamingTitle={renamingTitle}
-        confirmingDeleteProjectId={confirmingDeleteCanvasId}
+        confirmingDeleteDocumentId={confirmingDeleteCanvasId}
+        confirmingDeleteProjectId={confirmingDeleteProjectId}
         sortMode={canvasSortMode}
-        projectStatus={projectStatus}
-        libtvProjectResults={libtvProjectResults}
-        libtvProjectFilter={libtvProjectFilter}
-        libtvImporting={libtvImporting}
-        selectedLibtvProjectUuid={selectedLibtvProjectUuid}
-        onModeChange={setCanvasHomeMode}
-        onOpenLibtvHome={openLibtvHome}
-        onRefreshLocal={() => void refreshCanvasProjects()}
-        onCreateCanvas={() => void createCanvasProjectFromDraft()}
-        onSelectProject={setSelectedHomeCanvasId}
-        onOpenProject={(projectId) => void openCanvasProject(projectId)}
-        onStartRename={(projectId, title) => {
-          setRenamingCanvasId(projectId);
+        onRefreshLocal={() => void refreshCanvasWorkspace()}
+        onCreateCanvas={() => void createCanvasDocumentFromDraft()}
+        onCreateProject={() => void createCanvasProject()}
+        onSelectDocument={setSelectedHomeCanvasId}
+        onOpenDocument={(canvasId) => void openCanvasDocument(canvasId)}
+        onSelectProject={(projectId) => {
+          selectCanvasProject(projectId);
+          setSelectedHomeCanvasId("");
+          setRenamingCanvasId("");
+          setRenamingProjectId("");
+          setRenamingTitle("");
+          setConfirmingDeleteCanvasId("");
+          setConfirmingDeleteProjectId("");
+        }}
+        onStartRenameDocument={(canvasId, title) => {
+          setRenamingCanvasId(canvasId);
+          setRenamingProjectId("");
           setRenamingTitle(title);
           setConfirmingDeleteCanvasId("");
+          setConfirmingDeleteProjectId("");
+        }}
+        onStartRenameProject={(projectId, title) => {
+          setRenamingProjectId(projectId);
+          setRenamingCanvasId("");
+          setRenamingTitle(title);
+          setConfirmingDeleteCanvasId("");
+          setConfirmingDeleteProjectId("");
         }}
         onCancelRename={() => {
           setRenamingCanvasId("");
+          setRenamingProjectId("");
           setRenamingTitle("");
         }}
         onRenamingTitleChange={setRenamingTitle}
-        onSubmitRename={(projectId) => void submitRenameCanvasProject(projectId)}
-        onConfirmDelete={setConfirmingDeleteCanvasId}
-        onCancelDelete={() => setConfirmingDeleteCanvasId("")}
+        onSubmitRenameDocument={(canvasId) => void submitRenameCanvasDocument(canvasId)}
+        onSubmitRenameProject={(projectId) => void submitRenameCanvasProject(projectId)}
+        onDuplicateDocument={(canvasId) => void duplicateCanvasDocument(canvasId)}
+        onMoveDocumentToProject={(canvasId, projectId) => void moveCanvasToProject(canvasId, projectId)}
+        onConfirmDeleteDocument={(canvasId) => {
+          setConfirmingDeleteCanvasId(canvasId);
+          setConfirmingDeleteProjectId("");
+        }}
+        onConfirmDeleteProject={(projectId) => {
+          setConfirmingDeleteProjectId(projectId);
+          setConfirmingDeleteCanvasId("");
+        }}
+        onDeleteDocument={(canvasId) => void deleteCanvasDocument(canvasId)}
         onDeleteProject={(projectId) => void deleteCanvasProject(projectId)}
         onSortModeChange={setCanvasSortMode}
-        onRefreshLibtvProjects={() => void searchLibtvProjects()}
-        onLibtvProjectFilterChange={setLibtvProjectFilter}
-        onSelectLibtvProject={setSelectedLibtvProjectUuid}
-        onImportLibtvProject={(projectUuid) => void importLibtvProjectFromDraft(projectUuid)}
       />
     );
   }
   return (
-    <section className="infinite-canvas-page" aria-label={t("infiniteCanvas.title")}>
+    <section className="infinite-canvas-page" aria-label={t("infiniteCanvas:title")}>
       <CanvasTabsBar
         tabs={canvasTabs}
         activeCanvasId={activeCanvasId}
         showHome={showCanvasHome}
         onOpenHome={returnToCanvasHome}
-        onOpenCanvas={(canvasId) => void openCanvasProject(canvasId)}
+        onOpenCanvas={(canvasId) => void openCanvasDocument(canvasId)}
         onCloseCanvas={(canvasId) => void closeCanvasTab(canvasId)}
         onReorderCanvas={reorderCanvasTabs}
         t={t}
       />
-      {renderLibtvHomeToast()}
+      {renderPageToast()}
       {showCanvasHome ? renderCanvasHome() : null}
       <div
         ref={stageRef}
@@ -2000,7 +2176,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         {isImageDropActive ? (
           <div className="ic-stage-drop-hint" aria-live="polite">
             <Upload size={18} aria-hidden="true" />
-            <span>{t("infiniteCanvas.dropImagesToCanvas")}</span>
+            <span>{t("infiniteCanvas:dropImagesToCanvas")}</span>
           </div>
         ) : null}
         <SelectionToolbar
@@ -2022,7 +2198,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             cropAspectMenuOpen={cropAspectMenuOpen}
             downloadStatus={downloadStatus}
             onCropAspectMenuOpenChange={setCropAspectMenuOpen}
-            onUploadImage={(nodeId) => fileInputRefs.current[nodeId]?.click()}
+            onLoadImage={(nodeId) => fileInputRefs.current[nodeId]?.click()}
             onImportLibraryImage={setLibraryPickerNodeId}
             onOpenCrop={openImageCrop}
             onChangeCropAspect={changeCropAspect}
@@ -2031,6 +2207,13 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             onPreviewImage={openImagePreview}
             onDownloadImage={(nodeId) => void downloadNodeImage(nodeId)}
             onDeleteNode={(nodeId) => void deleteNode(nodeId)}
+            imageProviders={imageProviders}
+            defaultImageProvider={defaultImageProvider}
+            isGenerationTargetActive={isGenerationTargetActiveStable}
+            onRunAllActionFissionRows={runAllActionFissionRowsStable}
+            onSwitchAllActionFissionRows={switchAllActionFissionRowsStable}
+            onDownloadAllActionFissionRows={downloadAllActionFissionRowsStable}
+            onStopAllActionFissionRows={stopAllActionFissionRowsStable}
             t={t}
           />
         ) : null}
@@ -2044,7 +2227,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
           <ConnectionLayer
             showConnections={showConnections}
             linkDraft={linkDraft}
-            selectConnectionLabel={t("infiniteCanvas.selectConnection")}
+            selectConnectionLabel={t("infiniteCanvas:selectConnection")}
             onSelectConnection={selectConnection}
             onFocusConnection={focusConnection}
             onMoveSelectedConnection={updateConnectionAction}
@@ -2071,7 +2254,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             editingPromptId={editingPromptId}
             linkDraftFromId={linkDraft?.from || ""}
             linkDraftSourceNode={linkDraft ? nodeMap.get(linkDraft.from) || null : null}
-            canvasType={activeProject?.canvasType || "forart"}
             renderNodeBody={renderNodeBodyStable}
             startNodeDrag={startNodeDragStable}
             finishLink={finishLinkStable}
@@ -2080,17 +2262,17 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             startLink={startLinkStable}
             setHoveredId={setHoveredId}
             getKindLabel={getKindLabelStable}
+            isNodeRunning={isNodeRunningStable}
             t={t}
           />
           {renderImageComposer()}
-          {renderLibtvComposer()}
         </div>
         {showConnections && connectionAction && selectedConnectionId === connectionAction.id ? (
           <button
             className="ic-link-delete-button nodrag"
             type="button"
-            aria-label={t("infiniteCanvas.deleteConnection")}
-            title={t("infiniteCanvas.deleteConnection")}
+            aria-label={t("infiniteCanvas:deleteConnection")}
+            title={t("infiniteCanvas:deleteConnection")}
             style={{
               left: connectionAction.left,
               top: connectionAction.top,
@@ -2105,7 +2287,6 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
           </button>
         ) : null}
         {renderDownloadToast()}
-        {renderLibtvSyncToast()}
         <div className="ic-canvas-controls nodrag">
           {isMinimapOpen ? (
             <div className="ic-minimap-popover">
@@ -2114,8 +2295,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
                 className="ic-minimap"
                 role="button"
                 tabIndex={0}
-                aria-label={t("infiniteCanvas.minimap")}
-                title={t("infiniteCanvas.minimap")}
+                aria-label={t("infiniteCanvas:minimap")}
+                title={t("infiniteCanvas:minimap")}
                 onPointerDown={handleMinimapPointerDown}
                 onPointerMove={handleMinimapPointerMove}
                 onPointerUp={handleMinimapPointerUp}
@@ -2150,13 +2331,13 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
           ) : null}
           {isZoomMenuOpen ? (
             <form className="ic-zoom-popover" onSubmit={submitZoomInput}>
-              <button type="button" title={t("infiniteCanvas.zoomOut")} aria-label={t("infiniteCanvas.zoomOut")} onClick={() => zoomBy(0.88)}>
+              <button type="button" title={t("infiniteCanvas:zoomOut")} aria-label={t("infiniteCanvas:zoomOut")} onClick={() => zoomBy(0.88)}>
                 <ZoomOut size={16} aria-hidden="true" />
               </button>
               <label>
                 <input
                   ref={zoomInputRef}
-                  aria-label={t("infiniteCanvas.zoomCanvas")}
+                  aria-label={t("infiniteCanvas:zoomCanvas")}
                   type="text"
                   inputMode="numeric"
                   pattern="[0-9]*"
@@ -2166,49 +2347,33 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
                 />
                 <span>%</span>
               </label>
-              <button type="submit" title={t("common.actions.save")} aria-label={t("common.actions.save")}>
+              <button type="submit" title={t("common:actions.save")} aria-label={t("common:actions.save")}>
                 <Check size={16} aria-hidden="true" />
               </button>
-              <button type="button" title={t("infiniteCanvas.zoomIn")} aria-label={t("infiniteCanvas.zoomIn")} onClick={() => zoomBy(1.12)}>
+              <button type="button" title={t("infiniteCanvas:zoomIn")} aria-label={t("infiniteCanvas:zoomIn")} onClick={() => zoomBy(1.12)}>
                 <ZoomIn size={16} aria-hidden="true" />
               </button>
             </form>
           ) : null}
           <div className="ic-control-bar">
-            {activeProject?.canvasType === "forart-libtv" ? (
-              <button
-                type="button"
-                data-tooltip={t("infiniteCanvas.libtvRefreshingRemoteCanvas")}
-                aria-label={t("infiniteCanvas.libtvRefreshingRemoteCanvas")}
-                onClick={() => void refreshLibtvCanvasFromRemote({
-                  ...activeProject,
-                  nodes,
-                  connections,
-                  groups,
-                  viewport,
-                })}
-              >
-                <RefreshCw size={16} aria-hidden="true" />
-              </button>
-            ) : null}
             <button
               type="button"
               className={libraryPickerNodeId ? "active" : ""}
-              data-tooltip={t("infiniteCanvas.importFromLibrary")}
-              aria-label={t("infiniteCanvas.importFromLibrary")}
+              data-tooltip={t("infiniteCanvas:importFromLibrary")}
+              aria-label={t("infiniteCanvas:importFromLibrary")}
               aria-pressed={Boolean(libraryPickerNodeId)}
               onClick={toggleCanvasLibraryPicker}
             >
               <Images size={16} aria-hidden="true" />
             </button>
-            <button type="button" data-tooltip={t("infiniteCanvas.resetView")} aria-label={t("infiniteCanvas.resetView")} onClick={resetView}>
+            <button type="button" data-tooltip={t("infiniteCanvas:resetView")} aria-label={t("infiniteCanvas:resetView")} onClick={resetView}>
               <Crosshair size={16} aria-hidden="true" />
             </button>
             <button
               type="button"
               className={!showConnections ? "active" : ""}
-              data-tooltip={t(showConnections ? "infiniteCanvas.hideConnections" : "infiniteCanvas.showConnections")}
-              aria-label={t(showConnections ? "infiniteCanvas.hideConnections" : "infiniteCanvas.showConnections")}
+              data-tooltip={t(showConnections ? "infiniteCanvas:hideConnections" : "infiniteCanvas:showConnections")}
+              aria-label={t(showConnections ? "infiniteCanvas:hideConnections" : "infiniteCanvas:showConnections")}
               aria-pressed={!showConnections}
               onClick={() => {
                 setShowConnections((current) => !current);
@@ -2223,8 +2388,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             <button
               type="button"
               className={isMinimapOpen ? "active" : ""}
-              data-tooltip={t("infiniteCanvas.minimap")}
-              aria-label={t("infiniteCanvas.minimap")}
+              data-tooltip={t("infiniteCanvas:minimap")}
+              aria-label={t("infiniteCanvas:minimap")}
               aria-pressed={isMinimapOpen}
               onClick={() => {
                 setIsZoomMenuOpen(false);
@@ -2236,8 +2401,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             <button
               type="button"
               className="ic-zoom-value"
-              data-tooltip={t("infiniteCanvas.zoomCanvas")}
-              aria-label={t("infiniteCanvas.zoomCanvas")}
+              data-tooltip={t("infiniteCanvas:zoomCanvas")}
+              aria-label={t("infiniteCanvas:zoomCanvas")}
               aria-expanded={isZoomMenuOpen}
               onClick={() => {
                 setIsZoomMenuOpen((current) => !current);
@@ -2249,13 +2414,11 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         </div>
         {contextMenu ? (
           <div className="ic-context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onContextMenu={(event) => event.preventDefault()}>
-            {activeProject?.canvasType !== "forart-libtv" ? (
-              <button type="button" role="menuitem" onClick={() => createEmptyGroup({ x: contextMenu.worldX, y: contextMenu.worldY })}>
-                <Layers size={15} aria-hidden="true" />
-                <span>{t("infiniteCanvas.emptyGroup")}</span>
-              </button>
-            ) : null}
-            {(activeProject?.canvasType === "forart-libtv" ? LIBTV_CREATABLE_NODE_TYPES : LOCAL_CONTEXT_MENU_NODE_TYPES).map((type) => {
+            <button type="button" role="menuitem" onClick={() => createEmptyGroup({ x: contextMenu.worldX, y: contextMenu.worldY })}>
+              <Layers size={15} aria-hidden="true" />
+              <span>{t("infiniteCanvas:emptyGroup")}</span>
+            </button>
+            {LOCAL_CONTEXT_MENU_NODE_TYPES.map((type) => {
               const Icon = getNodeDefinition(type).icon;
               return (
                 <button key={type} type="button" role="menuitem" onClick={() => void addNode(type, { x: contextMenu.worldX, y: contextMenu.worldY })}>
@@ -2266,7 +2429,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             })}
           </div>
         ) : null}
-        {previewNode && isImageLikeNode(previewNode) && previewNode.url ? <ImageViewer src={previewNode.url} alt={previewNode.fileName || "canvas image preview"} ariaLabel={t("infiniteCanvas.viewLargeImage")} onClose={() => setImagePreview(null)} /> : null}
+        {previewNode && isImageLikeNode(previewNode) && previewNode.url ? <ImageViewer src={previewNode.url} alt={previewNode.fileName || "canvas image preview"} ariaLabel={t("infiniteCanvas:viewLargeImage")} onClose={() => setImagePreview(null)} /> : null}
+        {actionFissionPreview ? <ImageViewer src={actionFissionPreview.src} alt={actionFissionPreview.alt} ariaLabel={t("infiniteCanvas:viewLargeImage")} onClose={() => setActionFissionPreview(null)} /> : null}
         {libraryPickerNodeId ? (
           <div className="ic-library-rail-panel nodrag nopan" onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
             <LibraryAssetPickerRail onSelect={(selection) => void importLibraryImage(selection)} />

@@ -40,7 +40,7 @@
   gap: var(--space-2);
   color: var(--text-muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
 }
 
 .dialog-field input {
@@ -66,7 +66,7 @@
   padding: 0 var(--space-4);
   background: var(--button-functional-bg);
   color: var(--button-functional-text);
-  font-weight: 800;
+  font-weight: var(--font-weight-semibold);
   transition:
     background 160ms ease,
     border-color 160ms ease,
@@ -230,13 +230,14 @@
   flex: 0 1 auto;
   max-width: 100%;
   min-height: 32px;
+  min-width: 32px;
   border: 1px solid transparent;
   border-radius: 999px;
   padding: 0 12px;
   background: transparent;
   color: var(--text-secondary);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -265,7 +266,20 @@
   padding: 0 10px;
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--font-weight-regular);
+}
+
+.library-tag-filter button,
+.library-tag-filter-menu button,
+.library-tag-overflow-menu button,
+.library-modal-tags button,
+.outfit-tag-menu button,
+.model-tag-manager__list button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
 }
 
 .tag-create-row {
@@ -308,6 +322,7 @@
 
 .model-tag-manager__list button {
   min-height: 38px;
+  min-width: 38px;
   max-width: 100%;
   border: 1px solid var(--button-functional-border);
   border-radius: var(--button-functional-radius);
@@ -315,7 +330,7 @@
   background: var(--button-functional-bg);
   color: var(--button-functional-muted-text);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -356,6 +371,6 @@
   background: color-mix(in srgb, var(--surface-card-muted) 54%, transparent);
   color: var(--text-muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--font-weight-regular);
 }
 

@@ -30,7 +30,7 @@ export const API_PROVIDER_CHANGED_EVENT = "forart-api-providers-changed";
 
 export interface ApiSettings {
   providers: ApiProvider[];
-  defaultImageProviderId: string;
+  defaultImageProviderId?: string;
 }
 
 let apiSettingsCache: ApiSettings = {
@@ -170,10 +170,6 @@ export function readApiProviders(): ApiProvider[] {
   return apiSettingsCache.providers;
 }
 
-export function readDefaultImageProviderId() {
-  return apiSettingsCache.defaultImageProviderId;
-}
-
 export function readApiSettings(): ApiSettings {
   return apiSettingsCache;
 }
@@ -189,7 +185,7 @@ export async function loadApiSettings(): Promise<ApiSettings> {
 export async function saveApiSettings(settings: ApiSettings): Promise<ApiSettings> {
   const normalized = setApiSettingsCache(settings);
   if (window.forartConfig?.saveApiSettings) {
-    const result = await window.forartConfig.saveApiSettings(normalized);
+    const result = await window.forartConfig.saveApiSettings({ ...normalized, defaultImageProviderId: normalized.defaultImageProviderId || "" });
     return setApiSettingsCache(normalizeApiSettings(result.apiSettings as Partial<ApiSettings>));
   }
   return normalized;

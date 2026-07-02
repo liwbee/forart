@@ -22,7 +22,7 @@ export function getActiveDataSource() {
 export function getApiBaseUrl() {
   if (!activeConfig) return "";
   if (activeConfig.mode === "remote") return activeConfig.serverUrl;
-  return "http://127.0.0.1:5175";
+  return "http://127.0.0.1:6980";
 }
 
 function createDataSource(config: ForartAppConfig): ForartDataSource {

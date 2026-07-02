@@ -1,7 +1,7 @@
-import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Copy, Download, MoreHorizontal, Pencil, Plus, Search, Star, Trash2, Upload, X } from "lucide-react";
+import { Copy, Download, MoreHorizontal, Pencil, Plus, Star, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Fragment } from "react";
 import { ImageViewer } from "../../lib/ImageViewer";
@@ -161,10 +161,10 @@ function ModelProjectSidebar({
   }
 
   return (
-    <aside className="model-project-rail" aria-label={t("modelLibrary.projectRail")}>
+    <aside className="model-project-rail" aria-label={t("modelLibrary:projectRail")}>
       <button className="model-project-add" type="button" onClick={onCreateProject}>
         <Plus size={18} aria-hidden="true" />
-        <span>{t("common.labels.newProject")}</span>
+        <span>{t("common:labels.newProject")}</span>
       </button>
 
       <div className="model-project-list">
@@ -184,7 +184,7 @@ function ModelProjectSidebar({
                     onKeyDown={(event) => handleRenameKeyDown(event, project.id)}
                     autoFocus
                     maxLength={120}
-                    aria-label={t("common.labels.projectName")}
+                    aria-label={t("common:labels.projectName")}
                   />
                 ) : (
                   <button
@@ -204,7 +204,7 @@ function ModelProjectSidebar({
                 <button
                   className="model-project-menu-button"
                   type="button"
-                  aria-label={t("modelLibrary.projectActions", { name: project.name || "Untitled Project" })}
+                  aria-label={t("modelLibrary:projectActions", { name: project.name || "Untitled Project" })}
                   aria-expanded={menuProjectId === project.id}
                   onClick={(event) => toggleMenu(event, project.id)}
                 >
@@ -214,7 +214,7 @@ function ModelProjectSidebar({
             );
           })
         ) : (
-          <div className="model-project-list-empty">{t("common.empty.noProjects")}</div>
+          <div className="model-project-list-empty">{t("common:empty.noProjects")}</div>
         )}
       </div>
 
@@ -235,7 +235,7 @@ function ModelProjectSidebar({
             }}
           >
             <Pencil size={16} aria-hidden="true" />
-            <span>{t("common.actions.rename")}</span>
+            <span>{t("common:actions.rename")}</span>
           </button>
           <button
             className={deleteConfirmProjectId === menuProjectId ? "danger confirming" : "danger"}
@@ -248,7 +248,7 @@ function ModelProjectSidebar({
             }}
           >
             <Trash2 size={16} aria-hidden="true" />
-            <span>{deleteConfirmProjectId === menuProjectId ? t("common.confirm.delete") : t("common.actions.delete")}</span>
+            <span>{deleteConfirmProjectId === menuProjectId ? t("common:confirm.delete") : t("common:actions.delete")}</span>
           </button>
         </div>,
         document.body,
@@ -259,18 +259,18 @@ function ModelProjectSidebar({
 
 function ModelToolbar({
   tags,
-  activeTagId,
+  activeTagIds,
   activeGender,
-  searchSlot,
-  onTagChange,
+  onTagToggle,
+  onTagClear,
   onGenderToggle,
   onOpenTagManager,
 }: {
   tags: ModelTag[];
-  activeTagId: string;
+  activeTagIds: string[];
   activeGender: "female" | "male" | "";
-  searchSlot?: ReactNode;
-  onTagChange: (tagId: string) => void;
+  onTagToggle: (tagId: string) => void;
+  onTagClear: () => void;
   onGenderToggle: (gender: "female" | "male") => void;
   onOpenTagManager: () => void;
 }) {
@@ -281,7 +281,8 @@ function ModelToolbar({
   const [tagMenuState, setTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
   const visibleTags = tags.slice(0, visibleTagCount);
   const hiddenTags = tags.slice(visibleTagCount);
-  const hasHiddenActiveTag = hiddenTags.some((tag) => tag.id === activeTagId);
+  const activeTagSet = useMemo(() => new Set(activeTagIds), [activeTagIds]);
+  const hasHiddenActiveTag = hiddenTags.some((tag) => activeTagSet.has(tag.id));
 
   useEffect(() => {
     const controls = tagControlsRef.current;
@@ -376,13 +377,13 @@ function ModelToolbar({
 
   return (
     <div className="model-toolbar">
-      <div className="library-gender-filter" aria-label={t("modelLibrary.genderCategory")}>
-        <span className="library-filter-label">{t("modelLibrary.gender")}</span>
+      <div className="library-gender-filter" aria-label={t("modelLibrary:genderCategory")}>
+        <span className="library-filter-label">{t("modelLibrary:gender")}</span>
         <button
           className={`gender-icon-filter female${activeGender === "female" ? " active" : ""}`}
           type="button"
-          aria-label={t("modelLibrary.femaleModel")}
-          title={t("modelLibrary.femaleModel")}
+          aria-label={t("modelLibrary:femaleModel")}
+          title={t("modelLibrary:femaleModel")}
           onClick={() => onGenderToggle("female")}
         >
           <GenderSymbol gender="female" className="gender-symbol-icon" />
@@ -390,8 +391,8 @@ function ModelToolbar({
         <button
           className={`gender-icon-filter male${activeGender === "male" ? " active" : ""}`}
           type="button"
-          aria-label={t("modelLibrary.maleModel")}
-          title={t("modelLibrary.maleModel")}
+          aria-label={t("modelLibrary:maleModel")}
+          title={t("modelLibrary:maleModel")}
           onClick={() => onGenderToggle("male")}
         >
           <GenderSymbol gender="male" className="gender-symbol-icon" />
@@ -401,21 +402,22 @@ function ModelToolbar({
       <div className="library-filter-divider" aria-hidden="true" />
 
       <div className="library-tag-section">
-        <span className="library-filter-label">{t("common.labels.tags")}</span>
-        <button className="model-tag-add-button" type="button" aria-label={t("common.labels.manageTags")} title={t("common.labels.manageTags")} onClick={onOpenTagManager}>
+        <span className="library-filter-label">{t("common:labels.tags")}</span>
+        <button className="model-tag-add-button" type="button" aria-label={t("common:labels.manageTags")} title={t("common:labels.manageTags")} onClick={onOpenTagManager}>
           <Pencil size={18} aria-hidden="true" />
         </button>
         <div className="library-tag-controls" ref={tagControlsRef}>
           <div className="library-tag-filter">
-            <button className={activeTagId ? "" : "active"} type="button" onClick={() => onTagChange("")}>
-              {t("common.labels.all")}
+            <button className={activeTagIds.length ? "" : "active"} type="button" onClick={onTagClear}>
+              {t("common:labels.all")}
             </button>
             {visibleTags.map((tag) => (
               <button
                 key={tag.id}
-                className={activeTagId === tag.id ? "active" : ""}
+                className={activeTagSet.has(tag.id) ? "active" : ""}
                 type="button"
-                onClick={() => onTagChange(tag.id)}
+                aria-pressed={activeTagSet.has(tag.id)}
+                onClick={() => onTagToggle(tag.id)}
               >
                 {tag.name}
               </button>
@@ -425,8 +427,8 @@ function ModelToolbar({
             <button
               className={`library-tag-more-button${hasHiddenActiveTag ? " active" : ""}`}
               type="button"
-              aria-label={t("modelLibrary.moreTags")}
-              title={t("modelLibrary.moreTags")}
+              aria-label={t("modelLibrary:moreTags")}
+              title={t("modelLibrary:moreTags")}
               aria-expanded={tagMenuState.open}
               onClick={openTagMenu}
             >
@@ -435,7 +437,7 @@ function ModelToolbar({
           ) : null}
           <div className="library-tag-measure" ref={tagMeasureRef} aria-hidden="true">
             <button type="button" data-measure-kind="all">
-              {t("common.labels.all")}
+              {t("common:labels.all")}
             </button>
             {tags.map((tag) => (
               <button key={tag.id} type="button" data-measure-kind="tag">
@@ -448,7 +450,6 @@ function ModelToolbar({
           </div>
         </div>
       </div>
-      {searchSlot ? <div className="model-toolbar-search-slot">{searchSlot}</div> : null}
       {tagMenuState.open && hiddenTags.length
         ? createPortal(
             <div
@@ -460,12 +461,12 @@ function ModelToolbar({
               {hiddenTags.map((tag) => (
                 <button
                   key={tag.id}
-                  className={activeTagId === tag.id ? "active" : ""}
+                  className={activeTagSet.has(tag.id) ? "active" : ""}
                   type="button"
-                  role="menuitem"
+                  role="menuitemcheckbox"
+                  aria-checked={activeTagSet.has(tag.id)}
                   onClick={() => {
-                    setTagMenuState({ open: false, x: 0, y: 0 });
-                    onTagChange(tag.id);
+                    onTagToggle(tag.id);
                   }}
                 >
                   {tag.name}
@@ -505,11 +506,11 @@ function AddModelCard({ disabled, onCreate }: { disabled: boolean; onCreate: (ge
     <div className="model-add-card model-add-gender-card">
       <button className="model-add-gender-option female" type="button" disabled={disabled} onClick={() => onCreate("female")}>
         <GenderSymbol gender="female" className="model-add-gender-icon" />
-        <strong>{disabled ? t("common.states.adding") : t("modelLibrary.addFemaleModel")}</strong>
+        <strong>{disabled ? t("common:states.adding") : t("modelLibrary:addFemaleModel")}</strong>
       </button>
       <button className="model-add-gender-option male" type="button" disabled={disabled} onClick={() => onCreate("male")}>
         <GenderSymbol gender="male" className="model-add-gender-icon" />
-        <strong>{disabled ? t("common.states.adding") : t("modelLibrary.addMaleModel")}</strong>
+        <strong>{disabled ? t("common:states.adding") : t("modelLibrary:addMaleModel")}</strong>
       </button>
     </div>
   );
@@ -534,13 +535,13 @@ function ModelCard({
         {coverUrl ? (
           <img
             src={coverUrl}
-            alt={t("modelLibrary.coverAlt", { name: model.name })}
+            alt={t("modelLibrary:coverAlt", { name: model.name })}
             loading="lazy"
             draggable={false}
             onDragStart={(event) => event.preventDefault()}
           />
         ) : (
-          <div className="placeholder">{t("common.empty.noImage")}</div>
+          <div className="placeholder">{t("common:empty.noImage")}</div>
         )}
       </div>
       <div className="model-card__meta">
@@ -552,7 +553,7 @@ function ModelCard({
             ))}
           </div>
         ) : (
-          <div className="tag-list empty">{t("modelLibrary.noTags")}</div>
+          <div className="tag-list empty">{t("modelLibrary:noTags")}</div>
         )}
       </div>
     </button>
@@ -783,12 +784,12 @@ function ModelInlineEditor({
     if (!src) return;
     setOpenImageMenuState({ imageId: "", x: 0, y: 0 });
     setDeleteConfirmImageId("");
-    onImageActionStatus("busy", t("common.states.copyingImage"));
+    onImageActionStatus("busy", t("common:states.copyingImage"));
     try {
       await copyLibraryImage(src);
-      onImageActionStatus("ready", t("common.states.imageCopied"));
+      onImageActionStatus("ready", t("common:states.imageCopied"));
     } catch (error) {
-      onImageActionStatus("error", t("common.errors.imageActionFailed", { message: error instanceof Error ? error.message : String(error) }));
+      onImageActionStatus("error", t("common:errors.imageActionFailed", { message: error instanceof Error ? error.message : String(error) }));
     }
   }
 
@@ -796,24 +797,24 @@ function ModelInlineEditor({
     if (!src) return;
     setOpenImageMenuState({ imageId: "", x: 0, y: 0 });
     setDeleteConfirmImageId("");
-    onImageActionStatus("busy", t("common.states.downloadingImage"));
+    onImageActionStatus("busy", t("common:states.downloadingImage"));
     try {
       await downloadLibraryOriginalImage(src, defaultName);
-      onImageActionStatus("ready", t("common.states.imageDownloadStarted"));
+      onImageActionStatus("ready", t("common:states.imageDownloadStarted"));
     } catch (error) {
-      onImageActionStatus("error", t("common.errors.imageActionFailed", { message: error instanceof Error ? error.message : String(error) }));
+      onImageActionStatus("error", t("common:errors.imageActionFailed", { message: error instanceof Error ? error.message : String(error) }));
     }
   }
 
   return (
-    <section ref={editorRef} className="model-inline-editor" aria-label={t("modelLibrary.inlineEditor", { name: model.name })}>
-      <button className="model-inline-close-button" type="button" onClick={onClose} aria-label={t("modelLibrary.closeEditor")}>
-        <X size={18} aria-hidden="true" />
+    <section ref={editorRef} className="model-inline-editor" aria-label={t("modelLibrary:inlineEditor", { name: model.name })}>
+      <button className="model-inline-close-button" type="button" onClick={onClose} aria-label={t("modelLibrary:closeEditor")}>
+        <X size={14} aria-hidden="true" />
       </button>
       <div className="model-inline-editor-head">
         <div className="model-inline-title-area">
           <label className="model-inline-name-field">
-            <span>{t("modelLibrary.modelName")}</span>
+            <span>{t("modelLibrary:modelName")}</span>
             <input
               className="library-entry-title-input"
               type="text"
@@ -825,18 +826,18 @@ function ModelInlineEditor({
               maxLength={120}
             />
           </label>
-          <div className="model-inline-summary" aria-label={t("modelLibrary.assetOverview")}>
+          <div className="model-inline-summary" aria-label={t("modelLibrary:assetOverview")}>
             <button
               className={`model-lib-button danger model-delete-confirm-button${isConfirmingDelete ? " confirming" : ""}`}
               type="button"
               disabled={isDeleting}
               onClick={() => onDelete(model.id, isConfirmingDelete)}
-              aria-label={isConfirmingDelete ? t("modelLibrary.confirmDeleteModel") : t("modelLibrary.deleteModel")}
+              aria-label={isConfirmingDelete ? t("modelLibrary:confirmDeleteModel") : t("modelLibrary:deleteModel")}
             >
-              {isDeleting ? t("modelLibrary.deleting") : isConfirmingDelete ? t("modelLibrary.finalConfirmDelete") : t("common.actions.delete")}
+              {isDeleting ? t("modelLibrary:deleting") : isConfirmingDelete ? t("modelLibrary:finalConfirmDelete") : t("common:actions.delete")}
             </button>
-            <span>{t("modelLibrary.tagCount", { count: model.tags.length || 0 })}</span>
-            <span>{t("modelLibrary.imageCount", { count: images.length || 0 })}</span>
+            <span>{t("modelLibrary:tagCount", { count: model.tags.length || 0 })}</span>
+            <span>{t("modelLibrary:imageCount", { count: images.length || 0 })}</span>
           </div>
         </div>
       </div>
@@ -844,8 +845,8 @@ function ModelInlineEditor({
         <div className="model-inline-tags-block">
           <div className="model-inline-section-head">
             <div>
-              <span className="model-inline-section-label">{t("common.labels.tags")}</span>
-              <p>{model.tags.length ? t("modelLibrary.selectedTagCount", { count: model.tags.length }) : t("common.labels.notSelected")}</p>
+              <span className="model-inline-section-label">{t("common:labels.tags")}</span>
+              <p>{model.tags.length ? t("modelLibrary:selectedTagCount", { count: model.tags.length }) : t("common:labels.notSelected")}</p>
             </div>
           </div>
           <div className="library-modal-tags">
@@ -864,7 +865,7 @@ function ModelInlineEditor({
                 );
               })
             ) : (
-              <div className="library-modal-tags empty">{t("modelLibrary.noAvailableTags")}</div>
+              <div className="library-modal-tags empty">{t("modelLibrary:noAvailableTags")}</div>
             )}
           </div>
         </div>
@@ -877,12 +878,12 @@ function ModelInlineEditor({
         >
           <div className="model-inline-section-head">
             <div>
-              <span className="model-inline-section-label">{t("modelLibrary.images")}</span>
-              <p>{images.length ? t("modelLibrary.assetCount", { count: images.length }) : t("modelLibrary.noAssets")}</p>
+              <span className="model-inline-section-label">{t("modelLibrary:images")}</span>
+              <p>{images.length ? t("modelLibrary:assetCount", { count: images.length }) : t("modelLibrary:noAssets")}</p>
             </div>
             <button className="model-lib-button" type="button" onClick={() => fileInputRef.current?.click()}>
               <Upload size={16} aria-hidden="true" />
-              <span>{t("common.actions.uploadImage")}</span>
+              <span>{t("common:actions.uploadImage")}</span>
             </button>
             <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={handleFilesSelected} />
           </div>
@@ -892,7 +893,7 @@ function ModelInlineEditor({
                 const isCover = model.cover_image_id === image.id;
                 const src = image.asset_url || "";
                 const menuOpen = openImageMenuState.imageId === image.id;
-                const altText = image.caption || model.name || image.filename || t("modelLibrary.imagePreview");
+                const altText = image.caption || model.name || image.filename || t("modelLibrary:imagePreview");
                 return (
                   <Fragment key={image.id}>
                     <figure className={`model-image-tile${isCover ? " cover" : ""}`}>
@@ -922,12 +923,12 @@ function ModelInlineEditor({
                             onDragStart={(event) => event.preventDefault()}
                           />
                         ) : (
-                          <div className="placeholder">{t("common.empty.noImage")}</div>
+                          <div className="placeholder">{t("common:empty.noImage")}</div>
                         )}
                         <button
                           className="model-image-menu-button"
                           type="button"
-                          aria-label={t("modelLibrary.imageActions")}
+                          aria-label={t("modelLibrary:imageActions")}
                           aria-expanded={menuOpen}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -963,7 +964,7 @@ function ModelInlineEditor({
                               }}
                             >
                               <Star size={15} aria-hidden="true" />
-                              <span>{t("modelLibrary.setAsCover")}</span>
+                              <span>{t("modelLibrary:setAsCover")}</span>
                             </button>
                             <button
                               type="button"
@@ -972,7 +973,7 @@ function ModelInlineEditor({
                               onClick={() => void handleDownloadOriginalImage(src, image.filename || image.caption || `${model.name}-${image.id}`)}
                             >
                               <Download size={15} aria-hidden="true" />
-                              <span>{t("common.actions.downloadOriginalImage")}</span>
+                              <span>{t("common:actions.downloadOriginalImage")}</span>
                             </button>
                             <button
                               type="button"
@@ -981,7 +982,7 @@ function ModelInlineEditor({
                               onClick={() => void handleCopyImage(src)}
                             >
                               <Copy size={15} aria-hidden="true" />
-                              <span>{t("common.actions.copyImage")}</span>
+                              <span>{t("common:actions.copyImage")}</span>
                             </button>
                             <button
                               className={deleteConfirmImageId === image.id ? "danger confirming" : "danger"}
@@ -998,7 +999,7 @@ function ModelInlineEditor({
                               }}
                             >
                               <Trash2 size={15} aria-hidden="true" />
-                              <span>{deleteConfirmImageId === image.id ? t("common.confirm.delete") : t("common.actions.delete")}</span>
+                              <span>{deleteConfirmImageId === image.id ? t("common:confirm.delete") : t("common:actions.delete")}</span>
                             </button>
                           </div>,
                           document.body,
@@ -1008,7 +1009,7 @@ function ModelInlineEditor({
                 );
               })
             ) : (
-              <div className="model-inline-helper">{t("modelLibrary.emptyImagesHint")}</div>
+              <div className="model-inline-helper">{t("modelLibrary:emptyImagesHint")}</div>
             )}
           </div>
         </div>
@@ -1225,19 +1226,19 @@ function CreateProjectDialog({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="dialog__head">
-          <h2 id="create-project-title">{t("common.labels.newProject")}</h2>
-          <p>{t("modelLibrary.createProjectDescription")}</p>
+          <h2 id="create-project-title">{t("common:labels.newProject")}</h2>
+          <p>{t("modelLibrary:createProjectDescription")}</p>
         </div>
         <label className="dialog-field">
-          <span>{t("common.labels.projectName")}</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} autoFocus maxLength={120} placeholder={t("modelLibrary.projectPlaceholder")} />
+          <span>{t("common:labels.projectName")}</span>
+          <input value={name} onChange={(event) => setName(event.target.value)} autoFocus maxLength={120} placeholder={t("modelLibrary:projectPlaceholder")} />
         </label>
         <div className="dialog__actions">
           <button className="button secondary" type="button" onClick={onClose} disabled={isCreating}>
-            {t("common.actions.cancel")}
+            {t("common:actions.cancel")}
           </button>
           <button className="button primary" type="submit" disabled={isCreating}>
-            {isCreating ? t("common.states.creating") : t("common.actions.create")}
+            {isCreating ? t("common:states.creating") : t("common:actions.create")}
           </button>
         </div>
       </form>
@@ -1306,14 +1307,14 @@ function ModelTagManager({
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="model-tag-manager" role="dialog" aria-modal="true" aria-labelledby="tag-manager-title" onMouseDown={(event) => event.stopPropagation()}>
         <div className="dialog__head">
-          <h2 id="tag-manager-title">{t("common.labels.manageTags")}</h2>
-          <p>{t("modelLibrary.tagManagerDescription")}</p>
+          <h2 id="tag-manager-title">{t("common:labels.manageTags")}</h2>
+          <p>{t("modelLibrary:tagManagerDescription")}</p>
         </div>
 
         <div className="dialog-field">
-          <span>{t("common.labels.newTag")}</span>
+          <span>{t("common:labels.newTag")}</span>
           <div className="tag-create-row">
-            <input value={newTagName} onChange={(event) => setNewTagName(event.target.value)} maxLength={24} placeholder={t("common.labels.tagNamePlaceholder")} />
+            <input value={newTagName} onChange={(event) => setNewTagName(event.target.value)} maxLength={24} placeholder={t("common:labels.tagNamePlaceholder")} />
             <button
               className="button primary"
               type="button"
@@ -1323,13 +1324,13 @@ function ModelTagManager({
                 setNewTagName("");
               }}
             >
-              {t("common.actions.add")}
+              {t("common:actions.add")}
             </button>
           </div>
         </div>
 
         <div className="model-tag-manager__body">
-          <div className="model-tag-manager__list" aria-label={t("common.labels.tagList")}>
+          <div className="model-tag-manager__list" aria-label={t("common:labels.tagList")}>
             {tags.map((tag) => {
               const selected = selectedTagId === tag.id;
               return (
@@ -1343,13 +1344,13 @@ function ModelTagManager({
                 </button>
               );
             })}
-            {!tags.length ? <div className="model-tag-manager__empty">{t("common.empty.noTagsYet")}</div> : null}
+            {!tags.length ? <div className="model-tag-manager__empty">{t("common:empty.noTagsYet")}</div> : null}
           </div>
 
           {selectedTag ? (
             <div className="model-tag-manager__editor">
               <label className="dialog-field">
-                <span>{t("common.labels.editTag")}</span>
+                <span>{t("common:labels.editTag")}</span>
                 <input
                   value={draftTagName}
                   onChange={(event) => setDraftTagName(event.target.value)}
@@ -1372,11 +1373,11 @@ function ModelTagManager({
                 type="button"
                 onClick={() => onDeleteTag(selectedTag.id, deleteConfirmTagId === selectedTag.id)}
               >
-                {deleteConfirmTagId === selectedTag.id ? t("common.confirm.delete") : t("common.actions.delete")}
+                {deleteConfirmTagId === selectedTag.id ? t("common:confirm.delete") : t("common:actions.delete")}
               </button>
             </div>
           ) : (
-            <div className="model-tag-manager__editor model-tag-manager__editor--empty">{t("common.labels.emptyTagEditor")}</div>
+            <div className="model-tag-manager__editor model-tag-manager__editor--empty">{t("common:labels.emptyTagEditor")}</div>
           )}
         </div>
       </section>
@@ -1384,7 +1385,7 @@ function ModelTagManager({
   );
 }
 
-export function ModelLibraryPage() {
+export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
@@ -1394,14 +1395,13 @@ export function ModelLibraryPage() {
   const [closeMenuToken, setCloseMenuToken] = useState(0);
   const [deleteConfirmModelId, setDeleteConfirmModelId] = useState("");
   const [deleteConfirmTagId, setDeleteConfirmTagId] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
   const { toast: imageActionToast, showToast: showImageActionToast } = useLibraryImageActionToast();
   const activeProjectId = useModelLibraryStore((state) => state.activeProjectId);
-  const activeTagId = useModelLibraryStore((state) => state.activeTagId);
+  const activeTagIds = useModelLibraryStore((state) => state.activeTagIds);
   const activeGender = useModelLibraryStore((state) => state.activeGender);
   const openModelId = useModelLibraryStore((state) => state.openModelId);
   const setActiveProjectId = useModelLibraryStore((state) => state.setActiveProjectId);
-  const setActiveTagId = useModelLibraryStore((state) => state.setActiveTagId);
+  const setActiveTagIds = useModelLibraryStore((state) => state.setActiveTagIds);
   const toggleGender = useModelLibraryStore((state) => state.toggleGender);
   const openEditor = useModelLibraryStore((state) => state.openEditor);
   const closeEditor = useModelLibraryStore((state) => state.closeEditor);
@@ -1436,12 +1436,13 @@ export function ModelLibraryPage() {
 
   useEffect(() => {
     const tags = tagsQuery.data?.tags || [];
-    if (activeTagId && !tags.some((tag) => tag.id === activeTagId)) setActiveTagId("");
-  }, [activeTagId, setActiveTagId, tagsQuery.data?.tags]);
+    const validTagIds = activeTagIds.filter((tagId) => tags.some((tag) => tag.id === tagId));
+    if (validTagIds.length !== activeTagIds.length) setActiveTagIds(validTagIds);
+  }, [activeTagIds, setActiveTagIds, tagsQuery.data?.tags]);
 
   const modelsQuery = useQuery({
-    queryKey: activeProjectId ? modelLibraryKeys.models(activeProjectId, activeTagId, activeGender) : ["models", "empty"],
-    queryFn: () => listModels({ projectId: activeProjectId, tagId: activeTagId, gender: activeGender }),
+    queryKey: activeProjectId ? modelLibraryKeys.models(activeProjectId, activeTagIds, activeGender) : ["models", "empty"],
+    queryFn: () => listModels({ projectId: activeProjectId, tagIds: activeTagIds, gender: activeGender }),
     enabled: Boolean(activeProjectId),
   });
 
@@ -1453,19 +1454,19 @@ export function ModelLibraryPage() {
 
   const createModelMutation = useMutation({
     mutationFn: async (gender: "female" | "male") => {
-      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
       const allModels = allModelsQuery.data ?? await queryClient.ensureQueryData({
         queryKey: modelLibraryKeys.models(activeProjectId),
         queryFn: () => listModels({ projectId: activeProjectId }),
       });
-      if (!allModels) throw new Error(t("modelLibrary.fetchModelsFailed"));
+      if (!allModels) throw new Error(t("modelLibrary:fetchModelsFailed"));
       const name = nextDefaultModelName(allModels.models, gender);
       const model = await createModel(activeProjectId, { name, gender });
       return { model, gender };
     },
     onSuccess: async ({ model, gender }) => {
       if (activeGender && activeGender !== gender) toggleGender(gender);
-      if (activeTagId) setActiveTagId("");
+      if (activeTagIds.length) setActiveTagIds([]);
       setDeleteConfirmModelId("");
       await queryClient.invalidateQueries({ queryKey: ["models", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
@@ -1536,7 +1537,7 @@ export function ModelLibraryPage() {
 
   const createTagMutation = useMutation({
     mutationFn: (name: string) => {
-      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
       return createModelTag(activeProjectId, name);
     },
     onSuccess: async () => {
@@ -1544,10 +1545,10 @@ export function ModelLibraryPage() {
     },
   });
 
-  const renameTagMutation = useMutation({
-    mutationFn: ({ tagId, name }: { tagId: string; name: string }) => {
-      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
-      return updateModelTag(activeProjectId, tagId, { name });
+  const updateTagMutation = useMutation({
+    mutationFn: ({ tagId, name }: { tagId: string; name?: string }) => {
+      if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
+      return updateModelTag(activeProjectId, tagId, { ...(name !== undefined ? { name } : {}) });
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
@@ -1556,12 +1557,12 @@ export function ModelLibraryPage() {
 
   const deleteTagMutation = useMutation({
     mutationFn: (tagId: string) => {
-      if (!activeProjectId) throw new Error(t("common.labels.selectProjectFirst"));
+      if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
       return deleteModelTag(activeProjectId, tagId);
     },
     onSuccess: async (result, tagId) => {
       setDeleteConfirmTagId("");
-      if (activeTagId === tagId) setActiveTagId("");
+      if (activeTagIds.includes(tagId)) setActiveTagIds(activeTagIds.filter((activeTagId) => activeTagId !== tagId));
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
       await queryClient.invalidateQueries({ queryKey: ["models", activeProjectId] });
     },
@@ -1627,7 +1628,11 @@ export function ModelLibraryPage() {
   function handleRenameTag(tagId: string, name: string) {
     const next = normalizeTags([name])[0];
     if (!next) return;
-    renameTagMutation.mutate({ tagId, name: next });
+    updateTagMutation.mutate({ tagId, name: next });
+  }
+
+  function handleToggleTagFilter(tagId: string) {
+    setActiveTagIds(activeTagIds.includes(tagId) ? activeTagIds.filter((activeTagId) => activeTagId !== tagId) : [...activeTagIds, tagId]);
   }
 
   function handleDeleteTag(tagId: string, isConfirming: boolean) {
@@ -1678,12 +1683,12 @@ export function ModelLibraryPage() {
     deleteModelImageMutation.error,
     setModelCoverMutation.error,
     createTagMutation.error,
-    renameTagMutation.error,
+    updateTagMutation.error,
     deleteTagMutation.error,
   ]);
 
   return (
-    <section className="model-library-page" aria-label={t("modelLibrary.title")}>
+    <section className="model-library-page" aria-label={t("modelLibrary:title")}>
       <div className="model-library">
         <ModelProjectSidebar
           projects={projects}
@@ -1710,34 +1715,19 @@ export function ModelLibraryPage() {
           <div className="model-content-head">
             <ModelToolbar
               tags={tags}
-              activeTagId={activeTagId}
+              activeTagIds={activeTagIds}
               activeGender={activeGender}
-              onTagChange={setActiveTagId}
+              onTagToggle={handleToggleTagFilter}
+              onTagClear={() => setActiveTagIds([])}
               onGenderToggle={toggleGender}
               onOpenTagManager={() => setTagManagerOpen(true)}
-              searchSlot={
-                <label className="model-library-search">
-                  <Search size={18} aria-hidden="true" />
-                  <input
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                    placeholder={t("modelLibrary.searchPlaceholder")}
-                    aria-label={t("modelLibrary.searchPlaceholder")}
-                  />
-                  {searchQuery ? (
-                    <button type="button" aria-label={t("modelLibrary.clearSearch")} onClick={() => setSearchQuery("")}>
-                      <X size={16} aria-hidden="true" />
-                    </button>
-                  ) : null}
-                </label>
-              }
             />
           </div>
 
           <div className="model-lib-body">
-            {errorMessage ? <div className="model-lib-error">{t("modelLibrary.requestFailed", { message: errorMessage })}</div> : null}
-            {projectsQuery.isLoading ? <div className="model-lib-empty">{t("common.states.loadingProjects")}</div> : null}
-            {!projectsQuery.isLoading && !projects.length ? <div className="model-lib-empty">{t("common.empty.noProjects")}</div> : null}
+            {errorMessage ? <div className="model-lib-error">{t("modelLibrary:requestFailed", { message: errorMessage })}</div> : null}
+            {projectsQuery.isLoading ? <div className="model-lib-empty">{t("common:states.loadingProjects")}</div> : null}
+            {!projectsQuery.isLoading && !projects.length ? <div className="model-lib-empty">{t("common:empty.noProjects")}</div> : null}
             {activeProject ? (
               <>
                 <ModelGrid

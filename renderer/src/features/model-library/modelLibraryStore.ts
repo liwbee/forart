@@ -3,11 +3,11 @@ import { ModelGender } from "./types";
 
 interface ModelLibraryState {
   activeProjectId: string;
-  activeTagId: string;
+  activeTagIds: string[];
   activeGender: Exclude<ModelGender, "unknown"> | "";
   openModelId: string;
   setActiveProjectId: (projectId: string) => void;
-  setActiveTagId: (tagId: string) => void;
+  setActiveTagIds: (tagIds: string[]) => void;
   toggleGender: (gender: Exclude<ModelGender, "unknown">) => void;
   openEditor: (modelId: string) => void;
   closeEditor: () => void;
@@ -15,17 +15,17 @@ interface ModelLibraryState {
 
 export const useModelLibraryStore = create<ModelLibraryState>((set, get) => ({
   activeProjectId: "",
-  activeTagId: "",
+  activeTagIds: [],
   activeGender: "",
   openModelId: "",
   setActiveProjectId: (projectId) =>
     set({
       activeProjectId: projectId,
-      activeTagId: "",
+      activeTagIds: [],
       activeGender: "",
       openModelId: "",
     }),
-  setActiveTagId: (tagId) => set({ activeTagId: tagId, openModelId: "" }),
+  setActiveTagIds: (tagIds) => set({ activeTagIds: tagIds, openModelId: "" }),
   toggleGender: (gender) =>
     set({
       activeGender: get().activeGender === gender ? "" : gender,

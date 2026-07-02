@@ -47,7 +47,7 @@ try
 
     Log("Starting frontend dev server...");
     viteProcess = StartBackgroundCommand("npm run dev:web", appDirectory, "vite", () => consoleVisible);
-    await WaitForHttpReady("http://127.0.0.1:5174", TimeSpan.FromSeconds(45), viteProcess);
+    await WaitForHttpReady("http://127.0.0.1:6981", TimeSpan.FromSeconds(45), viteProcess);
     Log("Frontend server is ready.");
 
     Log("Opening Forart window...");

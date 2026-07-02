@@ -2,18 +2,19 @@ import type { CanvasNodeType, CropAspectKey } from "./types";
 
 export const NODE_DEFAULTS: Record<CanvasNodeType, { w: number; h: number; title: string }> = {
   imageGenerator: { w: 300, h: 400, title: "Image Generation" },
-  image: { w: 300, h: 400, title: "Image" },
+  libtvImageGenerator: { w: 320, h: 420, title: "LibTV Image Generator" },
+  imageLoader: { w: 300, h: 400, title: "Image Loader" },
   prompt: { w: 310, h: 220, title: "Prompt" },
   llm: { w: 340, h: 300, title: "LLM Model" },
-  libtvImage: { w: 300, h: 400, title: "LibTV Image" },
-  libtvPrompt: { w: 310, h: 220, title: "LibTV Prompt" },
-  libtvUpload: { w: 300, h: 400, title: "LibTV Upload" },
+  actionFission: { w: 760, h: 620, title: "Action Fission" },
 };
 
 export const IMAGE_NODE_MIN_WIDTH = 180;
 export const IMAGE_NODE_MIN_HEIGHT = 120;
 export const IMAGE_NODE_MAX_WIDTH = 560;
 export const IMAGE_NODE_MAX_HEIGHT = 440;
+export const ACTION_FISSION_NODE_MIN_WIDTH = 700;
+export const ACTION_FISSION_NODE_MIN_HEIGHT = 420;
 
 export const IMAGE_RESOLUTION_OPTIONS = ["1k", "2k", "4k"] as const;
 export const IMAGE_ASPECT_RATIO_OPTIONS = ["1:1", "2:3", "3:2", "4:3", "3:4", "16:9", "9:16"] as const;

@@ -5,14 +5,24 @@ export const actionLibraryKeys = {
   projects: ["actionProjects"] as const,
   tagRoot: ["actionTags"] as const,
   tags: (projectId: string) => ["actionTags", projectId] as const,
-  actions: (projectId: string, tagId = "") => ["actions", projectId, tagId] as const,
+  actions: (projectId: string, tagIds: readonly string[] = []) => ["actions", projectId, [...tagIds].sort().join(",")] as const,
   storageSettings: ["storageSettings"] as const,
 };
 
-function queryString(params: Record<string, string | undefined>) {
+function isStringArray(value: string | readonly string[] | undefined): value is readonly string[] {
+  return Array.isArray(value);
+}
+
+function queryString(params: Record<string, string | readonly string[] | undefined>) {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value) search.set(key, value);
+    if (isStringArray(value)) {
+      for (const item of value) {
+        if (item) search.append(key, item);
+      }
+    } else if (value) {
+      search.set(key, value);
+    }
   }
   const text = search.toString();
   return text ? `?${text}` : "";
@@ -49,9 +59,9 @@ export function uploadActionProjectCover(projectId: string, payload: AssetUpload
   });
 }
 
-export function listActions({ projectId, tagId = "" }: ActionFilters) {
+export function listActions({ projectId, tagIds = [] }: ActionFilters) {
   return apiRequest<{ actions: ActionEntry[] }>(
-    `/api/action-projects/${encodeURIComponent(projectId)}/actions${queryString({ tag_id: tagId })}`
+    `/api/action-projects/${encodeURIComponent(projectId)}/actions${queryString({ tag_id: tagIds })}`
   );
 }
 

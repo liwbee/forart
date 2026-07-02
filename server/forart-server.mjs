@@ -5,10 +5,14 @@ import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
+import { createAdminContext } from "./src/admin/admin-context.mjs";
+import { createAdminRouter } from "./src/http/admin-router.mjs";
 
-const SERVER_PORT = Number(process.env.PORT || 5175);
+const SERVER_PORT = Number(process.env.PORT || 6980);
 const SERVER_HOST = process.env.HOST || "0.0.0.0";
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
+const ADMIN_ROOT = path.join(SERVER_DIR, "admin");
 const DEFAULT_DATA_ROOT = path.join(ROOT_DIR, ".forart-data");
 const DATABASE_DIR = path.resolve(process.env.FORART_DATABASE_DIR || path.join(DEFAULT_DATA_ROOT, "database"));
 const DEFAULT_DATA_DIR = path.resolve(process.env.FORART_DATA_DIR || path.join(DEFAULT_DATA_ROOT, "library"));
@@ -39,7 +43,6 @@ const LIBRARY_LABELS = SERVER_LANGUAGE === "en-US"
   };
 const DEFAULT_PROJECT_NAME = LIBRARY_LABELS.defaultProject;
 const DEFAULT_MODEL_NAME = LIBRARY_LABELS.defaultModel;
-const DEFAULT_TAG_COLOR = "#6b7280";
 const DEFAULT_OUTFIT_PROJECT_NAME = LIBRARY_LABELS.defaultOutfitProject;
 const DEFAULT_OUTFIT_NAME = LIBRARY_LABELS.defaultOutfit;
 const DEFAULT_ACTION_PROJECT_NAME = LIBRARY_LABELS.defaultActionProject;
@@ -73,6 +76,7 @@ let DATA_DIR = "";
 let DATABASE_PATH = path.join(DATABASE_DIR, DATABASE_FILENAME);
 let STORAGE_ROOT = "";
 let db;
+const SERVER_STARTED_AT = new Date();
 
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",
@@ -198,23 +202,6 @@ function sendText(res, statusCode, text, contentType = "text/plain; charset=utf-
   res.end(text);
 }
 
-const STATIC_MIME_TYPES = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".ico": "image/x-icon",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-  ".ttf": "font/ttf",
-};
-
 function parseDataUrl(dataUrl) {
   const match = /^data:([^;]+);base64,(.+)$/i.exec(String(dataUrl || ""));
   if (!match) return null;
@@ -312,7 +299,6 @@ function initDatabase() {
     kind TEXT NOT NULL,
     project_id TEXT NOT NULL,
     name TEXT NOT NULL,
-    color TEXT NOT NULL DEFAULT '${DEFAULT_TAG_COLOR}',
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -399,6 +385,23 @@ function ensureDefaultActionProject() {
 }
 
 switchDataDir(process.env.FORART_DATA_DIR || DEFAULT_DATA_DIR);
+
+const adminContext = createAdminContext({
+  serverHost: SERVER_HOST,
+  serverPort: SERVER_PORT,
+  startedAt: SERVER_STARTED_AT,
+  databaseFilename: DATABASE_FILENAME,
+  getDataDir: () => DATA_DIR,
+  getDatabaseDir: () => DATABASE_DIR,
+  getDatabasePath: () => DATABASE_PATH,
+  getStorageRoot: () => STORAGE_ROOT,
+  getDb: () => db,
+});
+
+const handleAdminRoute = createAdminRouter({
+  adminRoot: ADMIN_ROOT,
+  context: adminContext,
+});
 
 function ensureStorageConfigured(res) {
   if (db) return true;
@@ -765,8 +768,8 @@ function createProjectTag(kind, projectId, name) {
   const id = newId("tag");
   const sortOrder = db.prepare("SELECT COUNT(*) AS total FROM library_tags WHERE kind = ? AND project_id = ?").get(kind, projectId)?.total || 0;
   db.prepare(
-    "INSERT INTO library_tags (id, kind, project_id, name, color, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run(id, kind, projectId, name, DEFAULT_TAG_COLOR, sortOrder + 1, timestamp, timestamp);
+    "INSERT INTO library_tags (id, kind, project_id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).run(id, kind, projectId, name, sortOrder + 1, timestamp, timestamp);
   const tag = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(id);
   return { ...tag, usage_count: 0 };
 }
@@ -787,6 +790,18 @@ function updateEntryTags(kind, entryId, projectId, names) {
       "INSERT OR IGNORE INTO library_entry_tags (id, kind, entry_id, tag_id, created_at) VALUES (?, ?, ?, ?, ?)"
     ).run(newId("entrytag"), kind, entryId, tag.id, nowIso());
   }
+}
+
+function resolveTagNames(kind, projectId, tagIds) {
+  const uniqueTagIds = Array.from(new Set(tagIds.map((tagId) => String(tagId || "").trim()).filter(Boolean)));
+  if (!uniqueTagIds.length) return [];
+  return uniqueTagIds
+    .map((tagId) => db.prepare("SELECT name FROM library_tags WHERE kind = ? AND project_id = ? AND id = ?").get(kind, projectId, tagId)?.name)
+    .filter(Boolean);
+}
+
+function entryMatchesAllTags(entry, tagNames) {
+  return tagNames.every((tagName) => entry.tags.includes(tagName));
 }
 
 function handleProjectTagApi(req, res, { kind, projectId, tagId }) {
@@ -1061,7 +1076,7 @@ function handleModelLibraryApi(req, res, url) {
       return true;
     }
     if (tail === "outfits" && method === "GET") {
-      const tagId = url.searchParams.get("tag_id") || "";
+      const tagNames = resolveTagNames("outfit", projectId, url.searchParams.getAll("tag_id"));
       const project = loadOutfitProject(projectId);
       if (!project) {
         sendJson(res, 404, { detail: "Outfit project not found" });
@@ -1069,8 +1084,7 @@ function handleModelLibraryApi(req, res, url) {
       }
       const outfits = db.prepare("SELECT * FROM outfit_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
         .map(outfitWithAssetAndTags);
-      const activeTag = tagId ? db.prepare("SELECT * FROM library_tags WHERE kind = 'outfit' AND project_id = ? AND id = ?").get(projectId, tagId) : null;
-      const filtered = activeTag ? outfits.filter((outfit) => outfit.tags.includes(activeTag.name)) : outfits;
+      const filtered = tagNames.length ? outfits.filter((outfit) => entryMatchesAllTags(outfit, tagNames)) : outfits;
       sendJson(res, 200, { outfits: filtered });
       return true;
     }
@@ -1254,7 +1268,7 @@ function handleModelLibraryApi(req, res, url) {
       return true;
     }
     if (tail === "actions" && method === "GET") {
-      const tagId = url.searchParams.get("tag_id") || "";
+      const tagNames = resolveTagNames("action", projectId, url.searchParams.getAll("tag_id"));
       const project = loadActionProject(projectId);
       if (!project) {
         sendJson(res, 404, { detail: "Action project not found" });
@@ -1262,8 +1276,7 @@ function handleModelLibraryApi(req, res, url) {
       }
       const actions = db.prepare("SELECT * FROM action_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
         .map(actionWithAssetAndTags);
-      const activeTag = tagId ? db.prepare("SELECT * FROM library_tags WHERE kind = 'action' AND project_id = ? AND id = ?").get(projectId, tagId) : null;
-      const filtered = activeTag ? actions.filter((action) => action.tags.includes(activeTag.name)) : actions;
+      const filtered = tagNames.length ? actions.filter((action) => entryMatchesAllTags(action, tagNames)) : actions;
       sendJson(res, 200, { actions: filtered });
       return true;
     }
@@ -1459,7 +1472,7 @@ function handleModelLibraryApi(req, res, url) {
       return true;
     }
     if (tail === "models" && method === "GET") {
-      const tagId = url.searchParams.get("tag_id") || "";
+      const tagNames = resolveTagNames("model", projectId, url.searchParams.getAll("tag_id"));
       const gender = url.searchParams.get("gender") || "";
       const project = loadProject(projectId);
       if (!project) {
@@ -1469,8 +1482,7 @@ function handleModelLibraryApi(req, res, url) {
       const models = db.prepare("SELECT * FROM model_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
         .map(modelWithCoverAndTags)
         .filter((model) => (gender ? model.gender === gender : true));
-      const activeTag = tagId ? db.prepare("SELECT * FROM library_tags WHERE kind = 'model' AND project_id = ? AND id = ?").get(projectId, tagId) : null;
-      const filtered = activeTag ? models.filter((model) => model.tags.includes(activeTag.name)) : models;
+      const filtered = tagNames.length ? models.filter((model) => entryMatchesAllTags(model, tagNames)) : models;
       sendJson(res, 200, { models: filtered });
       return true;
     }
@@ -1688,6 +1700,7 @@ const server = createServer((req, res) => {
   }
 
   const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
+  if (handleAdminRoute(req, res, url)) return;
   if (handleModelLibraryApi(req, res, url)) return;
   sendJson(res, 404, { detail: "API route not found" });
 });

@@ -19,6 +19,8 @@ interface CanvasIndexes {
   groupLookup: Map<string, CanvasGroup>;
 }
 
+type CanvasHistoryState = CanvasDocument & CanvasIndexes;
+
 interface CanvasStore extends CanvasDocument {
   nodeIds: string[];
   connectionIds: string[];
@@ -53,7 +55,7 @@ function idsEqual<T extends { id: string }>(items: T[], ids: string[]) {
   return items.length === ids.length && items.every((item, index) => item.id === ids[index]);
 }
 
-function withCanvasIndexes(document: CanvasDocument): CanvasDocument & CanvasIndexes {
+function withCanvasIndexes(document: CanvasDocument): CanvasHistoryState {
   return {
     ...document,
     ...createCanvasIndexes(document),
@@ -149,7 +151,11 @@ export const useCanvasStore = create<CanvasStore>()(
       },
     }),
     {
-      partialize: (state) => ({ nodes: state.nodes, connections: state.connections, groups: state.groups }),
+      partialize: (state): CanvasHistoryState => withCanvasIndexes({
+        nodes: state.nodes,
+        connections: state.connections,
+        groups: state.groups,
+      }),
       equality: isCanvasDocumentEqual,
       limit: 100,
     },
@@ -180,7 +186,7 @@ export function commitCanvasDocumentChange(previous: CanvasDocument) {
   };
   if (isCanvasDocumentEqual(previous, current)) return;
   useCanvasStore.temporal.setState((state) => ({
-    pastStates: [...state.pastStates, previous].slice(-100),
+    pastStates: [...state.pastStates, withCanvasIndexes(previous)].slice(-100),
     futureStates: [],
   }));
 }

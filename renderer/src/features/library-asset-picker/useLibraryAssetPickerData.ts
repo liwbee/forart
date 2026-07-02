@@ -41,18 +41,18 @@ export function useLibraryAssetPickerData({
   const [modelChoiceFor, setModelChoiceFor] = useState<LibraryAssetItem | null>(null);
   const activeOutfitProjectId = useOutfitLibraryStore((state) => state.activeProjectId);
   const setActiveOutfitProjectId = useOutfitLibraryStore((state) => state.setActiveProjectId);
-  const activeOutfitTagId = useOutfitLibraryStore((state) => state.activeTagId);
-  const setActiveOutfitTagId = useOutfitLibraryStore((state) => state.setActiveTagId);
+  const activeOutfitTagIds = useOutfitLibraryStore((state) => state.activeTagIds);
+  const setActiveOutfitTagIds = useOutfitLibraryStore((state) => state.setActiveTagIds);
   const activeModelProjectId = useModelLibraryStore((state) => state.activeProjectId);
   const setActiveModelProjectId = useModelLibraryStore((state) => state.setActiveProjectId);
-  const activeModelTagId = useModelLibraryStore((state) => state.activeTagId);
-  const setActiveModelTagId = useModelLibraryStore((state) => state.setActiveTagId);
+  const activeModelTagIds = useModelLibraryStore((state) => state.activeTagIds);
+  const setActiveModelTagIds = useModelLibraryStore((state) => state.setActiveTagIds);
   const activeModelGender = useModelLibraryStore((state) => state.activeGender);
   const toggleModelGender = useModelLibraryStore((state) => state.toggleGender);
   const activeActionProjectId = useActionLibraryStore((state) => state.activeProjectId);
   const setActiveActionProjectId = useActionLibraryStore((state) => state.setActiveProjectId);
-  const activeActionTagId = useActionLibraryStore((state) => state.activeTagId);
-  const setActiveActionTagId = useActionLibraryStore((state) => state.setActiveTagId);
+  const activeActionTagIds = useActionLibraryStore((state) => state.activeTagIds);
+  const setActiveActionTagIds = useActionLibraryStore((state) => state.setActiveTagIds);
 
   useEffect(() => {
     if (!availableTabs.includes(activeTab)) {
@@ -147,32 +147,35 @@ export function useLibraryAssetPickerData({
 
   useEffect(() => {
     const tags = outfitTagsQuery.data?.tags || [];
-    if (activeTab === "outfits" && activeOutfitTagId && !tags.some((tag) => tag.id === activeOutfitTagId)) setActiveOutfitTagId("");
-  }, [activeOutfitTagId, activeTab, outfitTagsQuery.data?.tags, setActiveOutfitTagId]);
+    const validTagIds = activeOutfitTagIds.filter((tagId) => tags.some((tag) => tag.id === tagId));
+    if (activeTab === "outfits" && validTagIds.length !== activeOutfitTagIds.length) setActiveOutfitTagIds(validTagIds);
+  }, [activeOutfitTagIds, activeTab, outfitTagsQuery.data?.tags, setActiveOutfitTagIds]);
 
   useEffect(() => {
     const tags = modelTagsQuery.data?.tags || [];
-    if (activeTab === "models" && activeModelTagId && !tags.some((tag) => tag.id === activeModelTagId)) setActiveModelTagId("");
-  }, [activeModelTagId, activeTab, modelTagsQuery.data?.tags, setActiveModelTagId]);
+    const validTagIds = activeModelTagIds.filter((tagId) => tags.some((tag) => tag.id === tagId));
+    if (activeTab === "models" && validTagIds.length !== activeModelTagIds.length) setActiveModelTagIds(validTagIds);
+  }, [activeModelTagIds, activeTab, modelTagsQuery.data?.tags, setActiveModelTagIds]);
 
   useEffect(() => {
     const tags = actionTagsQuery.data?.tags || [];
-    if (activeTab === "actions" && activeActionTagId && !tags.some((tag) => tag.id === activeActionTagId)) setActiveActionTagId("");
-  }, [activeActionTagId, activeTab, actionTagsQuery.data?.tags, setActiveActionTagId]);
+    const validTagIds = activeActionTagIds.filter((tagId) => tags.some((tag) => tag.id === tagId));
+    if (activeTab === "actions" && validTagIds.length !== activeActionTagIds.length) setActiveActionTagIds(validTagIds);
+  }, [activeActionTagIds, activeTab, actionTagsQuery.data?.tags, setActiveActionTagIds]);
 
   const outfitsQuery = useQuery({
-    queryKey: activeOutfitProjectId ? outfitLibraryKeys.outfits(activeOutfitProjectId, activeOutfitTagId) : ["outfits", "empty", activeOutfitTagId],
-    queryFn: () => listOutfits({ projectId: activeOutfitProjectId, tagId: activeOutfitTagId }),
+    queryKey: activeOutfitProjectId ? outfitLibraryKeys.outfits(activeOutfitProjectId, activeOutfitTagIds) : ["outfits", "empty", activeOutfitTagIds],
+    queryFn: () => listOutfits({ projectId: activeOutfitProjectId, tagIds: activeOutfitTagIds }),
     enabled: canQuery && activeTab === "outfits" && Boolean(activeOutfitProjectId),
   });
   const modelsQuery = useQuery({
-    queryKey: activeModelProjectId ? modelLibraryKeys.models(activeModelProjectId, activeModelTagId, activeModelGender) : ["models", "empty", activeModelTagId, activeModelGender],
-    queryFn: () => listModels({ projectId: activeModelProjectId, tagId: activeModelTagId, gender: activeModelGender }),
+    queryKey: activeModelProjectId ? modelLibraryKeys.models(activeModelProjectId, activeModelTagIds, activeModelGender) : ["models", "empty", activeModelTagIds, activeModelGender],
+    queryFn: () => listModels({ projectId: activeModelProjectId, tagIds: activeModelTagIds, gender: activeModelGender }),
     enabled: canQuery && activeTab === "models" && Boolean(activeModelProjectId),
   });
   const actionsQuery = useQuery({
-    queryKey: activeActionProjectId ? actionLibraryKeys.actions(activeActionProjectId, activeActionTagId) : ["actions", "empty", activeActionTagId],
-    queryFn: () => listActions({ projectId: activeActionProjectId, tagId: activeActionTagId }),
+    queryKey: activeActionProjectId ? actionLibraryKeys.actions(activeActionProjectId, activeActionTagIds) : ["actions", "empty", activeActionTagIds],
+    queryFn: () => listActions({ projectId: activeActionProjectId, tagIds: activeActionTagIds }),
     enabled: canQuery && activeTab === "actions" && Boolean(activeActionProjectId),
   });
 
@@ -185,7 +188,7 @@ export function useLibraryAssetPickerData({
   const activeProjects = activeTab === "models" ? modelProjects : activeTab === "actions" ? actionProjects : outfitProjects;
   const activeProjectId = activeTab === "models" ? activeModelProjectId : activeTab === "actions" ? activeActionProjectId : activeOutfitProjectId;
   const activeTags = activeTab === "models" ? modelTagsQuery.data?.tags || [] : activeTab === "actions" ? actionTagsQuery.data?.tags || [] : outfitTagsQuery.data?.tags || [];
-  const activeTagId = activeTab === "models" ? activeModelTagId : activeTab === "actions" ? activeActionTagId : activeOutfitTagId;
+  const activeTagIds = activeTab === "models" ? activeModelTagIds : activeTab === "actions" ? activeActionTagIds : activeOutfitTagIds;
   const activeItems = useMemo<LibraryAssetItem[]>(() => {
     if (activeTab === "models") {
       return sortByName(modelsQuery.data?.models || [], (model) => model.name).map((model) => ({
@@ -238,7 +241,7 @@ export function useLibraryAssetPickerData({
 
   useEffect(() => {
     setModelChoiceFor(null);
-  }, [activeTab, activeModelGender, activeModelProjectId, activeModelTagId]);
+  }, [activeTab, activeModelGender, activeModelProjectId, activeModelTagIds]);
 
   function changeProject(projectId: string) {
     if (activeTab === "models") setActiveModelProjectId(projectId);
@@ -246,10 +249,10 @@ export function useLibraryAssetPickerData({
     else setActiveOutfitProjectId(projectId);
   }
 
-  function changeTag(tagId: string) {
-    if (activeTab === "models") setActiveModelTagId(tagId);
-    else if (activeTab === "actions") setActiveActionTagId(tagId);
-    else setActiveOutfitTagId(tagId);
+  function changeTag(tagIds: string[]) {
+    if (activeTab === "models") setActiveModelTagIds(tagIds);
+    else if (activeTab === "actions") setActiveActionTagIds(tagIds);
+    else setActiveOutfitTagIds(tagIds);
   }
 
   function prefetchModelChoices(item: LibraryAssetItem) {
@@ -269,7 +272,7 @@ export function useLibraryAssetPickerData({
     activeProjectId,
     activeModelGender,
     activeTags,
-    activeTagId,
+    activeTagIds,
     activeItems,
     isLoading,
     errorMessage,

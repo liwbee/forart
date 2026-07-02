@@ -4,6 +4,7 @@ import type { useTranslation } from "react-i18next";
 import { useCanvasStore } from "../canvasStore";
 import { useCanvasUiStore } from "../canvasUiStore";
 import { WORLD_CENTER } from "../canvasGeometry";
+import { ACTION_FISSION_NODE_MIN_HEIGHT, ACTION_FISSION_NODE_MIN_WIDTH } from "../constants";
 import { canConnect, hasConnection } from "../core/rules";
 import { acceptsIncomingConnections, isImageLikeNode } from "../nodePredicates";
 import { getNodeDefinition } from "../nodes/registry";
@@ -25,7 +26,6 @@ interface NodeLayerProps {
   editingPromptId: string;
   linkDraftFromId: string;
   linkDraftSourceNode: CanvasNode | null;
-  canvasType: "forart" | "forart-libtv";
   renderNodeBody: (node: CanvasNode, state: NodeBodyRenderState) => React.ReactNode;
   startNodeDrag: (event: PointerEvent<HTMLDivElement>, node: CanvasNode) => void;
   finishLink: (event: PointerEvent<HTMLElement>, target: CanvasNode) => void;
@@ -34,6 +34,7 @@ interface NodeLayerProps {
   startLink: (event: PointerEvent<HTMLButtonElement>, node: CanvasNode) => void;
   setHoveredId: ReturnType<typeof useCanvasUiStore.getState>["setHoveredId"];
   getKindLabel: (type: CanvasNodeType) => string;
+  isNodeRunning?: (node: CanvasNode) => boolean;
   t: ReturnType<typeof useTranslation>["t"];
 }
 
@@ -56,7 +57,6 @@ const CanvasNodeItem = memo(function CanvasNodeItem({
   isEditingPrompt,
   isConnecting,
   linkDraftSourceNode,
-  canvasType,
   renderNodeBody,
   startNodeDrag,
   finishLink,
@@ -65,6 +65,7 @@ const CanvasNodeItem = memo(function CanvasNodeItem({
   startLink,
   setHoveredId,
   getKindLabel,
+  isNodeRunning: getIsNodeRunning,
   t,
 }: CanvasNodeItemProps) {
   const node = useCanvasStore((state) => state.nodeLookup.get(nodeId));
@@ -85,28 +86,38 @@ const CanvasNodeItem = memo(function CanvasNodeItem({
   ));
 
   if (!node) return null;
-  const hasCustomNodeBody = ["image", "libtvUpload", "imageGenerator", "libtvImage", "prompt", "libtvPrompt"].includes(node.type);
-  const canAcceptLinkDraft = linkDraftSourceNode ? canConnect(linkDraftSourceNode, node, canvasType) && !hasExistingDraftConnection : acceptsIncomingConnections(node);
+  const hasCustomNodeBody = ["imageLoader", "imageGenerator", "libtvImageGenerator", "prompt", "actionFission"].includes(node.type);
+  const canAcceptLinkDraft = linkDraftSourceNode ? canConnect(linkDraftSourceNode, node) && !hasExistingDraftConnection : acceptsIncomingConnections(node);
   const showInputPort = acceptsIncomingConnections(node) && canAcceptLinkDraft;
+  const showOutputPort = node.type !== "actionFission";
+  const isNodeRunning = getIsNodeRunning ? getIsNodeRunning(node) : Boolean(node.running);
+  const renderedWidth = node.type === "actionFission" ? Math.max(ACTION_FISSION_NODE_MIN_WIDTH, node.w) : node.w;
+  const renderedHeight = node.type === "actionFission" ? Math.max(ACTION_FISSION_NODE_MIN_HEIGHT, node.h) : node.h;
 
   return (
     <div
-      className={`ic-node ic-node--${node.type}${isImageLikeNode(node) && node.url ? " has-image" : ""}${node.running ? " is-running" : ""}${selected ? " selected" : ""}${hovered ? " hovered" : ""}${related ? " related" : ""}${isConnecting ? " connecting" : ""}`}
-      style={{ left: WORLD_CENTER + node.x, top: WORLD_CENTER + node.y, width: node.w, height: node.h }}
+      className={`ic-node ic-node--${node.type}${isImageLikeNode(node) && node.url ? " has-image" : ""}${isNodeRunning ? " is-running" : ""}${selected ? " selected" : ""}${hovered ? " hovered" : ""}${related ? " related" : ""}${isConnecting ? " connecting" : ""}`}
+      style={{ left: WORLD_CENTER + node.x, top: WORLD_CENTER + node.y, width: renderedWidth, height: renderedHeight }}
       onPointerDown={(event) => startNodeDrag(event, node)}
       onPointerUp={(event) => finishLink(event, node)}
       onDoubleClick={(event) => handleNodeDoubleClick(event, node)}
-      onPointerEnter={() => setHoveredId(node.id)}
-      onPointerLeave={() => setHoveredId((current) => (current === node.id ? "" : current))}
+      onPointerEnter={() => {
+        setHoveredId(node.id);
+      }}
+      onPointerLeave={() => {
+        setHoveredId((current) => (current === node.id ? "" : current));
+      }}
     >
       {showInputPort ? (
-        <button className="ic-port ic-port--in nodrag" type="button" title={t("infiniteCanvas.connectHere")} onPointerUp={(event) => finishLink(event, node)}>
+        <button className="ic-port ic-port--in nodrag" type="button" title={t("infiniteCanvas:connectHere")} onPointerUp={(event) => finishLink(event, node)}>
           <Link2 size={13} aria-hidden="true" />
         </button>
       ) : null}
-      <button className="ic-port ic-port--out nodrag" type="button" title={t("infiniteCanvas.dragLink")} onPointerDown={(event) => startLink(event, node)}>
-        <Link2 size={13} aria-hidden="true" />
-      </button>
+      {showOutputPort ? (
+        <button className="ic-port ic-port--out nodrag" type="button" title={t("infiniteCanvas:dragLink")} onPointerDown={(event) => startLink(event, node)}>
+          <Link2 size={13} aria-hidden="true" />
+        </button>
+      ) : null}
       {!hasCustomNodeBody ? (
         <>
           <div className="ic-node-head">
@@ -124,7 +135,7 @@ const CanvasNodeItem = memo(function CanvasNodeItem({
         openSelectId: itemOpenSelectId,
         isEditingPrompt,
       })}
-      {selected && !isCropping && !isImageLikeNode(node) ? <button className="ic-resize-handle nodrag" type="button" aria-label={t("infiniteCanvas.dragResize")} onPointerDown={(event) => startNodeResize(event, node)} /> : null}
+      {selected && !isCropping && !isImageLikeNode(node) ? <button className="ic-resize-handle nodrag" type="button" aria-label={t("infiniteCanvas:dragResize")} onPointerDown={(event) => startNodeResize(event, node)} /> : null}
     </div>
   );
 });
@@ -138,7 +149,6 @@ export const NodeLayer = memo(function NodeLayer({
   editingPromptId,
   linkDraftFromId,
   linkDraftSourceNode,
-  canvasType,
   renderNodeBody,
   startNodeDrag,
   finishLink,
@@ -147,6 +157,7 @@ export const NodeLayer = memo(function NodeLayer({
   startLink,
   setHoveredId,
   getKindLabel,
+  isNodeRunning,
   t,
 }: NodeLayerProps) {
   const nodeIds = useCanvasStore((state) => state.nodeIds);
@@ -163,7 +174,6 @@ export const NodeLayer = memo(function NodeLayer({
           isEditingPrompt={editingPromptId === nodeId}
           isConnecting={linkDraftFromId === nodeId}
           linkDraftSourceNode={linkDraftSourceNode}
-          canvasType={canvasType}
           renderNodeBody={renderNodeBody}
           startNodeDrag={startNodeDrag}
           finishLink={finishLink}
@@ -172,6 +182,7 @@ export const NodeLayer = memo(function NodeLayer({
           startLink={startLink}
           setHoveredId={setHoveredId}
           getKindLabel={getKindLabel}
+          isNodeRunning={isNodeRunning}
           t={t}
         />
       ))}

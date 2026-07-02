@@ -42,9 +42,9 @@ export function LibraryAssetPickerDialog({
       <section className="library-asset-picker library-asset-picker--dialog nodrag nopan" role="dialog" aria-modal="true" aria-labelledby="library-asset-picker-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="library-asset-picker__head">
           <div>
-            <h2 id="library-asset-picker-title">{title || t("infiniteCanvas.importFromLibrary")}</h2>
+            <h2 id="library-asset-picker-title">{title || t("infiniteCanvas:importFromLibrary")}</h2>
           </div>
-          <button type="button" aria-label={t("common.actions.close")} title={t("common.actions.close")} onClick={onClose}>
+          <button type="button" aria-label={t("common:actions.close")} title={t("common:actions.close")} onClick={onClose}>
             <X size={18} aria-hidden="true" />
           </button>
         </header>
