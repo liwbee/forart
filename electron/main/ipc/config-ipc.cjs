@@ -406,6 +406,7 @@ $ErrorActionPreference = "Stop"
 function Write-Log {
   param([string]$Message)
   $line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
+  Write-Host $line
   Add-Content -LiteralPath $script:LogPath -Value $line -Encoding UTF8
 }
 
@@ -604,11 +605,7 @@ function writeUpdateApplyLauncherScript(scriptPath) {
   [Parameter(Mandatory = $true)]
   [string]$WorkingDirectory,
   [Parameter(Mandatory = $true)]
-  [string]$StatusPath,
-  [Parameter(Mandatory = $true)]
-  [string]$StdoutPath,
-  [Parameter(Mandatory = $true)]
-  [string]$StderrPath
+  [string]$StatusPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -648,9 +645,7 @@ try {
     FilePath = "powershell.exe"
     ArgumentList = $argumentList
     WorkingDirectory = $WorkingDirectory
-    WindowStyle = "Hidden"
-    RedirectStandardOutput = $StdoutPath
-    RedirectStandardError = $StderrPath
+    WindowStyle = "Normal"
   }
   Start-Process @startInfo
 
@@ -677,8 +672,6 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, files, needsRoo
   const logPath = path.join(applyRoot, 'apply-update.log');
   const statusPath = path.join(applyRoot, 'apply-status.json');
   const launcherStatusPath = path.join(applyRoot, 'launcher-status.json');
-  const applyStdoutPath = path.join(applyRoot, 'apply-stdout.log');
-  const applyStderrPath = path.join(applyRoot, 'apply-stderr.log');
 
   const plan = {
     applyRoot,
@@ -710,10 +703,6 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, files, needsRoo
     rootDir,
     '-StatusPath',
     launcherStatusPath,
-    '-StdoutPath',
-    applyStdoutPath,
-    '-StderrPath',
-    applyStderrPath,
   ], {
       cwd: rootDir,
       stdio: 'ignore',
@@ -728,8 +717,6 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, files, needsRoo
       { name: 'launcher-status', path: launcherStatusPath },
       { name: 'apply-status', path: statusPath },
       { name: 'apply-log', path: logPath },
-      { name: 'apply-stdout', path: applyStdoutPath },
-      { name: 'apply-stderr', path: applyStderrPath },
     ]).then(resolve, reject).finally(() => {
       child.off('error', onError);
     });
