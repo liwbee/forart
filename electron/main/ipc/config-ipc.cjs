@@ -9,6 +9,22 @@ const GITHUB_RAW_ROOT = `https://raw.githubusercontent.com/liwbee/forart/${GITHU
 const REMOTE_TREE_URL = `${GITHUB_API_ROOT}/git/trees/${GITHUB_BRANCH}?recursive=1`;
 const REMOTE_VERSION_URL = `${GITHUB_RAW_ROOT}/VERSION`;
 const REMOTE_UPDATE_NOTES_URL = `${GITHUB_RAW_ROOT}/update-notes.json`;
+const MIRROR_SYNC_ROOTS = [
+  'electron/',
+  'renderer/',
+  'server/admin/',
+  'server/src/',
+];
+const MIRROR_SYNC_FILES = [
+  'server/.dockerignore',
+  'server/.gitignore',
+  'server/Dockerfile',
+  'server/README.md',
+  'server/START_FORART_SERVER.bat',
+  'server/forart-server.mjs',
+  'server/package-lock.json',
+  'server/package.json',
+];
 
 function readPackageInfo(rootDir) {
   try {
@@ -192,6 +208,12 @@ function updateStagingRoot(rootDir) {
 
 function updateApplyRoot(rootDir) {
   const directory = path.join(portableDataRoot(rootDir), 'update_apply');
+  fs.mkdirSync(directory, { recursive: true });
+  return directory;
+}
+
+function updateDeletedRoot(rootDir) {
+  const directory = path.join(portableDataRoot(rootDir), 'update_deleted');
   fs.mkdirSync(directory, { recursive: true });
   return directory;
 }
@@ -416,6 +438,29 @@ function Join-UpdatePath {
   return [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($BasePath, $nativeRelative))
 }
 
+function Test-PathInsideOrSame {
+  param([string]$ParentPath, [string]$ChildPath)
+  $parentFull = [System.IO.Path]::GetFullPath($ParentPath).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  $childFull = [System.IO.Path]::GetFullPath($ChildPath).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  if ($childFull -eq $parentFull) {
+    return $true
+  }
+  return $childFull.StartsWith($parentFull + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-UpdateRelativePath {
+  param([string]$BasePath, [string]$ChildPath)
+  $baseFull = [System.IO.Path]::GetFullPath($BasePath).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  $childFull = [System.IO.Path]::GetFullPath($ChildPath).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  if ($childFull -eq $baseFull) {
+    return ""
+  }
+  if (-not $childFull.StartsWith($baseFull + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Path is outside update root: $ChildPath"
+  }
+  return $childFull.Substring($baseFull.Length + 1).Replace([string][System.IO.Path]::DirectorySeparatorChar, "/").Replace([string][System.IO.Path]::AltDirectorySeparatorChar, "/")
+}
+
 function Copy-FileWithRetry {
   param([string]$Source, [string]$Destination)
   $parent = Split-Path -Path $Destination -Parent
@@ -460,6 +505,102 @@ function Remove-TreeBestEffort {
       }
       Start-Sleep -Milliseconds (300 * $attempt)
     }
+  }
+}
+
+function Move-StaleUpdateFile {
+  param([string]$RelativePath)
+  $source = Join-UpdatePath -BasePath $script:RootDir -RelativePath $RelativePath
+  if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+    return
+  }
+
+  if (-not (Test-PathInsideOrSame -ParentPath $script:RootDir -ChildPath $source)) {
+    throw "Refusing to move stale file outside root: $RelativePath"
+  }
+
+  $backup = Join-UpdatePath -BasePath $script:DeletedBackupRoot -RelativePath $RelativePath
+  $backupParent = Split-Path -Path $backup -Parent
+  if ($backupParent) {
+    New-Item -ItemType Directory -Force -Path $backupParent | Out-Null
+  }
+  Move-Item -LiteralPath $source -Destination $backup -Force
+  Write-Log ("Moved stale update file to backup: {0}" -f $RelativePath)
+}
+
+function Remove-EmptyDirectoriesUnder {
+  param([string]$Directory)
+  if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
+    return
+  }
+  Get-ChildItem -LiteralPath $Directory -Directory -Recurse -Force |
+    Sort-Object { $_.FullName.Length } -Descending |
+    ForEach-Object {
+      try {
+        if (-not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+          Remove-Item -LiteralPath $_.FullName -Force
+          Write-Log ("Removed empty update directory: {0}" -f $_.FullName)
+        }
+      } catch {
+        Write-Log ("Could not remove empty directory {0}: {1}" -f $_.FullName, $_.Exception.Message)
+      }
+    }
+}
+
+function Invoke-MirrorSyncCleanup {
+  if (-not $script:DeletedBackupRoot) {
+    return
+  }
+
+  $remoteFiles = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+  foreach ($file in $plan.files) {
+    [void]$remoteFiles.Add(([string]$file).Replace("\", "/"))
+  }
+
+  $staleFiles = New-Object 'System.Collections.Generic.List[string]'
+  foreach ($root in $plan.mirrorRoots) {
+    $rootRel = ([string]$root).Replace("\", "/").TrimStart("/")
+    if (-not $rootRel.EndsWith("/")) {
+      $rootRel = "$rootRel/"
+    }
+    $rootPath = Join-UpdatePath -BasePath $script:RootDir -RelativePath $rootRel
+    if (-not (Test-Path -LiteralPath $rootPath -PathType Container)) {
+      continue
+    }
+    if (-not (Test-PathInsideOrSame -ParentPath $script:RootDir -ChildPath $rootPath)) {
+      throw "Refusing to mirror-sync unsafe directory: $rootRel"
+    }
+    Get-ChildItem -LiteralPath $rootPath -File -Recurse -Force | ForEach-Object {
+      $relative = Get-UpdateRelativePath -BasePath $script:RootDir -ChildPath $_.FullName
+      if (-not $remoteFiles.Contains($relative)) {
+        $staleFiles.Add($relative)
+      }
+    }
+  }
+
+  foreach ($file in $plan.mirrorFiles) {
+    $relative = ([string]$file).Replace("\", "/").TrimStart("/")
+    if ($relative -and -not $remoteFiles.Contains($relative)) {
+      $target = Join-UpdatePath -BasePath $script:RootDir -RelativePath $relative
+      if (Test-Path -LiteralPath $target -PathType Leaf) {
+        $staleFiles.Add($relative)
+      }
+    }
+  }
+
+  $uniqueStaleFiles = @($staleFiles | Sort-Object -Unique)
+  if ($uniqueStaleFiles.Count -eq 0) {
+    Write-Log "Mirror sync cleanup found no stale files."
+    return
+  }
+
+  Write-Log ("Mirror sync cleanup moving {0} stale file(s) to {1}." -f $uniqueStaleFiles.Count, $script:DeletedBackupRoot)
+  foreach ($relative in $uniqueStaleFiles) {
+    Move-StaleUpdateFile -RelativePath $relative
+  }
+  foreach ($root in $plan.mirrorRoots) {
+    $rootPath = Join-UpdatePath -BasePath $script:RootDir -RelativePath ([string]$root)
+    Remove-EmptyDirectoriesUnder -Directory $rootPath
   }
 }
 
@@ -560,6 +701,7 @@ $script:RootDir = [string]$plan.rootDir
 $stagingRoot = [string]$plan.stagingRoot
 $script:LogPath = [string]$plan.logPath
 $script:StatusPath = [string]$plan.statusPath
+$script:DeletedBackupRoot = [string]$plan.deletedBackupRoot
 $electronPid = [int]$plan.electronPid
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Path $script:LogPath -Parent) | Out-Null
@@ -583,6 +725,8 @@ try {
 
   Stop-DevServerOnPort -Port 6981 | Out-Null
   Start-Sleep -Milliseconds 500
+
+  Invoke-MirrorSyncCleanup
 
   foreach ($file in $plan.files) {
     $rel = [string]$file
@@ -693,12 +837,16 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, files, needsRoo
   const logPath = path.join(applyRoot, 'apply-update.log');
   const statusPath = path.join(applyRoot, 'apply-status.json');
   const launcherStatusPath = path.join(applyRoot, 'launcher-status.json');
+  const deletedBackupRoot = path.join(updateDeletedRoot(rootDir), `${timestampName()}-${process.pid}`);
 
   const plan = {
     applyRoot,
     rootDir,
     stagingRoot,
     files,
+    mirrorRoots: MIRROR_SYNC_ROOTS,
+    mirrorFiles: MIRROR_SYNC_FILES,
+    deletedBackupRoot,
     needsRootInstall,
     needsServerInstall,
     electronPid: process.pid,
