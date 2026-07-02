@@ -195,6 +195,12 @@ function updateStagingRoot(rootDir) {
   return directory;
 }
 
+function updateApplyRoot(rootDir) {
+  const directory = path.join(portableDataRoot(rootDir), 'update_apply');
+  fs.mkdirSync(directory, { recursive: true });
+  return directory;
+}
+
 function timestampName() {
   const now = new Date();
   const pad = (value) => String(value).padStart(2, '0');
@@ -355,6 +361,298 @@ function applyStagedFiles(rootDir, stagingRoot, backupRoot, files) {
     applied.push({ rel, hadOriginal });
   }
   return applied;
+}
+
+function readStagedVersion(stagingRoot) {
+  try {
+    const version = fs.readFileSync(safeStagingTarget(stagingRoot, 'VERSION'), 'utf8').trim().split(/\r?\n/)[0]?.trim();
+    return version || '';
+  } catch {
+    return '';
+  }
+}
+
+function writeUpdateApplyScript(scriptPath) {
+  const script = String.raw`param(
+  [Parameter(Mandatory = $true)]
+  [string]$PlanPath
+)
+
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+function Write-Log {
+  param([string]$Message)
+  $line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
+  Add-Content -LiteralPath $script:LogPath -Value $line -Encoding UTF8
+}
+
+function Join-UpdatePath {
+  param([string]$BasePath, [string]$RelativePath)
+  $nativeRelative = $RelativePath -replace "/", [System.IO.Path]::DirectorySeparatorChar
+  return [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($BasePath, $nativeRelative))
+}
+
+function Copy-FileWithRetry {
+  param([string]$Source, [string]$Destination)
+  $parent = Split-Path -LiteralPath $Destination -Parent
+  if ($parent) {
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+  }
+
+  $temp = "$Destination.update_tmp"
+  for ($attempt = 1; $attempt -le 8; $attempt += 1) {
+    try {
+      if (Test-Path -LiteralPath $temp) {
+        Remove-Item -LiteralPath $temp -Force
+      }
+      Copy-Item -LiteralPath $Source -Destination $temp -Force
+      if (Test-Path -LiteralPath $Destination) {
+        Remove-Item -LiteralPath $Destination -Force
+      }
+      Move-Item -LiteralPath $temp -Destination $Destination -Force
+      return
+    } catch {
+      if ($attempt -eq 8) {
+        throw
+      }
+      Start-Sleep -Milliseconds (250 * $attempt)
+    }
+  }
+}
+
+function Remove-TreeBestEffort {
+  param([string]$Directory)
+  if (-not $Directory -or -not (Test-Path -LiteralPath $Directory)) {
+    return
+  }
+  for ($attempt = 1; $attempt -le 5; $attempt += 1) {
+    try {
+      Remove-Item -LiteralPath $Directory -Recurse -Force
+      return
+    } catch {
+      if ($attempt -eq 5) {
+        Write-Log ("Could not remove temporary directory: {0}. {1}" -f $Directory, $_.Exception.Message)
+        return
+      }
+      Start-Sleep -Milliseconds (300 * $attempt)
+    }
+  }
+}
+
+function Test-TcpPortOpen {
+  param([int]$Port)
+  $client = New-Object System.Net.Sockets.TcpClient
+  try {
+    $async = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
+    if (-not $async.AsyncWaitHandle.WaitOne(300)) {
+      return $false
+    }
+    $client.EndConnect($async)
+    return $true
+  } catch {
+    return $false
+  } finally {
+    $client.Close()
+  }
+}
+
+function Wait-ForDevServerToStop {
+  param([int]$Port)
+  Write-Log ("Waiting for dev server port {0} to stop." -f $Port)
+  for ($attempt = 1; $attempt -le 120; $attempt += 1) {
+    if (-not (Test-TcpPortOpen -Port $Port)) {
+      return
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  throw "Timed out waiting for dev server port $Port to stop."
+}
+
+function Invoke-NpmInstall {
+  param([string]$WorkingDirectory)
+  Write-Log ("Running npm install in {0}" -f $WorkingDirectory)
+  Push-Location -LiteralPath $WorkingDirectory
+  try {
+    & cmd.exe /c "npm install" 2>&1 | ForEach-Object { Write-Log ("npm: {0}" -f $_) }
+    if ($LASTEXITCODE -ne 0) {
+      throw "npm install failed with exit code $LASTEXITCODE"
+    }
+  } finally {
+    Pop-Location
+  }
+}
+
+function Restore-AppliedFiles {
+  param([array]$Applied)
+  Write-Log "Restoring files from backup."
+  for ($index = $Applied.Count - 1; $index -ge 0; $index -= 1) {
+    $item = $Applied[$index]
+    try {
+      if ($item.HadOriginal -and (Test-Path -LiteralPath $item.BackupPath)) {
+        Copy-FileWithRetry -Source $item.BackupPath -Destination $item.Target
+      } elseif (-not $item.HadOriginal -and (Test-Path -LiteralPath $item.Target)) {
+        Remove-Item -LiteralPath $item.Target -Force
+      }
+    } catch {
+      Write-Log ("Restore failed for {0}: {1}" -f $item.Rel, $_.Exception.Message)
+    }
+  }
+}
+
+function Write-Status {
+  param([string]$State, [string]$ErrorMessage = "")
+  $payload = [ordered]@{
+    state = $State
+    error = $ErrorMessage
+    updatedAt = (Get-Date).ToString("o")
+  }
+  $payload | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $script:StatusPath -Encoding UTF8
+}
+
+function Start-ForartAgain {
+  $forartExe = Join-Path $script:RootDir "Forart.exe"
+  $starter = Join-Path $script:RootDir "START_FORART_MAIN.bat"
+  if (Test-Path -LiteralPath $forartExe) {
+    Write-Log ("Restarting with {0}" -f $forartExe)
+    Start-Process -FilePath $forartExe -WorkingDirectory $script:RootDir
+    return
+  }
+  if (Test-Path -LiteralPath $starter) {
+    Write-Log ("Restarting with {0}" -f $starter)
+    $quotedStarter = '"' + $starter + '"'
+    Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $quotedStarter) -WorkingDirectory $script:RootDir
+    return
+  }
+  Write-Log "Restarting with npm run dev"
+  Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "npm run dev") -WorkingDirectory $script:RootDir
+}
+
+$plan = Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$script:RootDir = [string]$plan.rootDir
+$stagingRoot = [string]$plan.stagingRoot
+$backupRoot = [string]$plan.backupRoot
+$script:LogPath = [string]$plan.logPath
+$script:StatusPath = [string]$plan.statusPath
+$electronPid = [int]$plan.electronPid
+$applied = @()
+
+New-Item -ItemType Directory -Force -Path (Split-Path -LiteralPath $script:LogPath -Parent) | Out-Null
+Write-Status -State "running"
+
+try {
+  Write-Log ("Forart update apply script started. Plan: {0}" -f $PlanPath)
+  if ($electronPid -gt 0) {
+    Write-Log ("Waiting for Electron process {0} to exit." -f $electronPid)
+    for ($attempt = 1; $attempt -le 180; $attempt += 1) {
+      $process = Get-Process -Id $electronPid -ErrorAction SilentlyContinue
+      if (-not $process) {
+        break
+      }
+      Start-Sleep -Milliseconds 500
+    }
+    if (Get-Process -Id $electronPid -ErrorAction SilentlyContinue) {
+      throw "Timed out waiting for Forart to exit."
+    }
+  }
+
+  Wait-ForDevServerToStop -Port 6981
+  Start-Sleep -Milliseconds 500
+  New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+
+  foreach ($file in $plan.files) {
+    $rel = [string]$file
+    $source = Join-UpdatePath -BasePath $stagingRoot -RelativePath $rel
+    $target = Join-UpdatePath -BasePath $script:RootDir -RelativePath $rel
+    $backup = Join-UpdatePath -BasePath $backupRoot -RelativePath $rel
+    if (-not (Test-Path -LiteralPath $source)) {
+      throw "Staged update file is missing: $rel"
+    }
+
+    $hadOriginal = Test-Path -LiteralPath $target
+    if ($hadOriginal) {
+      New-Item -ItemType Directory -Force -Path (Split-Path -LiteralPath $backup -Parent) | Out-Null
+      Copy-Item -LiteralPath $target -Destination $backup -Force
+    }
+
+    $entry = [pscustomobject]@{
+      Rel = $rel
+      Target = $target
+      BackupPath = $backup
+      HadOriginal = $hadOriginal
+    }
+    $applied += $entry
+    Copy-FileWithRetry -Source $source -Destination $target
+    Write-Log ("Updated {0}" -f $rel)
+  }
+
+  if ($plan.needsRootInstall) {
+    Invoke-NpmInstall -WorkingDirectory $script:RootDir
+  }
+  if ($plan.needsServerInstall) {
+    Invoke-NpmInstall -WorkingDirectory (Join-Path $script:RootDir "server")
+  }
+
+  Write-Status -State "success"
+  Remove-TreeBestEffort -Directory $stagingRoot
+  Write-Log "Forart update applied successfully."
+  Start-ForartAgain
+} catch {
+  $message = $_.Exception.Message
+  Write-Log ("Update failed: {0}" -f $message)
+  Restore-AppliedFiles -Applied $applied
+  Write-Status -State "failed" -ErrorMessage $message
+}
+`;
+  fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+  fs.writeFileSync(scriptPath, script, 'utf8');
+}
+
+function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, files, needsRootInstall, needsServerInstall }) {
+  if (process.platform !== 'win32') {
+    throw new Error('Automatic source update is currently supported on Windows only.');
+  }
+
+  const applyRoot = path.join(updateApplyRoot(rootDir), `${timestampName()}-${process.pid}`);
+  fs.mkdirSync(applyRoot, { recursive: true });
+  const scriptPath = path.join(applyRoot, 'apply-update.ps1');
+  const planPath = path.join(applyRoot, 'update-plan.json');
+  const logPath = path.join(applyRoot, 'apply-update.log');
+  const statusPath = path.join(applyRoot, 'apply-status.json');
+
+  const plan = {
+    rootDir,
+    stagingRoot,
+    backupRoot,
+    files,
+    needsRootInstall,
+    needsServerInstall,
+    electronPid: process.pid,
+    logPath,
+    statusPath,
+    createdAt: new Date().toISOString(),
+  };
+
+  writeUpdateApplyScript(scriptPath);
+  fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf8');
+
+  const child = spawn('powershell.exe', [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    scriptPath,
+    '-PlanPath',
+    planPath,
+  ], {
+    cwd: rootDir,
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  child.unref();
+
+  return { applyRoot, scriptPath, planPath, logPath, statusPath };
 }
 
 async function probeNet(name, net, url, required = true) {
@@ -533,7 +831,6 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
   ipcMain.handle('app:run-update', async () => {
     const stagingRoot = path.join(updateStagingRoot(rootDir), `${timestampName()}-${process.pid}`);
     const backupRoot = path.join(updateBackupRoot(rootDir), timestampName());
-    let applied = [];
     try {
       await removeDirectoryBestEffort(stagingRoot);
       fs.mkdirSync(stagingRoot, { recursive: true });
@@ -541,57 +838,47 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
 
       const files = await githubUpdateFileList(net);
       await downloadGithubUpdateFiles(net, files, stagingRoot);
-      applied = applyStagedFiles(rootDir, stagingRoot, backupRoot, files);
-
       const needsRootInstall = files.includes('package.json') || files.includes('package-lock.json');
       const needsServerInstall = files.includes('server/package.json') || files.includes('server/package-lock.json');
-      const installResults = [];
-      if (needsRootInstall) {
-        installResults.push(await runCommand('npm', ['install'], rootDir));
-      }
-      if (needsServerInstall) {
-        installResults.push(await runCommand('npm', ['install'], path.join(rootDir, 'server')));
-      }
-      const failedInstall = installResults.find((item) => !item.ok);
-      if (failedInstall) {
-          restoreFiles(rootDir, backupRoot, applied);
-        return {
-          ok: false,
-          stdout: installResults.map((item) => item.stdout || '').join(''),
-          stderr: installResults.map((item) => item.stderr || '').join(''),
-          restartRequired: false,
-          backupDir: backupRoot,
-          updated: applied.map((item) => item.rel),
-          count: applied.length,
-          error: failedInstall.error || 'npm install failed',
-        };
-      }
+      const applyInfo = scheduleStagedUpdateApply({
+        rootDir,
+        stagingRoot,
+        backupRoot,
+        files,
+        needsRootInstall,
+        needsServerInstall,
+      });
+      const version = readStagedVersion(stagingRoot);
 
-      const version = readLocalVersion(rootDir);
+      setTimeout(() => {
+        app.quit();
+      }, 500);
+
       return {
         ok: true,
-        stdout: installResults.map((item) => item.stdout || '').join(''),
-        stderr: installResults.map((item) => item.stderr || '').join(''),
+        stdout: '',
+        stderr: '',
         restartRequired: true,
+        applyScheduled: true,
+        applyDir: applyInfo.applyRoot,
+        applyLog: applyInfo.logPath,
         backupDir: backupRoot,
-        updated: applied.map((item) => item.rel),
-        count: applied.length,
+        updated: files,
+        count: files.length,
         version,
       };
     } catch (error) {
-      if (applied.length) restoreFiles(rootDir, backupRoot, applied);
+      await removeDirectoryBestEffort(stagingRoot);
       return {
         ok: false,
         stdout: '',
         stderr: '',
         restartRequired: false,
         backupDir: fs.existsSync(backupRoot) ? backupRoot : '',
-        updated: applied.map((item) => item.rel),
-        count: applied.length,
+        updated: [],
+        count: 0,
         error: error instanceof Error ? error.message : String(error),
       };
-    } finally {
-      await removeDirectoryBestEffort(stagingRoot);
     }
   });
 

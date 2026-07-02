@@ -53,7 +53,7 @@ const updateText = {
   updating: "\u66f4\u65b0\u4e2d",
   updatingMessage: "\u6b63\u5728\u66f4\u65b0...",
   updateFailed: "\u66f4\u65b0\u5931\u8d25",
-  updateFinished: "\u66f4\u65b0\u5b8c\u6210\uff0c\u91cd\u542f\u540e\u751f\u6548",
+  updateFinished: "\u5df2\u4e0b\u8f7d\u66f4\u65b0\uff0c\u6b63\u5728\u9000\u51fa\u5e76\u5e94\u7528",
   updateAvailable: "\u53d1\u73b0\u65b0\u66f4\u65b0\uff0c\u518d\u70b9\u4e00\u6b21\u66f4\u65b0",
   openProjectAvailable: "\u53d1\u73b0\u65b0\u66f4\u65b0\uff0c\u518d\u70b9\u4e00\u6b21\u6253\u5f00\u9879\u76ee\u9875",
   projectOpened: "\u5df2\u6253\u5f00\u9879\u76ee\u9875\u9762",
@@ -318,7 +318,7 @@ export function App() {
     if (result?.ok) {
       setUpdateStatus(canGitUpdate ? "updated" : "current");
       setUpdateMessage(canGitUpdate
-        ? (currentLanguage === "zh-CN" ? updateText.updateFinished : "Updated. Restart to apply.")
+        ? (currentLanguage === "zh-CN" ? updateText.updateFinished : "Update downloaded. Forart is closing to apply it.")
         : (currentLanguage === "zh-CN" ? updateText.projectOpened : "Project page opened."));
     } else {
       setUpdateStatus("error");
