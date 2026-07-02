@@ -132,6 +132,14 @@ function runCommand(command, args, cwd) {
   });
 }
 
+function stripUtf8Bom(text) {
+  return String(text || '').replace(/^\uFEFF/, '');
+}
+
+function parseJsonText(text) {
+  return JSON.parse(stripUtf8Bom(text));
+}
+
 function normalizeUpdateNotes(input, fallbackVersion = '') {
   const payload = input && typeof input === 'object' ? input : {};
   const items = Array.isArray(payload.items)
@@ -174,7 +182,7 @@ async function readRemoteVersion(net) {
 function readLocalUpdateNotes(rootDir, fallbackVersion = '') {
   try {
     const filePath = path.join(rootDir, 'update-notes.json');
-    const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const payload = parseJsonText(fs.readFileSync(filePath, 'utf8'));
     return normalizeUpdateNotes(payload, fallbackVersion);
   } catch {
     return normalizeUpdateNotes({}, fallbackVersion);
@@ -183,7 +191,7 @@ function readLocalUpdateNotes(rootDir, fallbackVersion = '') {
 
 async function readRemoteUpdateNotes(net, latestVersion) {
   try {
-    const payload = JSON.parse(await fetchText(net, REMOTE_UPDATE_NOTES_URL));
+    const payload = parseJsonText(await fetchText(net, REMOTE_UPDATE_NOTES_URL));
     return normalizeUpdateNotes(payload, latestVersion);
   } catch (error) {
     return {
@@ -470,7 +478,7 @@ async function waitForApplyStatus(statusPath, expectedState, timeoutMs = 10000, 
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      const payload = JSON.parse(await fs.promises.readFile(statusPath, 'utf8'));
+      const payload = parseJsonText(await fs.promises.readFile(statusPath, 'utf8'));
       if (payload?.state === expectedState) return payload;
       if (payload?.state === 'failed') {
         throw new Error(payload.error || 'Update apply script failed before takeover.');
@@ -513,7 +521,7 @@ function Join-UpdatePath {
 
 function Copy-FileWithRetry {
   param([string]$Source, [string]$Destination)
-  $parent = Split-Path -LiteralPath $Destination -Parent
+  $parent = Split-Path -Path $Destination -Parent
   if ($parent) {
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
   }
@@ -626,27 +634,15 @@ function Write-Status {
     error = $ErrorMessage
     updatedAt = (Get-Date).ToString("o")
   }
-  $payload | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $script:StatusPath -Encoding UTF8
+  $json = $payload | ConvertTo-Json -Depth 4
+  [System.IO.File]::WriteAllText($script:StatusPath, $json, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 function Start-ForartAgain {
   param([bool]$DevServerWasStopped)
-  $forartExe = Join-Path $script:RootDir "Forart.exe"
-  $starter = Join-Path $script:RootDir "START_FORART_MAIN.bat"
   if (-not $DevServerWasStopped) {
     Write-Log "Restarting Electron only because the dev server is still running."
     Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "npm run electron") -WorkingDirectory $script:RootDir
-    return
-  }
-  if (Test-Path -LiteralPath $forartExe) {
-    Write-Log ("Restarting with {0}" -f $forartExe)
-    Start-Process -FilePath $forartExe -WorkingDirectory $script:RootDir
-    return
-  }
-  if (Test-Path -LiteralPath $starter) {
-    Write-Log ("Restarting with {0}" -f $starter)
-    $quotedStarter = '"' + $starter + '"'
-    Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $quotedStarter) -WorkingDirectory $script:RootDir
     return
   }
   Write-Log "Restarting with npm run dev"
@@ -662,7 +658,7 @@ $script:StatusPath = [string]$plan.statusPath
 $electronPid = [int]$plan.electronPid
 $applied = @()
 
-New-Item -ItemType Directory -Force -Path (Split-Path -LiteralPath $script:LogPath -Parent) | Out-Null
+New-Item -ItemType Directory -Force -Path (Split-Path -Path $script:LogPath -Parent) | Out-Null
 Write-Status -State "running"
 
 try {
@@ -696,7 +692,7 @@ try {
 
     $hadOriginal = Test-Path -LiteralPath $target
     if ($hadOriginal) {
-      New-Item -ItemType Directory -Force -Path (Split-Path -LiteralPath $backup -Parent) | Out-Null
+      New-Item -ItemType Directory -Force -Path (Split-Path -Path $backup -Parent) | Out-Null
       Copy-Item -LiteralPath $target -Destination $backup -Force
     }
 
@@ -776,7 +772,8 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, fil
       `$applyOutputPath = ${psSingleQuoted(applyOutputPath)}`,
       'function Write-RunnerStatus {',
       '  param([string]$State, [string]$ErrorMessage = "")',
-      '  [ordered]@{ state = $State; error = $ErrorMessage; updatedAt = (Get-Date).ToString("o") } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $runnerStatusPath -Encoding UTF8',
+      '  $json = [ordered]@{ state = $State; error = $ErrorMessage; updatedAt = (Get-Date).ToString("o") } | ConvertTo-Json -Depth 4',
+      '  [System.IO.File]::WriteAllText($runnerStatusPath, $json, (New-Object System.Text.UTF8Encoding($false)))',
       '}',
       'Write-RunnerStatus -State "running"',
       'try {',
@@ -801,11 +798,12 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, fil
       `$launcherStatusPath = ${psSingleQuoted(launcherStatusPath)}`,
       'function Write-LauncherStatus {',
       '  param([string]$State, [string]$ErrorMessage = "")',
-      '  [ordered]@{ state = $State; error = $ErrorMessage; updatedAt = (Get-Date).ToString("o") } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $launcherStatusPath -Encoding UTF8',
+      '  $json = [ordered]@{ state = $State; error = $ErrorMessage; updatedAt = (Get-Date).ToString("o") } | ConvertTo-Json -Depth 4',
+      '  [System.IO.File]::WriteAllText($launcherStatusPath, $json, (New-Object System.Text.UTF8Encoding($false)))',
       '}',
       'try {',
       '  Write-LauncherStatus -State "starting"',
-      "  $command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"' + $runnerScript + '\"'",
+      "  $command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"' + $runnerScript + '\"'",
       '  $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command; CurrentDirectory = $rootDir }',
       '  if ($result.ReturnValue -ne 0) { throw "Win32_Process.Create failed: $($result.ReturnValue)" }',
       '  Write-LauncherStatus -State "created"',
@@ -825,7 +823,7 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, fil
       'setlocal',
       'chcp 65001 >nul',
       `cd /d "${rootDir}"`,
-      `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${launcherScriptPath}"`,
+      `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${launcherScriptPath}"`,
       'endlocal',
       '',
     ].join('\r\n'),

@@ -1,9 +1,9 @@
 {
-  "version": "0.1.7",
-  "updatedAt": "2026-07-02T17:12:00+08:00",
+  "version": "0.1.8",
+  "updatedAt": "2026-07-02T18:20:00+08:00",
   "items": [
-    "更新器改为等待独立 runner 写入 running 状态后再关闭 Forart，避免 apply 脚本初始化阶段失败时只显示 timeout。",
-    "新增 launcher-status.json、runner-status.json 和 apply-process.log，更新接管失败时会保留更明确的诊断信息。",
-    "apply 过程的 stdout/stderr 会写入 apply-process.log，便于定位 PowerShell 启动或脚本执行问题。"
+    "修复 Windows PowerShell 5.1 下更新 apply 脚本的 Split-Path 参数兼容问题。",
+    "修复 PowerShell 写出的状态 JSON 带 BOM 导致 Electron 解析失败的问题。",
+    "移除 Forart.exe 启动器依赖，更新完成后改为通过 npm run dev 或 npm run electron 重启。"
   ]
 }
