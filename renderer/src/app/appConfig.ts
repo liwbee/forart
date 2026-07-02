@@ -63,13 +63,6 @@ export interface ForartUpdateCheckResult {
 
 export interface ForartUpdateRunResult {
   ok: boolean;
-  stdout?: string;
-  stderr?: string;
-  restartRequired?: boolean;
-  applyScheduled?: boolean;
-  applyDir?: string;
-  applyLog?: string;
-  backupDir?: string;
   updated?: string[];
   count?: number;
   version?: string;

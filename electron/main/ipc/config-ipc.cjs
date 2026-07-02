@@ -360,9 +360,8 @@ async function removeDirectoryBestEffort(directory) {
     try {
       await fs.promises.rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
       return;
-    } catch (error) {
+    } catch {
       if (attempt === 4) {
-        console.warn('[forart-update] could not remove temporary directory:', directory, error);
         return;
       }
       await wait(150 * (attempt + 1));
@@ -377,10 +376,6 @@ function readStagedVersion(stagingRoot) {
   } catch {
     return '';
   }
-}
-
-function psSingleQuoted(value) {
-  return `'${String(value).replace(/'/g, "''")}'`;
 }
 
 async function readTextIfExists(filePath, maxLength = 1600) {
@@ -1101,7 +1096,7 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
       sendProgress({ phase: 'scheduling', percent: 100, fileCount: files.length });
       const needsRootInstall = files.includes('package.json') || files.includes('package-lock.json');
       const needsServerInstall = files.includes('server/package.json') || files.includes('server/package-lock.json');
-      const applyInfo = await scheduleStagedUpdateApply({
+      await scheduleStagedUpdateApply({
         rootDir,
         stagingRoot,
         files,
@@ -1117,12 +1112,6 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
 
       return {
         ok: true,
-        stdout: '',
-        stderr: '',
-        restartRequired: true,
-        applyScheduled: true,
-        applyDir: applyInfo.applyRoot,
-        applyLog: applyInfo.logPath,
         updated: files,
         count: files.length,
         version,
@@ -1131,9 +1120,6 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
       await removeDirectoryBestEffort(stagingRoot);
       return {
         ok: false,
-        stdout: '',
-        stderr: '',
-        restartRequired: false,
         updated: [],
         count: 0,
         error: error instanceof Error ? error.message : String(error),
