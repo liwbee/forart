@@ -124,13 +124,9 @@ function normalizeUpdateNotes(input, fallbackVersion = '') {
 }
 
 function readLocalVersion(rootDir) {
-  try {
-    const version = fs.readFileSync(path.join(rootDir, 'VERSION'), 'utf8').trim().split(/\r?\n/)[0]?.trim();
-    if (version) return version;
-  } catch {
-    // Fall back to package.json for older local copies that do not have VERSION yet.
-  }
-  return readPackageInfo(rootDir).version;
+  const version = fs.readFileSync(path.join(rootDir, 'VERSION'), 'utf8').trim().split(/\r?\n/)[0]?.trim();
+  if (!version) throw new Error('Local VERSION is empty.');
+  return version;
 }
 
 async function readRemoteVersion(net) {

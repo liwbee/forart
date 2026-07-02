@@ -722,52 +722,6 @@
   outline: 0;
 }
 
-.ic-folder-breadcrumbs {
-  min-width: 0;
-  min-height: 34px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  overflow: hidden;
-  margin-top: -10px;
-}
-
-.ic-folder-breadcrumbs button {
-  min-width: 0;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: 0;
-  border-radius: 8px;
-  padding: 0 9px;
-  color: var(--canvas-node-muted);
-  background: transparent;
-  font-size: 12px;
-  font-weight: var(--font-weight-medium);
-  cursor: pointer;
-}
-
-.ic-folder-breadcrumbs button svg {
-  flex: 0 0 auto;
-  transform: rotate(-90deg);
-}
-
-.ic-folder-breadcrumbs button span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ic-folder-breadcrumbs button:hover,
-.ic-folder-breadcrumbs button:focus-visible,
-.ic-folder-breadcrumbs button.active {
-  color: var(--canvas-state-hover-text);
-  background: var(--canvas-state-hover-bg);
-  outline: 0;
-}
-
 .ic-project-card-grid {
   --ic-project-card-size: 140px;
   min-height: 0;
@@ -833,34 +787,6 @@
 .ic-project-card.active {
   border-color: var(--canvas-state-active-border);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--canvas-link-active) 10%, transparent);
-}
-
-.ic-folder-card {
-  border-color: var(--canvas-node-border);
-  background: color-mix(in srgb, var(--canvas-node-muted) 12%, var(--canvas-node-bg));
-}
-
-.ic-folder-card.active {
-  border-color: var(--canvas-state-active-border);
-}
-
-.ic-folder-card__shape {
-  position: absolute;
-  inset: -1px;
-  z-index: 0;
-  width: calc(100% + 2px);
-  height: calc(100% + 2px);
-  pointer-events: none;
-}
-
-.ic-folder-card__body {
-  fill: var(--canvas-node-bg);
-  stroke: none;
-  vector-effect: non-scaling-stroke;
-}
-
-:root.theme-dark .ic-folder-card {
-  background: color-mix(in srgb, var(--canvas-node-muted) 14%, var(--canvas-node-bg));
 }
 
 .ic-project-card.is-importing {
