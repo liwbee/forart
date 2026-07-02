@@ -577,7 +577,7 @@ try {
   }
 
   Write-Status -State "success"
-  Remove-TreeBestEffort -Directory (Split-Path -Path $stagingRoot -Parent)
+  Remove-TreeBestEffort -Directory $stagingRoot
   Write-Log "Forart update applied successfully."
   Start-ForartAgain -DevServerWasStopped $devServerWasStopped
 } catch {
