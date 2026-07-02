@@ -595,6 +595,75 @@ try {
   fs.writeFileSync(scriptPath, script, 'utf8');
 }
 
+function writeUpdateApplyLauncherScript(scriptPath) {
+  const script = String.raw`param(
+  [Parameter(Mandatory = $true)]
+  [string]$ApplyPath,
+  [Parameter(Mandatory = $true)]
+  [string]$PlanPath,
+  [Parameter(Mandatory = $true)]
+  [string]$WorkingDirectory,
+  [Parameter(Mandatory = $true)]
+  [string]$StatusPath,
+  [Parameter(Mandatory = $true)]
+  [string]$StdoutPath,
+  [Parameter(Mandatory = $true)]
+  [string]$StderrPath
+)
+
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+function Write-LauncherStatus {
+  param([string]$State, [string]$ErrorMessage = "")
+  $payload = [ordered]@{
+    state = $State
+    error = $ErrorMessage
+    updatedAt = (Get-Date).ToString("o")
+  }
+  $json = $payload | ConvertTo-Json -Depth 4
+  [System.IO.File]::WriteAllText($StatusPath, $json, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Quote-ProcessArgument {
+  param([string]$Value)
+  return '"' + ($Value -replace '"', '\"') + '"'
+}
+
+try {
+  New-Item -ItemType Directory -Force -Path (Split-Path -Path $StatusPath -Parent) | Out-Null
+  Write-LauncherStatus -State "starting"
+
+  $argumentList = @(
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    (Quote-ProcessArgument -Value $ApplyPath),
+    "-PlanPath",
+    (Quote-ProcessArgument -Value $PlanPath)
+  ) -join " "
+
+  $startInfo = @{
+    FilePath = "powershell.exe"
+    ArgumentList = $argumentList
+    WorkingDirectory = $WorkingDirectory
+    WindowStyle = "Hidden"
+    RedirectStandardOutput = $StdoutPath
+    RedirectStandardError = $StderrPath
+  }
+  Start-Process @startInfo
+
+  Write-LauncherStatus -State "launched"
+} catch {
+  Write-LauncherStatus -State "failed" -ErrorMessage $_.Exception.Message
+  exit 1
+}
+`;
+  fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+  fs.writeFileSync(scriptPath, script, 'utf8');
+}
+
 async function scheduleStagedUpdateApply({ rootDir, stagingRoot, files, needsRootInstall, needsServerInstall }) {
   if (process.platform !== 'win32') {
     throw new Error('Automatic source update is currently supported on Windows only.');
@@ -603,9 +672,13 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, files, needsRoo
   const applyRoot = path.join(updateApplyRoot(rootDir), `${timestampName()}-${process.pid}`);
   fs.mkdirSync(applyRoot, { recursive: true });
   const scriptPath = path.join(applyRoot, 'apply-update.ps1');
+  const launcherPath = path.join(applyRoot, 'apply-launcher.ps1');
   const planPath = path.join(applyRoot, 'update-plan.json');
   const logPath = path.join(applyRoot, 'apply-update.log');
   const statusPath = path.join(applyRoot, 'apply-status.json');
+  const launcherStatusPath = path.join(applyRoot, 'launcher-status.json');
+  const applyStdoutPath = path.join(applyRoot, 'apply-stdout.log');
+  const applyStderrPath = path.join(applyRoot, 'apply-stderr.log');
 
   const plan = {
     applyRoot,
@@ -621,20 +694,28 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, files, needsRoo
   };
 
   writeUpdateApplyScript(scriptPath);
+  writeUpdateApplyLauncherScript(launcherPath);
   fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf8');
   const child = spawn('powershell.exe', [
     '-NoProfile',
     '-ExecutionPolicy',
     'Bypass',
-    '-WindowStyle',
-    'Hidden',
     '-File',
+    launcherPath,
+    '-ApplyPath',
     scriptPath,
     '-PlanPath',
     planPath,
+    '-WorkingDirectory',
+    rootDir,
+    '-StatusPath',
+    launcherStatusPath,
+    '-StdoutPath',
+    applyStdoutPath,
+    '-StderrPath',
+    applyStderrPath,
   ], {
       cwd: rootDir,
-      detached: true,
       stdio: 'ignore',
       windowsHide: true,
     });
@@ -644,14 +725,17 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, files, needsRoo
     child.once('error', onError);
     child.unref();
     waitForApplyStatus(statusPath, 'running', 12000, [
+      { name: 'launcher-status', path: launcherStatusPath },
       { name: 'apply-status', path: statusPath },
       { name: 'apply-log', path: logPath },
+      { name: 'apply-stdout', path: applyStdoutPath },
+      { name: 'apply-stderr', path: applyStderrPath },
     ]).then(resolve, reject).finally(() => {
       child.off('error', onError);
     });
   });
 
-  return { applyRoot, scriptPath, planPath, logPath, statusPath };
+  return { applyRoot, scriptPath, launcherPath, planPath, logPath, statusPath };
 }
 
 async function probeNet(name, net, url, required = true) {
