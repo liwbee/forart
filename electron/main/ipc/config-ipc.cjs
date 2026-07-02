@@ -317,6 +317,26 @@ function restoreFiles(rootDir, backupRoot, applied) {
   }
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function removeDirectoryBestEffort(directory) {
+  if (!directory || !fs.existsSync(directory)) return;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await fs.promises.rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      return;
+    } catch (error) {
+      if (attempt === 4) {
+        console.warn('[forart-update] could not remove temporary directory:', directory, error);
+        return;
+      }
+      await wait(150 * (attempt + 1));
+    }
+  }
+}
+
 function applyStagedFiles(rootDir, stagingRoot, backupRoot, files) {
   const applied = [];
   for (const rel of files) {
@@ -515,7 +535,7 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
     const backupRoot = path.join(updateBackupRoot(rootDir), timestampName());
     let applied = [];
     try {
-      if (fs.existsSync(stagingRoot)) fs.rmSync(stagingRoot, { recursive: true, force: true });
+      await removeDirectoryBestEffort(stagingRoot);
       fs.mkdirSync(stagingRoot, { recursive: true });
       fs.mkdirSync(backupRoot, { recursive: true });
 
@@ -571,7 +591,7 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
         error: error instanceof Error ? error.message : String(error),
       };
     } finally {
-      if (fs.existsSync(stagingRoot)) fs.rmSync(stagingRoot, { recursive: true, force: true });
+      await removeDirectoryBestEffort(stagingRoot);
     }
   });
 
