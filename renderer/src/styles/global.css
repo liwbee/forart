@@ -2671,7 +2671,7 @@ input[type="color"]:focus-visible {
   width: min(860px, 100%);
   max-height: min(700px, calc(100dvh - 40px));
   display: grid;
-  grid-template-rows: auto auto auto auto auto;
+  grid-template-rows: auto;
   gap: var(--space-4);
   overflow: hidden;
   border: 1px solid var(--border-subtle);
@@ -2777,6 +2777,65 @@ input[type="color"]:focus-visible {
 
 .update-modal-summary.fail .update-modal-dot {
   background: var(--danger);
+}
+
+.update-progress-panel {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  background: var(--surface-card);
+}
+
+.update-progress-head,
+.update-progress-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.update-progress-head strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.update-progress-head span,
+.update-progress-meta strong {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.update-progress-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-progress-meta.muted {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.update-progress-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-control);
+}
+
+.update-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 160ms ease;
 }
 
 .update-modal-grid {

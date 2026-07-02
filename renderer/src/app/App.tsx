@@ -7,7 +7,7 @@ import { ImageReviewPage } from "../features/image-review/ImageReviewPage";
 import { ResourceLibraryPage } from "../features/resource-library/ResourceLibraryPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { AppView, useAppStore } from "./appStore";
-import type { ForartAppConfig, ForartAppInfo, ForartUpdateCheckResult, ForartUpdateConnectivityResult, ForartUpdateNotes, ForartUpdateRunResult } from "./appConfig";
+import type { ForartAppConfig, ForartAppInfo, ForartUpdateCheckResult, ForartUpdateConnectivityResult, ForartUpdateNotes, ForartUpdateProgress, ForartUpdateRunResult } from "./appConfig";
 import { getAppTitle } from "./runtimeConfig";
 import { SetupPage } from "./SetupPage";
 
@@ -81,6 +81,33 @@ function formatUpdateDate(value: string) {
   return `${year}.${month}.${day}`;
 }
 
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size >= 10 || unitIndex === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function updatePhaseLabel(phase: string, language: "zh-CN" | "en-US") {
+  if (language === "zh-CN") {
+    if (phase === "listing") return "正在获取更新列表";
+    if (phase === "downloading") return "正在下载更新";
+    if (phase === "scheduling") return "正在准备应用更新";
+    if (phase === "scheduled") return "已准备应用更新";
+    return "正在更新";
+  }
+  if (phase === "listing") return "Fetching update list";
+  if (phase === "downloading") return "Downloading update";
+  if (phase === "scheduling") return "Preparing update";
+  if (phase === "scheduled") return "Update ready to apply";
+  return "Updating";
+}
+
 function isKeepAliveView(view: AppView) {
   return KEEP_ALIVE_VIEWS.has(view);
 }
@@ -138,6 +165,7 @@ export function App() {
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateCheckResult, setUpdateCheckResult] = useState<ForartUpdateCheckResult | null>(null);
   const [updateNotes, setUpdateNotes] = useState<ForartUpdateNotes | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<ForartUpdateProgress | null>(null);
   const [connectivity, setConnectivity] = useState<ForartUpdateConnectivityResult | null>(null);
   const [connectivityChecking, setConnectivityChecking] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -168,6 +196,18 @@ export function App() {
     if (!appInfo) return;
     void checkForUpdates(false);
   }, [appInfo?.currentRevision]);
+
+  useEffect(() => {
+    return window.forartConfig?.onUpdateProgress?.((progress) => {
+      setUpdateProgress(progress);
+      const label = updatePhaseLabel(progress.phase, currentLanguage);
+      if (progress.phase === "downloading") {
+        setUpdateMessage(`${label} ${Math.round(progress.percent)}% - ${formatBytes(progress.bytesPerSecond)}/s`);
+      } else {
+        setUpdateMessage(label);
+      }
+    });
+  }, [currentLanguage]);
 
   useEffect(() => {
     let canceled = false;
@@ -309,6 +349,7 @@ export function App() {
     }
 
     setUpdateStatus("updating");
+    setUpdateProgress(null);
     setUpdateMessage(currentLanguage === "zh-CN" ? updateText.updatingMessage : "Updating...");
     const canGitUpdate = updateCheckResult?.canGitUpdate ?? appInfo?.canGitUpdate ?? false;
     const result: ForartUpdateRunResult | undefined = canGitUpdate
@@ -359,6 +400,12 @@ export function App() {
     : updateStatus === "current"
       ? `${currentLanguage === "zh-CN" ? "\u5df2\u662f\u6700\u65b0\u7248\u672c" : "Already up to date"} ${currentUpdateDateLabel}`
       : updateMessage || (currentLanguage === "zh-CN" ? updateText.connectivityWarn : "Check status before updating");
+  const updateProgressPercent = Math.max(0, Math.min(100, updateProgress?.percent || 0));
+  const updateProgressVisible = Boolean(updateProgress && (updateStatus === "updating" || updateStatus === "updated"));
+  const updateProgressPhase = updateProgress ? updatePhaseLabel(updateProgress.phase, currentLanguage) : "";
+  const updateProgressSpeed = updateProgress ? `${formatBytes(updateProgress.bytesPerSecond)}/s` : "";
+  const updateProgressTotal = updateProgress ? formatBytes(updateProgress.downloadedBytes) : "0 B";
+  const updateProgressFile = updateProgress?.currentFile || "";
   const sidebarToggleLabel = sidebarCollapsed ? t("nav:expandSidebar") : t("nav:collapseSidebar");
   const SidebarToggleIcon = sidebarCollapsed ? PanelLeftOpen : PanelLeftClose;
 
@@ -521,6 +568,28 @@ export function App() {
                 <strong>{updateSummaryText}</strong>
               </div>
             </div>
+
+            {updateProgressVisible ? (
+              <section className="update-progress-panel" aria-label={currentLanguage === "zh-CN" ? "更新进度" : "Update progress"}>
+                <div className="update-progress-head">
+                  <strong>{updateProgressPhase}</strong>
+                  <span>{Math.round(updateProgressPercent)}%</span>
+                </div>
+                <div className="update-progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(updateProgressPercent)}>
+                  <span style={{ width: `${updateProgressPercent}%` }} />
+                </div>
+                <div className="update-progress-meta">
+                  <span>{updateProgressFile || (currentLanguage === "zh-CN" ? "准备中" : "Preparing")}</span>
+                  <strong>{updateProgressTotal} · {updateProgressSpeed}</strong>
+                </div>
+                {updateProgress?.fileCount ? (
+                  <div className="update-progress-meta muted">
+                    <span>{currentLanguage === "zh-CN" ? "文件" : "File"} {updateProgress.fileIndex}/{updateProgress.fileCount}</span>
+                    <strong>{formatBytes(updateProgress.fileBytes)}{updateProgress.fileTotalBytes ? ` / ${formatBytes(updateProgress.fileTotalBytes)}` : ""}</strong>
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
 
             <section className="update-notes-panel">
               <div className="update-panel-head">

@@ -61,6 +61,40 @@ async function fetchBytes(net, url) {
   return Buffer.from(await response.arrayBuffer());
 }
 
+async function fetchBytesWithProgress(net, url, onProgress) {
+  const response = await net.fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, {
+    headers: {
+      Accept: 'application/octet-stream, text/plain, */*',
+      'User-Agent': 'Forart-Updater',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const totalBytes = Number(response.headers.get('content-length') || 0) || 0;
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    const bytes = Buffer.from(await response.arrayBuffer());
+    onProgress?.({ receivedBytes: bytes.length, totalBytes, done: true });
+    return bytes;
+  }
+
+  const chunks = [];
+  let receivedBytes = 0;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    const chunk = Buffer.from(value);
+    chunks.push(chunk);
+    receivedBytes += chunk.length;
+    onProgress?.({ receivedBytes, totalBytes, done: false });
+  }
+  onProgress?.({ receivedBytes, totalBytes, done: true });
+  return Buffer.concat(chunks);
+}
+
 function resolveCommand(command) {
   if (process.platform === 'win32' && command === 'npm') return 'npm.cmd';
   return command;
@@ -286,13 +320,60 @@ async function githubUpdateFileList(net) {
   return [...new Set(files)];
 }
 
-async function downloadGithubUpdateFiles(net, files, stagingRoot) {
-  for (const rel of files) {
+async function downloadGithubUpdateFiles(net, files, stagingRoot, onProgress) {
+  const startedAt = Date.now();
+  let downloadedBytes = 0;
+  let lastEmittedAt = 0;
+
+  const emitProgress = (payload, force = false) => {
+    const now = Date.now();
+    if (!force && now - lastEmittedAt < 180) return;
+    lastEmittedAt = now;
+    const elapsedSeconds = Math.max((now - startedAt) / 1000, 0.001);
+    onProgress?.({
+      phase: 'downloading',
+      downloadedBytes,
+      bytesPerSecond: downloadedBytes / elapsedSeconds,
+      ...payload,
+    });
+  };
+
+  for (let index = 0; index < files.length; index += 1) {
+    const rel = files[index];
     const target = safeStagingTarget(stagingRoot, rel);
     const rawUrl = `${GITHUB_RAW_ROOT}/${rel.split('/').map(encodeURIComponent).join('/')}`;
-    const bytes = await fetchBytes(net, rawUrl);
+    let lastFileBytes = 0;
+    emitProgress({
+      currentFile: rel,
+      fileIndex: index + 1,
+      fileCount: files.length,
+      fileBytes: 0,
+      fileTotalBytes: 0,
+      percent: files.length ? (index / files.length) * 100 : 0,
+    }, true);
+    const bytes = await fetchBytesWithProgress(net, rawUrl, ({ receivedBytes, totalBytes, done }) => {
+      downloadedBytes += Math.max(0, receivedBytes - lastFileBytes);
+      lastFileBytes = receivedBytes;
+      const fileFraction = totalBytes > 0 ? Math.min(receivedBytes / totalBytes, 1) : (done ? 1 : 0.5);
+      emitProgress({
+        currentFile: rel,
+        fileIndex: index + 1,
+        fileCount: files.length,
+        fileBytes: receivedBytes,
+        fileTotalBytes: totalBytes,
+        percent: files.length ? Math.min(((index + fileFraction) / files.length) * 100, 99.8) : 0,
+      }, done);
+    });
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, bytes);
+    emitProgress({
+      currentFile: rel,
+      fileIndex: index + 1,
+      fileCount: files.length,
+      fileBytes: bytes.length,
+      fileTotalBytes: bytes.length,
+      percent: files.length ? ((index + 1) / files.length) * 100 : 100,
+    }, true);
   }
 }
 
@@ -462,11 +543,12 @@ function Wait-ForDevServerToStop {
   Write-Log ("Waiting for dev server port {0} to stop." -f $Port)
   for ($attempt = 1; $attempt -le 120; $attempt += 1) {
     if (-not (Test-TcpPortOpen -Port $Port)) {
-      return
+      return $true
     }
     Start-Sleep -Milliseconds 500
   }
-  throw "Timed out waiting for dev server port $Port to stop."
+  Write-Log ("Dev server port {0} is still open. Continuing with Electron-only restart." -f $Port)
+  return $false
 }
 
 function Invoke-NpmInstall {
@@ -511,8 +593,14 @@ function Write-Status {
 }
 
 function Start-ForartAgain {
+  param([bool]$DevServerWasStopped)
   $forartExe = Join-Path $script:RootDir "Forart.exe"
   $starter = Join-Path $script:RootDir "START_FORART_MAIN.bat"
+  if (-not $DevServerWasStopped) {
+    Write-Log "Restarting Electron only because the dev server is still running."
+    Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "npm run electron") -WorkingDirectory $script:RootDir
+    return
+  }
   if (Test-Path -LiteralPath $forartExe) {
     Write-Log ("Restarting with {0}" -f $forartExe)
     Start-Process -FilePath $forartExe -WorkingDirectory $script:RootDir
@@ -556,7 +644,7 @@ try {
     }
   }
 
-  Wait-ForDevServerToStop -Port 6981
+  $devServerWasStopped = Wait-ForDevServerToStop -Port 6981
   Start-Sleep -Milliseconds 500
   New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
 
@@ -596,7 +684,7 @@ try {
   Write-Status -State "success"
   Remove-TreeBestEffort -Directory $stagingRoot
   Write-Log "Forart update applied successfully."
-  Start-ForartAgain
+  Start-ForartAgain -DevServerWasStopped $devServerWasStopped
 } catch {
   $message = $_.Exception.Message
   Write-Log ("Update failed: {0}" -f $message)
@@ -608,7 +696,7 @@ try {
   fs.writeFileSync(scriptPath, script, 'utf8');
 }
 
-function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, files, needsRootInstall, needsServerInstall }) {
+async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, files, needsRootInstall, needsServerInstall }) {
   if (process.platform !== 'win32') {
     throw new Error('Automatic source update is currently supported on Windows only.');
   }
@@ -616,6 +704,7 @@ function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, files, ne
   const applyRoot = path.join(updateApplyRoot(rootDir), `${timestampName()}-${process.pid}`);
   fs.mkdirSync(applyRoot, { recursive: true });
   const scriptPath = path.join(applyRoot, 'apply-update.ps1');
+  const launcherPath = path.join(applyRoot, 'launch-apply.cmd');
   const planPath = path.join(applyRoot, 'update-plan.json');
   const logPath = path.join(applyRoot, 'apply-update.log');
   const statusPath = path.join(applyRoot, 'apply-status.json');
@@ -635,24 +724,43 @@ function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, files, ne
 
   writeUpdateApplyScript(scriptPath);
   fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf8');
+  fs.writeFileSync(
+    launcherPath,
+    [
+      '@echo off',
+      'setlocal',
+      'chcp 65001 >nul',
+      `cd /d "${rootDir}"`,
+      `start "" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}" -PlanPath "${planPath}"`,
+      'endlocal',
+      '',
+    ].join('\r\n'),
+    'utf8',
+  );
 
-  const child = spawn('powershell.exe', [
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    scriptPath,
-    '-PlanPath',
-    planPath,
-  ], {
-    cwd: rootDir,
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
+  await new Promise((resolve, reject) => {
+    const child = spawn('cmd.exe', ['/d', '/c', launcherPath], {
+      cwd: rootDir,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    const timeout = setTimeout(() => {
+      child.unref();
+      resolve();
+    }, 2500);
+    child.on('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) resolve();
+      else reject(new Error(`Update launcher exited with code ${code}`));
+    });
   });
-  child.unref();
 
-  return { applyRoot, scriptPath, planPath, logPath, statusPath };
+  return { applyRoot, scriptPath, launcherPath, planPath, logPath, statusPath };
 }
 
 async function probeNet(name, net, url, required = true) {
@@ -828,19 +936,35 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
     }
   });
 
-  ipcMain.handle('app:run-update', async () => {
+  ipcMain.handle('app:run-update', async (event) => {
     const stagingRoot = path.join(updateStagingRoot(rootDir), `${timestampName()}-${process.pid}`);
     const backupRoot = path.join(updateBackupRoot(rootDir), timestampName());
+    const sendProgress = (payload) => {
+      event.sender.send('app:update-progress', {
+        phase: payload.phase || 'downloading',
+        percent: Math.max(0, Math.min(100, Number(payload.percent || 0))),
+        downloadedBytes: Number(payload.downloadedBytes || 0),
+        bytesPerSecond: Number(payload.bytesPerSecond || 0),
+        currentFile: String(payload.currentFile || ''),
+        fileIndex: Number(payload.fileIndex || 0),
+        fileCount: Number(payload.fileCount || 0),
+        fileBytes: Number(payload.fileBytes || 0),
+        fileTotalBytes: Number(payload.fileTotalBytes || 0),
+      });
+    };
     try {
       await removeDirectoryBestEffort(stagingRoot);
       fs.mkdirSync(stagingRoot, { recursive: true });
       fs.mkdirSync(backupRoot, { recursive: true });
 
+      sendProgress({ phase: 'listing', percent: 0 });
       const files = await githubUpdateFileList(net);
-      await downloadGithubUpdateFiles(net, files, stagingRoot);
+      sendProgress({ phase: 'downloading', percent: 0, fileCount: files.length });
+      await downloadGithubUpdateFiles(net, files, stagingRoot, sendProgress);
+      sendProgress({ phase: 'scheduling', percent: 100, fileCount: files.length });
       const needsRootInstall = files.includes('package.json') || files.includes('package-lock.json');
       const needsServerInstall = files.includes('server/package.json') || files.includes('server/package-lock.json');
-      const applyInfo = scheduleStagedUpdateApply({
+      const applyInfo = await scheduleStagedUpdateApply({
         rootDir,
         stagingRoot,
         backupRoot,
@@ -849,6 +973,7 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
         needsServerInstall,
       });
       const version = readStagedVersion(stagingRoot);
+      sendProgress({ phase: 'scheduled', percent: 100, fileCount: files.length });
 
       setTimeout(() => {
         app.quit();

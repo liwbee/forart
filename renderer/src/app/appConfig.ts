@@ -78,6 +78,18 @@ export interface ForartUpdateRunResult {
   error?: string;
 }
 
+export interface ForartUpdateProgress {
+  phase: "listing" | "downloading" | "scheduling" | "scheduled" | string;
+  percent: number;
+  downloadedBytes: number;
+  bytesPerSecond: number;
+  currentFile: string;
+  fileIndex: number;
+  fileCount: number;
+  fileBytes: number;
+  fileTotalBytes: number;
+}
+
 export interface ForartUpdateNotes {
   version?: string;
   updatedAt?: string;
@@ -115,6 +127,7 @@ export interface ForartConfigApi {
   appInfo: () => Promise<ForartAppInfo>;
   checkUpdate: () => Promise<ForartUpdateCheckResult>;
   runUpdate: () => Promise<ForartUpdateRunResult>;
+  onUpdateProgress: (callback: (progress: ForartUpdateProgress) => void) => () => void;
   updateConnectivity: () => Promise<ForartUpdateConnectivityResult>;
   openUpdatePage: () => Promise<{ ok: true }>;
 }
