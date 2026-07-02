@@ -453,6 +453,29 @@ function readStagedVersion(stagingRoot) {
   }
 }
 
+function psSingleQuoted(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+async function waitForApplyStatus(statusPath, expectedState, timeoutMs = 10000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const payload = JSON.parse(await fs.promises.readFile(statusPath, 'utf8'));
+      if (payload?.state === expectedState) return payload;
+      if (payload?.state === 'failed') {
+        throw new Error(payload.error || 'Update apply script failed before takeover.');
+      }
+    } catch (error) {
+      if (error?.code !== 'ENOENT' && !String(error?.message || '').includes('Unexpected end')) {
+        throw error;
+      }
+    }
+    await wait(150);
+  }
+  throw new Error('Timed out waiting for update apply script to take over.');
+}
+
 function writeUpdateApplyScript(scriptPath) {
   const script = String.raw`param(
   [Parameter(Mandatory = $true)]
@@ -705,6 +728,7 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, fil
   fs.mkdirSync(applyRoot, { recursive: true });
   const scriptPath = path.join(applyRoot, 'apply-update.ps1');
   const launcherPath = path.join(applyRoot, 'launch-apply.cmd');
+  const launcherScriptPath = path.join(applyRoot, 'launch-apply.ps1');
   const planPath = path.join(applyRoot, 'update-plan.json');
   const logPath = path.join(applyRoot, 'apply-update.log');
   const statusPath = path.join(applyRoot, 'apply-status.json');
@@ -725,13 +749,27 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, fil
   writeUpdateApplyScript(scriptPath);
   fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf8');
   fs.writeFileSync(
+    launcherScriptPath,
+    [
+      '$ErrorActionPreference = "Stop"',
+      `$applyScript = ${psSingleQuoted(scriptPath)}`,
+      `$planPath = ${psSingleQuoted(planPath)}`,
+      `$rootDir = ${psSingleQuoted(rootDir)}`,
+      "$command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"' + $applyScript + '\" -PlanPath \"' + $planPath + '\"'",
+      '$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command; CurrentDirectory = $rootDir }',
+      'if ($result.ReturnValue -ne 0) { throw "Win32_Process.Create failed: $($result.ReturnValue)" }',
+      '',
+    ].join('\r\n'),
+    'utf8',
+  );
+  fs.writeFileSync(
     launcherPath,
     [
       '@echo off',
       'setlocal',
       'chcp 65001 >nul',
       `cd /d "${rootDir}"`,
-      `start "" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}" -PlanPath "${planPath}"`,
+      `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${launcherScriptPath}"`,
       'endlocal',
       '',
     ].join('\r\n'),
@@ -759,8 +797,9 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, fil
       else reject(new Error(`Update launcher exited with code ${code}`));
     });
   });
+  await waitForApplyStatus(statusPath, 'running', 12000);
 
-  return { applyRoot, scriptPath, launcherPath, planPath, logPath, statusPath };
+  return { applyRoot, scriptPath, launcherPath, launcherScriptPath, planPath, logPath, statusPath };
 }
 
 async function probeNet(name, net, url, required = true) {
@@ -977,7 +1016,7 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
 
       setTimeout(() => {
         app.quit();
-      }, 500);
+      }, 1200);
 
       return {
         ok: true,

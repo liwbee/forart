@@ -1,9 +1,9 @@
 {
-  "version": "0.1.5",
-  "updatedAt": "2026-07-02T15:55:00+08:00",
+  "version": "0.1.6",
+  "updatedAt": "2026-07-02T16:20:00+08:00",
   "items": [
-    "更新应用脚本改为通过独立 cmd launcher 启动，避免 Electron 退出时被父进程连带关闭。",
-    "更新流程新增下载进度、当前文件、下载速度和已下载大小显示。",
-    "如果 Vite dev server 仍在运行，更新完成后只重启 Electron 窗口；如果 Vite 已停止，则走完整启动器重启。"
+    "更新器现在会等待 apply 脚本写入 running 状态后再关闭 Forart，避免下载完成后脚本还没接管就退出。",
+    "apply 启动器改为通过 Windows Win32_Process.Create 创建独立 PowerShell 进程，降低被父进程树清理连带关闭的风险。",
+    "如果 apply 脚本未能接管，更新会返回失败并保留当前窗口，方便查看错误。"
   ]
 }
