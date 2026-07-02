@@ -95,43 +95,6 @@ async function fetchBytesWithProgress(net, url, onProgress) {
   return Buffer.concat(chunks);
 }
 
-function resolveCommand(command) {
-  if (process.platform === 'win32' && command === 'npm') return 'npm.cmd';
-  return command;
-}
-
-function runCommand(command, args, cwd) {
-  return new Promise((resolve) => {
-    const child = spawn(resolveCommand(command), args.map(String), {
-      cwd,
-      windowsHide: true,
-    });
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout?.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr?.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on('error', (error) => {
-      resolve({ ok: false, stdout, stderr, error: error.message });
-    });
-
-    child.on('close', (code) => {
-      resolve({
-        ok: code === 0,
-        stdout,
-        stderr,
-        error: code === 0 ? undefined : `${command} exited with code ${code}`,
-      });
-    });
-  });
-}
-
 function stripUtf8Bom(text) {
   return String(text || '').replace(/^\uFEFF/, '');
 }
@@ -225,12 +188,6 @@ function portableDataRoot(rootDir) {
   return directory;
 }
 
-function updateBackupRoot(rootDir) {
-  const directory = path.join(portableDataRoot(rootDir), 'update_backups');
-  fs.mkdirSync(directory, { recursive: true });
-  return directory;
-}
-
 function updateStagingRoot(rootDir) {
   const directory = path.join(portableDataRoot(rootDir), 'update_staging');
   fs.mkdirSync(directory, { recursive: true });
@@ -260,7 +217,6 @@ function hasSafeParts(rel) {
 function updateAllowedFile(input) {
   const rel = normalizeUpdatePath(input);
   if (!hasSafeParts(rel)) return false;
-  if (rel === 'Forart.exe') return false;
   if (rel === 'forart-config.json') return false;
   if (rel.startsWith('.git/') || rel.startsWith('.forart-data/') || rel.startsWith('CanvasAssests/')) return false;
   if (rel.startsWith('node_modules/') || rel.startsWith('dist/') || rel.startsWith('data/')) return false;
@@ -286,21 +242,12 @@ function updateAllowedFile(input) {
     rel.startsWith('electron/')
     || rel.startsWith('renderer/')
     || rel.startsWith('server/')
-    || rel.startsWith('scripts/launcher/')
   );
 }
 
 function isInsideOrSame(parent, target) {
   const relative = path.relative(path.resolve(parent), path.resolve(target));
   return relative === '' || (Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative));
-}
-
-function safeUpdateTarget(rootDir, rel) {
-  const normalized = normalizeUpdatePath(rel);
-  if (!updateAllowedFile(normalized)) throw new Error(`Update file is not allowed: ${normalized}`);
-  const target = path.resolve(rootDir, ...normalized.split('/'));
-  if (!isInsideOrSame(rootDir, target)) throw new Error(`Unsafe update path: ${normalized}`);
-  return target;
 }
 
 function safeStagingTarget(stagingRoot, rel) {
@@ -385,33 +332,6 @@ async function downloadGithubUpdateFiles(net, files, stagingRoot, onProgress) {
   }
 }
 
-function backupFile(rootDir, backupRoot, rel) {
-  const target = safeUpdateTarget(rootDir, rel);
-  if (!fs.existsSync(target)) return false;
-  const backupPath = path.resolve(backupRoot, ...normalizeUpdatePath(rel).split('/'));
-  if (!isInsideOrSame(backupRoot, backupPath)) throw new Error(`Unsafe backup path: ${rel}`);
-  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
-  fs.copyFileSync(target, backupPath);
-  return true;
-}
-
-function restoreFiles(rootDir, backupRoot, applied) {
-  for (const item of [...applied].reverse()) {
-    const target = safeUpdateTarget(rootDir, item.rel);
-    const backupPath = path.resolve(backupRoot, ...normalizeUpdatePath(item.rel).split('/'));
-    try {
-      if (item.hadOriginal && fs.existsSync(backupPath)) {
-        fs.mkdirSync(path.dirname(target), { recursive: true });
-        fs.copyFileSync(backupPath, target);
-      } else if (!item.hadOriginal && fs.existsSync(target)) {
-        fs.unlinkSync(target);
-      }
-    } catch {
-      // Keep restoring the rest. The original update error is more useful to the caller.
-    }
-  }
-}
-
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -430,26 +350,6 @@ async function removeDirectoryBestEffort(directory) {
       await wait(150 * (attempt + 1));
     }
   }
-}
-
-function applyStagedFiles(rootDir, stagingRoot, backupRoot, files) {
-  const applied = [];
-  for (const rel of files) {
-    const source = safeStagingTarget(stagingRoot, rel);
-    const target = safeUpdateTarget(rootDir, rel);
-    const hadOriginal = backupFile(rootDir, backupRoot, rel);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    const tempPath = `${target}.update_tmp`;
-    fs.copyFileSync(source, tempPath);
-    try {
-      fs.renameSync(tempPath, target);
-    } catch {
-      fs.rmSync(target, { force: true });
-      fs.renameSync(tempPath, target);
-    }
-    applied.push({ rel, hadOriginal });
-  }
-  return applied;
 }
 
 function readStagedVersion(stagingRoot) {
@@ -610,23 +510,6 @@ function Invoke-NpmInstall {
   }
 }
 
-function Restore-AppliedFiles {
-  param([array]$Applied)
-  Write-Log "Restoring files from backup."
-  for ($index = $Applied.Count - 1; $index -ge 0; $index -= 1) {
-    $item = $Applied[$index]
-    try {
-      if ($item.HadOriginal -and (Test-Path -LiteralPath $item.BackupPath)) {
-        Copy-FileWithRetry -Source $item.BackupPath -Destination $item.Target
-      } elseif (-not $item.HadOriginal -and (Test-Path -LiteralPath $item.Target)) {
-        Remove-Item -LiteralPath $item.Target -Force
-      }
-    } catch {
-      Write-Log ("Restore failed for {0}: {1}" -f $item.Rel, $_.Exception.Message)
-    }
-  }
-}
-
 function Write-Status {
   param([string]$State, [string]$ErrorMessage = "")
   $payload = [ordered]@{
@@ -652,11 +535,9 @@ function Start-ForartAgain {
 $plan = Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $script:RootDir = [string]$plan.rootDir
 $stagingRoot = [string]$plan.stagingRoot
-$backupRoot = [string]$plan.backupRoot
 $script:LogPath = [string]$plan.logPath
 $script:StatusPath = [string]$plan.statusPath
 $electronPid = [int]$plan.electronPid
-$applied = @()
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Path $script:LogPath -Parent) | Out-Null
 Write-Status -State "running"
@@ -679,30 +560,15 @@ try {
 
   $devServerWasStopped = Wait-ForDevServerToStop -Port 6981
   Start-Sleep -Milliseconds 500
-  New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
 
   foreach ($file in $plan.files) {
     $rel = [string]$file
     $source = Join-UpdatePath -BasePath $stagingRoot -RelativePath $rel
     $target = Join-UpdatePath -BasePath $script:RootDir -RelativePath $rel
-    $backup = Join-UpdatePath -BasePath $backupRoot -RelativePath $rel
     if (-not (Test-Path -LiteralPath $source)) {
       throw "Staged update file is missing: $rel"
     }
 
-    $hadOriginal = Test-Path -LiteralPath $target
-    if ($hadOriginal) {
-      New-Item -ItemType Directory -Force -Path (Split-Path -Path $backup -Parent) | Out-Null
-      Copy-Item -LiteralPath $target -Destination $backup -Force
-    }
-
-    $entry = [pscustomobject]@{
-      Rel = $rel
-      Target = $target
-      BackupPath = $backup
-      HadOriginal = $hadOriginal
-    }
-    $applied += $entry
     Copy-FileWithRetry -Source $source -Destination $target
     Write-Log ("Updated {0}" -f $rel)
   }
@@ -715,13 +581,12 @@ try {
   }
 
   Write-Status -State "success"
-  Remove-TreeBestEffort -Directory $stagingRoot
+  Remove-TreeBestEffort -Directory (Split-Path -Path $stagingRoot -Parent)
   Write-Log "Forart update applied successfully."
   Start-ForartAgain -DevServerWasStopped $devServerWasStopped
 } catch {
   $message = $_.Exception.Message
   Write-Log ("Update failed: {0}" -f $message)
-  Restore-AppliedFiles -Applied $applied
   Write-Status -State "failed" -ErrorMessage $message
 }
 `;
@@ -729,7 +594,7 @@ try {
   fs.writeFileSync(scriptPath, script, 'utf8');
 }
 
-async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, files, needsRootInstall, needsServerInstall }) {
+async function scheduleStagedUpdateApply({ rootDir, stagingRoot, files, needsRootInstall, needsServerInstall }) {
   if (process.platform !== 'win32') {
     throw new Error('Automatic source update is currently supported on Windows only.');
   }
@@ -740,6 +605,7 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, fil
   const launcherPath = path.join(applyRoot, 'launch-apply.cmd');
   const launcherScriptPath = path.join(applyRoot, 'launch-apply.ps1');
   const runnerScriptPath = path.join(applyRoot, 'apply-runner.ps1');
+  const cleanupScriptPath = path.join(applyRoot, 'cleanup-update-dirs.ps1');
   const planPath = path.join(applyRoot, 'update-plan.json');
   const logPath = path.join(applyRoot, 'apply-update.log');
   const statusPath = path.join(applyRoot, 'apply-status.json');
@@ -750,7 +616,6 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, fil
   const plan = {
     rootDir,
     stagingRoot,
-    backupRoot,
     files,
     needsRootInstall,
     needsServerInstall,
@@ -770,20 +635,42 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, fil
       `$planPath = ${psSingleQuoted(planPath)}`,
       `$runnerStatusPath = ${psSingleQuoted(runnerStatusPath)}`,
       `$applyOutputPath = ${psSingleQuoted(applyOutputPath)}`,
+      `$cleanupScript = ${psSingleQuoted(cleanupScriptPath)}`,
       'function Write-RunnerStatus {',
       '  param([string]$State, [string]$ErrorMessage = "")',
       '  $json = [ordered]@{ state = $State; error = $ErrorMessage; updatedAt = (Get-Date).ToString("o") } | ConvertTo-Json -Depth 4',
       '  [System.IO.File]::WriteAllText($runnerStatusPath, $json, (New-Object System.Text.UTF8Encoding($false)))',
       '}',
+      'function Start-Cleanup {',
+      '  try {',
+      '    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $cleanupScript) -WindowStyle Hidden',
+      '  } catch {',
+      '    Add-Content -LiteralPath $applyOutputPath -Value ("CLEANUP START ERROR: {0}" -f $_.Exception.Message) -Encoding UTF8',
+      '  }',
+      '}',
       'Write-RunnerStatus -State "running"',
       'try {',
       '  & $applyScript -PlanPath $planPath *>&1 | Tee-Object -FilePath $applyOutputPath -Append',
       '  Write-RunnerStatus -State "finished"',
+      '  Start-Cleanup',
       '} catch {',
       '  $message = $_.Exception.Message',
       '  Add-Content -LiteralPath $applyOutputPath -Value ("RUNNER ERROR: {0}" -f $message) -Encoding UTF8',
       '  Write-RunnerStatus -State "failed" -ErrorMessage $message',
       '  throw',
+      '}',
+      '',
+    ].join('\r\n'),
+    'utf8',
+  );
+  fs.writeFileSync(
+    cleanupScriptPath,
+    [
+      '$ErrorActionPreference = "SilentlyContinue"',
+      'Start-Sleep -Seconds 1',
+      `$updateApplyRoot = ${psSingleQuoted(updateApplyRoot(rootDir))}`,
+      'if ($updateApplyRoot -and (Test-Path -LiteralPath $updateApplyRoot)) {',
+      '  Remove-Item -LiteralPath $updateApplyRoot -Recurse -Force',
       '}',
       '',
     ].join('\r\n'),
@@ -859,7 +746,7 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, backupRoot, fil
     { name: 'apply-log', path: logPath },
   ]);
 
-  return { applyRoot, scriptPath, launcherPath, launcherScriptPath, runnerScriptPath, planPath, logPath, statusPath, runnerStatusPath, launcherStatusPath, applyOutputPath };
+  return { applyRoot, scriptPath, launcherPath, launcherScriptPath, runnerScriptPath, cleanupScriptPath, planPath, logPath, statusPath, runnerStatusPath, launcherStatusPath, applyOutputPath };
 }
 
 async function probeNet(name, net, url, required = true) {
@@ -885,18 +772,6 @@ async function probeNet(name, net, url, required = true) {
       required,
     };
   }
-}
-
-async function probeCommand(name, command, args, rootDir) {
-  const startedAt = Date.now();
-  const result = await runCommand(command, args, rootDir);
-  return {
-    name,
-    ok: result.ok,
-    elapsedMs: Date.now() - startedAt,
-    detail: result.ok ? (result.stdout || result.stderr || '').trim().split(/\r?\n/)[0] || 'OK' : result.error || result.stderr || 'Failed',
-    required: true,
-  };
 }
 
 async function probeWritable(rootDir) {
@@ -931,13 +806,12 @@ async function appInfoPayload(rootDir) {
     name: packageInfo.name,
     repoUrl: REPO_URL,
     updateUrl: REMOTE_VERSION_URL,
-    canGitUpdate: true,
     currentRevision: version,
     currentUpdatedAt: localNotes.updatedAt || version,
   };
 }
 
-function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, rootDir, net, shell }) {
+function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, rootDir, net }) {
   let activeAppConfig = null;
 
   ipcMain.handle('config:load', async () => {
@@ -1016,7 +890,6 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
         currentUpdatedAt: info.currentUpdatedAt,
         latestUpdatedAt: remoteNotes.updatedAt || latestVersion,
         updateAvailable,
-        canGitUpdate: true,
         repoUrl: REPO_URL,
         updateNotes: remoteNotes.items.length ? { ...remoteNotes, source: 'update-notes.json' } : remoteNotes,
       };
@@ -1028,7 +901,6 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
         currentUpdatedAt: info.currentUpdatedAt,
         latestUpdatedAt: '',
         updateAvailable: false,
-        canGitUpdate: true,
         repoUrl: REPO_URL,
         error: error instanceof Error ? error.message : String(error),
       };
@@ -1037,7 +909,6 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
 
   ipcMain.handle('app:run-update', async (event) => {
     const stagingRoot = path.join(updateStagingRoot(rootDir), `${timestampName()}-${process.pid}`);
-    const backupRoot = path.join(updateBackupRoot(rootDir), timestampName());
     const sendProgress = (payload) => {
       event.sender.send('app:update-progress', {
         phase: payload.phase || 'downloading',
@@ -1054,7 +925,6 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
     try {
       await removeDirectoryBestEffort(stagingRoot);
       fs.mkdirSync(stagingRoot, { recursive: true });
-      fs.mkdirSync(backupRoot, { recursive: true });
 
       sendProgress({ phase: 'listing', percent: 0 });
       const files = await githubUpdateFileList(net);
@@ -1066,7 +936,6 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
       const applyInfo = await scheduleStagedUpdateApply({
         rootDir,
         stagingRoot,
-        backupRoot,
         files,
         needsRootInstall,
         needsServerInstall,
@@ -1086,7 +955,6 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
         applyScheduled: true,
         applyDir: applyInfo.applyRoot,
         applyLog: applyInfo.logPath,
-        backupDir: backupRoot,
         updated: files,
         count: files.length,
         version,
@@ -1098,7 +966,6 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
         stdout: '',
         stderr: '',
         restartRequired: false,
-        backupDir: fs.existsSync(backupRoot) ? backupRoot : '',
         updated: [],
         count: 0,
         error: error instanceof Error ? error.message : String(error),
@@ -1110,20 +977,13 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
     const results = await Promise.all([
       probeNet('GitHub VERSION', net, REMOTE_VERSION_URL),
       probeNet('GitHub update tree', net, REMOTE_TREE_URL),
-      probeNet('GitHub update notes', net, REMOTE_UPDATE_NOTES_URL, false),
       probeWritable(rootDir),
-      probeCommand('npm command', 'npm', ['--version'], rootDir),
     ]);
     const required = results.filter((item) => item.required);
     return {
       ok: required.every((item) => item.ok),
       results,
     };
-  });
-
-  ipcMain.handle('app:open-update-page', async () => {
-    await shell.openExternal(REPO_URL);
-    return { ok: true };
   });
 
   return { getActiveConfig: () => activeAppConfig };

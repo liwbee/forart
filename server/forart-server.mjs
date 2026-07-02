@@ -225,6 +225,8 @@ function imageDimensions() {
 function initDatabase() {
   db = new DatabaseSync(DATABASE_PATH);
   db.exec(`
+  PRAGMA journal_mode = WAL;
+  PRAGMA busy_timeout = 5000;
   PRAGMA foreign_keys = ON;
   CREATE TABLE IF NOT EXISTS model_projects (
     id TEXT PRIMARY KEY,
@@ -329,10 +331,31 @@ function initDatabase() {
   CREATE UNIQUE INDEX IF NOT EXISTS idx_outfit_entries_project_name_unique ON outfit_entries(project_id, name);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_action_projects_name_unique ON action_projects(name);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_action_entries_project_name_unique ON action_entries(project_id, name);
+  CREATE INDEX IF NOT EXISTS idx_model_entries_project_updated ON model_entries(project_id, updated_at DESC, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_model_images_model_sort ON model_images(model_id, sort_order ASC, created_at ASC);
+  CREATE INDEX IF NOT EXISTS idx_outfit_entries_project_updated ON outfit_entries(project_id, updated_at DESC, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_action_entries_project_updated ON action_entries(project_id, updated_at DESC, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_library_tags_kind_project_sort ON library_tags(kind, project_id, sort_order ASC, name ASC);
+  CREATE INDEX IF NOT EXISTS idx_library_entry_tags_kind_entry ON library_entry_tags(kind, entry_id);
+  CREATE INDEX IF NOT EXISTS idx_library_entry_tags_tag ON library_entry_tags(tag_id);
 `);
   ensureDefaultProject();
   ensureDefaultOutfitProject();
   ensureDefaultActionProject();
+}
+
+function runDbTransaction(work) {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = work();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {}
+    throw error;
+  }
 }
 
 function switchDataDir(nextDataDir) {
@@ -823,7 +846,8 @@ function handleProjectTagApi(req, res, { kind, projectId, tagId }) {
       .then((payload) => {
         const name = String(payload?.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
         if (!name) return sendJson(res, 400, { detail: "Tag name is required" });
-        sendJson(res, 200, createProjectTag(kind, projectId, name));
+        const tag = runDbTransaction(() => createProjectTag(kind, projectId, name));
+        sendJson(res, 200, tag);
       })
       .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
     return true;
@@ -831,19 +855,22 @@ function handleProjectTagApi(req, res, { kind, projectId, tagId }) {
   if (method === "PATCH" && tagId) {
     parseJsonBody(req)
       .then((payload) => {
-        const tag = db.prepare("SELECT * FROM library_tags WHERE id = ? AND kind = ? AND project_id = ?").get(tagId, kind, projectId);
-        if (!tag) return sendJson(res, 404, { detail: "Tag not found" });
-        if (payload.name !== undefined) {
-          const nextName = String(payload.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
-          if (!nextName) return sendJson(res, 400, { detail: "Tag name is required" });
-          const exists = db.prepare("SELECT id FROM library_tags WHERE kind = ? AND project_id = ? AND name = ? AND id <> ?").get(kind, projectId, nextName, tagId);
-          if (exists) return sendJson(res, 400, { detail: "Tag already exists" });
-          db.prepare("UPDATE library_tags SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), tagId);
-        }
-        if (payload.sort_order !== undefined) {
-          db.prepare("UPDATE library_tags SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(payload.sort_order || 0), nowIso(), tagId);
-        }
-        const next = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
+        const next = runDbTransaction(() => {
+          const tag = db.prepare("SELECT * FROM library_tags WHERE id = ? AND kind = ? AND project_id = ?").get(tagId, kind, projectId);
+          if (!tag) return null;
+          if (payload.name !== undefined) {
+            const nextName = String(payload.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
+            if (!nextName) throw new Error("Tag name is required");
+            const exists = db.prepare("SELECT id FROM library_tags WHERE kind = ? AND project_id = ? AND name = ? AND id <> ?").get(kind, projectId, nextName, tagId);
+            if (exists) throw new Error("Tag already exists");
+            db.prepare("UPDATE library_tags SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), tagId);
+          }
+          if (payload.sort_order !== undefined) {
+            db.prepare("UPDATE library_tags SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(payload.sort_order || 0), nowIso(), tagId);
+          }
+          return db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
+        });
+        if (!next) return sendJson(res, 404, { detail: "Tag not found" });
         sendJson(res, 200, { ...next, usage_count: tagUsage(tagId) });
       })
       .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
@@ -855,8 +882,10 @@ function handleProjectTagApi(req, res, { kind, projectId, tagId }) {
       sendJson(res, 200, { ok: true });
       return true;
     }
-    db.prepare("DELETE FROM library_entry_tags WHERE tag_id = ?").run(tagId);
-    db.prepare("DELETE FROM library_tags WHERE id = ?").run(tagId);
+    runDbTransaction(() => {
+      db.prepare("DELETE FROM library_entry_tags WHERE tag_id = ?").run(tagId);
+      db.prepare("DELETE FROM library_tags WHERE id = ?").run(tagId);
+    });
     sendJson(res, 200, { ok: true });
     return true;
   }
@@ -924,13 +953,37 @@ function writeAsset(content, mimeType, originalFilename, { source, subdir, filen
   writeFileSync(targetPath, content);
   const dims = imageDimensions(content, mimeType);
   const timestamp = nowIso();
-  db.prepare(
-    `
-    INSERT INTO assets (id, filename, path, mime_type, width, height, source, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `
-  ).run(assetId, path.basename(targetPath), assetRelativePath(targetPath), mimeType, dims.width, dims.height, source, timestamp);
-  return db.prepare("SELECT * FROM assets WHERE id = ?").get(assetId);
+  try {
+    db.prepare(
+      `
+      INSERT INTO assets (id, filename, path, mime_type, width, height, source, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    ).run(assetId, path.basename(targetPath), assetRelativePath(targetPath), mimeType, dims.width, dims.height, source, timestamp);
+    return db.prepare("SELECT * FROM assets WHERE id = ?").get(assetId);
+  } catch (error) {
+    try {
+      unlinkSync(targetPath);
+    } catch {}
+    throw error;
+  }
+}
+
+function writeAssetInTransaction(content, mimeType, originalFilename, options, work) {
+  let asset = null;
+  try {
+    return runDbTransaction(() => {
+      asset = writeAsset(content, mimeType, originalFilename, options);
+      return work(asset);
+    });
+  } catch (error) {
+    if (asset?.path) {
+      try {
+        unlinkSync(assetAbsolutePath(asset.path));
+      } catch {}
+    }
+    throw error;
+  }
 }
 
 function removeAssetIfUnused(assetId) {
@@ -1022,20 +1075,23 @@ function handleModelLibraryApi(req, res, url) {
           const data = payload || {};
           const project = loadOutfitProject(projectId);
           if (!project) return sendJson(res, 404, { detail: "Outfit project not found" });
-          if (data.name !== undefined) {
-            const nextName = validateFileNamePart(data.name || DEFAULT_OUTFIT_PROJECT_NAME, "project name");
-            if (outfitProjectNameExists(nextName, projectId)) return sendJson(res, 400, { detail: "Project name must be unique" });
-            if (nextName !== project.name) {
-              renameOutfitProjectFolder(project, nextName);
-              db.prepare("UPDATE outfit_projects SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), projectId);
+          const nextProject = runDbTransaction(() => {
+            if (data.name !== undefined) {
+              const nextName = validateFileNamePart(data.name || DEFAULT_OUTFIT_PROJECT_NAME, "project name");
+              if (outfitProjectNameExists(nextName, projectId)) throw new Error("Project name must be unique");
+              if (nextName !== project.name) {
+                renameOutfitProjectFolder(project, nextName);
+                db.prepare("UPDATE outfit_projects SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), projectId);
+              }
             }
-          }
-          if (data.cover_asset_id !== undefined) {
-            const coverAssetId = data.cover_asset_id ? String(data.cover_asset_id) : null;
-            if (coverAssetId && !loadAsset(coverAssetId)) return sendJson(res, 404, { detail: "Asset not found" });
-            db.prepare("UPDATE outfit_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(coverAssetId, nowIso(), projectId);
-          }
-          sendJson(res, 200, projectWithCover(loadOutfitProject(projectId)));
+            if (data.cover_asset_id !== undefined) {
+              const coverAssetId = data.cover_asset_id ? String(data.cover_asset_id) : null;
+              if (coverAssetId && !loadAsset(coverAssetId)) throw new Error("Asset not found");
+              db.prepare("UPDATE outfit_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(coverAssetId, nowIso(), projectId);
+            }
+            return projectWithCover(loadOutfitProject(projectId));
+          });
+          sendJson(res, 200, nextProject);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1048,11 +1104,13 @@ function handleModelLibraryApi(req, res, url) {
       }
       const assetRows = db.prepare("SELECT asset_id FROM outfit_entries WHERE project_id = ?").all(projectId);
       const coverAssetRows = db.prepare("SELECT cover_asset_id AS asset_id FROM outfit_projects WHERE id = ?").all(projectId);
-      deleteProjectTags("outfit", projectId);
-      db.prepare("DELETE FROM outfit_projects WHERE id = ?").run(projectId);
-      for (const row of assetRows) removeAssetIfUnused(row.asset_id);
-      for (const row of coverAssetRows) removeAssetIfUnused(row.asset_id);
-      ensureDefaultOutfitProject();
+      runDbTransaction(() => {
+        deleteProjectTags("outfit", projectId);
+        db.prepare("DELETE FROM outfit_projects WHERE id = ?").run(projectId);
+        for (const row of assetRows) removeAssetIfUnused(row.asset_id);
+        for (const row of coverAssetRows) removeAssetIfUnused(row.asset_id);
+        ensureDefaultOutfitProject();
+      });
       sendJson(res, 200, { ok: true });
       return true;
     }
@@ -1064,13 +1122,21 @@ function handleModelLibraryApi(req, res, url) {
           const decoded = parseDataUrl(payload?.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
           if (!decoded) return sendJson(res, 400, { detail: "Invalid upload data" });
           const relDir = path.relative(STORAGE_ROOT, path.join(outfitProjectDirForName(project.name), "__project_cover__"));
-          const asset = writeAsset(decoded.buffer, decoded.mimeType, payload?.filename || "image", {
-            source: "outfit-project-cover",
-            subdir: relDir,
-            filenameStem: "cover",
-          });
-          db.prepare("UPDATE outfit_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
-          sendJson(res, 200, projectWithCover(loadOutfitProject(projectId)));
+          const nextProject = writeAssetInTransaction(
+            decoded.buffer,
+            decoded.mimeType,
+            payload?.filename || "image",
+            {
+              source: "outfit-project-cover",
+              subdir: relDir,
+              filenameStem: "cover",
+            },
+            (asset) => {
+              db.prepare("UPDATE outfit_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
+              return projectWithCover(loadOutfitProject(projectId));
+            }
+          );
+          sendJson(res, 200, nextProject);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1100,16 +1166,24 @@ function handleModelLibraryApi(req, res, url) {
           const name = nextOutfitName(projectId, project.name);
           if (outfitNameExists(projectId, name)) return sendJson(res, 400, { detail: "Outfit name must be unique" });
           const relDir = path.relative(STORAGE_ROOT, outfitProjectDirForName(project.name));
-          const asset = writeAsset(decoded.buffer, decoded.mimeType, payload?.filename || "image", {
-            source: "outfit-library",
-            subdir: relDir,
-            filenameStem: name,
-          });
-          db.prepare(
-            "INSERT INTO outfit_entries (id, project_id, name, asset_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-          ).run(id, projectId, name, asset.id, timestamp, timestamp);
-          db.prepare("UPDATE outfit_projects SET cover_asset_id = COALESCE(cover_asset_id, ?), updated_at = ? WHERE id = ?").run(asset.id, timestamp, projectId);
-          sendJson(res, 200, outfitWithAssetAndTags(loadOutfit(id)));
+          const outfit = writeAssetInTransaction(
+            decoded.buffer,
+            decoded.mimeType,
+            payload?.filename || "image",
+            {
+              source: "outfit-library",
+              subdir: relDir,
+              filenameStem: name,
+            },
+            (asset) => {
+              db.prepare(
+                "INSERT INTO outfit_entries (id, project_id, name, asset_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+              ).run(id, projectId, name, asset.id, timestamp, timestamp);
+              db.prepare("UPDATE outfit_projects SET cover_asset_id = COALESCE(cover_asset_id, ?), updated_at = ? WHERE id = ?").run(asset.id, timestamp, projectId);
+              return outfitWithAssetAndTags(loadOutfit(id));
+            }
+          );
+          sendJson(res, 200, outfit);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1125,11 +1199,14 @@ function handleModelLibraryApi(req, res, url) {
         .then((payload) => {
           const outfit = loadOutfit(outfitId);
           if (!outfit) return sendJson(res, 404, { detail: "Outfit not found" });
-          if (payload.tags !== undefined) {
-            updateEntryTags("outfit", outfitId, outfit.project_id, payload.tags);
-            db.prepare("UPDATE outfit_entries SET updated_at = ? WHERE id = ?").run(nowIso(), outfitId);
-          }
-          sendJson(res, 200, outfitWithAssetAndTags(loadOutfit(outfitId)));
+          const nextOutfit = runDbTransaction(() => {
+            if (payload.tags !== undefined) {
+              updateEntryTags("outfit", outfitId, outfit.project_id, payload.tags);
+              db.prepare("UPDATE outfit_entries SET updated_at = ? WHERE id = ?").run(nowIso(), outfitId);
+            }
+            return outfitWithAssetAndTags(loadOutfit(outfitId));
+          });
+          sendJson(res, 200, nextOutfit);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1140,10 +1217,12 @@ function handleModelLibraryApi(req, res, url) {
         sendJson(res, 404, { detail: "Outfit not found" });
         return true;
       }
-      db.prepare("DELETE FROM library_entry_tags WHERE kind = 'outfit' AND entry_id = ?").run(outfitId);
-      db.prepare("UPDATE outfit_projects SET cover_asset_id = NULL WHERE cover_asset_id = ?").run(outfit.asset_id);
-      db.prepare("DELETE FROM outfit_entries WHERE id = ?").run(outfitId);
-      removeAssetIfUnused(outfit.asset_id);
+      runDbTransaction(() => {
+        db.prepare("DELETE FROM library_entry_tags WHERE kind = 'outfit' AND entry_id = ?").run(outfitId);
+        db.prepare("UPDATE outfit_projects SET cover_asset_id = NULL WHERE cover_asset_id = ?").run(outfit.asset_id);
+        db.prepare("DELETE FROM outfit_entries WHERE id = ?").run(outfitId);
+        removeAssetIfUnused(outfit.asset_id);
+      });
       sendJson(res, 200, { ok: true });
       return true;
     }
@@ -1158,17 +1237,25 @@ function handleModelLibraryApi(req, res, url) {
           if (!decoded) return sendJson(res, 400, { detail: "Invalid upload data" });
           const previousAssetId = outfit.asset_id;
           const relDir = path.relative(STORAGE_ROOT, outfitProjectDirForName(project.name));
-          const asset = writeAsset(decoded.buffer, decoded.mimeType, payload?.filename || "image", {
-            source: "outfit-library",
-            subdir: relDir,
-            filenameStem: outfit.name || DEFAULT_OUTFIT_NAME,
-          });
           const timestamp = nowIso();
-          db.prepare("UPDATE outfit_entries SET asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, timestamp, outfitId);
-          db.prepare("UPDATE outfit_projects SET cover_asset_id = CASE WHEN cover_asset_id = ? THEN ? ELSE cover_asset_id END, updated_at = ? WHERE id = ?")
-            .run(previousAssetId, asset.id, timestamp, project.id);
-          removeAssetIfUnused(previousAssetId);
-          sendJson(res, 200, outfitWithAssetAndTags(loadOutfit(outfitId)));
+          const nextOutfit = writeAssetInTransaction(
+            decoded.buffer,
+            decoded.mimeType,
+            payload?.filename || "image",
+            {
+              source: "outfit-library",
+              subdir: relDir,
+              filenameStem: outfit.name || DEFAULT_OUTFIT_NAME,
+            },
+            (asset) => {
+              db.prepare("UPDATE outfit_entries SET asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, timestamp, outfitId);
+              db.prepare("UPDATE outfit_projects SET cover_asset_id = CASE WHEN cover_asset_id = ? THEN ? ELSE cover_asset_id END, updated_at = ? WHERE id = ?")
+                .run(previousAssetId, asset.id, timestamp, project.id);
+              removeAssetIfUnused(previousAssetId);
+              return outfitWithAssetAndTags(loadOutfit(outfitId));
+            }
+          );
+          sendJson(res, 200, nextOutfit);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1214,20 +1301,23 @@ function handleModelLibraryApi(req, res, url) {
           const data = payload || {};
           const project = loadActionProject(projectId);
           if (!project) return sendJson(res, 404, { detail: "Action project not found" });
-          if (data.name !== undefined) {
-            const nextName = validateFileNamePart(data.name || DEFAULT_ACTION_PROJECT_NAME, "project name");
-            if (actionProjectNameExists(nextName, projectId)) return sendJson(res, 400, { detail: "Project name must be unique" });
-            if (nextName !== project.name) {
-              renameActionProjectFolder(project, nextName);
-              db.prepare("UPDATE action_projects SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), projectId);
+          const nextProject = runDbTransaction(() => {
+            if (data.name !== undefined) {
+              const nextName = validateFileNamePart(data.name || DEFAULT_ACTION_PROJECT_NAME, "project name");
+              if (actionProjectNameExists(nextName, projectId)) throw new Error("Project name must be unique");
+              if (nextName !== project.name) {
+                renameActionProjectFolder(project, nextName);
+                db.prepare("UPDATE action_projects SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), projectId);
+              }
             }
-          }
-          if (data.cover_asset_id !== undefined) {
-            const coverAssetId = data.cover_asset_id ? String(data.cover_asset_id) : null;
-            if (coverAssetId && !loadAsset(coverAssetId)) return sendJson(res, 404, { detail: "Asset not found" });
-            db.prepare("UPDATE action_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(coverAssetId, nowIso(), projectId);
-          }
-          sendJson(res, 200, projectWithCover(loadActionProject(projectId)));
+            if (data.cover_asset_id !== undefined) {
+              const coverAssetId = data.cover_asset_id ? String(data.cover_asset_id) : null;
+              if (coverAssetId && !loadAsset(coverAssetId)) throw new Error("Asset not found");
+              db.prepare("UPDATE action_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(coverAssetId, nowIso(), projectId);
+            }
+            return projectWithCover(loadActionProject(projectId));
+          });
+          sendJson(res, 200, nextProject);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1240,11 +1330,13 @@ function handleModelLibraryApi(req, res, url) {
       }
       const assetRows = db.prepare("SELECT asset_id FROM action_entries WHERE project_id = ?").all(projectId);
       const coverAssetRows = db.prepare("SELECT cover_asset_id AS asset_id FROM action_projects WHERE id = ?").all(projectId);
-      deleteProjectTags("action", projectId);
-      db.prepare("DELETE FROM action_projects WHERE id = ?").run(projectId);
-      for (const row of assetRows) removeAssetIfUnused(row.asset_id);
-      for (const row of coverAssetRows) removeAssetIfUnused(row.asset_id);
-      ensureDefaultActionProject();
+      runDbTransaction(() => {
+        deleteProjectTags("action", projectId);
+        db.prepare("DELETE FROM action_projects WHERE id = ?").run(projectId);
+        for (const row of assetRows) removeAssetIfUnused(row.asset_id);
+        for (const row of coverAssetRows) removeAssetIfUnused(row.asset_id);
+        ensureDefaultActionProject();
+      });
       sendJson(res, 200, { ok: true });
       return true;
     }
@@ -1256,13 +1348,21 @@ function handleModelLibraryApi(req, res, url) {
           const decoded = parseDataUrl(payload?.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
           if (!decoded) return sendJson(res, 400, { detail: "Invalid upload data" });
           const relDir = path.relative(STORAGE_ROOT, path.join(actionProjectDirForName(project.name), "__project_cover__"));
-          const asset = writeAsset(decoded.buffer, decoded.mimeType, payload?.filename || "image", {
-            source: "action-project-cover",
-            subdir: relDir,
-            filenameStem: "cover",
-          });
-          db.prepare("UPDATE action_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
-          sendJson(res, 200, projectWithCover(loadActionProject(projectId)));
+          const nextProject = writeAssetInTransaction(
+            decoded.buffer,
+            decoded.mimeType,
+            payload?.filename || "image",
+            {
+              source: "action-project-cover",
+              subdir: relDir,
+              filenameStem: "cover",
+            },
+            (asset) => {
+              db.prepare("UPDATE action_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
+              return projectWithCover(loadActionProject(projectId));
+            }
+          );
+          sendJson(res, 200, nextProject);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1292,16 +1392,24 @@ function handleModelLibraryApi(req, res, url) {
           const name = nextActionName(projectId, project.name);
           if (actionNameExists(projectId, name)) return sendJson(res, 400, { detail: "Action name must be unique" });
           const relDir = path.relative(STORAGE_ROOT, actionProjectDirForName(project.name));
-          const asset = writeAsset(decoded.buffer, decoded.mimeType, payload?.filename || "image", {
-            source: "action-library",
-            subdir: relDir,
-            filenameStem: name,
-          });
-          db.prepare(
-            "INSERT INTO action_entries (id, project_id, name, asset_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-          ).run(id, projectId, name, asset.id, timestamp, timestamp);
-          db.prepare("UPDATE action_projects SET cover_asset_id = COALESCE(cover_asset_id, ?), updated_at = ? WHERE id = ?").run(asset.id, timestamp, projectId);
-          sendJson(res, 200, actionWithAssetAndTags(loadAction(id)));
+          const action = writeAssetInTransaction(
+            decoded.buffer,
+            decoded.mimeType,
+            payload?.filename || "image",
+            {
+              source: "action-library",
+              subdir: relDir,
+              filenameStem: name,
+            },
+            (asset) => {
+              db.prepare(
+                "INSERT INTO action_entries (id, project_id, name, asset_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+              ).run(id, projectId, name, asset.id, timestamp, timestamp);
+              db.prepare("UPDATE action_projects SET cover_asset_id = COALESCE(cover_asset_id, ?), updated_at = ? WHERE id = ?").run(asset.id, timestamp, projectId);
+              return actionWithAssetAndTags(loadAction(id));
+            }
+          );
+          sendJson(res, 200, action);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1317,14 +1425,17 @@ function handleModelLibraryApi(req, res, url) {
         .then((payload) => {
           const action = loadAction(actionId);
           if (!action) return sendJson(res, 404, { detail: "Action not found" });
-          if (payload.tags !== undefined) {
-            updateEntryTags("action", actionId, action.project_id, payload.tags);
-            db.prepare("UPDATE action_entries SET updated_at = ? WHERE id = ?").run(nowIso(), actionId);
-          }
-          if (payload.prompt !== undefined) {
-            db.prepare("UPDATE action_entries SET prompt = ?, updated_at = ? WHERE id = ?").run(String(payload.prompt || "").slice(0, 4000), nowIso(), actionId);
-          }
-          sendJson(res, 200, actionWithAssetAndTags(loadAction(actionId)));
+          const nextAction = runDbTransaction(() => {
+            if (payload.tags !== undefined) {
+              updateEntryTags("action", actionId, action.project_id, payload.tags);
+              db.prepare("UPDATE action_entries SET updated_at = ? WHERE id = ?").run(nowIso(), actionId);
+            }
+            if (payload.prompt !== undefined) {
+              db.prepare("UPDATE action_entries SET prompt = ?, updated_at = ? WHERE id = ?").run(String(payload.prompt || "").slice(0, 4000), nowIso(), actionId);
+            }
+            return actionWithAssetAndTags(loadAction(actionId));
+          });
+          sendJson(res, 200, nextAction);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1335,10 +1446,12 @@ function handleModelLibraryApi(req, res, url) {
         sendJson(res, 404, { detail: "Action not found" });
         return true;
       }
-      db.prepare("DELETE FROM library_entry_tags WHERE kind = 'action' AND entry_id = ?").run(actionId);
-      db.prepare("UPDATE action_projects SET cover_asset_id = NULL WHERE cover_asset_id = ?").run(action.asset_id);
-      db.prepare("DELETE FROM action_entries WHERE id = ?").run(actionId);
-      removeAssetIfUnused(action.asset_id);
+      runDbTransaction(() => {
+        db.prepare("DELETE FROM library_entry_tags WHERE kind = 'action' AND entry_id = ?").run(actionId);
+        db.prepare("UPDATE action_projects SET cover_asset_id = NULL WHERE cover_asset_id = ?").run(action.asset_id);
+        db.prepare("DELETE FROM action_entries WHERE id = ?").run(actionId);
+        removeAssetIfUnused(action.asset_id);
+      });
       sendJson(res, 200, { ok: true });
       return true;
     }
@@ -1353,17 +1466,25 @@ function handleModelLibraryApi(req, res, url) {
           if (!decoded) return sendJson(res, 400, { detail: "Invalid upload data" });
           const previousAssetId = action.asset_id;
           const relDir = path.relative(STORAGE_ROOT, actionProjectDirForName(project.name));
-          const asset = writeAsset(decoded.buffer, decoded.mimeType, payload?.filename || "image", {
-            source: "action-library",
-            subdir: relDir,
-            filenameStem: action.name || DEFAULT_ACTION_NAME,
-          });
           const timestamp = nowIso();
-          db.prepare("UPDATE action_entries SET asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, timestamp, actionId);
-          db.prepare("UPDATE action_projects SET cover_asset_id = CASE WHEN cover_asset_id = ? THEN ? ELSE cover_asset_id END, updated_at = ? WHERE id = ?")
-            .run(previousAssetId, asset.id, timestamp, project.id);
-          removeAssetIfUnused(previousAssetId);
-          sendJson(res, 200, actionWithAssetAndTags(loadAction(actionId)));
+          const nextAction = writeAssetInTransaction(
+            decoded.buffer,
+            decoded.mimeType,
+            payload?.filename || "image",
+            {
+              source: "action-library",
+              subdir: relDir,
+              filenameStem: action.name || DEFAULT_ACTION_NAME,
+            },
+            (asset) => {
+              db.prepare("UPDATE action_entries SET asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, timestamp, actionId);
+              db.prepare("UPDATE action_projects SET cover_asset_id = CASE WHEN cover_asset_id = ? THEN ? ELSE cover_asset_id END, updated_at = ? WHERE id = ?")
+                .run(previousAssetId, asset.id, timestamp, project.id);
+              removeAssetIfUnused(previousAssetId);
+              return actionWithAssetAndTags(loadAction(actionId));
+            }
+          );
+          sendJson(res, 200, nextAction);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1410,20 +1531,23 @@ function handleModelLibraryApi(req, res, url) {
           const data = payload || {};
           const project = loadProject(projectId);
           if (!project) return sendJson(res, 404, { detail: "Model project not found" });
-          if (data.name !== undefined) {
-            const nextName = validateFileNamePart(data.name || DEFAULT_PROJECT_NAME, "project name");
-            if (projectNameExists(nextName, projectId)) return sendJson(res, 400, { detail: "Project name must be unique" });
-            if (nextName !== project.name) {
-              renameProjectFolder(project, nextName);
-              db.prepare("UPDATE model_projects SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), projectId);
+          const nextProject = runDbTransaction(() => {
+            if (data.name !== undefined) {
+              const nextName = validateFileNamePart(data.name || DEFAULT_PROJECT_NAME, "project name");
+              if (projectNameExists(nextName, projectId)) throw new Error("Project name must be unique");
+              if (nextName !== project.name) {
+                renameProjectFolder(project, nextName);
+                db.prepare("UPDATE model_projects SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), projectId);
+              }
             }
-          }
-          if (data.cover_asset_id !== undefined) {
-            const coverAssetId = data.cover_asset_id ? String(data.cover_asset_id) : null;
-            if (coverAssetId && !loadAsset(coverAssetId)) return sendJson(res, 404, { detail: "Asset not found" });
-            db.prepare("UPDATE model_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(coverAssetId, nowIso(), projectId);
-          }
-          sendJson(res, 200, projectWithCover(loadProject(projectId)));
+            if (data.cover_asset_id !== undefined) {
+              const coverAssetId = data.cover_asset_id ? String(data.cover_asset_id) : null;
+              if (coverAssetId && !loadAsset(coverAssetId)) throw new Error("Asset not found");
+              db.prepare("UPDATE model_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(coverAssetId, nowIso(), projectId);
+            }
+            return projectWithCover(loadProject(projectId));
+          });
+          sendJson(res, 200, nextProject);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1439,16 +1563,18 @@ function handleModelLibraryApi(req, res, url) {
         "SELECT mi.asset_id FROM model_images mi JOIN model_entries me ON me.id = mi.model_id WHERE me.project_id = ?"
       ).all(projectId);
       const coverAssetRows = db.prepare("SELECT cover_asset_id AS asset_id FROM model_projects WHERE id = ?").all(projectId);
-      deleteProjectTags("model", projectId);
-      db.prepare("DELETE FROM model_projects WHERE id = ?").run(projectId);
-      for (const row of modelRows) {
-        const imageAssets = db.prepare("SELECT asset_id FROM model_images WHERE model_id = ?").all(row.id);
-        db.prepare("DELETE FROM model_images WHERE model_id = ?").run(row.id);
-        for (const asset of imageAssets) removeAssetIfUnused(asset.asset_id);
-      }
-      for (const asset of imageRows) removeAssetIfUnused(asset.asset_id);
-      for (const asset of coverAssetRows) removeAssetIfUnused(asset.asset_id);
-      ensureDefaultProject();
+      runDbTransaction(() => {
+        deleteProjectTags("model", projectId);
+        db.prepare("DELETE FROM model_projects WHERE id = ?").run(projectId);
+        for (const row of modelRows) {
+          const imageAssets = db.prepare("SELECT asset_id FROM model_images WHERE model_id = ?").all(row.id);
+          db.prepare("DELETE FROM model_images WHERE model_id = ?").run(row.id);
+          for (const asset of imageAssets) removeAssetIfUnused(asset.asset_id);
+        }
+        for (const asset of imageRows) removeAssetIfUnused(asset.asset_id);
+        for (const asset of coverAssetRows) removeAssetIfUnused(asset.asset_id);
+        ensureDefaultProject();
+      });
       sendJson(res, 200, { ok: true });
       return true;
     }
@@ -1460,13 +1586,21 @@ function handleModelLibraryApi(req, res, url) {
           const decoded = parseDataUrl(payload?.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
           if (!decoded) return sendJson(res, 400, { detail: "Invalid upload data" });
           const relDir = path.relative(STORAGE_ROOT, path.join(projectDirForName(project.name), "__project_cover__"));
-          const asset = writeAsset(decoded.buffer, decoded.mimeType, payload?.filename || "image", {
-            source: "model-project-cover",
-            subdir: relDir,
-            filenameStem: "cover",
-          });
-          db.prepare("UPDATE model_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
-          sendJson(res, 200, projectWithCover(loadProject(projectId)));
+          const nextProject = writeAssetInTransaction(
+            decoded.buffer,
+            decoded.mimeType,
+            payload?.filename || "image",
+            {
+              source: "model-project-cover",
+              subdir: relDir,
+              filenameStem: "cover",
+            },
+            (asset) => {
+              db.prepare("UPDATE model_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
+              return projectWithCover(loadProject(projectId));
+            }
+          );
+          sendJson(res, 200, nextProject);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1496,11 +1630,14 @@ function handleModelLibraryApi(req, res, url) {
           const id = newId("model");
           const name = validateFileNamePart(payload?.name || DEFAULT_MODEL_NAME, "model name");
           if (modelNameExists(projectId, name)) return sendJson(res, 400, { detail: "Model name must be unique within the project" });
-          db.prepare(
-            "INSERT INTO model_entries (id, project_id, name, code, gender, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-          ).run(id, projectId, name, code, sanitizeGender(payload?.gender), timestamp, timestamp);
-          db.prepare("UPDATE model_projects SET updated_at = ? WHERE id = ?").run(timestamp, projectId);
-          sendJson(res, 200, modelWithCoverAndTags(loadModel(id)));
+          const model = runDbTransaction(() => {
+            db.prepare(
+              "INSERT INTO model_entries (id, project_id, name, code, gender, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            ).run(id, projectId, name, code, sanitizeGender(payload?.gender), timestamp, timestamp);
+            db.prepare("UPDATE model_projects SET updated_at = ? WHERE id = ?").run(timestamp, projectId);
+            return modelWithCoverAndTags(loadModel(id));
+          });
+          sendJson(res, 200, model);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1516,26 +1653,29 @@ function handleModelLibraryApi(req, res, url) {
         .then((payload) => {
           const model = loadModel(modelId);
           if (!model) return sendJson(res, 404, { detail: "Model not found" });
-          if (payload.name !== undefined) {
-            const nextName = validateFileNamePart(payload.name || DEFAULT_MODEL_NAME, "model name");
-            if (modelNameExists(model.project_id, nextName, modelId)) return sendJson(res, 400, { detail: "Model name must be unique within the project" });
-            if (nextName !== model.name) {
-              renameModelFolderAndImages(model, nextName);
-              db.prepare("UPDATE model_entries SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), modelId);
+          const nextModel = runDbTransaction(() => {
+            if (payload.name !== undefined) {
+              const nextName = validateFileNamePart(payload.name || DEFAULT_MODEL_NAME, "model name");
+              if (modelNameExists(model.project_id, nextName, modelId)) throw new Error("Model name must be unique within the project");
+              if (nextName !== model.name) {
+                renameModelFolderAndImages(model, nextName);
+                db.prepare("UPDATE model_entries SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), modelId);
+              }
             }
-          }
-          if (payload.tags !== undefined) {
-            updateEntryTags("model", modelId, model.project_id, payload.tags);
-          }
-          if (payload.cover_image_id !== undefined) {
-            const coverImageId = payload.cover_image_id ? String(payload.cover_image_id) : null;
-            if (coverImageId) {
-              const image = db.prepare("SELECT id FROM model_images WHERE id = ? AND model_id = ?").get(coverImageId, modelId);
-              if (!image) return sendJson(res, 404, { detail: "Model image not found" });
+            if (payload.tags !== undefined) {
+              updateEntryTags("model", modelId, model.project_id, payload.tags);
             }
-            db.prepare("UPDATE model_entries SET cover_image_id = ?, updated_at = ? WHERE id = ?").run(coverImageId, nowIso(), modelId);
-          }
-          sendJson(res, 200, modelWithCoverAndTags(loadModel(modelId)));
+            if (payload.cover_image_id !== undefined) {
+              const coverImageId = payload.cover_image_id ? String(payload.cover_image_id) : null;
+              if (coverImageId) {
+                const image = db.prepare("SELECT id FROM model_images WHERE id = ? AND model_id = ?").get(coverImageId, modelId);
+                if (!image) throw new Error("Model image not found");
+              }
+              db.prepare("UPDATE model_entries SET cover_image_id = ?, updated_at = ? WHERE id = ?").run(coverImageId, nowIso(), modelId);
+            }
+            return modelWithCoverAndTags(loadModel(modelId));
+          });
+          sendJson(res, 200, nextModel);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1547,9 +1687,11 @@ function handleModelLibraryApi(req, res, url) {
         return true;
       }
       const imageRows = db.prepare("SELECT asset_id FROM model_images WHERE model_id = ?").all(modelId);
-      db.prepare("DELETE FROM library_entry_tags WHERE kind = 'model' AND entry_id = ?").run(modelId);
-      db.prepare("DELETE FROM model_entries WHERE id = ?").run(modelId);
-      for (const row of imageRows) removeAssetIfUnused(row.asset_id);
+      runDbTransaction(() => {
+        db.prepare("DELETE FROM library_entry_tags WHERE kind = 'model' AND entry_id = ?").run(modelId);
+        db.prepare("DELETE FROM model_entries WHERE id = ?").run(modelId);
+        for (const row of imageRows) removeAssetIfUnused(row.asset_id);
+      });
       sendJson(res, 200, { ok: true });
       return true;
     }
@@ -1584,20 +1726,23 @@ function handleModelLibraryApi(req, res, url) {
           const timestamp = nowIso();
           const imageId = newId("image");
           const sortOrder = Number(payload?.sort_order || 0);
-          db.prepare(
-            "INSERT INTO model_images (id, model_id, asset_id, caption, sort_order, created_at, mime_type, filename) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-          ).run(imageId, modelId, asset.id, String(payload?.caption || ""), sortOrder, timestamp, asset.mime_type, asset.filename);
-          sendJson(res, 200, {
-            id: imageId,
-            model_id: modelId,
-            asset_id: asset.id,
-            asset_url: assetUrl(asset.id),
-            caption: String(payload?.caption || ""),
-            sort_order: sortOrder,
-            created_at: timestamp,
-            mime_type: asset.mime_type,
-            filename: asset.filename,
+          const image = runDbTransaction(() => {
+            db.prepare(
+              "INSERT INTO model_images (id, model_id, asset_id, caption, sort_order, created_at, mime_type, filename) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            ).run(imageId, modelId, asset.id, String(payload?.caption || ""), sortOrder, timestamp, asset.mime_type, asset.filename);
+            return {
+              id: imageId,
+              model_id: modelId,
+              asset_id: asset.id,
+              asset_url: assetUrl(asset.id),
+              caption: String(payload?.caption || ""),
+              sort_order: sortOrder,
+              created_at: timestamp,
+              mime_type: asset.mime_type,
+              filename: asset.filename,
+            };
           });
+          sendJson(res, 200, image);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1614,31 +1759,39 @@ function handleModelLibraryApi(req, res, url) {
           const modelName = folderName(model.name, "model name");
           const relDir = path.relative(STORAGE_ROOT, modelDirForNames(project.name, model.name));
           const sortOrder = db.prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM model_images WHERE model_id = ?").get(modelId)?.next || 0;
-          const asset = writeAsset(decoded.buffer, decoded.mimeType, payload?.filename || "image", {
-            source: "model-library",
-            subdir: relDir,
-            filenameStem: `${modelName}_${String(Number(sortOrder) + 1).padStart(3, "0")}`,
-          });
           const timestamp = nowIso();
           const imageId = newId("image");
-          db.prepare(
-            "INSERT INTO model_images (id, model_id, asset_id, caption, sort_order, created_at, mime_type, filename) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-          ).run(imageId, modelId, asset.id, "", Number(sortOrder), timestamp, asset.mime_type, asset.filename);
-          db.prepare("UPDATE model_entries SET updated_at = ? WHERE id = ?").run(timestamp, modelId);
-          sendJson(res, 200, {
-            image: {
-              id: imageId,
-              model_id: modelId,
-              asset_id: asset.id,
-              asset_url: assetUrl(asset.id),
-              caption: "",
-              sort_order: Number(sortOrder),
-              created_at: timestamp,
-              mime_type: asset.mime_type,
-              filename: asset.filename,
+          const result = writeAssetInTransaction(
+            decoded.buffer,
+            decoded.mimeType,
+            payload?.filename || "image",
+            {
+              source: "model-library",
+              subdir: relDir,
+              filenameStem: `${modelName}_${String(Number(sortOrder) + 1).padStart(3, "0")}`,
             },
-            asset: { id: asset.id },
-          });
+            (asset) => {
+              db.prepare(
+                "INSERT INTO model_images (id, model_id, asset_id, caption, sort_order, created_at, mime_type, filename) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+              ).run(imageId, modelId, asset.id, "", Number(sortOrder), timestamp, asset.mime_type, asset.filename);
+              db.prepare("UPDATE model_entries SET updated_at = ? WHERE id = ?").run(timestamp, modelId);
+              return {
+                image: {
+                  id: imageId,
+                  model_id: modelId,
+                  asset_id: asset.id,
+                  asset_url: assetUrl(asset.id),
+                  caption: "",
+                  sort_order: Number(sortOrder),
+                  created_at: timestamp,
+                  mime_type: asset.mime_type,
+                  filename: asset.filename,
+                },
+                asset: { id: asset.id },
+              };
+            }
+          );
+          sendJson(res, 200, result);
         })
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -1653,9 +1806,11 @@ function handleModelLibraryApi(req, res, url) {
       sendJson(res, 404, { detail: "Model image not found" });
       return true;
     }
-    db.prepare("UPDATE model_entries SET cover_image_id = NULL WHERE cover_image_id = ?").run(imageId);
-    db.prepare("DELETE FROM model_images WHERE id = ?").run(imageId);
-    removeAssetIfUnused(image.asset_id);
+    runDbTransaction(() => {
+      db.prepare("UPDATE model_entries SET cover_image_id = NULL WHERE cover_image_id = ?").run(imageId);
+      db.prepare("DELETE FROM model_images WHERE id = ?").run(imageId);
+      removeAssetIfUnused(image.asset_id);
+    });
     sendJson(res, 200, { ok: true });
     return true;
   }

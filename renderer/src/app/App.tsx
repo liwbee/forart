@@ -55,8 +55,6 @@ const updateText = {
   updateFailed: "\u66f4\u65b0\u5931\u8d25",
   updateFinished: "\u5df2\u4e0b\u8f7d\u66f4\u65b0\uff0c\u6b63\u5728\u9000\u51fa\u5e76\u5e94\u7528",
   updateAvailable: "\u53d1\u73b0\u65b0\u66f4\u65b0\uff0c\u518d\u70b9\u4e00\u6b21\u66f4\u65b0",
-  openProjectAvailable: "\u53d1\u73b0\u65b0\u66f4\u65b0\uff0c\u518d\u70b9\u4e00\u6b21\u6253\u5f00\u9879\u76ee\u9875",
-  projectOpened: "\u5df2\u6253\u5f00\u9879\u76ee\u9875\u9762",
   current: "\u5df2\u662f\u6700\u65b0\u66f4\u65b0",
   restart: "\u91cd\u542f\u751f\u6548",
   updateAvailableShort: "\u53ef\u66f4\u65b0",
@@ -299,7 +297,6 @@ export function App() {
       currentUpdatedAt: appInfo?.currentUpdatedAt || "",
       latestUpdatedAt: "",
       updateAvailable: false,
-      canGitUpdate: appInfo?.canGitUpdate ?? false,
       repoUrl: appInfo?.repoUrl || "",
       error: String(error),
     }));
@@ -315,16 +312,13 @@ export function App() {
     setLatestUpdatedAt(result.updateAvailable ? (result.latestUpdatedAt || result.currentUpdatedAt) : (result.currentUpdatedAt || result.latestUpdatedAt));
     setAppInfo((current) => current ? {
       ...current,
-      canGitUpdate: result.canGitUpdate,
       repoUrl: result.repoUrl,
       currentRevision: result.currentRevision || current.currentRevision,
       currentUpdatedAt: result.currentUpdatedAt || current.currentUpdatedAt,
     } : current);
     if (result.updateAvailable) {
       setUpdateStatus("available");
-      setUpdateMessage(result.canGitUpdate
-        ? (currentLanguage === "zh-CN" ? updateText.updateAvailable : "Update available. Click again to update.")
-        : (currentLanguage === "zh-CN" ? updateText.openProjectAvailable : "Update available. Click again to open project page."));
+      setUpdateMessage(currentLanguage === "zh-CN" ? updateText.updateAvailable : "Update available. Click again to update.");
     } else {
       setUpdateStatus("current");
       setUpdateMessage(currentLanguage === "zh-CN" ? updateText.current : "You're up to date.");
@@ -351,16 +345,11 @@ export function App() {
     setUpdateStatus("updating");
     setUpdateProgress(null);
     setUpdateMessage(currentLanguage === "zh-CN" ? updateText.updatingMessage : "Updating...");
-    const canGitUpdate = updateCheckResult?.canGitUpdate ?? appInfo?.canGitUpdate ?? false;
-    const result: ForartUpdateRunResult | undefined = canGitUpdate
-      ? await window.forartConfig?.runUpdate().catch((error): ForartUpdateRunResult => ({ ok: false, error: String(error) }))
-      : await window.forartConfig?.openUpdatePage().then((): ForartUpdateRunResult => ({ ok: true, restartRequired: false })).catch((error): ForartUpdateRunResult => ({ ok: false, error: String(error) }));
+    const result: ForartUpdateRunResult | undefined = await window.forartConfig?.runUpdate().catch((error): ForartUpdateRunResult => ({ ok: false, error: String(error) }));
 
     if (result?.ok) {
-      setUpdateStatus(canGitUpdate ? "updated" : "current");
-      setUpdateMessage(canGitUpdate
-        ? (currentLanguage === "zh-CN" ? updateText.updateFinished : "Update downloaded. Forart is closing to apply it.")
-        : (currentLanguage === "zh-CN" ? updateText.projectOpened : "Project page opened."));
+      setUpdateStatus("updated");
+      setUpdateMessage(currentLanguage === "zh-CN" ? updateText.updateFinished : "Update downloaded. Forart is closing to apply it.");
     } else {
       setUpdateStatus("error");
       setUpdateMessage(result?.error || (currentLanguage === "zh-CN" ? updateText.updateFailed : "Update failed"));

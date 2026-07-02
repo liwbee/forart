@@ -75,7 +75,7 @@ ipcMain.handle('canvas-cache:reveal', async (_event, payload) => canvasCacheStor
 ipcMain.handle('canvas-cache:open-root', async () => canvasCacheStore.openRoot());
 registerImageReviewIpc({ ipcMain, imageReviewStore });
 registerLibtvIpc({ ipcMain, libtv, libtvGenerationRunner });
-registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, rootDir, net, shell });
+registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, rootDir, net });
 ipcMain.handle('canvas:write-clipboard', async (_event, payload = {}) => {
   clipboard.writeText(JSON.stringify({
     kind: CANVAS_NODES_CLIPBOARD_KIND,

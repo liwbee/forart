@@ -45,7 +45,6 @@ export interface ForartAppInfo {
   name: string;
   repoUrl: string;
   updateUrl: string;
-  canGitUpdate: boolean;
   currentRevision: string;
   currentUpdatedAt: string;
 }
@@ -57,7 +56,6 @@ export interface ForartUpdateCheckResult {
   currentUpdatedAt: string;
   latestUpdatedAt: string;
   updateAvailable: boolean;
-  canGitUpdate: boolean;
   repoUrl: string;
   updateNotes?: ForartUpdateNotes;
   error?: string;
@@ -129,7 +127,6 @@ export interface ForartConfigApi {
   runUpdate: () => Promise<ForartUpdateRunResult>;
   onUpdateProgress: (callback: (progress: ForartUpdateProgress) => void) => () => void;
   updateConnectivity: () => Promise<ForartUpdateConnectivityResult>;
-  openUpdatePage: () => Promise<{ ok: true }>;
 }
 
 export interface EasyToolApi {

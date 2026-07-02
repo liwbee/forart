@@ -49,7 +49,6 @@ contextBridge.exposeInMainWorld('forartConfig', {
     return () => ipcRenderer.removeListener('app:update-progress', listener);
   },
   updateConnectivity: () => ipcRenderer.invoke('app:update-connectivity'),
-  openUpdatePage: () => ipcRenderer.invoke('app:open-update-page'),
 });
 
 contextBridge.exposeInMainWorld('forartReview', {
