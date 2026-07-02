@@ -517,6 +517,11 @@ function Write-Status {
   [System.IO.File]::WriteAllText($script:StatusPath, $json, (New-Object System.Text.UTF8Encoding($false)))
 }
 
+function Cleanup-UpdateDirs {
+  Start-Sleep -Milliseconds 300
+  Remove-TreeBestEffort -Directory $stagingRoot
+}
+
 function Start-ForartAgain {
   param([bool]$DevServerWasStopped)
   if (-not $DevServerWasStopped) {
@@ -536,9 +541,9 @@ $script:StatusPath = [string]$plan.statusPath
 $electronPid = [int]$plan.electronPid
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Path $script:LogPath -Parent) | Out-Null
-Write-Status -State "running"
 
 try {
+  Write-Status -State "running"
   Write-Log ("Forart update apply script started. Plan: {0}" -f $PlanPath)
   if ($electronPid -gt 0) {
     Write-Log ("Waiting for Electron process {0} to exit." -f $electronPid)
@@ -577,9 +582,9 @@ try {
   }
 
   Write-Status -State "success"
-  Remove-TreeBestEffort -Directory $stagingRoot
   Write-Log "Forart update applied successfully."
   Start-ForartAgain -DevServerWasStopped $devServerWasStopped
+  Cleanup-UpdateDirs
 } catch {
   $message = $_.Exception.Message
   Write-Log ("Update failed: {0}" -f $message)
@@ -598,18 +603,12 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, files, needsRoo
   const applyRoot = path.join(updateApplyRoot(rootDir), `${timestampName()}-${process.pid}`);
   fs.mkdirSync(applyRoot, { recursive: true });
   const scriptPath = path.join(applyRoot, 'apply-update.ps1');
-  const launcherPath = path.join(applyRoot, 'launch-apply.cmd');
-  const launcherScriptPath = path.join(applyRoot, 'launch-apply.ps1');
-  const runnerScriptPath = path.join(applyRoot, 'apply-runner.ps1');
-  const cleanupScriptPath = path.join(applyRoot, 'cleanup-update-dirs.ps1');
   const planPath = path.join(applyRoot, 'update-plan.json');
   const logPath = path.join(applyRoot, 'apply-update.log');
   const statusPath = path.join(applyRoot, 'apply-status.json');
-  const runnerStatusPath = path.join(applyRoot, 'runner-status.json');
-  const launcherStatusPath = path.join(applyRoot, 'launcher-status.json');
-  const applyOutputPath = path.join(applyRoot, 'apply-process.log');
 
   const plan = {
+    applyRoot,
     rootDir,
     stagingRoot,
     files,
@@ -623,126 +622,36 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, files, needsRoo
 
   writeUpdateApplyScript(scriptPath);
   fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf8');
-  fs.writeFileSync(
-    runnerScriptPath,
-    [
-      '$ErrorActionPreference = "Stop"',
-      `$applyScript = ${psSingleQuoted(scriptPath)}`,
-      `$planPath = ${psSingleQuoted(planPath)}`,
-      `$runnerStatusPath = ${psSingleQuoted(runnerStatusPath)}`,
-      `$applyOutputPath = ${psSingleQuoted(applyOutputPath)}`,
-      `$cleanupScript = ${psSingleQuoted(cleanupScriptPath)}`,
-      'function Write-RunnerStatus {',
-      '  param([string]$State, [string]$ErrorMessage = "")',
-      '  $json = [ordered]@{ state = $State; error = $ErrorMessage; updatedAt = (Get-Date).ToString("o") } | ConvertTo-Json -Depth 4',
-      '  [System.IO.File]::WriteAllText($runnerStatusPath, $json, (New-Object System.Text.UTF8Encoding($false)))',
-      '}',
-      'function Start-Cleanup {',
-      '  try {',
-      '    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $cleanupScript) -WindowStyle Hidden',
-      '  } catch {',
-      '    Add-Content -LiteralPath $applyOutputPath -Value ("CLEANUP START ERROR: {0}" -f $_.Exception.Message) -Encoding UTF8',
-      '  }',
-      '}',
-      'Write-RunnerStatus -State "running"',
-      'try {',
-      '  & $applyScript -PlanPath $planPath *>&1 | Tee-Object -FilePath $applyOutputPath -Append',
-      '  Write-RunnerStatus -State "finished"',
-      '  Start-Cleanup',
-      '} catch {',
-      '  $message = $_.Exception.Message',
-      '  Add-Content -LiteralPath $applyOutputPath -Value ("RUNNER ERROR: {0}" -f $message) -Encoding UTF8',
-      '  Write-RunnerStatus -State "failed" -ErrorMessage $message',
-      '  throw',
-      '}',
-      '',
-    ].join('\r\n'),
-    'utf8',
-  );
-  fs.writeFileSync(
-    cleanupScriptPath,
-    [
-      '$ErrorActionPreference = "SilentlyContinue"',
-      'Start-Sleep -Seconds 1',
-      `$updateApplyRoot = ${psSingleQuoted(updateApplyRoot(rootDir))}`,
-      'if ($updateApplyRoot -and (Test-Path -LiteralPath $updateApplyRoot)) {',
-      '  Remove-Item -LiteralPath $updateApplyRoot -Recurse -Force',
-      '}',
-      '',
-    ].join('\r\n'),
-    'utf8',
-  );
-  fs.writeFileSync(
-    launcherScriptPath,
-    [
-      '$ErrorActionPreference = "Stop"',
-      `$runnerScript = ${psSingleQuoted(runnerScriptPath)}`,
-      `$rootDir = ${psSingleQuoted(rootDir)}`,
-      `$launcherStatusPath = ${psSingleQuoted(launcherStatusPath)}`,
-      'function Write-LauncherStatus {',
-      '  param([string]$State, [string]$ErrorMessage = "")',
-      '  $json = [ordered]@{ state = $State; error = $ErrorMessage; updatedAt = (Get-Date).ToString("o") } | ConvertTo-Json -Depth 4',
-      '  [System.IO.File]::WriteAllText($launcherStatusPath, $json, (New-Object System.Text.UTF8Encoding($false)))',
-      '}',
-      'try {',
-      '  Write-LauncherStatus -State "starting"',
-      "  $command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"' + $runnerScript + '\"'",
-      '  $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command; CurrentDirectory = $rootDir }',
-      '  if ($result.ReturnValue -ne 0) { throw "Win32_Process.Create failed: $($result.ReturnValue)" }',
-      '  Write-LauncherStatus -State "created"',
-      '} catch {',
-      '  $message = $_.Exception.Message',
-      '  Write-LauncherStatus -State "failed" -ErrorMessage $message',
-      '  throw',
-      '}',
-      '',
-    ].join('\r\n'),
-    'utf8',
-  );
-  fs.writeFileSync(
-    launcherPath,
-    [
-      '@echo off',
-      'setlocal',
-      'chcp 65001 >nul',
-      `cd /d "${rootDir}"`,
-      `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${launcherScriptPath}"`,
-      'endlocal',
-      '',
-    ].join('\r\n'),
-    'utf8',
-  );
-
-  await new Promise((resolve, reject) => {
-    const child = spawn('cmd.exe', ['/d', '/c', launcherPath], {
+  const child = spawn('powershell.exe', [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-WindowStyle',
+    'Hidden',
+    '-File',
+    scriptPath,
+    '-PlanPath',
+    planPath,
+  ], {
       cwd: rootDir,
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
     });
-    const timeout = setTimeout(() => {
-      child.unref();
-      resolve();
-    }, 2500);
-    child.on('error', (error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timeout);
-      if (code === 0) resolve();
-      else reject(new Error(`Update launcher exited with code ${code}`));
+
+  await new Promise((resolve, reject) => {
+    const onError = (error) => reject(error);
+    child.once('error', onError);
+    child.unref();
+    waitForApplyStatus(statusPath, 'running', 12000, [
+      { name: 'apply-status', path: statusPath },
+      { name: 'apply-log', path: logPath },
+    ]).then(resolve, reject).finally(() => {
+      child.off('error', onError);
     });
   });
-  await waitForApplyStatus(runnerStatusPath, 'running', 12000, [
-    { name: 'launcher-status', path: launcherStatusPath },
-    { name: 'runner-status', path: runnerStatusPath },
-    { name: 'apply-output', path: applyOutputPath },
-    { name: 'apply-status', path: statusPath },
-    { name: 'apply-log', path: logPath },
-  ]);
 
-  return { applyRoot, scriptPath, launcherPath, launcherScriptPath, runnerScriptPath, cleanupScriptPath, planPath, logPath, statusPath, runnerStatusPath, launcherStatusPath, applyOutputPath };
+  return { applyRoot, scriptPath, planPath, logPath, statusPath };
 }
 
 async function probeNet(name, net, url, required = true) {
