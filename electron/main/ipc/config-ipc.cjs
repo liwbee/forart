@@ -547,6 +547,28 @@ function Remove-EmptyDirectoriesUnder {
     }
 }
 
+function Prune-OldDeletedBackups {
+  if (-not $script:DeletedBackupRoot) {
+    return
+  }
+
+  $backupRoot = Split-Path -Path $script:DeletedBackupRoot -Parent
+  if (-not $backupRoot -or -not (Test-Path -LiteralPath $backupRoot -PathType Container)) {
+    return
+  }
+
+  Get-ChildItem -LiteralPath $backupRoot -Directory -Force |
+    Where-Object { $_.FullName -ne $script:DeletedBackupRoot } |
+    ForEach-Object {
+      try {
+        Remove-Item -LiteralPath $_.FullName -Recurse -Force
+        Write-Log ("Removed old deleted-file backup: {0}" -f $_.FullName)
+      } catch {
+        Write-Log ("Could not remove old deleted-file backup {0}: {1}" -f $_.FullName, $_.Exception.Message)
+      }
+    }
+}
+
 function Invoke-MirrorSyncCleanup {
   if (-not $script:DeletedBackupRoot) {
     return
@@ -749,6 +771,7 @@ try {
 
   Write-Status -State "success"
   Write-Log "Forart update applied successfully."
+  Prune-OldDeletedBackups
   Start-ForartAgain
   Cleanup-UpdateDirs
 } catch {

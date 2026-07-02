@@ -1,6 +1,6 @@
 {
-  "version": "0.1.11",
-  "updatedAt": "2026-07-03T01:20:00+08:00",
+  "version": "0.1.12",
+  "updatedAt": "2026-07-03T01:30:00+08:00",
   "items": [
     "修复 Windows PowerShell 5.1 下更新 apply 脚本的 Split-Path 参数兼容问题。",
     "修复 PowerShell 写出的状态 JSON 带 BOM 导致 Electron 解析失败的问题。",
@@ -8,6 +8,7 @@
     "修复 Electron 直接 detached 启动 PowerShell 时 apply 脚本未接手导致更新超时的问题。",
     "更新接手阶段显示 PowerShell 进度窗口，方便确认更新仍在进行。",
     "修复更新完成后只重启 Electron 时 Vite 服务已不可用导致 ERR_CONNECTION_REFUSED 的问题。",
-    "更新时对应用源码目录执行受保护镜像同步，旧版本残留文件会移动到 .forart-data/update_deleted 备份。"
+    "更新时对应用源码目录执行受保护镜像同步，旧版本残留文件会移动到 .forart-data/update_deleted 备份。",
+    "旧文件备份只保留最近一次，避免 update_deleted 长期累积。"
   ]
 }
