@@ -58,7 +58,8 @@ export function Select({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const initializedScrollRef = useRef("");
-  const selectedOption = options.find((option) => option.value === value) || options[0] || { value: "", label: placeholder || "" };
+  const matchedOption = options.find((option) => option.value === value) || null;
+  const selectedOption = matchedOption || (value && placeholder ? { value, label: placeholder } : options[0] || { value: "", label: placeholder || "" });
   const isOpen = Boolean((open ?? internalOpen) && !disabled);
 
   function setOpen(nextOpen: boolean) {
@@ -145,7 +146,7 @@ export function Select({
       onClick={(event) => event.stopPropagation()}
     >
       {options.map((option) => {
-        const selected = option.value === selectedOption.value;
+        const selected = Boolean(matchedOption && option.value === matchedOption.value);
         return (
           <button
             key={option.value}

@@ -23,6 +23,8 @@ interface UseActionFissionGenerationActionsOptions {
   apiProviders: ApiProvider[];
   defaultImageProviderId: string;
   imageProviders: ApiProvider[];
+  libtvReady: boolean;
+  libtvUnavailableMessage: string;
   activeCanvasId: string;
   activeCanvasTitle: string;
   activeProject: CanvasDocumentRecord | null;
@@ -81,6 +83,8 @@ export function useActionFissionGenerationActions({
   apiProviders,
   defaultImageProviderId,
   imageProviders,
+  libtvReady,
+  libtvUnavailableMessage,
   activeCanvasId,
   activeCanvasTitle,
   activeProject,
@@ -124,6 +128,10 @@ export function useActionFissionGenerationActions({
     const node = nodeMap.get(nodeId);
     if (!node) return;
     const sourceState = normalizeActionFissionState(node.actionFission);
+    if (!libtvReady) {
+      patchNodeActionFission(setNodes, nodeId, (state) => ({ ...state, error: libtvUnavailableMessage }));
+      return;
+    }
     const workspaceId = String(sourceState.libtvWorkspaceId || "").trim();
     const modelName = String(sourceState.libtvModelName || "").trim();
     if (!workspaceId) {
@@ -298,7 +306,7 @@ export function useActionFissionGenerationActions({
       });
       await saveActiveNodes(nextNodesForSave);
     }
-  }, [connections, nodeMap, nodes, saveActiveNodes, setNodes, t]);
+  }, [connections, libtvReady, libtvUnavailableMessage, nodeMap, nodes, saveActiveNodes, setNodes, t]);
 
   const refreshActionFissionRow = useCallback((nodeId: string, rowId: string, actions: ActionEntry[], tags: ActionTag[]) => {
     const node = nodeMap.get(nodeId);

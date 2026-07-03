@@ -5,6 +5,23 @@ function libtvApi() {
   return window.libtv;
 }
 
+export async function getLibtvAvailability() {
+  if (!window.libtv?.status || !window.libtv.account) {
+    return { ready: false, available: false, loggedIn: false, error: "LibTV bridge is unavailable." };
+  }
+  const status = await window.libtv.status();
+  if (!status.available) {
+    return { ready: false, available: false, loggedIn: false, error: status.error || "LibTV CLI is unavailable." };
+  }
+  const account = await window.libtv.account();
+  return {
+    ready: Boolean(account.loggedIn),
+    available: true,
+    loggedIn: Boolean(account.loggedIn),
+    error: account.loggedIn ? "" : account.error || "LibTV is not logged in.",
+  };
+}
+
 export async function listLibtvWorkspaces() {
   return libtvApi().workspaces({ page: 1, pageSize: 100 });
 }

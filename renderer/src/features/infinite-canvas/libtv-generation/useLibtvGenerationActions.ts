@@ -9,6 +9,8 @@ import { LIBTV_ASPECT_RATIO_OPTIONS, LIBTV_QUALITY_OPTIONS, type LibtvAspectRati
 interface UseLibtvGenerationActionsOptions {
   nodes: CanvasNode[];
   connections: CanvasConnection[];
+  libtvReady: boolean;
+  libtvUnavailableMessage: string;
   patchNode: (nodeId: string, patch: Partial<CanvasNode>) => void;
   t: TFunction;
 }
@@ -24,6 +26,8 @@ function normalizeQuality(value: unknown): LibtvQuality {
 export function useLibtvGenerationActions({
   nodes,
   connections,
+  libtvReady,
+  libtvUnavailableMessage,
   patchNode,
   t,
 }: UseLibtvGenerationActionsOptions) {
@@ -34,6 +38,10 @@ export function useLibtvGenerationActions({
     const node = nodeMap.get(nodeId);
     if (!node || (node.type !== "libtvImageGenerator" && node.type !== "imageGenerator") || node.libtvImageGeneration?.running) return;
     const state = node.libtvImageGeneration || {};
+    if (!libtvReady) {
+      patchNode(nodeId, { libtvImageGeneration: { ...state, error: libtvUnavailableMessage } });
+      return;
+    }
     const workspaceId = String(state.workspaceId || "").trim();
     const modelName = String(state.modelName || "").trim();
     const ownPrompt = node.type === "imageGenerator" ? node.text || "" : state.prompt || "";
@@ -136,7 +144,7 @@ export function useLibtvGenerationActions({
     } finally {
       if (abortControllersRef.current[nodeId] === abortController) delete abortControllersRef.current[nodeId];
     }
-  }, [connections, nodeMap, nodes, patchNode, t]);
+  }, [connections, libtvReady, libtvUnavailableMessage, nodeMap, nodes, patchNode, t]);
 
   const stopLibtvImageGenerator = useCallback((nodeId: string) => {
     abortControllersRef.current[nodeId]?.abort();

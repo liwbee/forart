@@ -18,6 +18,7 @@ interface ActionFissionFooterProps {
   state: ActionFissionState;
   selectedProvider: ApiProvider | null;
   selectedModel: string;
+  libtvReady: boolean;
   openSelectId: string;
   bulkActions: ActionFissionBulkActions;
   onOpenSelectChange: (selectId: string) => void;
@@ -40,6 +41,7 @@ export function ActionFissionFooter({
   state,
   selectedProvider,
   selectedModel,
+  libtvReady,
   openSelectId,
   bulkActions,
   onOpenSelectChange,
@@ -80,7 +82,7 @@ export function ActionFissionFooter({
   }, []);
 
   useEffect(() => {
-    if (state.apiType !== "libtv-api") return;
+    if (state.apiType !== "libtv-api" || !libtvReady) return;
     let canceled = false;
     void loadLibtvModels().then((models) => {
       if (canceled) return;
@@ -108,7 +110,7 @@ export function ActionFissionFooter({
         open={openSelectId === id && !disabled}
         onOpenChange={(open) => {
           onOpenSelectChange(open ? id : "");
-          if (open && name === "model" && state.apiType === "libtv-api") void loadLibtvModels();
+          if (open && name === "model" && state.apiType === "libtv-api" && libtvReady) void loadLibtvModels();
         }}
         onChange={onChange}
         menuPlacement="top"
@@ -117,7 +119,7 @@ export function ActionFissionFooter({
     );
   };
   const sizePanelId = selectId(nodeId, "size");
-  const isLibtvApi = state.apiType === "libtv-api";
+  const isLibtvApi = state.apiType === "libtv-api" && libtvReady;
   const modelValue = isLibtvApi ? state.libtvModelName || "" : selectedModel;
   const selectedRule = selectedProvider && selectedModel
     ? getImageModelRule(selectedProvider.modelRules.image[selectedModel] || detectImageModelRuleId(selectedModel))

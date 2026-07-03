@@ -30,6 +30,8 @@ export interface CanvasNodeBodyActions {
   patchPrompt: (nodeId: string, patch: Partial<CanvasNode>) => void;
   imageProviders: ApiProvider[];
   defaultImageProvider: ApiProvider | null;
+  libtvReady: boolean;
+  libtvUnavailableMessage: string;
   draggedInputConnectionId: string;
   removeInput: (connectionId: string) => void;
   reorderInput: (nodeId: string, connectionId: string, imageInsertIndex: number) => void;
@@ -82,6 +84,8 @@ export const CanvasNodeBodyRenderer = memo(function CanvasNodeBodyRenderer({
         node={node}
         imageProviders={actions.imageProviders}
         defaultImageProvider={actions.defaultImageProvider}
+        libtvReady={actions.libtvReady}
+        libtvUnavailableMessage={actions.libtvUnavailableMessage}
         openSelectId={openSelectId}
         draggedInputConnectionId={actions.draggedInputConnectionId}
         onOpenSelectChange={actions.openSelectChange}

@@ -12,6 +12,7 @@ interface ActionFissionApiBarProps {
   state: ActionFissionState;
   selectedProvider: ApiProvider | null;
   imageProviders: ApiProvider[];
+  libtvReady: boolean;
   openSelectId: string;
   onOpenSelectChange: (selectId: string) => void;
   onSetApiType: (apiType: NonNullable<ActionFissionState["apiType"]>) => void;
@@ -28,6 +29,7 @@ export function ActionFissionApiBar({
   state,
   selectedProvider,
   imageProviders,
+  libtvReady,
   openSelectId,
   onOpenSelectChange,
   onSetApiType,
@@ -63,7 +65,7 @@ export function ActionFissionApiBar({
   }, []);
 
   useEffect(() => {
-    if (!isLibtvApi) return;
+    if (!isLibtvApi || !libtvReady) return;
     let canceled = false;
     void loadLibtvWorkspaces().then((workspaces) => {
       if (canceled) return;
@@ -77,27 +79,28 @@ export function ActionFissionApiBar({
     return () => {
       canceled = true;
     };
-  }, [isLibtvApi, loadLibtvWorkspaces]);
+  }, [isLibtvApi, libtvReady, loadLibtvWorkspaces]);
 
   const apiOptions = [
     ...imageProviders.map((provider) => ({ value: provider.id, label: provider.name || provider.id })),
-    { value: "libtv-api", label: "LibTV" },
+    ...(libtvReady ? [{ value: "libtv-api", label: "LibTV" }] : []),
   ];
   const workspaceOptions = libtvWorkspaces.length
     ? libtvWorkspaces.map((workspace) => ({ value: workspace.id, label: workspace.name || workspace.id }))
     : [{ value: "", label: t("infiniteCanvas:libtvNoWorkspaces") }];
 
-  const renderSelect = (name: string, ariaLabel: string, value: string, options: Array<{ value: string; label: string; hint?: string }>, onChange: (value: string) => void) => {
+  const renderSelect = (name: string, ariaLabel: string, value: string, options: Array<{ value: string; label: string; hint?: string }>, onChange: (value: string) => void, placeholder?: string) => {
     const id = selectId(nodeId, name);
     return (
       <Select
         value={value}
         options={options}
         ariaLabel={ariaLabel}
+        placeholder={placeholder}
         open={openSelectId === id}
         onOpenChange={(open) => {
           onOpenSelectChange(open ? id : "");
-          if (open && name === "libtv-workspace") void loadLibtvWorkspaces();
+          if (open && name === "libtv-workspace" && libtvReady) void loadLibtvWorkspaces();
         }}
         onChange={onChange}
         menuPlacement="bottom"
@@ -125,8 +128,9 @@ export function ActionFissionApiBar({
           onSetApiType("third-party-api");
           onSetModel(nextModel, provider?.id || "", nextSize);
         },
+        isLibtvApi && !libtvReady ? "LibTV" : undefined,
       )}
-      {isLibtvApi ? renderSelect(
+      {isLibtvApi && libtvReady ? renderSelect(
         "libtv-workspace",
         t("infiniteCanvas:libtvWorkspace"),
         state.libtvWorkspaceId || "",

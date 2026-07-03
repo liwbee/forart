@@ -53,7 +53,6 @@ interface NodeToolbarProps {
 function selectedProviderFor(stateProviderId: string | undefined, defaultImageProvider: ApiProvider | null, imageProviders: ApiProvider[]) {
   return imageProviders.find((provider) => provider.id === stateProviderId)
     || defaultImageProvider
-    || imageProviders[0]
     || null;
 }
 

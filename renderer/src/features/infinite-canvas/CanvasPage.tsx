@@ -11,6 +11,7 @@ import { collectPrompt } from "./core/workflow";
 import { clamp, getGroupBounds, linkMidpoint, WORLD_CENTER } from "./canvasGeometry";
 import { ImageGeneratorComposer } from "./composers/ImageGeneratorComposer";
 import { useLibtvGenerationActions } from "./libtv-generation/useLibtvGenerationActions";
+import { useLibtvAvailability } from "./libtv-generation/useLibtvAvailability";
 import { LibraryAssetPickerRail } from "../library-asset-picker/LibraryAssetPickerRail";
 import type { LibraryAssetSelection } from "../library-asset-picker/types";
 import type { ActionEntry, ActionTag } from "../action-library/types";
@@ -440,6 +441,10 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   }) : null, [selectedNodesBounds]);
   const imageProviders = useMemo(() => apiProviders.filter((provider) => provider.protocol !== "gemini" && provider.imageModels.length), [apiProviders]);
   const chatProviders = useMemo(() => apiProviders.filter((provider) => provider.chatModels.length), [apiProviders]);
+  const libtvAvailability = useLibtvAvailability();
+  const libtvUnavailableMessage = libtvAvailability.available
+    ? t("infiniteCanvas:libtvNotLoggedIn")
+    : t("infiniteCanvas:libtvUnavailable");
   const fixedCanvasUiStyle = useMemo(() => ({
     "--ic-fixed-ui-scale": `${1 / viewport.scale}`,
     "--ic-fixed-ui-hover-scale": `${1.06 / viewport.scale}`,
@@ -716,6 +721,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     apiProviders,
     defaultImageProviderId,
     imageProviders,
+    libtvReady: libtvAvailability.ready,
+    libtvUnavailableMessage,
     activeCanvasId,
     activeCanvasTitle,
     activeProject,
@@ -732,6 +739,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   } = useLibtvGenerationActions({
     nodes,
     connections,
+    libtvReady: libtvAvailability.ready,
+    libtvUnavailableMessage,
     patchNode,
     t,
   });
@@ -1942,6 +1951,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     patchPrompt: patchPromptStable,
     imageProviders,
     defaultImageProvider,
+    libtvReady: libtvAvailability.ready,
+    libtvUnavailableMessage,
     draggedInputConnectionId,
     removeInput: removeInputStable,
     reorderInput: reorderInputStable,
@@ -1984,6 +1995,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     previewActionFissionActionStable,
     imageProviders,
     isGenerationTargetActiveStable,
+    libtvAvailability.ready,
+    libtvUnavailableMessage,
     beforeRemoveActionFissionRowStable,
     refreshActionFissionRowStable,
     removeInputStable,
@@ -2075,7 +2088,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     const node = selectedId ? nodeMap.get(selectedId) : null;
     if (isNodeDragging || !node || node.type !== "imageGenerator" || imageCrop?.nodeId === node.id) return null;
     const selectedProvider = imageProviders.find((provider) => provider.id === node.imageProviderId)
-      || imageProviders[0]
+      || defaultImageProvider
       || null;
     const selectedModel = node.imageModel && selectedProvider?.imageModels.includes(node.imageModel) ? node.imageModel : selectedProvider?.imageModels[0] || "";
     const inputPreviews = getImageGeneratorInputPreviews(node.id);
@@ -2095,6 +2108,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         selectedProvider={selectedProvider}
         selectedModel={selectedModel}
         imageProviders={imageProviders}
+        libtvReady={libtvAvailability.ready}
+        libtvUnavailableMessage={libtvUnavailableMessage}
         inputPreviews={inputPreviews}
         generationReadiness={generationReadiness}
         generationTask={getGenerationTaskForNodeTarget(nodes, { type: "imageGenerator", nodeId: node.id })}

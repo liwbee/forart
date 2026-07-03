@@ -22,6 +22,8 @@ interface ImageGeneratorComposerProps {
   selectedProvider: ApiProvider | null;
   selectedModel: string;
   imageProviders: ApiProvider[];
+  libtvReady: boolean;
+  libtvUnavailableMessage: string;
   inputPreviews: ImageGeneratorInputPreview[];
   generationReadiness: ImageGenerationReadiness;
   generationTask?: CanvasGenerationTask | null;
@@ -44,6 +46,8 @@ export function ImageGeneratorComposer({
   selectedProvider,
   selectedModel,
   imageProviders,
+  libtvReady,
+  libtvUnavailableMessage,
   inputPreviews,
   generationReadiness,
   generationTask,
@@ -130,7 +134,7 @@ export function ImageGeneratorComposer({
   );
   const apiOptions = [
     ...imageProviders.map((provider) => ({ value: provider.id, label: provider.name || provider.id })),
-    { value: "libtv-api", label: "LibTV" },
+    ...(libtvReady ? [{ value: "libtv-api", label: "LibTV" }] : []),
   ];
   const selectedApiValue = isLibtvApi ? "libtv-api" : selectedProvider?.id || "";
   const libtvWorkspaceOptions = (
@@ -157,6 +161,7 @@ export function ImageGeneratorComposer({
     options: Array<{ value: string; label: string; hint?: string }>,
     onChange: (value: string) => void,
     disabled = false,
+    placeholder?: string,
   ) => {
     const id = selectId(name);
     return (
@@ -165,6 +170,7 @@ export function ImageGeneratorComposer({
         options={options}
         ariaLabel={label}
         disabled={disabled}
+        placeholder={placeholder}
         open={openSelectId === id && !disabled}
         onOpenChange={(nextOpen) => onOpenSelectChange((current) => (nextOpen ? id : current === id ? "" : current))}
         onChange={onChange}
@@ -225,6 +231,8 @@ export function ImageGeneratorComposer({
               generationError: "",
             });
           },
+          false,
+          isLibtvApi && !libtvReady ? "LibTV" : undefined,
         )}
         {isLibtvApi ? renderComposerSelect(
           "libtv-workspace",
@@ -331,7 +339,9 @@ export function ImageGeneratorComposer({
       </div>
       {!isRunning && !isLibtvApi && generationReadinessMessage ? <div className="ic-image-composer__hint">{generationReadinessMessage}</div> : null}
       {isLibtvApi && libtvState.status ? <div className="ic-image-composer__status">{libtvState.status}</div> : null}
-      {node.generationError || libtvState.error || libtvLoadError ? <div className="ic-image-composer__error">{node.generationError || libtvState.error || libtvLoadError}</div> : null}
+      {node.generationError || libtvState.error || libtvLoadError || (isLibtvApi && !libtvReady ? libtvUnavailableMessage : "") ? (
+        <div className="ic-image-composer__error">{node.generationError || libtvState.error || libtvLoadError || libtvUnavailableMessage}</div>
+      ) : null}
     </div>
   );
 }
