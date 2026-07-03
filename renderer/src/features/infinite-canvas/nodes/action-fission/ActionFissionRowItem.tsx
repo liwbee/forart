@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Copy, Download, Play, RefreshCw, Search, Square, X } from "lucide-react";
+import { Ban, Check, ChevronDown, Copy, Download, Play, RefreshCw, Search, Square, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
@@ -15,6 +15,7 @@ interface ActionFissionRowItemProps {
   actions: ActionEntry[];
   candidates: ActionEntry[];
   candidateCount: number;
+  tagCounts: Record<string, number>;
   publicReferenceCount: number;
   publicReferenceLimit: number;
   selectedProvider: ApiProvider | null;
@@ -23,7 +24,7 @@ interface ActionFissionRowItemProps {
   openSelectId: string;
   onOpenSelectChange: (selectId: string) => void;
   onSetProject: (rowId: string, projectId: string) => void;
-  onSetTags: (rowId: string, tagIds: string[]) => void;
+  onSetTags: (rowId: string, includeTagIds: string[], excludeTagIds: string[]) => void;
   onRemoveRow: (rowId: string) => void | Promise<void>;
   onRefreshRow: (nodeId: string, rowId: string, actions: ActionEntry[], tags: ActionTag[]) => void;
   onRunRow: (nodeId: string, rowId: string, actions: ActionEntry[], tags: ActionTag[]) => void;
@@ -70,6 +71,7 @@ export function ActionFissionRowItem({
   actions,
   candidates,
   candidateCount,
+  tagCounts,
   publicReferenceCount,
   publicReferenceLimit,
   selectedProvider,
@@ -111,9 +113,15 @@ export function ActionFissionRowItem({
   const selectorId = rowSelectId(nodeId, row.id, "selector");
   const selectorOpen = openSelectId === selectorId && !disabled;
   const selectedProject = projects.find((project) => project.id === row.actionProjectId) || null;
-  const selectedTagNames = row.actionTagIds
+  const selectedTagNames = [
+    ...row.includeActionTagIds
     .map((tagId) => tags.find((tag) => tag.id === tagId)?.name || "")
-    .filter(Boolean);
+    .filter(Boolean),
+    ...row.excludeActionTagIds
+    .map((tagId) => tags.find((tag) => tag.id === tagId)?.name || "")
+    .filter(Boolean)
+    .map((name) => `不含 ${name}`),
+  ];
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const panelPositionRef = useRef("");
@@ -260,7 +268,7 @@ export function ActionFissionRowItem({
     >
       <div className="ic-action-fission-selector-panel__section ic-action-fission-selector-panel__projects-section">
         <span className="ic-action-fission-selector-panel__label">选择项目</span>
-        <div className="ic-action-fission-selector-panel__projects">
+        <div className="ic-action-fission-selector-panel__projects scrollbar-thin">
           {projects.length ? projects.map((project) => {
             const selected = project.id === row.actionProjectId;
             return (
@@ -284,21 +292,52 @@ export function ActionFissionRowItem({
           <span className="ic-action-fission-selector-panel__label">选择标签</span>
           <div className="ic-action-fission-selector-panel__tags">
             {row.actionProjectId && tags.length ? tags.map((tag) => {
-              const selected = row.actionTagIds.includes(tag.id);
+              const included = row.includeActionTagIds.includes(tag.id);
+              const excluded = row.excludeActionTagIds.includes(tag.id);
               return (
                 <button
                   key={tag.id}
                   type="button"
-                  className={selected ? "selected" : ""}
-                  aria-pressed={selected}
+                  className={`ic-action-fission-tag-choice${included ? " ic-action-fission-tag-choice--include" : ""}${excluded ? " ic-action-fission-tag-choice--exclude" : ""}`}
+                  aria-pressed={included || excluded}
                   onClick={() => {
-                    const nextTags = selected
-                      ? row.actionTagIds.filter((tagId) => tagId !== tag.id)
-                      : [...row.actionTagIds, tag.id];
-                    onSetTags(row.id, nextTags);
+                    const nextIncludeTags = included
+                      ? row.includeActionTagIds.filter((tagId) => tagId !== tag.id)
+                      : [...row.includeActionTagIds, tag.id];
+                    const nextExcludeTags = row.excludeActionTagIds.filter((tagId) => tagId !== tag.id);
+                    onSetTags(row.id, nextIncludeTags, nextExcludeTags);
                   }}
                 >
-                  {tag.name}
+                  <span>{tag.name}</span>
+                  <span className="ic-action-fission-tag-choice__count">{tagCounts[tag.id] || 0}</span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="ic-action-fission-tag-choice__exclude"
+                    aria-label={`排除 ${tag.name}`}
+                    title={`排除 ${tag.name}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const nextExcludeTags = excluded
+                        ? row.excludeActionTagIds.filter((tagId) => tagId !== tag.id)
+                        : [...row.excludeActionTagIds, tag.id];
+                      const nextIncludeTags = row.includeActionTagIds.filter((tagId) => tagId !== tag.id);
+                      onSetTags(row.id, nextIncludeTags, nextExcludeTags);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const nextExcludeTags = excluded
+                        ? row.excludeActionTagIds.filter((tagId) => tagId !== tag.id)
+                        : [...row.excludeActionTagIds, tag.id];
+                      const nextIncludeTags = row.includeActionTagIds.filter((tagId) => tagId !== tag.id);
+                      onSetTags(row.id, nextIncludeTags, nextExcludeTags);
+                    }}
+                  >
+                    <Ban size={12} aria-hidden="true" />
+                  </span>
                 </button>
               );
             }) : <span className="ic-action-fission-selector-panel__empty">{row.actionProjectId ? "暂无标签" : "先选择项目"}</span>}
@@ -307,7 +346,7 @@ export function ActionFissionRowItem({
 
         <div className="ic-action-fission-selector-panel__section ic-action-fission-selector-panel__results">
           <span className="ic-action-fission-selector-panel__label">筛选结果 · {candidateCount}</span>
-          <div className="ic-action-fission-selector-panel__result-list">
+          <div className="ic-action-fission-selector-panel__result-list scrollbar-stable">
             {candidates.length ? candidates.slice(0, 12).map((action) => (
               <div key={action.id} className="ic-action-fission-selector-panel__result" title={action.name}>
                 {action.asset_url ? (

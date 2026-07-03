@@ -1,11 +1,12 @@
 import { apiRequest } from "../../lib/apiClient";
+import { EMPTY_LIBRARY_TAG_FILTER, libraryTagFilterKey, type LibraryTagFilter } from "../library-tags";
 import { AssetUploadPayload, ModelEntry, ModelFilters, ModelImage, ModelProject, ModelTag, StorageSettings } from "./types";
 
 export const modelLibraryKeys = {
   projects: ["modelProjects"] as const,
   tagRoot: ["modelTags"] as const,
   tags: (projectId: string) => ["modelTags", projectId] as const,
-  models: (projectId: string, tagIds: readonly string[] = [], gender = "") => ["models", projectId, [...tagIds].sort().join(","), gender] as const,
+  models: (projectId: string, tagFilter: LibraryTagFilter = EMPTY_LIBRARY_TAG_FILTER, gender = "") => ["models", projectId, libraryTagFilterKey(tagFilter), gender] as const,
   images: (modelId: string) => ["modelImages", modelId] as const,
   storageSettings: ["storageSettings"] as const,
 };
@@ -60,9 +61,9 @@ export function uploadModelProjectCover(projectId: string, payload: AssetUploadP
   });
 }
 
-export function listModels({ projectId, tagIds = [], gender = "" }: ModelFilters) {
+export function listModels({ projectId, tagFilter = EMPTY_LIBRARY_TAG_FILTER, gender = "" }: ModelFilters) {
   return apiRequest<{ models: ModelEntry[] }>(
-    `/api/model-projects/${encodeURIComponent(projectId)}/models${queryString({ tag_id: tagIds, gender })}`
+    `/api/model-projects/${encodeURIComponent(projectId)}/models${queryString({ tag_id: tagFilter.includeTagIds, exclude_tag_id: tagFilter.excludeTagIds, gender })}`
   );
 }
 

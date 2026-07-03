@@ -1,0 +1,59 @@
+/* Infinite canvas theme tokens and page shell variables. */
+.infinite-canvas-page {
+  --canvas-bg: #edf2f7;
+  --canvas-bg-vignette: rgba(255, 255, 255, 0.55);
+  --canvas-grid-line: rgba(88, 107, 132, 0.2);
+  --canvas-grid-dot: rgba(88, 107, 132, 0.34);
+  --canvas-node-bg: #ffffff;
+  --canvas-node-bg-muted: #f5f7fa;
+  --canvas-node-border: #d5dde8;
+  --canvas-node-border-strong: #aebcce;
+  --canvas-node-text: #101828;
+  --canvas-node-muted: #5f6f85;
+  --canvas-link: rgba(71, 84, 103, 0.5);
+  --canvas-link-active: #111827;
+  --canvas-link-related: rgba(96, 165, 250, 0.82);
+  --canvas-control-bg: rgba(255, 255, 255, 0.92);
+  --canvas-control-hover: #eef2f7;
+  --canvas-selection-fill: rgba(17, 24, 39, 0.1);
+  --canvas-selection-stroke: #111827;
+  --canvas-state-hover-bg: var(--canvas-control-hover);
+  --canvas-state-hover-border: var(--canvas-node-border-strong);
+  --canvas-state-hover-text: var(--canvas-node-text);
+  --canvas-state-active-bg: var(--canvas-link-active);
+  --canvas-state-active-text: var(--canvas-node-bg);
+  --canvas-state-active-border: var(--canvas-link-active);
+  --canvas-state-selected-bg: color-mix(in srgb, var(--canvas-link-active) 10%, var(--canvas-node-bg));
+  --canvas-state-selected-text: var(--canvas-link-active);
+  --canvas-state-selected-border: var(--canvas-link-active);
+  --canvas-state-focus-ring: 0 0 0 3px color-mix(in srgb, var(--canvas-link-active) 12%, transparent);
+  --canvas-state-disabled-opacity: var(--state-disabled-opacity);
+
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: 42px minmax(0, 1fr);
+  position: relative;
+}
+
+:root.theme-dark .infinite-canvas-page {
+  --canvas-bg: #111820;
+  --canvas-bg-vignette: rgba(54, 67, 86, 0.24);
+  --canvas-grid-line: rgba(203, 213, 225, 0.12);
+  --canvas-grid-dot: rgba(203, 213, 225, 0.18);
+  --canvas-node-bg: #1a222d;
+  --canvas-node-bg-muted: #222c39;
+  --canvas-node-border: #354255;
+  --canvas-node-border-strong: #56657a;
+  --canvas-node-text: #f2f5f9;
+  --canvas-node-muted: #a5b4c8;
+  --canvas-link: rgba(203, 213, 225, 0.42);
+  --canvas-link-active: #f8fafc;
+  --canvas-link-related: rgba(125, 211, 252, 0.8);
+  --canvas-control-bg: rgba(18, 24, 33, 0.92);
+  --canvas-control-hover: #252e3b;
+  --canvas-selection-fill: rgba(248, 250, 252, 0.12);
+  --canvas-selection-stroke: #f8fafc;
+}
+

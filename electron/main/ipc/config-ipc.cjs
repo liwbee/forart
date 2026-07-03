@@ -974,7 +974,7 @@ async function appInfoPayload(rootDir) {
   };
 }
 
-function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, rootDir, net }) {
+function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, rootDir, dataRoot = rootDir, net }) {
   let activeAppConfig = null;
 
   ipcMain.handle('config:load', async () => {
@@ -1071,7 +1071,16 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
   });
 
   ipcMain.handle('app:run-update', async (event) => {
-    const stagingRoot = path.join(updateStagingRoot(rootDir), `${timestampName()}-${process.pid}`);
+    if (app.isPackaged) {
+      return {
+        ok: false,
+        updated: [],
+        count: 0,
+        error: 'Packaged portable updates are not enabled yet. Download the latest portable build and replace the app files.',
+      };
+    }
+
+    const stagingRoot = path.join(updateStagingRoot(dataRoot), `${timestampName()}-${process.pid}`);
     const sendProgress = (payload) => {
       event.sender.send('app:update-progress', {
         phase: payload.phase || 'downloading',
@@ -1131,7 +1140,7 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
     const results = await Promise.all([
       probeNet('GitHub VERSION', net, REMOTE_VERSION_URL),
       probeNet('GitHub update tree', net, REMOTE_TREE_URL),
-      probeWritable(rootDir),
+      probeWritable(dataRoot),
     ]);
     const required = results.filter((item) => item.required);
     return {

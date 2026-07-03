@@ -1,0 +1,63 @@
+/* Opt-in shared scrollbar styles. Global defaults still hide scrollbars. */
+.scrollbar-thin-stable,
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--scrollbar-thumb, var(--canvas-node-muted, var(--text-muted))) 46%, transparent) transparent;
+}
+
+.scrollbar-thin-stable {
+  scrollbar-gutter: stable;
+}
+
+.scrollbar-stable {
+  scrollbar-gutter: stable;
+}
+
+.scrollbar-menu {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--scrollbar-thumb, var(--canvas-node-muted, var(--text-muted))) 42%, transparent) transparent;
+}
+
+.scrollbar-thin-stable::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scrollbar-thin-stable::-webkit-scrollbar-track,
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin-stable::-webkit-scrollbar-thumb,
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--scrollbar-thumb, var(--canvas-node-muted, var(--text-muted))) 42%, transparent);
+  background-clip: padding-box;
+}
+
+.scrollbar-thin-stable::-webkit-scrollbar-thumb:hover,
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--scrollbar-thumb, var(--canvas-node-muted, var(--text-muted))) 58%, transparent);
+  background-clip: padding-box;
+}
+
+.scrollbar-menu::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  display: block;
+}
+
+.scrollbar-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-menu::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--scrollbar-thumb, var(--canvas-node-muted, var(--text-muted))) 38%, transparent);
+}

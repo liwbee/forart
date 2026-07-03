@@ -1,3 +1,5 @@
+import type { LibraryTagFilter } from "../library-tags";
+
 export interface OutfitProject {
   id: string;
   name: string;
@@ -37,7 +39,7 @@ export interface AssetUploadPayload {
 
 export interface OutfitFilters {
   projectId: string;
-  tagIds?: string[];
+  tagFilter?: LibraryTagFilter;
 }
 
 export interface StorageSettings {

@@ -1,3 +1,5 @@
+import type { LibraryTagFilter } from "../library-tags";
+
 export type ModelGender = "female" | "male" | "unknown";
 
 export interface ModelProject {
@@ -54,7 +56,7 @@ export interface AssetUploadPayload {
 
 export interface ModelFilters {
   projectId: string;
-  tagIds?: string[];
+  tagFilter?: LibraryTagFilter;
   gender?: Exclude<ModelGender, "unknown"> | "";
 }
 

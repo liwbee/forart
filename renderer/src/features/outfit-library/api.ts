@@ -1,11 +1,12 @@
 import { apiRequest } from "../../lib/apiClient";
+import { EMPTY_LIBRARY_TAG_FILTER, libraryTagFilterKey, type LibraryTagFilter } from "../library-tags";
 import { AssetUploadPayload, OutfitEntry, OutfitFilters, OutfitProject, OutfitTag, StorageSettings } from "./types";
 
 export const outfitLibraryKeys = {
   projects: ["outfitProjects"] as const,
   tagRoot: ["outfitTags"] as const,
   tags: (projectId: string) => ["outfitTags", projectId] as const,
-  outfits: (projectId: string, tagIds: readonly string[] = []) => ["outfits", projectId, [...tagIds].sort().join(",")] as const,
+  outfits: (projectId: string, tagFilter: LibraryTagFilter = EMPTY_LIBRARY_TAG_FILTER) => ["outfits", projectId, libraryTagFilterKey(tagFilter)] as const,
   storageSettings: ["storageSettings"] as const,
 };
 
@@ -59,9 +60,9 @@ export function uploadOutfitProjectCover(projectId: string, payload: AssetUpload
   });
 }
 
-export function listOutfits({ projectId, tagIds = [] }: OutfitFilters) {
+export function listOutfits({ projectId, tagFilter = EMPTY_LIBRARY_TAG_FILTER }: OutfitFilters) {
   return apiRequest<{ outfits: OutfitEntry[] }>(
-    `/api/outfit-projects/${encodeURIComponent(projectId)}/outfits${queryString({ tag_id: tagIds })}`
+    `/api/outfit-projects/${encodeURIComponent(projectId)}/outfits${queryString({ tag_id: tagFilter.includeTagIds, exclude_tag_id: tagFilter.excludeTagIds })}`
   );
 }
 

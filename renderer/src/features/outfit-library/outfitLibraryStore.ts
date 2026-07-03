@@ -1,19 +1,20 @@
 import { create } from "zustand";
+import { EMPTY_LIBRARY_TAG_FILTER, type LibraryTagFilter } from "../library-tags";
 
 interface OutfitLibraryState {
   activeProjectId: string;
-  activeTagIds: string[];
+  activeTagFilter: LibraryTagFilter;
   setActiveProjectId: (projectId: string) => void;
-  setActiveTagIds: (tagIds: string[]) => void;
+  setActiveTagFilter: (tagFilter: LibraryTagFilter) => void;
 }
 
 export const useOutfitLibraryStore = create<OutfitLibraryState>((set) => ({
   activeProjectId: "",
-  activeTagIds: [],
+  activeTagFilter: EMPTY_LIBRARY_TAG_FILTER,
   setActiveProjectId: (projectId) =>
     set({
       activeProjectId: projectId,
-      activeTagIds: [],
+      activeTagFilter: EMPTY_LIBRARY_TAG_FILTER,
     }),
-  setActiveTagIds: (tagIds) => set({ activeTagIds: tagIds }),
+  setActiveTagFilter: (tagFilter) => set({ activeTagFilter: tagFilter }),
 }));

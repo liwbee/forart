@@ -1,7 +1,7 @@
 import { Images, PersonStanding, Users, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { LibraryTagFilterButton } from "../../components/LibraryTagFilterButton";
+import { LibraryTagFilterButton } from "../library-tags";
 import { Select } from "../../components/Select";
 import { cacheBustedLibraryAssetUrl, useLibraryAssetPickerData } from "./useLibraryAssetPickerData";
 import type { LibraryAssetItem, LibraryAssetPickerSource, LibraryAssetSelection, LibraryAssetTab } from "./types";
@@ -124,11 +124,12 @@ export function LibraryAssetPickerContent({
         />
         <LibraryTagFilterButton
           tags={picker.activeTags}
-          activeTagIds={picker.activeTagIds}
+          tagFilter={picker.activeTagFilter}
+          tagCounts={picker.activeTagCounts}
           allLabel={t("infiniteCanvas:allLibraryTags")}
           ariaLabel={t("infiniteCanvas:libraryTagFilter")}
           onChange={picker.changeTag}
-          active={Boolean(picker.activeTagIds.length || (picker.activeTab === "models" && picker.activeModelGender))}
+          active={Boolean(picker.hasActiveTagFilter || (picker.activeTab === "models" && picker.activeModelGender))}
           menuContentBefore={picker.activeTab === "models" ? (
             <div className="library-asset-picker__filter-menu-section" aria-label={t("modelLibrary:genderCategory")}>
               <span>{t("modelLibrary:gender")}</span>

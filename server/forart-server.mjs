@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 import { createAdminContext } from "./src/admin/admin-context.mjs";
 import { createAdminRouter } from "./src/http/admin-router.mjs";
+import { createCanvasExchangeContext } from "./src/canvas-exchange/canvas-exchange-context.mjs";
+import { createCanvasExchangeRouter } from "./src/http/canvas-exchange-router.mjs";
 
 const SERVER_PORT = Number(process.env.PORT || 6980);
 const SERVER_HOST = process.env.HOST || "0.0.0.0";
@@ -426,6 +428,14 @@ const handleAdminRoute = createAdminRouter({
   context: adminContext,
 });
 
+const canvasExchangeContext = createCanvasExchangeContext({
+  getStorageRoot: () => STORAGE_ROOT,
+});
+
+const handleCanvasExchangeRoute = createCanvasExchangeRouter({
+  context: canvasExchangeContext,
+});
+
 function ensureStorageConfigured(res) {
   if (db) return true;
   sendJson(res, 409, { detail: "Asset library storage is unavailable. Check FORART_DATA_DIR or default data directory permissions.", code: "MODEL_LIBRARY_STORAGE_NOT_CONFIGURED" });
@@ -823,8 +833,9 @@ function resolveTagNames(kind, projectId, tagIds) {
     .filter(Boolean);
 }
 
-function entryMatchesAllTags(entry, tagNames) {
-  return tagNames.every((tagName) => entry.tags.includes(tagName));
+function entryMatchesTagFilter(entry, includeTagNames, excludeTagNames) {
+  return includeTagNames.every((tagName) => entry.tags.includes(tagName))
+    && excludeTagNames.every((tagName) => !entry.tags.includes(tagName));
 }
 
 function handleProjectTagApi(req, res, { kind, projectId, tagId }) {
@@ -1142,7 +1153,8 @@ function handleModelLibraryApi(req, res, url) {
       return true;
     }
     if (tail === "outfits" && method === "GET") {
-      const tagNames = resolveTagNames("outfit", projectId, url.searchParams.getAll("tag_id"));
+      const includeTagNames = resolveTagNames("outfit", projectId, url.searchParams.getAll("tag_id"));
+      const excludeTagNames = resolveTagNames("outfit", projectId, url.searchParams.getAll("exclude_tag_id"));
       const project = loadOutfitProject(projectId);
       if (!project) {
         sendJson(res, 404, { detail: "Outfit project not found" });
@@ -1150,7 +1162,9 @@ function handleModelLibraryApi(req, res, url) {
       }
       const outfits = db.prepare("SELECT * FROM outfit_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
         .map(outfitWithAssetAndTags);
-      const filtered = tagNames.length ? outfits.filter((outfit) => entryMatchesAllTags(outfit, tagNames)) : outfits;
+      const filtered = includeTagNames.length || excludeTagNames.length
+        ? outfits.filter((outfit) => entryMatchesTagFilter(outfit, includeTagNames, excludeTagNames))
+        : outfits;
       sendJson(res, 200, { outfits: filtered });
       return true;
     }
@@ -1368,7 +1382,8 @@ function handleModelLibraryApi(req, res, url) {
       return true;
     }
     if (tail === "actions" && method === "GET") {
-      const tagNames = resolveTagNames("action", projectId, url.searchParams.getAll("tag_id"));
+      const includeTagNames = resolveTagNames("action", projectId, url.searchParams.getAll("tag_id"));
+      const excludeTagNames = resolveTagNames("action", projectId, url.searchParams.getAll("exclude_tag_id"));
       const project = loadActionProject(projectId);
       if (!project) {
         sendJson(res, 404, { detail: "Action project not found" });
@@ -1376,7 +1391,9 @@ function handleModelLibraryApi(req, res, url) {
       }
       const actions = db.prepare("SELECT * FROM action_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
         .map(actionWithAssetAndTags);
-      const filtered = tagNames.length ? actions.filter((action) => entryMatchesAllTags(action, tagNames)) : actions;
+      const filtered = includeTagNames.length || excludeTagNames.length
+        ? actions.filter((action) => entryMatchesTagFilter(action, includeTagNames, excludeTagNames))
+        : actions;
       sendJson(res, 200, { actions: filtered });
       return true;
     }
@@ -1606,7 +1623,8 @@ function handleModelLibraryApi(req, res, url) {
       return true;
     }
     if (tail === "models" && method === "GET") {
-      const tagNames = resolveTagNames("model", projectId, url.searchParams.getAll("tag_id"));
+      const includeTagNames = resolveTagNames("model", projectId, url.searchParams.getAll("tag_id"));
+      const excludeTagNames = resolveTagNames("model", projectId, url.searchParams.getAll("exclude_tag_id"));
       const gender = url.searchParams.get("gender") || "";
       const project = loadProject(projectId);
       if (!project) {
@@ -1616,7 +1634,9 @@ function handleModelLibraryApi(req, res, url) {
       const models = db.prepare("SELECT * FROM model_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
         .map(modelWithCoverAndTags)
         .filter((model) => (gender ? model.gender === gender : true));
-      const filtered = tagNames.length ? models.filter((model) => entryMatchesAllTags(model, tagNames)) : models;
+      const filtered = includeTagNames.length || excludeTagNames.length
+        ? models.filter((model) => entryMatchesTagFilter(model, includeTagNames, excludeTagNames))
+        : models;
       sendJson(res, 200, { models: filtered });
       return true;
     }
@@ -1856,6 +1876,7 @@ const server = createServer((req, res) => {
 
   const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
   if (handleAdminRoute(req, res, url)) return;
+  if (handleCanvasExchangeRoute(req, res, url)) return;
   if (handleModelLibraryApi(req, res, url)) return;
   sendJson(res, 404, { detail: "API route not found" });
 });

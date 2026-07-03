@@ -7,6 +7,7 @@ import { listModelImages, listModelProjects, listModels, listModelTags, modelLib
 import { useModelLibraryStore } from "../model-library/modelLibraryStore";
 import { getStorageSettings, listOutfitProjects, listOutfits, listOutfitTags, outfitLibraryKeys } from "../outfit-library/api";
 import { useOutfitLibraryStore } from "../outfit-library/outfitLibraryStore";
+import { cleanLibraryTagFilter, countLibraryTags, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
 import type { LibraryAssetItem, LibraryAssetTab } from "./types";
 
 export const defaultLibraryAssetTabs: LibraryAssetTab[] = ["models", "outfits", "actions"];
@@ -41,18 +42,18 @@ export function useLibraryAssetPickerData({
   const [modelChoiceFor, setModelChoiceFor] = useState<LibraryAssetItem | null>(null);
   const activeOutfitProjectId = useOutfitLibraryStore((state) => state.activeProjectId);
   const setActiveOutfitProjectId = useOutfitLibraryStore((state) => state.setActiveProjectId);
-  const activeOutfitTagIds = useOutfitLibraryStore((state) => state.activeTagIds);
-  const setActiveOutfitTagIds = useOutfitLibraryStore((state) => state.setActiveTagIds);
+  const activeOutfitTagFilter = useOutfitLibraryStore((state) => state.activeTagFilter);
+  const setActiveOutfitTagFilter = useOutfitLibraryStore((state) => state.setActiveTagFilter);
   const activeModelProjectId = useModelLibraryStore((state) => state.activeProjectId);
   const setActiveModelProjectId = useModelLibraryStore((state) => state.setActiveProjectId);
-  const activeModelTagIds = useModelLibraryStore((state) => state.activeTagIds);
-  const setActiveModelTagIds = useModelLibraryStore((state) => state.setActiveTagIds);
+  const activeModelTagFilter = useModelLibraryStore((state) => state.activeTagFilter);
+  const setActiveModelTagFilter = useModelLibraryStore((state) => state.setActiveTagFilter);
   const activeModelGender = useModelLibraryStore((state) => state.activeGender);
   const toggleModelGender = useModelLibraryStore((state) => state.toggleGender);
   const activeActionProjectId = useActionLibraryStore((state) => state.activeProjectId);
   const setActiveActionProjectId = useActionLibraryStore((state) => state.setActiveProjectId);
-  const activeActionTagIds = useActionLibraryStore((state) => state.activeTagIds);
-  const setActiveActionTagIds = useActionLibraryStore((state) => state.setActiveTagIds);
+  const activeActionTagFilter = useActionLibraryStore((state) => state.activeTagFilter);
+  const setActiveActionTagFilter = useActionLibraryStore((state) => state.setActiveTagFilter);
 
   useEffect(() => {
     if (!availableTabs.includes(activeTab)) {
@@ -147,35 +148,47 @@ export function useLibraryAssetPickerData({
 
   useEffect(() => {
     const tags = outfitTagsQuery.data?.tags || [];
-    const validTagIds = activeOutfitTagIds.filter((tagId) => tags.some((tag) => tag.id === tagId));
-    if (activeTab === "outfits" && validTagIds.length !== activeOutfitTagIds.length) setActiveOutfitTagIds(validTagIds);
-  }, [activeOutfitTagIds, activeTab, outfitTagsQuery.data?.tags, setActiveOutfitTagIds]);
+    const validFilter = cleanLibraryTagFilter(activeOutfitTagFilter, tags.map((tag) => tag.id));
+    if (
+      activeTab === "outfits"
+      && (validFilter.includeTagIds.length !== activeOutfitTagFilter.includeTagIds.length
+        || validFilter.excludeTagIds.length !== activeOutfitTagFilter.excludeTagIds.length)
+    ) setActiveOutfitTagFilter(validFilter);
+  }, [activeOutfitTagFilter, activeTab, outfitTagsQuery.data?.tags, setActiveOutfitTagFilter]);
 
   useEffect(() => {
     const tags = modelTagsQuery.data?.tags || [];
-    const validTagIds = activeModelTagIds.filter((tagId) => tags.some((tag) => tag.id === tagId));
-    if (activeTab === "models" && validTagIds.length !== activeModelTagIds.length) setActiveModelTagIds(validTagIds);
-  }, [activeModelTagIds, activeTab, modelTagsQuery.data?.tags, setActiveModelTagIds]);
+    const validFilter = cleanLibraryTagFilter(activeModelTagFilter, tags.map((tag) => tag.id));
+    if (
+      activeTab === "models"
+      && (validFilter.includeTagIds.length !== activeModelTagFilter.includeTagIds.length
+        || validFilter.excludeTagIds.length !== activeModelTagFilter.excludeTagIds.length)
+    ) setActiveModelTagFilter(validFilter);
+  }, [activeModelTagFilter, activeTab, modelTagsQuery.data?.tags, setActiveModelTagFilter]);
 
   useEffect(() => {
     const tags = actionTagsQuery.data?.tags || [];
-    const validTagIds = activeActionTagIds.filter((tagId) => tags.some((tag) => tag.id === tagId));
-    if (activeTab === "actions" && validTagIds.length !== activeActionTagIds.length) setActiveActionTagIds(validTagIds);
-  }, [activeActionTagIds, activeTab, actionTagsQuery.data?.tags, setActiveActionTagIds]);
+    const validFilter = cleanLibraryTagFilter(activeActionTagFilter, tags.map((tag) => tag.id));
+    if (
+      activeTab === "actions"
+      && (validFilter.includeTagIds.length !== activeActionTagFilter.includeTagIds.length
+        || validFilter.excludeTagIds.length !== activeActionTagFilter.excludeTagIds.length)
+    ) setActiveActionTagFilter(validFilter);
+  }, [activeActionTagFilter, activeTab, actionTagsQuery.data?.tags, setActiveActionTagFilter]);
 
   const outfitsQuery = useQuery({
-    queryKey: activeOutfitProjectId ? outfitLibraryKeys.outfits(activeOutfitProjectId, activeOutfitTagIds) : ["outfits", "empty", activeOutfitTagIds],
-    queryFn: () => listOutfits({ projectId: activeOutfitProjectId, tagIds: activeOutfitTagIds }),
+    queryKey: activeOutfitProjectId ? outfitLibraryKeys.outfits(activeOutfitProjectId, activeOutfitTagFilter) : ["outfits", "empty", activeOutfitTagFilter],
+    queryFn: () => listOutfits({ projectId: activeOutfitProjectId, tagFilter: activeOutfitTagFilter }),
     enabled: canQuery && activeTab === "outfits" && Boolean(activeOutfitProjectId),
   });
   const modelsQuery = useQuery({
-    queryKey: activeModelProjectId ? modelLibraryKeys.models(activeModelProjectId, activeModelTagIds, activeModelGender) : ["models", "empty", activeModelTagIds, activeModelGender],
-    queryFn: () => listModels({ projectId: activeModelProjectId, tagIds: activeModelTagIds, gender: activeModelGender }),
+    queryKey: activeModelProjectId ? modelLibraryKeys.models(activeModelProjectId, activeModelTagFilter, activeModelGender) : ["models", "empty", activeModelTagFilter, activeModelGender],
+    queryFn: () => listModels({ projectId: activeModelProjectId, tagFilter: activeModelTagFilter, gender: activeModelGender }),
     enabled: canQuery && activeTab === "models" && Boolean(activeModelProjectId),
   });
   const actionsQuery = useQuery({
-    queryKey: activeActionProjectId ? actionLibraryKeys.actions(activeActionProjectId, activeActionTagIds) : ["actions", "empty", activeActionTagIds],
-    queryFn: () => listActions({ projectId: activeActionProjectId, tagIds: activeActionTagIds }),
+    queryKey: activeActionProjectId ? actionLibraryKeys.actions(activeActionProjectId, activeActionTagFilter) : ["actions", "empty", activeActionTagFilter],
+    queryFn: () => listActions({ projectId: activeActionProjectId, tagFilter: activeActionTagFilter }),
     enabled: canQuery && activeTab === "actions" && Boolean(activeActionProjectId),
   });
 
@@ -188,12 +201,13 @@ export function useLibraryAssetPickerData({
   const activeProjects = activeTab === "models" ? modelProjects : activeTab === "actions" ? actionProjects : outfitProjects;
   const activeProjectId = activeTab === "models" ? activeModelProjectId : activeTab === "actions" ? activeActionProjectId : activeOutfitProjectId;
   const activeTags = activeTab === "models" ? modelTagsQuery.data?.tags || [] : activeTab === "actions" ? actionTagsQuery.data?.tags || [] : outfitTagsQuery.data?.tags || [];
-  const activeTagIds = activeTab === "models" ? activeModelTagIds : activeTab === "actions" ? activeActionTagIds : activeOutfitTagIds;
+  const activeTagFilter = activeTab === "models" ? activeModelTagFilter : activeTab === "actions" ? activeActionTagFilter : activeOutfitTagFilter;
   const activeItems = useMemo<LibraryAssetItem[]>(() => {
     if (activeTab === "models") {
       return sortByName(modelsQuery.data?.models || [], (model) => model.name).map((model) => ({
         id: model.id,
         name: model.name,
+        tags: model.tags,
         assetId: model.cover_asset_id,
         url: model.cover_url || "",
         updatedAt: model.updated_at,
@@ -205,6 +219,7 @@ export function useLibraryAssetPickerData({
       return sortByName(actionsQuery.data?.actions || [], (action) => action.name).map((action) => ({
         id: action.id,
         name: action.name,
+        tags: action.tags,
         assetId: action.asset_id,
         url: action.asset_url || "",
         updatedAt: action.updated_at,
@@ -214,6 +229,7 @@ export function useLibraryAssetPickerData({
     return sortByName(outfitsQuery.data?.outfits || [], (outfit) => outfit.name).map((outfit) => ({
       id: outfit.id,
       name: outfit.name,
+      tags: outfit.tags,
       assetId: outfit.asset_id,
       url: outfit.asset_url || "",
       updatedAt: outfit.updated_at,
@@ -241,7 +257,7 @@ export function useLibraryAssetPickerData({
 
   useEffect(() => {
     setModelChoiceFor(null);
-  }, [activeTab, activeModelGender, activeModelProjectId, activeModelTagIds]);
+  }, [activeTab, activeModelGender, activeModelProjectId, activeModelTagFilter]);
 
   function changeProject(projectId: string) {
     if (activeTab === "models") setActiveModelProjectId(projectId);
@@ -249,10 +265,10 @@ export function useLibraryAssetPickerData({
     else setActiveOutfitProjectId(projectId);
   }
 
-  function changeTag(tagIds: string[]) {
-    if (activeTab === "models") setActiveModelTagIds(tagIds);
-    else if (activeTab === "actions") setActiveActionTagIds(tagIds);
-    else setActiveOutfitTagIds(tagIds);
+  function changeTag(tagFilter: LibraryTagFilter) {
+    if (activeTab === "models") setActiveModelTagFilter(tagFilter);
+    else if (activeTab === "actions") setActiveActionTagFilter(tagFilter);
+    else setActiveOutfitTagFilter(tagFilter);
   }
 
   function prefetchModelChoices(item: LibraryAssetItem) {
@@ -272,7 +288,9 @@ export function useLibraryAssetPickerData({
     activeProjectId,
     activeModelGender,
     activeTags,
-    activeTagIds,
+    activeTagFilter,
+    activeTagCounts: countLibraryTags(activeItems, activeTags),
+    hasActiveTagFilter: hasLibraryTagFilter(activeTagFilter),
     activeItems,
     isLoading,
     errorMessage,

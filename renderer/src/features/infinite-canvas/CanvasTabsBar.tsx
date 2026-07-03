@@ -1,15 +1,16 @@
-import { Home, Layers, X } from "lucide-react";
+import { Cloud, Home, Layers, X } from "lucide-react";
 import { PointerEvent, useRef, useState } from "react";
 import type { TFunction } from "i18next";
-import type { CanvasDocumentTab } from "./useCanvasProjects";
+import type { CanvasDocumentTab } from "./canvasTabs";
 
 interface CanvasTabsBarProps {
   tabs: CanvasDocumentTab[];
   activeCanvasId: string;
+  activeRemoteCanvasId?: string;
   showHome: boolean;
   onOpenHome: () => void;
-  onOpenCanvas: (canvasId: string) => void;
-  onCloseCanvas: (canvasId: string) => void;
+  onOpenCanvas: (tab: CanvasDocumentTab) => void;
+  onCloseCanvas: (tab: CanvasDocumentTab) => void;
   onReorderCanvas: (draggedCanvasId: string, targetIndex: number) => void;
   t: TFunction;
 }
@@ -46,6 +47,7 @@ function getTargetIndex(draggedCenter: number, draggedCanvasId: string, tabs: Ca
 export function CanvasTabsBar({
   tabs,
   activeCanvasId,
+  activeRemoteCanvasId = "",
   showHome,
   onOpenHome,
   onOpenCanvas,
@@ -97,7 +99,7 @@ export function CanvasTabsBar({
     const targetIndex = dragState.targetIndex;
     if (shouldOpen) {
       setDragState(null);
-      onOpenCanvas(tab.id);
+      onOpenCanvas(tab);
       return;
     }
     setIsReleasingDrag(true);
@@ -149,8 +151,10 @@ export function CanvasTabsBar({
       <div className={`ic-canvas-tabs-strip${dragState ? " is-reordering" : ""}${isReleasingDrag ? " is-releasing" : ""}`}>
         {tabs.map((tab, index) => {
           const title = tab.title || t("infiniteCanvas:untitledCanvas");
-          const isActive = !showHome && tab.id === activeCanvasId;
+          const isRemote = tab.source === "remote";
+          const isActive = !showHome && (isRemote ? tab.id === activeRemoteCanvasId : tab.id === activeCanvasId);
           const isDragging = dragState?.canvasId === tab.id;
+          const TabIcon = isRemote ? Cloud : Layers;
           return (
             <div
               key={tab.id}
@@ -174,7 +178,7 @@ export function CanvasTabsBar({
                 aria-selected={isActive}
                 tabIndex={-1}
               >
-                <Layers size={15} aria-hidden="true" />
+                <TabIcon size={15} aria-hidden="true" />
                 <span>{title}</span>
               </button>
               <button
@@ -183,7 +187,7 @@ export function CanvasTabsBar({
                 aria-label={`${t("common:actions.close")}: ${title}`}
                 title={t("common:actions.close")}
                 onPointerDown={(event) => event.stopPropagation()}
-                onClick={() => onCloseCanvas(tab.id)}
+                onClick={() => onCloseCanvas(tab)}
               >
                 <X size={13} aria-hidden="true" />
               </button>

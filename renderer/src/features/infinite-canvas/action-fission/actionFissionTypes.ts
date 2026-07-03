@@ -10,7 +10,8 @@ export type ActionFissionAspectRatio = NonNullable<CanvasNode["imageAspectRatio"
 export interface ActionFissionRow {
   id: string;
   actionProjectId: string;
-  actionTagIds: string[];
+  includeActionTagIds: string[];
+  excludeActionTagIds: string[];
   selectedActionId?: string;
   selectedActionName?: string;
   selectedActionPrompt?: string;

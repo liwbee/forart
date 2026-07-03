@@ -1,3 +1,5 @@
+import type { LibraryTagFilter } from "../library-tags";
+
 export interface ActionProject {
   id: string;
   name: string;
@@ -38,7 +40,7 @@ export interface AssetUploadPayload {
 
 export interface ActionFilters {
   projectId: string;
-  tagIds?: string[];
+  tagFilter?: LibraryTagFilter;
 }
 
 export interface StorageSettings {

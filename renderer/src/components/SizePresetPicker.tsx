@@ -118,7 +118,7 @@ export function SizePresetPicker<R extends string, A extends string>({
       </button>
       {isOpen ? (
         <div
-          className={joinClassNames("ic-composer-size__panel", panelClassName)}
+          className={joinClassNames("ic-composer-size__panel scrollbar-menu", panelClassName)}
           role="dialog"
           aria-label={labels.trigger}
           onPointerDown={(event) => event.stopPropagation()}

@@ -1,0 +1,715 @@
+/* Action fission node body: nodes/ActionFissionNodeBody.tsx and nodes/action-fission/*. */
+.ic-action-fission {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  gap: 12px;
+  padding: 14px;
+  color: var(--canvas-state-hover-text);
+  cursor: default;
+}
+
+.ic-action-fission button {
+  font: inherit;
+}
+
+.ic-action-fission-api-bar {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr);
+  gap: 8px;
+}
+
+.ic-action-fission-api-bar.is-libtv {
+  grid-template-columns: minmax(128px, 0.8fr) minmax(160px, 1.2fr);
+}
+
+.ic-action-fission-refs {
+  min-width: 0;
+  display: grid;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--canvas-node-border);
+}
+
+.ic-action-fission-refs__list {
+  min-width: 0;
+  min-height: calc(var(--ic-input-size) + 4px);
+}
+
+.ic-action-fission-rows {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  padding: 2px 8px 2px 0;
+}
+
+.ic-action-fission-row {
+  position: relative;
+  height: 148px;
+  min-height: 148px;
+  flex: 0 0 148px;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 74px;
+  grid-template-rows: minmax(0, 1fr);
+  column-gap: 14px;
+  row-gap: 0;
+  align-items: stretch;
+  border: 1px solid var(--canvas-node-border);
+  border-radius: 8px;
+  padding: 10px 16px 10px 10px;
+  background: var(--canvas-control-bg);
+}
+
+.ic-action-fission-row.has-message {
+  height: 180px;
+  min-height: 180px;
+  flex-basis: 180px;
+  grid-template-rows: minmax(0, 1fr) 24px;
+  row-gap: 8px;
+}
+
+.ic-action-fission-row.is-running {
+  border-color: color-mix(in srgb, var(--canvas-link-active) 45%, var(--canvas-node-border));
+}
+
+.ic-action-fission-row.is-running .ic-action-fission-result {
+  border-color: color-mix(in srgb, var(--canvas-link-active) 34%, var(--canvas-node-border));
+  background: color-mix(in srgb, var(--canvas-node-bg) 76%, transparent);
+}
+
+.ic-action-fission-row.is-running .ic-action-fission-result::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--canvas-node-bg) 38%, transparent);
+  pointer-events: none;
+}
+
+.ic-action-fission-row.is-running .ic-action-fission-result::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  background: linear-gradient(105deg, transparent 34%, color-mix(in srgb, var(--canvas-link-active) 18%, transparent) 50%, transparent 66%);
+  background-size: 240% 100%;
+  background-position: 140% 0;
+  pointer-events: none;
+  animation: ic-generator-running-sheen 1900ms ease-in-out infinite;
+}
+
+.ic-action-fission-row.is-running .ic-action-fission-result img {
+  filter: blur(3px) saturate(0.86);
+  transform: scale(1.04);
+}
+
+.ic-action-fission-row.has-error {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--canvas-node-border));
+}
+
+.ic-action-fission-result {
+  position: relative;
+  grid-row: 1;
+  min-width: 96px;
+  width: 96px;
+  height: 100%;
+  align-self: stretch;
+  overflow: hidden;
+  border: 1px solid var(--canvas-node-border);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--canvas-node-muted);
+  background: var(--canvas-node-bg);
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  text-align: center;
+}
+
+.ic-action-fission-result.has-image {
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.ic-action-fission-result.has-image:hover,
+.ic-action-fission-result.has-image:focus-visible {
+  border-color: var(--canvas-state-active-border);
+  outline: 0;
+}
+
+.ic-action-fission-result img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ic-action-fission-row__main {
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 66px;
+  gap: 12px;
+  border: 1px solid var(--canvas-node-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--canvas-node-bg);
+}
+
+.ic-action-fission-row__config {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 58px 18px 28px;
+  gap: 6px;
+}
+
+.ic-action-fission-row__actions button,
+.ic-action-fission-row__tools button,
+.ic-action-fission-add-row button,
+.ic-action-fission-run-all button {
+  border: 1px solid var(--canvas-node-border);
+  color: var(--canvas-state-hover-text);
+  background: var(--canvas-node-bg);
+  cursor: pointer;
+}
+
+.ic-action-fission-row__delete {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--canvas-node-muted);
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.ic-action-fission-row__delete:hover,
+.ic-action-fission-row__delete:focus-visible {
+  color: var(--canvas-state-hover-text);
+  outline: 0;
+}
+
+.ic-action-fission-filter-button {
+  min-width: 0;
+  height: 58px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+  border: 1px solid var(--canvas-node-border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: var(--canvas-state-hover-text);
+  background: var(--canvas-control-bg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ic-action-fission-filter-button:hover,
+.ic-action-fission-filter-button:focus-visible,
+.ic-action-fission-filter-button[aria-expanded="true"] {
+  border-color: var(--canvas-state-active-border);
+  background: var(--canvas-node-bg);
+  outline: 0;
+}
+
+.ic-action-fission-filter-button__project,
+.ic-action-fission-filter-button__tags {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ic-action-fission-filter-button__project {
+  grid-column: 1;
+  color: var(--canvas-state-hover-text);
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+
+.ic-action-fission-filter-button__tags {
+  grid-column: 1;
+  color: var(--canvas-node-muted);
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.ic-action-fission-filter-button svg {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  color: var(--canvas-node-muted);
+}
+
+.ic-action-fission-selected-action {
+  grid-row: 2;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--canvas-state-hover-text);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ic-action-fission-selector-panel {
+  position: fixed;
+  z-index: 1300;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 138px minmax(0, 1fr);
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid var(--canvas-node-border);
+  border-radius: 10px;
+  padding: 10px;
+  color: var(--canvas-state-hover-text);
+  background: var(--canvas-node-bg);
+  box-shadow: var(--shadow-popover);
+}
+
+.ic-action-fission-selector-panel__section {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.ic-action-fission-selector-panel__label {
+  color: var(--canvas-node-muted);
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+}
+
+.ic-action-fission-selector-panel__projects,
+.ic-action-fission-selector-panel__tags {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ic-action-fission-selector-panel__projects-section {
+  grid-template-rows: auto minmax(0, 1fr);
+  border-right: 1px solid var(--canvas-node-border);
+  padding-right: 10px;
+}
+
+.ic-action-fission-selector-panel__projects {
+  min-height: 0;
+  align-content: start;
+  overflow: auto;
+}
+
+.ic-action-fission-selector-panel__right {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+.ic-action-fission-selector-panel__projects button,
+.ic-action-fission-selector-panel__tags button {
+  flex: 0 0 auto;
+  min-height: 26px;
+  max-width: 180px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--canvas-node-border);
+  border-radius: 999px;
+  padding: 0 9px;
+  color: var(--canvas-state-hover-text);
+  background: var(--canvas-node-bg);
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.ic-action-fission-selector-panel__projects button {
+  width: 100%;
+  justify-content: space-between;
+  border-radius: 8px;
+}
+
+.ic-action-fission-selector-panel__projects button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ic-action-fission-selector-panel__projects button:hover,
+.ic-action-fission-selector-panel__projects button:focus-visible {
+  border-color: var(--canvas-state-hover-border);
+  background: var(--canvas-state-hover-bg);
+  outline: 0;
+}
+
+.ic-action-fission-selector-panel__tags button:hover,
+.ic-action-fission-selector-panel__tags button:focus-visible {
+  outline: 0;
+}
+
+.ic-action-fission-selector-panel__projects button.selected {
+  border-color: var(--canvas-link-active);
+  color: var(--canvas-state-active-text);
+  background: var(--canvas-state-active-bg);
+}
+
+.ic-action-fission-selector-panel__tags button.ic-action-fission-tag-choice {
+  padding-right: 4px;
+}
+
+.ic-action-fission-tag-choice--include {
+  border-color: var(--state-active-border) !important;
+  color: var(--state-active-text) !important;
+  background: var(--state-active-bg) !important;
+}
+
+.ic-action-fission-tag-choice--exclude {
+  border-color: color-mix(in srgb, var(--danger) 42%, transparent) !important;
+  color: var(--danger) !important;
+  background: var(--danger-soft) !important;
+}
+
+.ic-action-fission-tag-choice__exclude {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  color: currentColor;
+  opacity: 0.72;
+}
+
+.ic-action-fission-tag-choice__count {
+  min-width: 13px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0 3px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  color: currentColor;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  opacity: 0.72;
+}
+
+.ic-action-fission-tag-choice--include .ic-action-fission-tag-choice__exclude {
+  opacity: 0.78;
+}
+
+.ic-action-fission-tag-choice--exclude .ic-action-fission-tag-choice__exclude {
+  color: var(--danger);
+  opacity: 1;
+}
+
+.ic-action-fission-tag-choice__exclude:hover,
+.ic-action-fission-tag-choice__exclude:focus-visible {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  opacity: 1;
+  outline: 0;
+}
+
+.ic-action-fission-selector-panel__results {
+  min-height: 0;
+}
+
+.ic-action-fission-selector-panel__result-list {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
+  gap: 7px;
+  padding-right: 3px;
+}
+
+.ic-action-fission-selector-panel__result {
+  position: relative;
+  min-width: 0;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border: 1px solid var(--canvas-node-border);
+  border-radius: 8px;
+  background: var(--canvas-control-bg);
+}
+
+.ic-action-fission-selector-panel__result img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ic-action-fission-selector-panel__empty {
+  color: var(--canvas-node-muted);
+  font-size: 12px;
+  font-weight: var(--font-weight-regular);
+}
+
+.ic-action-fission-row__message {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--canvas-node-muted) 30%, transparent);
+  border-radius: 999px;
+  padding: 0 10px;
+  color: var(--canvas-state-hover-text);
+  background: color-mix(in srgb, var(--canvas-node-bg) 82%, transparent);
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ic-action-fission-row__message.is-running {
+  border-color: color-mix(in srgb, #2563eb 55%, var(--canvas-node-border));
+  color: #1d4ed8;
+  background: color-mix(in srgb, #2563eb 10%, var(--canvas-node-bg));
+}
+
+.ic-action-fission-row__message.is-ready {
+  border-color: var(--canvas-node-border);
+  color: var(--canvas-state-hover-text);
+  background: color-mix(in srgb, var(--canvas-node-bg) 82%, transparent);
+}
+
+.ic-action-fission-row__message.is-completed {
+  border-color: color-mix(in srgb, #16a34a 48%, var(--canvas-node-border));
+  color: #15803d;
+  background: color-mix(in srgb, #16a34a 9%, var(--canvas-node-bg));
+}
+
+.ic-action-fission-row__message.is-missing {
+  border-color: color-mix(in srgb, #f59e0b 58%, var(--canvas-node-border));
+  color: #b45309;
+  background: color-mix(in srgb, #f59e0b 12%, var(--canvas-node-bg));
+}
+
+.ic-action-fission-row__message.is-error {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--canvas-node-border));
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--canvas-node-bg));
+}
+
+.ic-action-fission-row__tools {
+  grid-row: 3;
+  min-width: 0;
+  align-self: start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ic-action-fission-row__tools button {
+  min-width: 0;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 9px;
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+}
+
+.ic-action-fission-row__tools .ic-action-fission-prompt-button {
+  width: 28px;
+  flex: 0 0 28px;
+  padding: 0;
+}
+
+.ic-action-fission-prompt-button__copy-icon {
+  display: none;
+}
+
+.ic-action-fission-prompt-button:hover .ic-action-fission-prompt-button__view-icon,
+.ic-action-fission-prompt-button:focus-visible .ic-action-fission-prompt-button__view-icon {
+  display: none;
+}
+
+.ic-action-fission-prompt-button:hover .ic-action-fission-prompt-button__copy-icon,
+.ic-action-fission-prompt-button:focus-visible .ic-action-fission-prompt-button__copy-icon {
+  display: block;
+}
+
+.ic-action-fission-prompt-panel {
+  position: fixed;
+  z-index: 1400;
+  box-sizing: border-box;
+  transform: translateY(-100%);
+  border: 1px solid var(--canvas-node-border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: var(--canvas-state-hover-text);
+  background: var(--canvas-node-bg);
+  box-shadow: var(--shadow-popover);
+  font-size: 12px;
+  font-weight: var(--font-weight-regular);
+  line-height: 1.45;
+  text-align: left;
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+.ic-action-fission-row__tools button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ic-action-fission-action-preview {
+  position: relative;
+  width: 66px;
+  aspect-ratio: 3 / 4;
+  align-self: center;
+  overflow: hidden;
+  border: 1px solid var(--canvas-node-border);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--canvas-node-muted);
+  background: var(--canvas-node-bg);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+  text-align: center;
+}
+
+.ic-action-fission-action-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ic-action-fission-action-preview.has-image {
+  cursor: zoom-in;
+}
+
+.ic-action-fission-action-preview.has-image:hover,
+.ic-action-fission-action-preview.has-image:focus-visible {
+  border-color: var(--canvas-state-active-border);
+  outline: 0;
+}
+
+.ic-action-fission-row__actions {
+  grid-row: 1;
+  display: grid;
+  align-content: center;
+}
+
+.ic-action-fission-row__actions button {
+  width: 62px;
+  height: 62px;
+  border-radius: 10px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.ic-action-fission-row__actions button,
+.ic-action-fission-run-all button {
+  border-color: var(--canvas-link-active);
+  color: var(--canvas-state-active-text);
+  background: var(--canvas-state-active-bg);
+}
+
+.ic-action-fission-row__actions button.is-stop,
+.ic-action-fission-run-all button.is-stop {
+  border-color: color-mix(in srgb, var(--danger) 70%, var(--canvas-node-border));
+  background: var(--danger);
+}
+
+.ic-action-fission button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ic-action-fission-add-row button {
+  width: 100%;
+  min-height: 34px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.ic-action-fission-node-error {
+  min-width: 0;
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ic-action-fission-footer {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.ic-action-fission-params {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 136px;
+  gap: 7px;
+}
+
+.ic-action-fission-run-all {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ic-action-fission-run-all button {
+  min-width: 104px;
+  height: 38px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+}
+

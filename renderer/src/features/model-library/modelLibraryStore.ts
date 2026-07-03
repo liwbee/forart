@@ -1,13 +1,14 @@
 import { create } from "zustand";
+import { EMPTY_LIBRARY_TAG_FILTER, type LibraryTagFilter } from "../library-tags";
 import { ModelGender } from "./types";
 
 interface ModelLibraryState {
   activeProjectId: string;
-  activeTagIds: string[];
+  activeTagFilter: LibraryTagFilter;
   activeGender: Exclude<ModelGender, "unknown"> | "";
   openModelId: string;
   setActiveProjectId: (projectId: string) => void;
-  setActiveTagIds: (tagIds: string[]) => void;
+  setActiveTagFilter: (tagFilter: LibraryTagFilter) => void;
   toggleGender: (gender: Exclude<ModelGender, "unknown">) => void;
   openEditor: (modelId: string) => void;
   closeEditor: () => void;
@@ -15,17 +16,17 @@ interface ModelLibraryState {
 
 export const useModelLibraryStore = create<ModelLibraryState>((set, get) => ({
   activeProjectId: "",
-  activeTagIds: [],
+  activeTagFilter: EMPTY_LIBRARY_TAG_FILTER,
   activeGender: "",
   openModelId: "",
   setActiveProjectId: (projectId) =>
     set({
       activeProjectId: projectId,
-      activeTagIds: [],
+      activeTagFilter: EMPTY_LIBRARY_TAG_FILTER,
       activeGender: "",
       openModelId: "",
     }),
-  setActiveTagIds: (tagIds) => set({ activeTagIds: tagIds, openModelId: "" }),
+  setActiveTagFilter: (tagFilter) => set({ activeTagFilter: tagFilter, openModelId: "" }),
   toggleGender: (gender) =>
     set({
       activeGender: get().activeGender === gender ? "" : gender,

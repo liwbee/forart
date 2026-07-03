@@ -64,9 +64,16 @@ function createLocalServerManager({ app, rootDir, fetchImpl = fetch, port = 6980
 
     fs.mkdirSync(config.localLibraryPath, { recursive: true });
     activeLocalServerConfig = config;
-    serverProcess = spawn(nodeExe, [bundledServerEntry], {
+    const useElectronNode = app.isPackaged && nodeExe === 'node';
+    const serverCommand = useElectronNode ? process.execPath : nodeExe;
+    const serverArgs = [bundledServerEntry];
+
+    serverProcess = spawn(serverCommand, serverArgs, {
       cwd: bundledServerDir,
-      env: localServerEnv(config),
+      env: {
+        ...localServerEnv(config),
+        ...(useElectronNode ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
+      },
       windowsHide: true,
     });
 

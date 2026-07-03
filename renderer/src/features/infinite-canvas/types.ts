@@ -193,7 +193,6 @@ export interface CanvasDocument extends CanvasSnapshot {
   title: string;
   icon?: string;
   canvasType?: "forart";
-  source?: "forart";
   projectId?: string;
   color?: string;
   pinned?: boolean;
@@ -206,7 +205,6 @@ export interface CanvasDocumentRecord {
   title: string;
   icon?: string;
   canvasType?: "forart";
-  source?: "forart";
   projectId?: string;
   color?: string;
   pinned?: boolean;

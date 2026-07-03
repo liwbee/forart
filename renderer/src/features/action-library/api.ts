@@ -1,11 +1,12 @@
 import { apiRequest } from "../../lib/apiClient";
+import { EMPTY_LIBRARY_TAG_FILTER, libraryTagFilterKey, type LibraryTagFilter } from "../library-tags";
 import { ActionEntry, ActionFilters, ActionProject, ActionTag, AssetUploadPayload, StorageSettings } from "./types";
 
 export const actionLibraryKeys = {
   projects: ["actionProjects"] as const,
   tagRoot: ["actionTags"] as const,
   tags: (projectId: string) => ["actionTags", projectId] as const,
-  actions: (projectId: string, tagIds: readonly string[] = []) => ["actions", projectId, [...tagIds].sort().join(",")] as const,
+  actions: (projectId: string, tagFilter: LibraryTagFilter = EMPTY_LIBRARY_TAG_FILTER) => ["actions", projectId, libraryTagFilterKey(tagFilter)] as const,
   storageSettings: ["storageSettings"] as const,
 };
 
@@ -59,9 +60,9 @@ export function uploadActionProjectCover(projectId: string, payload: AssetUpload
   });
 }
 
-export function listActions({ projectId, tagIds = [] }: ActionFilters) {
+export function listActions({ projectId, tagFilter = EMPTY_LIBRARY_TAG_FILTER }: ActionFilters) {
   return apiRequest<{ actions: ActionEntry[] }>(
-    `/api/action-projects/${encodeURIComponent(projectId)}/actions${queryString({ tag_id: tagIds })}`
+    `/api/action-projects/${encodeURIComponent(projectId)}/actions${queryString({ tag_id: tagFilter.includeTagIds, exclude_tag_id: tagFilter.excludeTagIds })}`
   );
 }
 

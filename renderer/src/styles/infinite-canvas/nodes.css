@@ -1,0 +1,175 @@
+/* Canvas node frame and first-pass node state styles. */
+.ic-node {
+  position: absolute;
+  z-index: 2;
+  pointer-events: auto;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-width: 180px;
+  min-height: 140px;
+  border: 1px solid var(--canvas-node-border);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--canvas-node-bg);
+  box-shadow: var(--shadow-ui);
+  cursor: grab;
+  touch-action: none;
+  overflow: visible;
+  transition:
+    border-color 180ms var(--ease-fluid),
+    box-shadow 180ms var(--ease-fluid),
+    opacity 180ms var(--ease-fluid),
+    transform 180ms var(--ease-fluid);
+}
+
+.ic-node.connecting {
+  border-color: var(--canvas-node-border);
+  box-shadow: var(--shadow-ui);
+}
+
+.ic-node:hover,
+.ic-node.hovered {
+  border-color: var(--canvas-state-hover-border);
+  box-shadow: var(--shadow-ui);
+}
+
+.ic-node.selected {
+  z-index: 8;
+  border-color: var(--canvas-state-active-border);
+  box-shadow: var(--shadow-ui);
+}
+
+.ic-node.related:not(.selected) {
+  border-color: var(--canvas-node-border);
+  box-shadow: var(--shadow-ui);
+}
+
+.ic-node--imageLoader,
+.ic-node--imageGenerator,
+.ic-node--libtvImageGenerator,
+.ic-node--generator {
+  grid-template-rows: minmax(0, 1fr);
+  padding: 0;
+  overflow: visible;
+  background: var(--canvas-node-bg);
+}
+
+.ic-node--imageGenerator.is-running,
+.ic-node--libtvImageGenerator.is-running,
+.ic-node--generator.is-running {
+  padding: 0;
+  border-color: color-mix(in srgb, var(--canvas-link-active) 34%, var(--canvas-node-border));
+  background: color-mix(in srgb, var(--canvas-node-bg) 76%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.ic-node--imageLoader.has-image,
+.ic-node--imageGenerator.has-image,
+.ic-node--libtvImageGenerator.has-image,
+.ic-node--generator.has-image {
+  border: 1px solid var(--canvas-node-border);
+  padding: 0;
+  background: var(--canvas-node-bg);
+  box-shadow: var(--shadow-ui);
+}
+
+.ic-node--imageLoader.has-image:hover,
+.ic-node--imageLoader.has-image.hovered {
+  border-color: var(--canvas-state-hover-border);
+  box-shadow: var(--shadow-ui);
+}
+
+.ic-node--imageLoader.has-image.selected {
+  border-color: var(--canvas-state-active-border);
+  box-shadow: var(--shadow-ui);
+}
+
+.ic-node--imageGenerator.is-running,
+.ic-node--imageGenerator.is-running.has-image,
+.ic-node--libtvImageGenerator.is-running,
+.ic-node--libtvImageGenerator.is-running.has-image,
+.ic-node--generator.is-running,
+.ic-node--generator.is-running.has-image {
+  border: 1px solid color-mix(in srgb, var(--canvas-link-active) 34%, var(--canvas-node-border));
+  padding: 0;
+  background: color-mix(in srgb, var(--canvas-node-bg) 76%, transparent);
+  box-shadow: var(--shadow-ui);
+}
+
+.ic-node--imageLoader:not(.has-image),
+.ic-node--imageGenerator:not(.has-image),
+.ic-node--libtvImageGenerator:not(.has-image),
+.ic-node--generator:not(.has-image) {
+  box-shadow: var(--shadow-ui);
+}
+
+.ic-node--imageGenerator.is-running::after,
+.ic-node--libtvImageGenerator.is-running::after,
+.ic-node--generator.is-running::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-radius: inherit;
+  background: linear-gradient(105deg, transparent 34%, color-mix(in srgb, var(--canvas-link-active) 18%, transparent) 50%, transparent 66%);
+  background-size: 240% 100%;
+  background-position: 140% 0;
+  pointer-events: none;
+  animation: ic-generator-running-sheen 1900ms ease-in-out infinite;
+}
+
+.ic-node--imageGenerator.is-running > :not(.ic-node-hover-toolbar):not(.ic-port),
+.ic-node--libtvImageGenerator.is-running > :not(.ic-node-hover-toolbar):not(.ic-port),
+.ic-node--generator.is-running > :not(.ic-node-hover-toolbar):not(.ic-port) {
+  position: relative;
+  z-index: 1;
+}
+
+.ic-node--imageLoader .ic-node-body,
+.ic-node--imageGenerator .ic-node-body,
+.ic-node--libtvImageGenerator .ic-node-body,
+.ic-node--generator .ic-node-body {
+  grid-row: 1;
+  overflow: visible;
+}
+
+.ic-node--prompt {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.ic-node--prompt .ic-node-body {
+  grid-row: 1;
+  gap: 0;
+  overflow: hidden;
+}
+
+.ic-node--prompt .ic-node-body textarea,
+.ic-node--prompt .ic-node-body .ic-prompt-display {
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 6px 7px;
+  background: transparent;
+  resize: none;
+}
+
+.ic-node--prompt .ic-node-body textarea:focus {
+  border: 0;
+  box-shadow: none;
+  outline: 0;
+}
+
+.ic-node--actionFission {
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 700px;
+  min-height: 420px;
+  padding: 0;
+  overflow: visible;
+}
+
+.ic-node--actionFission .ic-node-body {
+  grid-row: 1;
+  overflow: visible;
+}
+

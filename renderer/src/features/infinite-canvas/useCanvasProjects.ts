@@ -3,6 +3,7 @@ import type { TFunction } from "i18next";
 import { replaceCanvasDocument } from "./canvasStore";
 import { cloneCanvasNodesForNewCanvas } from "./canvasNodeClone";
 import { sanitizeCanvasNodesForSave } from "./canvasSerialization";
+import { localCanvasTabFromRecord, normalizeCanvasTab, type CanvasDocumentTab } from "./canvasTabs";
 import { stopLocalGenerationTasksForCanvas } from "./generation/generationTaskRegistry";
 import { createCanvasNode } from "./nodes/registry";
 import type { CanvasConnection, CanvasDocument, CanvasDocumentRecord, CanvasGroup, CanvasNode, CanvasNodeType, CanvasProjectRecord, CanvasSnapshot, Viewport } from "./types";
@@ -21,7 +22,6 @@ type StoredCanvasNode = Omit<CanvasNode, "type"> & {
   type: CanvasNodeType | "image";
 };
 
-export type CanvasDocumentTab = Pick<CanvasDocumentRecord, "id" | "title" | "icon" | "canvasType" | "source" | "updatedAt">;
 export type CanvasProjectStatusTone = "busy" | "ready" | "error";
 
 interface UseCanvasProjectsOptions {
@@ -50,20 +50,8 @@ function readLastCanvasState() {
 function writeLastCanvasState(canvasId: string, showHome: boolean) {
   if (typeof window === "undefined") return;
   if (canvasId) window.localStorage.setItem(LAST_CANVAS_ID_KEY, canvasId);
+  else window.localStorage.removeItem(LAST_CANVAS_ID_KEY);
   window.localStorage.setItem(LAST_CANVAS_HOME_KEY, showHome ? "true" : "false");
-}
-
-function normalizeCanvasTab(input: unknown): CanvasDocumentTab | null {
-  const parsed = input as Partial<CanvasDocumentTab> | null;
-  if (!parsed?.id) return null;
-  return {
-    id: String(parsed.id),
-    title: String(parsed.title || "Untitled canvas"),
-    icon: parsed.icon || "layers",
-    canvasType: "forart",
-    source: "forart",
-    updatedAt: Number(parsed.updatedAt || 0),
-  };
 }
 
 function readOpenCanvasTabs() {
@@ -80,17 +68,6 @@ function readOpenCanvasTabs() {
 function writeOpenCanvasTabs(tabs: CanvasDocumentTab[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(OPEN_CANVAS_TABS_KEY, JSON.stringify(tabs));
-}
-
-function canvasTabFromRecord(record: CanvasDocumentRecord | CanvasDocument): CanvasDocumentTab {
-  return {
-    id: record.id,
-    title: record.title || "Untitled canvas",
-    icon: record.icon || "layers",
-    canvasType: "forart",
-    source: "forart",
-    updatedAt: Number(record.updatedAt || 0),
-  };
 }
 
 function nodeDefaults(type: CanvasNodeType): CanvasNode {
@@ -195,7 +172,6 @@ function normalizeCanvasDocument(input: unknown): CanvasDocument | null {
     title: String(parsed.title || "Untitled canvas"),
     icon: parsed.icon || "layers",
     canvasType: "forart",
-    source: "forart",
     projectId: String(parsed.projectId || ""),
     color: parsed.color || "",
     pinned: Boolean(parsed.pinned),
@@ -214,7 +190,6 @@ function normalizeCanvasRecord(input: unknown): CanvasDocumentRecord | null {
     title: String(parsed.title || "Untitled canvas"),
     icon: parsed.icon || "layers",
     canvasType: "forart",
-    source: "forart",
     projectId: String(parsed.projectId || ""),
     color: parsed.color || "",
     pinned: Boolean(parsed.pinned),
@@ -325,7 +300,7 @@ export function useCanvasProjects({
 
   const addOrUpdateCanvasTab = useCallback((recordInput: CanvasDocumentRecord | CanvasDocument | CanvasDocumentTab) => {
     const tab = normalizeCanvasTab(recordInput);
-    if (!tab) return;
+    if (!tab || tab.source !== "local") return;
     setCanvasTabs((current) => (
       current.some((item) => item.id === tab.id)
         ? current.map((item) => (item.id === tab.id ? { ...item, ...tab } : item))
@@ -363,6 +338,19 @@ export function useCanvasProjects({
     clearCanvasTransientState();
   }, [addOrUpdateCanvasTab, clearCanvasTransientState, setViewport, setZoomInput]);
 
+  const openReadOnlyCanvasDocument = useCallback((document: CanvasDocument) => {
+    replaceCanvasDocument({ nodes: document.nodes, connections: document.connections, groups: document.groups });
+    setViewport(document.viewport);
+    setZoomInput(String(Math.round(document.viewport.scale * 100)));
+    activeCanvasIdRef.current = "";
+    setActiveCanvasId("");
+    setActiveCanvasTitle(document.title);
+    setShowCanvasHome(false);
+    showCanvasHomeRef.current = false;
+    writeLastCanvasState("", false);
+    clearCanvasTransientState();
+  }, [clearCanvasTransientState, setViewport, setZoomInput]);
+
   const updateCanvasDocumentRecord = useCallback((recordInput: unknown) => {
     const record = normalizeCanvasRecord(recordInput);
     if (!record) return;
@@ -372,7 +360,7 @@ export function useCanvasProjects({
         : [record, ...current];
       return [...next].sort((a, b) => Number(b.updatedAt || b.createdAt) - Number(a.updatedAt || a.createdAt));
     });
-    setCanvasTabs((current) => current.map((item) => (item.id === record.id ? { ...item, ...canvasTabFromRecord(record) } : item)));
+    setCanvasTabs((current) => current.map((item) => (item.id === record.id ? { ...item, ...localCanvasTabFromRecord(record) } : item)));
     if (record.id === activeCanvasIdRef.current) setActiveCanvasTitle(record.title);
   }, []);
 
@@ -384,7 +372,6 @@ export function useCanvasProjects({
       title: project?.title || activeCanvasTitle,
       icon: project?.icon,
       canvasType: project?.canvasType,
-      source: project?.source,
       projectId: project?.projectId || "",
       nodes: sanitizeCanvasNodesForSave(nodes),
       connections,
@@ -626,7 +613,6 @@ export function useCanvasProjects({
         title: t("infiniteCanvas:canvasCopyName", { title: project.title || t("infiniteCanvas:untitledCanvas") }),
         icon: project.icon,
         canvasType: project.canvasType,
-        source: project.source,
         projectId: project.projectId || "",
         nodes: cloneCanvasNodesForNewCanvas(project.nodes),
         connections: cloneCanvasPayload(project.connections),
@@ -658,6 +644,61 @@ export function useCanvasProjects({
     }
   }, [showProjectStatus, t, updateCanvasDocumentRecord]);
 
+  const showPackageResult = useCallback((result: { canceled?: boolean; warnings?: unknown[] } | null | undefined, successMessage: string) => {
+    if (!result || result.canceled) return;
+    const warningCount = Array.isArray(result.warnings) ? result.warnings.length : 0;
+    showProjectStatus(
+      warningCount ? t("infiniteCanvas:canvasExportWarnings") : successMessage,
+      warningCount ? "error" : "ready",
+      CANVAS_TOAST_AUTO_HIDE_MS,
+    );
+  }, [showProjectStatus, t]);
+
+  const exportCanvasDocumentJson = useCallback(async (canvasId: string) => {
+    if (!canvasId || !window.easyTool?.exportCanvasJson) return;
+    try {
+      if (canvasId === activeCanvasIdRef.current) await saveActiveCanvasNow();
+      const result = await window.easyTool.exportCanvasJson(canvasId);
+      showPackageResult(result, t("infiniteCanvas:canvasExported"));
+    } catch (error) {
+      showProjectStatus(error instanceof Error ? error.message : String(error), "error", CANVAS_TOAST_AUTO_HIDE_MS);
+    }
+  }, [saveActiveCanvasNow, showPackageResult, showProjectStatus, t]);
+
+  const exportCanvasDocumentPackage = useCallback(async (canvasId: string) => {
+    if (!canvasId || !window.easyTool?.exportCanvasPackage) return;
+    try {
+      if (canvasId === activeCanvasIdRef.current) await saveActiveCanvasNow();
+      const result = await window.easyTool.exportCanvasPackage(canvasId);
+      showPackageResult(result, t("infiniteCanvas:canvasExported"));
+    } catch (error) {
+      showProjectStatus(error instanceof Error ? error.message : String(error), "error", CANVAS_TOAST_AUTO_HIDE_MS);
+    }
+  }, [saveActiveCanvasNow, showPackageResult, showProjectStatus, t]);
+
+  const importCanvasDocument = useCallback(async () => {
+    if (!window.easyTool?.importCanvas) {
+      showProjectStatus(t("infiniteCanvas:canvasDesktopRequired"), "error", CANVAS_TOAST_AUTO_HIDE_MS);
+      return;
+    }
+    try {
+      const result = await window.easyTool.importCanvas({ projectId: activeProjectId });
+      if (result.canceled) return;
+      const record = normalizeCanvasRecord(result.record || result.canvas);
+      await refreshCanvasWorkspace();
+      if (record) {
+        setActiveProjectId(record.projectId || activeProjectId);
+        setSelectedHomeCanvasId(record.id);
+      }
+      showCanvasHomeRef.current = true;
+      setShowCanvasHome(true);
+      writeLastCanvasState("", true);
+      showPackageResult(result, t("infiniteCanvas:canvasImported"));
+    } catch (error) {
+      showProjectStatus(error instanceof Error ? error.message : String(error), "error", CANVAS_TOAST_AUTO_HIDE_MS);
+    }
+  }, [activeProjectId, refreshCanvasWorkspace, setActiveProjectId, showPackageResult, showProjectStatus, t]);
+
   useEffect(() => {
     let canceled = false;
     async function loadDiskCanvasProjects() {
@@ -673,7 +714,7 @@ export function useCanvasProjects({
         const projectMap = new Map(projects.map((project) => [project.id, project]));
         setCanvasTabs((current) => current
           .filter((tab) => projectMap.has(tab.id))
-          .map((tab) => canvasTabFromRecord(projectMap.get(tab.id)!)));
+          .map((tab) => localCanvasTabFromRecord(projectMap.get(tab.id)!)));
         const lastCanvas = readLastCanvasState();
         if (!lastCanvas.showHome && lastCanvas.canvasId && projects.some((project) => project.id === lastCanvas.canvasId)) {
           await openCanvasDocument(lastCanvas.canvasId);
@@ -692,7 +733,7 @@ export function useCanvasProjects({
     return () => {
       canceled = true;
     };
-  }, [openCanvasDocument, refreshCanvasWorkspace, showProjectStatus, t]);
+  }, []);
 
   useEffect(() => {
     if (!activeCanvasId) return;
@@ -701,7 +742,6 @@ export function useCanvasProjects({
       title: activeCanvasTitle,
       icon: activeProject?.icon,
       canvasType: activeProject?.canvasType,
-      source: activeProject?.source,
       projectId: activeProject?.projectId || "",
       nodes: sanitizeCanvasNodesForSave(nodes),
       connections,
@@ -746,6 +786,7 @@ export function useCanvasProjects({
     sortedCanvasDocuments,
     refreshCanvasWorkspace,
     openCanvasDocument,
+    openReadOnlyCanvasDocument,
     closeCanvasTab,
     reorderCanvasTabs,
     createCanvasDocumentFromDraft,
@@ -754,6 +795,9 @@ export function useCanvasProjects({
     submitRenameCanvasDocument,
     submitRenameCanvasProject,
     duplicateCanvasDocument,
+    exportCanvasDocumentJson,
+    exportCanvasDocumentPackage,
+    importCanvasDocument,
     moveCanvasToProject,
     deleteCanvasDocument,
     deleteCanvasProject,

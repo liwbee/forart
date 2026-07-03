@@ -40,8 +40,8 @@ export function useActionFissionNodeState({ node, onPatchNode, onBeforeRemoveRow
     patchActionFission((current) => changeActionFissionRowProject(current, rowId, projectId));
   }, [patchActionFission]);
 
-  const setRowTags = useCallback((rowId: string, tagIds: string[]) => {
-    patchActionFission((current) => changeActionFissionRowTags(current, rowId, tagIds));
+  const setRowTags = useCallback((rowId: string, includeTagIds: string[], excludeTagIds: string[]) => {
+    patchActionFission((current) => changeActionFissionRowTags(current, rowId, includeTagIds, excludeTagIds));
   }, [patchActionFission]);
 
   const addRow = useCallback(() => {

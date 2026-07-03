@@ -5,9 +5,12 @@ import { Copy, Download, MoreHorizontal, Pencil, Plus, Star, Trash2, Upload, X }
 import { createPortal } from "react-dom";
 import { Fragment } from "react";
 import { ImageViewer } from "../../lib/ImageViewer";
+import { CollapsibleTagFilterRow } from "../library-tags";
+import { LibraryTagChoiceButton } from "../library-tags";
 import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
 import { copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
 import { sortByName } from "../../lib/sortByName";
+import { EMPTY_LIBRARY_TAG_FILTER, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
 import {
   createModel,
   createModelTag,
@@ -259,121 +262,28 @@ function ModelProjectSidebar({
 
 function ModelToolbar({
   tags,
-  activeTagIds,
+  tagFilter,
+  tagCounts,
   activeGender,
   onTagToggle,
+  onTagExclude,
   onTagClear,
   onGenderToggle,
   onOpenTagManager,
 }: {
   tags: ModelTag[];
-  activeTagIds: string[];
+  tagFilter: LibraryTagFilter;
+  tagCounts: Record<string, number>;
   activeGender: "female" | "male" | "";
   onTagToggle: (tagId: string) => void;
+  onTagExclude: (tagId: string) => void;
   onTagClear: () => void;
   onGenderToggle: (gender: "female" | "male") => void;
   onOpenTagManager: () => void;
 }) {
   const { t } = useTranslation();
-  const tagControlsRef = useRef<HTMLDivElement>(null);
-  const tagMeasureRef = useRef<HTMLDivElement>(null);
-  const [visibleTagCount, setVisibleTagCount] = useState(tags.length);
-  const [tagMenuState, setTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
-  const visibleTags = tags.slice(0, visibleTagCount);
-  const hiddenTags = tags.slice(visibleTagCount);
-  const activeTagSet = useMemo(() => new Set(activeTagIds), [activeTagIds]);
-  const hasHiddenActiveTag = hiddenTags.some((tag) => activeTagSet.has(tag.id));
-
-  useEffect(() => {
-    const controls = tagControlsRef.current;
-    const measure = tagMeasureRef.current;
-    if (!controls || !measure) {
-      setVisibleTagCount(tags.length);
-      return;
-    }
-    const controlsElement = controls;
-    const measureElement = measure;
-
-    function updateVisibleTags() {
-      const controlsWidth = controlsElement.clientWidth;
-      const allButton = measureElement.querySelector<HTMLElement>('[data-measure-kind="all"]');
-      const moreButton = measureElement.querySelector<HTMLElement>('[data-measure-kind="more"]');
-      const tagButtons = Array.from(measureElement.querySelectorAll<HTMLElement>('[data-measure-kind="tag"]'));
-      if (!controlsWidth || !allButton || !moreButton) {
-        setVisibleTagCount(tags.length);
-        return;
-      }
-
-      const gapValue = getComputedStyle(controlsElement).columnGap || getComputedStyle(controlsElement).gap || "8px";
-      const gap = Number.parseFloat(gapValue) || 8;
-      const allWidth = allButton.offsetWidth;
-      const moreWidth = moreButton.offsetWidth;
-      const tagWidths = tagButtons.map((button) => button.offsetWidth);
-      const totalWidth = (widths: number[]) => widths.reduce((sum, width) => sum + width, 0) + Math.max(0, widths.length - 1) * gap;
-
-      if (totalWidth([allWidth, ...tagWidths]) <= controlsWidth) {
-        setVisibleTagCount(tags.length);
-        return;
-      }
-
-      for (let count = tags.length; count >= 0; count -= 1) {
-        if (totalWidth([allWidth, ...tagWidths.slice(0, count), moreWidth]) <= controlsWidth) {
-          setVisibleTagCount(count);
-          return;
-        }
-      }
-
-      setVisibleTagCount(0);
-    }
-
-    updateVisibleTags();
-    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateVisibleTags) : null;
-    resizeObserver?.observe(controlsElement);
-    window.addEventListener("resize", updateVisibleTags);
-    return () => {
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateVisibleTags);
-    };
-  }, [tags]);
-
-  useEffect(() => {
-    if (!tagMenuState.open) return;
-    function closeTagMenu() {
-      setTagMenuState({ open: false, x: 0, y: 0 });
-    }
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") closeTagMenu();
-    }
-    window.addEventListener("pointerdown", closeTagMenu);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", closeTagMenu);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [tagMenuState.open]);
-
-  useEffect(() => {
-    if (!hiddenTags.length && tagMenuState.open) {
-      setTagMenuState({ open: false, x: 0, y: 0 });
-    }
-  }, [hiddenTags.length, tagMenuState.open]);
-
-  function openTagMenu(event: MouseEvent<HTMLButtonElement>) {
-    event.stopPropagation();
-    if (tagMenuState.open) {
-      setTagMenuState({ open: false, x: 0, y: 0 });
-      return;
-    }
-    const rect = event.currentTarget.getBoundingClientRect();
-    const menuWidth = 180;
-    const menuMaxHeight = 280;
-    const pad = 8;
-    setTagMenuState({
-      open: true,
-      x: Math.max(pad, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - pad)),
-      y: Math.max(pad, Math.min(rect.bottom + 8, window.innerHeight - menuMaxHeight - pad)),
-    });
-  }
+  const includeTagSet = useMemo(() => new Set(tagFilter.includeTagIds), [tagFilter.includeTagIds]);
+  const excludeTagSet = useMemo(() => new Set(tagFilter.excludeTagIds), [tagFilter.excludeTagIds]);
 
   return (
     <div className="model-toolbar">
@@ -406,76 +316,27 @@ function ModelToolbar({
         <button className="model-tag-add-button" type="button" aria-label={t("common:labels.manageTags")} title={t("common:labels.manageTags")} onClick={onOpenTagManager}>
           <Pencil size={18} aria-hidden="true" />
         </button>
-        <div className="library-tag-controls" ref={tagControlsRef}>
-          <div className="library-tag-filter">
-            <button className={activeTagIds.length ? "" : "active"} type="button" onClick={onTagClear}>
-              {t("common:labels.all")}
-            </button>
-            {visibleTags.map((tag) => (
-              <button
-                key={tag.id}
-                className={activeTagSet.has(tag.id) ? "active" : ""}
-                type="button"
-                aria-pressed={activeTagSet.has(tag.id)}
-                onClick={() => onTagToggle(tag.id)}
-              >
-                {tag.name}
+        <div className="library-tag-controls">
+          <CollapsibleTagFilterRow expandLabel="展开标签" collapseLabel="收起标签">
+            <div className="library-tag-filter">
+              <button className={hasLibraryTagFilter(tagFilter) ? "" : "active"} type="button" onClick={onTagClear}>
+                {t("common:labels.all")}
               </button>
-            ))}
-          </div>
-          {hiddenTags.length ? (
-            <button
-              className={`library-tag-more-button${hasHiddenActiveTag ? " active" : ""}`}
-              type="button"
-              aria-label={t("modelLibrary:moreTags")}
-              title={t("modelLibrary:moreTags")}
-              aria-expanded={tagMenuState.open}
-              onClick={openTagMenu}
-            >
-              <MoreHorizontal size={18} aria-hidden="true" />
-            </button>
-          ) : null}
-          <div className="library-tag-measure" ref={tagMeasureRef} aria-hidden="true">
-            <button type="button" data-measure-kind="all">
-              {t("common:labels.all")}
-            </button>
-            {tags.map((tag) => (
-              <button key={tag.id} type="button" data-measure-kind="tag">
-                {tag.name}
-              </button>
-            ))}
-            <button className="library-tag-more-button" type="button" data-measure-kind="more">
-              <MoreHorizontal size={18} aria-hidden="true" />
-            </button>
-          </div>
+              {tags.map((tag) => (
+                <LibraryTagChoiceButton
+                  key={tag.id}
+                  name={tag.name}
+                  count={tagCounts[tag.id] || 0}
+                  included={includeTagSet.has(tag.id)}
+                  excluded={excludeTagSet.has(tag.id)}
+                  onToggleInclude={() => onTagToggle(tag.id)}
+                  onToggleExclude={() => onTagExclude(tag.id)}
+                />
+              ))}
+            </div>
+          </CollapsibleTagFilterRow>
         </div>
       </div>
-      {tagMenuState.open && hiddenTags.length
-        ? createPortal(
-            <div
-              className="library-tag-overflow-menu"
-              role="menu"
-              style={{ left: tagMenuState.x, top: tagMenuState.y }}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              {hiddenTags.map((tag) => (
-                <button
-                  key={tag.id}
-                  className={activeTagSet.has(tag.id) ? "active" : ""}
-                  type="button"
-                  role="menuitemcheckbox"
-                  aria-checked={activeTagSet.has(tag.id)}
-                  onClick={() => {
-                    onTagToggle(tag.id);
-                  }}
-                >
-                  {tag.name}
-                </button>
-              ))}
-            </div>,
-            document.body,
-          )
-        : null}
     </div>
   );
 }
@@ -1397,11 +1258,11 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   const [deleteConfirmTagId, setDeleteConfirmTagId] = useState("");
   const { toast: imageActionToast, showToast: showImageActionToast } = useLibraryImageActionToast();
   const activeProjectId = useModelLibraryStore((state) => state.activeProjectId);
-  const activeTagIds = useModelLibraryStore((state) => state.activeTagIds);
+  const activeTagFilter = useModelLibraryStore((state) => state.activeTagFilter);
   const activeGender = useModelLibraryStore((state) => state.activeGender);
   const openModelId = useModelLibraryStore((state) => state.openModelId);
   const setActiveProjectId = useModelLibraryStore((state) => state.setActiveProjectId);
-  const setActiveTagIds = useModelLibraryStore((state) => state.setActiveTagIds);
+  const setActiveTagFilter = useModelLibraryStore((state) => state.setActiveTagFilter);
   const toggleGender = useModelLibraryStore((state) => state.toggleGender);
   const openEditor = useModelLibraryStore((state) => state.openEditor);
   const closeEditor = useModelLibraryStore((state) => state.closeEditor);
@@ -1436,13 +1297,18 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
 
   useEffect(() => {
     const tags = tagsQuery.data?.tags || [];
-    const validTagIds = activeTagIds.filter((tagId) => tags.some((tag) => tag.id === tagId));
-    if (validTagIds.length !== activeTagIds.length) setActiveTagIds(validTagIds);
-  }, [activeTagIds, setActiveTagIds, tagsQuery.data?.tags]);
+    const validFilter = cleanLibraryTagFilter(activeTagFilter, tags.map((tag) => tag.id));
+    if (
+      validFilter.includeTagIds.length !== activeTagFilter.includeTagIds.length
+      || validFilter.excludeTagIds.length !== activeTagFilter.excludeTagIds.length
+    ) {
+      setActiveTagFilter(validFilter);
+    }
+  }, [activeTagFilter, setActiveTagFilter, tagsQuery.data?.tags]);
 
   const modelsQuery = useQuery({
-    queryKey: activeProjectId ? modelLibraryKeys.models(activeProjectId, activeTagIds, activeGender) : ["models", "empty"],
-    queryFn: () => listModels({ projectId: activeProjectId, tagIds: activeTagIds, gender: activeGender }),
+    queryKey: activeProjectId ? modelLibraryKeys.models(activeProjectId, activeTagFilter, activeGender) : ["models", "empty"],
+    queryFn: () => listModels({ projectId: activeProjectId, tagFilter: activeTagFilter, gender: activeGender }),
     enabled: Boolean(activeProjectId),
   });
 
@@ -1466,7 +1332,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     },
     onSuccess: async ({ model, gender }) => {
       if (activeGender && activeGender !== gender) toggleGender(gender);
-      if (activeTagIds.length) setActiveTagIds([]);
+      if (hasLibraryTagFilter(activeTagFilter)) setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER);
       setDeleteConfirmModelId("");
       await queryClient.invalidateQueries({ queryKey: ["models", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
@@ -1562,7 +1428,12 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     },
     onSuccess: async (result, tagId) => {
       setDeleteConfirmTagId("");
-      if (activeTagIds.includes(tagId)) setActiveTagIds(activeTagIds.filter((activeTagId) => activeTagId !== tagId));
+      if (activeTagFilter.includeTagIds.includes(tagId) || activeTagFilter.excludeTagIds.includes(tagId)) {
+        setActiveTagFilter(createLibraryTagFilter(
+          activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId),
+          activeTagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId),
+        ));
+      }
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
       await queryClient.invalidateQueries({ queryKey: ["models", activeProjectId] });
     },
@@ -1632,7 +1503,21 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   }
 
   function handleToggleTagFilter(tagId: string) {
-    setActiveTagIds(activeTagIds.includes(tagId) ? activeTagIds.filter((activeTagId) => activeTagId !== tagId) : [...activeTagIds, tagId]);
+    setActiveTagFilter(createLibraryTagFilter(
+      activeTagFilter.includeTagIds.includes(tagId)
+        ? activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId)
+        : [...activeTagFilter.includeTagIds, tagId],
+      activeTagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId),
+    ));
+  }
+
+  function handleExcludeTagFilter(tagId: string) {
+    setActiveTagFilter(createLibraryTagFilter(
+      activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId),
+      activeTagFilter.excludeTagIds.includes(tagId)
+        ? activeTagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId)
+        : [...activeTagFilter.excludeTagIds, tagId],
+    ));
   }
 
   function handleDeleteTag(tagId: string, isConfirming: boolean) {
@@ -1660,6 +1545,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     });
   }, [models, normalizedSearchQuery]);
   const tags = tagsQuery.data?.tags || [];
+  const tagCounts = useMemo(() => countLibraryTags(filteredModels, tags), [filteredModels, tags]);
   const activeProject = projects.find((project) => project.id === activeProjectId) || null;
   const imagesQuery = useQuery({
     queryKey: openModelId ? modelLibraryKeys.images(openModelId) : ["modelImages", "empty"],
@@ -1715,10 +1601,12 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
           <div className="model-content-head">
             <ModelToolbar
               tags={tags}
-              activeTagIds={activeTagIds}
+              tagFilter={activeTagFilter}
+              tagCounts={tagCounts}
               activeGender={activeGender}
               onTagToggle={handleToggleTagFilter}
-              onTagClear={() => setActiveTagIds([])}
+              onTagExclude={handleExcludeTagFilter}
+              onTagClear={() => setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER)}
               onGenderToggle={toggleGender}
               onOpenTagManager={() => setTagManagerOpen(true)}
             />

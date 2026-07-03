@@ -137,6 +137,13 @@ export interface EasyToolApi {
   deleteCanvas: (canvasId: string) => Promise<{ ok: true; filePath?: string }>;
   deleteCanvasProject: (projectId: string) => Promise<{ ok: true; deletedCanvasIds?: string[] }>;
   moveCanvasToProject: (canvasId: string, projectId: string) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
+  exportCanvasJson: (canvasId: string) => Promise<CanvasPackageExportResult>;
+  exportCanvasPackage: (canvasId: string) => Promise<CanvasPackageExportResult>;
+  importCanvas: (payload: { projectId?: string }) => Promise<CanvasPackageImportResult>;
+  createCanvasPackageForUpload: (canvasId: string) => Promise<CanvasPackageExportResult>;
+  importCanvasPackageFromPath: (payload: { filePath: string; projectId?: string }) => Promise<CanvasPackageImportResult>;
+  uploadCanvasPackageToRemote: (payload: { filePath: string; uploadUrl: string }) => Promise<unknown>;
+  downloadCanvasPackageFromRemote: (payload: { downloadUrl: string }) => Promise<{ ok: true; filePath: string }>;
   saveCanvasAsset: (payload: { dataUrl?: string; url?: string; defaultName?: string; kind?: "input" | "output" }) => Promise<{ url: string; fileName: string; filePath?: string }>;
   scanCanvasCache: () => Promise<CanvasCacheScanResult>;
   deleteCanvasCacheAssets: (payload: { ids: string[]; olderThanDays?: number }) => Promise<CanvasCacheDeleteResult>;
@@ -151,6 +158,28 @@ export interface EasyToolApi {
   stopGenerationTasksForNode: (canvasId: string, nodeId: string) => Promise<{ ok: true; tasks: unknown[]; taskIds: string[] }>;
   stopGenerationTasksForCanvas: (canvasId: string) => Promise<{ ok: true; tasks: unknown[]; taskIds: string[] }>;
   writeCanvasClipboard: (payload: unknown) => Promise<{ ok: true }>;
+}
+
+export interface CanvasPackageWarning {
+  source?: string;
+  url?: string;
+  message: string;
+}
+
+export interface CanvasPackageExportResult {
+  ok: true;
+  canceled?: boolean;
+  filePath?: string;
+  warnings?: CanvasPackageWarning[];
+}
+
+export interface CanvasPackageImportResult {
+  ok: true;
+  canceled?: boolean;
+  canvas?: unknown;
+  record?: unknown;
+  filePath?: string;
+  warnings?: CanvasPackageWarning[];
 }
 
 export interface CanvasCacheReference {

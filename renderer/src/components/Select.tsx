@@ -136,7 +136,7 @@ export function Select({
           node.scrollTop = Math.max(0, selectedElement.offsetTop - (node.clientHeight - selectedElement.offsetHeight) / 2);
         });
       }}
-      className={joinClassNames("ic-composer-select__menu", portal && "ic-composer-select__menu--portal", menuClassName)}
+      className={joinClassNames("ic-composer-select__menu scrollbar-menu", portal && "ic-composer-select__menu--portal", menuClassName)}
       role="listbox"
       aria-label={ariaLabel}
       style={portal ? portalMenuStyle : { maxHeight: maxMenuHeight }}

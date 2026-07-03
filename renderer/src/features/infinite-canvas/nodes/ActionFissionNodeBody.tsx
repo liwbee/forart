@@ -14,6 +14,7 @@ import { ActionFissionApiBar } from "./action-fission/ActionFissionApiBar";
 import { ActionFissionFooter } from "./action-fission/ActionFissionFooter";
 import { ActionFissionReferenceStrip } from "./action-fission/ActionFissionReferenceStrip";
 import { ActionFissionRowItem } from "./action-fission/ActionFissionRowItem";
+import { countLibraryTags } from "../../library-tags";
 
 interface SavedCanvasAsset {
   url: string;
@@ -121,7 +122,7 @@ export function ActionFissionNodeBody({
       autoSelectionKeyRef.current = "";
       return;
     }
-    const key = pendingRows.map(({ row, candidates }) => `${row.id}:${row.actionProjectId}:${row.actionTagIds.join(",")}:${candidates.map((action) => action.id).join(",")}`).join("|");
+    const key = pendingRows.map(({ row, candidates }) => `${row.id}:${row.actionProjectId}:${row.includeActionTagIds.join(",")}:${row.excludeActionTagIds.join(",")}:${candidates.map((action) => action.id).join(",")}`).join("|");
     if (autoSelectionKeyRef.current === key) return;
     autoSelectionKeyRef.current = key;
 
@@ -160,7 +161,7 @@ export function ActionFissionNodeBody({
         onDraggedInputConnectionIdChange={onDraggedInputConnectionIdChange}
       />
 
-      <div className="ic-action-fission-rows nowheel" onWheel={(event) => event.stopPropagation()}>
+      <div className="ic-action-fission-rows scrollbar-thin-stable nowheel" onWheel={(event) => event.stopPropagation()}>
         {rowData.map(({ row, tags, actions, candidates }) => (
           <ActionFissionRowItem
             key={row.id}
@@ -170,6 +171,7 @@ export function ActionFissionNodeBody({
             actions={actions}
             candidates={candidates}
             candidateCount={candidates.length}
+            tagCounts={countLibraryTags(candidates, tags)}
             publicReferenceCount={publicReferenceCount}
             publicReferenceLimit={BASE_PUBLIC_REFERENCE_LIMIT}
             selectedProvider={state.apiType === "libtv-api" ? ({ id: "libtv-api" } as ApiProvider) : selectedProvider}

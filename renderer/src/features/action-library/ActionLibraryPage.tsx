@@ -3,10 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, ChevronRight, Copy, Download, ImagePlus, MoreHorizontal, Pencil, Plus, Tags, Trash2 } from "lucide-react";
 import { createPortal } from "react-dom";
+import { CollapsibleTagFilterRow } from "../library-tags";
+import { LibraryTagChoiceButton } from "../library-tags";
 import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
 import { copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
 import { sortByName } from "../../lib/sortByName";
 import { normalizeTags, toggleTag } from "../model-library/tagUtils";
+import { EMPTY_LIBRARY_TAG_FILTER, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
 import {
   actionLibraryKeys,
   createAction,
@@ -239,19 +242,24 @@ function ActionProjectSidebar({
 
 function ActionToolbar({
   tags,
-  activeTagIds,
+  tagFilter,
+  tagCounts,
   onTagToggle,
+  onTagExclude,
   onTagClear,
   onOpenTagManager,
 }: {
   tags: ActionTag[];
-  activeTagIds: string[];
+  tagFilter: LibraryTagFilter;
+  tagCounts: Record<string, number>;
   onTagToggle: (tagId: string) => void;
+  onTagExclude: (tagId: string) => void;
   onTagClear: () => void;
   onOpenTagManager: () => void;
 }) {
   const { t } = useTranslation();
-  const activeTagSet = useMemo(() => new Set(activeTagIds), [activeTagIds]);
+  const includeTagSet = useMemo(() => new Set(tagFilter.includeTagIds), [tagFilter.includeTagIds]);
+  const excludeTagSet = useMemo(() => new Set(tagFilter.excludeTagIds), [tagFilter.excludeTagIds]);
   return (
     <div className="model-toolbar outfit-toolbar">
       <div className="library-tag-section">
@@ -260,22 +268,24 @@ function ActionToolbar({
           <Pencil size={18} aria-hidden="true" />
         </button>
         <div className="library-tag-controls">
-          <div className="library-tag-filter">
-            <button className={activeTagIds.length ? "" : "active"} type="button" onClick={onTagClear}>
-              {t("common:labels.all")}
-            </button>
-            {tags.map((tag) => (
-              <button
-                key={tag.id}
-                className={activeTagSet.has(tag.id) ? "active" : ""}
-                type="button"
-                aria-pressed={activeTagSet.has(tag.id)}
-                onClick={() => onTagToggle(tag.id)}
-              >
-                {tag.name}
+          <CollapsibleTagFilterRow expandLabel="展开标签" collapseLabel="收起标签">
+            <div className="library-tag-filter">
+              <button className={hasLibraryTagFilter(tagFilter) ? "" : "active"} type="button" onClick={onTagClear}>
+                {t("common:labels.all")}
               </button>
-            ))}
-          </div>
+              {tags.map((tag) => (
+                <LibraryTagChoiceButton
+                  key={tag.id}
+                  name={tag.name}
+                  count={tagCounts[tag.id] || 0}
+                  included={includeTagSet.has(tag.id)}
+                  excluded={excludeTagSet.has(tag.id)}
+                  onToggleInclude={() => onTagToggle(tag.id)}
+                  onToggleExclude={() => onTagExclude(tag.id)}
+                />
+              ))}
+            </div>
+          </CollapsibleTagFilterRow>
         </div>
       </div>
     </div>
@@ -309,7 +319,7 @@ function ActionCard({
   deleteConfirmActionId,
   isDeleting,
   onToggleTag,
-  onUpdatePrompt,
+  onUpdateDetails,
   onDelete,
   onImageActionStatus,
 }: {
@@ -318,7 +328,7 @@ function ActionCard({
   deleteConfirmActionId: string;
   isDeleting: boolean;
   onToggleTag: (actionId: string, tagName: string) => void;
-  onUpdatePrompt: (actionId: string, prompt: string) => void;
+  onUpdateDetails: (actionId: string, patch: Partial<Pick<ActionEntry, "name" | "prompt">>) => void;
   onDelete: (actionId: string, isConfirming: boolean) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
 }) {
@@ -326,19 +336,24 @@ function ActionCard({
   const [menuState, setMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
   const [tagMenuState, setTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
   const [promptOpen, setPromptOpen] = useState(false);
+  const [draftName, setDraftName] = useState(action.name || "");
   const [draftPrompt, setDraftPrompt] = useState(action.prompt || "");
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const committedNameRef = useRef(action.name || "");
   const committedPromptRef = useRef(action.prompt || "");
   const assetUrl = action.asset_url ? `${action.asset_url}?t=${encodeURIComponent(action.updated_at || action.asset_id)}` : "";
   const imageAlt = action.name || t("actionLibrary:actionImage");
 
   useEffect(() => {
+    setDraftName(action.name || "");
     setDraftPrompt(action.prompt || "");
+    committedNameRef.current = action.name || "";
     committedPromptRef.current = action.prompt || "";
-  }, [action.id, action.prompt]);
+  }, [action.id, action.name, action.prompt]);
 
   useEffect(() => {
-    if (promptOpen) textareaRef.current?.focus();
+    if (promptOpen) nameInputRef.current?.focus();
   }, [promptOpen]);
 
   useEffect(() => {
@@ -420,15 +435,24 @@ function ActionCard({
     }
   }
 
-  function commitPrompt() {
+  function commitDetails() {
+    const nextName = draftName.trim();
     const nextPrompt = draftPrompt;
-    if (nextPrompt === committedPromptRef.current) return;
-    committedPromptRef.current = nextPrompt;
-    onUpdatePrompt(action.id, nextPrompt);
+    const patch: Partial<Pick<ActionEntry, "name" | "prompt">> = {};
+    if (nextName && nextName !== committedNameRef.current) patch.name = nextName;
+    if (nextPrompt !== committedPromptRef.current) patch.prompt = nextPrompt;
+    if (!Object.keys(patch).length) {
+      if (!nextName) setDraftName(committedNameRef.current);
+      return;
+    }
+    if (patch.name) committedNameRef.current = patch.name;
+    if (patch.prompt !== undefined) committedPromptRef.current = patch.prompt;
+    if (!nextName) setDraftName(committedNameRef.current);
+    onUpdateDetails(action.id, patch);
   }
 
   function closePromptEditor() {
-    commitPrompt();
+    commitDetails();
     setPromptOpen(false);
   }
 
@@ -472,6 +496,29 @@ function ActionCard({
           <button className="action-card__back-button" type="button" tabIndex={promptOpen ? 0 : -1} aria-label={t("actionLibrary:backToImage")} title={t("common:actions.back")} onClick={closePromptEditor}>
             <ArrowLeft size={18} aria-hidden="true" />
           </button>
+          <label className="action-card__name-field">
+            <input
+              ref={nameInputRef}
+              value={draftName}
+              maxLength={120}
+              tabIndex={promptOpen ? 0 : -1}
+              aria-label={t("common:labels.name")}
+              placeholder={t("common:labels.name")}
+              onChange={(event) => setDraftName(event.target.value)}
+              onBlur={commitDetails}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitDetails();
+                  textareaRef.current?.focus();
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  closePromptEditor();
+                }
+              }}
+            />
+          </label>
           <label className="action-card__prompt-field">
             <textarea
               ref={textareaRef}
@@ -480,7 +527,7 @@ function ActionCard({
               tabIndex={promptOpen ? 0 : -1}
               placeholder={t("actionLibrary:inputText")}
               onChange={(event) => setDraftPrompt(event.target.value)}
-              onBlur={commitPrompt}
+              onBlur={commitDetails}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
                   event.preventDefault();
@@ -577,7 +624,7 @@ function ActionGrid({
   deleteConfirmActionId,
   onCreate,
   onToggleTag,
-  onUpdatePrompt,
+  onUpdateDetails,
   onDelete,
   onImageActionStatus,
 }: {
@@ -588,7 +635,7 @@ function ActionGrid({
   deleteConfirmActionId: string;
   onCreate: (file: File) => void;
   onToggleTag: (actionId: string, tagName: string) => void;
-  onUpdatePrompt: (actionId: string, prompt: string) => void;
+  onUpdateDetails: (actionId: string, patch: Partial<Pick<ActionEntry, "name" | "prompt">>) => void;
   onDelete: (actionId: string, isConfirming: boolean) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
 }) {
@@ -603,7 +650,7 @@ function ActionGrid({
           deleteConfirmActionId={deleteConfirmActionId}
           isDeleting={deletingActionId === action.id}
           onToggleTag={onToggleTag}
-          onUpdatePrompt={onUpdatePrompt}
+          onUpdateDetails={onUpdateDetails}
           onDelete={onDelete}
           onImageActionStatus={onImageActionStatus}
         />
@@ -814,9 +861,9 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const [closeMenuToken, setCloseMenuToken] = useState(0);
   const { toast: imageActionToast, showToast: showImageActionToast } = useLibraryImageActionToast();
   const activeProjectId = useActionLibraryStore((state) => state.activeProjectId);
-  const activeTagIds = useActionLibraryStore((state) => state.activeTagIds);
+  const activeTagFilter = useActionLibraryStore((state) => state.activeTagFilter);
   const setActiveProjectId = useActionLibraryStore((state) => state.setActiveProjectId);
-  const setActiveTagIds = useActionLibraryStore((state) => state.setActiveTagIds);
+  const setActiveTagFilter = useActionLibraryStore((state) => state.setActiveTagFilter);
 
   const storageSettingsQuery = useQuery({
     queryKey: actionLibraryKeys.storageSettings,
@@ -848,13 +895,18 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
 
   useEffect(() => {
     const tags = tagsQuery.data?.tags || [];
-    const validTagIds = activeTagIds.filter((tagId) => tags.some((tag) => tag.id === tagId));
-    if (validTagIds.length !== activeTagIds.length) setActiveTagIds(validTagIds);
-  }, [activeTagIds, setActiveTagIds, tagsQuery.data?.tags]);
+    const validFilter = cleanLibraryTagFilter(activeTagFilter, tags.map((tag) => tag.id));
+    if (
+      validFilter.includeTagIds.length !== activeTagFilter.includeTagIds.length
+      || validFilter.excludeTagIds.length !== activeTagFilter.excludeTagIds.length
+    ) {
+      setActiveTagFilter(validFilter);
+    }
+  }, [activeTagFilter, setActiveTagFilter, tagsQuery.data?.tags]);
 
   const actionsQuery = useQuery({
-    queryKey: activeProjectId ? actionLibraryKeys.actions(activeProjectId, activeTagIds) : ["actions", "empty"],
-    queryFn: () => listActions({ projectId: activeProjectId, tagIds: activeTagIds }),
+    queryKey: activeProjectId ? actionLibraryKeys.actions(activeProjectId, activeTagFilter) : ["actions", "empty"],
+    queryFn: () => listActions({ projectId: activeProjectId, tagFilter: activeTagFilter }),
     enabled: Boolean(activeProjectId),
   });
 
@@ -865,7 +917,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
       return createAction(activeProjectId, payload);
     },
     onSuccess: async () => {
-      if (activeTagIds.length) setActiveTagIds([]);
+      if (hasLibraryTagFilter(activeTagFilter)) setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER);
       setDeleteConfirmActionId("");
       await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.projects });
@@ -891,8 +943,8 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     },
   });
 
-  const updateActionPromptMutation = useMutation({
-    mutationFn: ({ actionId, prompt }: { actionId: string; prompt: string }) => updateAction(actionId, { prompt }),
+  const updateActionDetailsMutation = useMutation({
+    mutationFn: ({ actionId, patch }: { actionId: string; patch: Partial<Pick<ActionEntry, "name" | "prompt">> }) => updateAction(actionId, patch),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
     },
@@ -956,7 +1008,12 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     },
     onSuccess: async (_result, tagId) => {
       setDeleteConfirmTagId("");
-      if (activeTagIds.includes(tagId)) setActiveTagIds(activeTagIds.filter((activeTagId) => activeTagId !== tagId));
+      if (activeTagFilter.includeTagIds.includes(tagId) || activeTagFilter.excludeTagIds.includes(tagId)) {
+        setActiveTagFilter(createLibraryTagFilter(
+          activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId),
+          activeTagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId),
+        ));
+      }
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
       await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
     },
@@ -1008,7 +1065,21 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   }
 
   function handleToggleTagFilter(tagId: string) {
-    setActiveTagIds(activeTagIds.includes(tagId) ? activeTagIds.filter((activeTagId) => activeTagId !== tagId) : [...activeTagIds, tagId]);
+    setActiveTagFilter(createLibraryTagFilter(
+      activeTagFilter.includeTagIds.includes(tagId)
+        ? activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId)
+        : [...activeTagFilter.includeTagIds, tagId],
+      activeTagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId),
+    ));
+  }
+
+  function handleExcludeTagFilter(tagId: string) {
+    setActiveTagFilter(createLibraryTagFilter(
+      activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId),
+      activeTagFilter.excludeTagIds.includes(tagId)
+        ? activeTagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId)
+        : [...activeTagFilter.excludeTagIds, tagId],
+    ));
   }
 
   function handleDeleteTag(tagId: string, isConfirming: boolean) {
@@ -1029,6 +1100,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     });
   }, [actions, normalizedSearchQuery]);
   const tags = tagsQuery.data?.tags || [];
+  const tagCounts = useMemo(() => countLibraryTags(filteredActions, tags), [filteredActions, tags]);
   const activeProject = projects.find((project) => project.id === activeProjectId) || null;
   const errorMessage = getRequestError([
     storageSettingsQuery.error,
@@ -1038,7 +1110,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     createActionMutation.error,
     deleteActionMutation.error,
     updateActionTagsMutation.error,
-    updateActionPromptMutation.error,
+    updateActionDetailsMutation.error,
     createProjectMutation.error,
     renameProjectMutation.error,
     deleteProjectMutation.error,
@@ -1075,9 +1147,11 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
           <div className="model-content-head">
             <ActionToolbar
               tags={tags}
-              activeTagIds={activeTagIds}
+              tagFilter={activeTagFilter}
+              tagCounts={tagCounts}
               onTagToggle={handleToggleTagFilter}
-              onTagClear={() => setActiveTagIds([])}
+              onTagExclude={handleExcludeTagFilter}
+              onTagClear={() => setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER)}
               onOpenTagManager={() => setTagManagerOpen(true)}
             />
           </div>
@@ -1096,7 +1170,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
                 deleteConfirmActionId={deleteConfirmActionId}
                 onCreate={(file) => createActionMutation.mutate(file)}
                 onToggleTag={handleToggleActionTag}
-                onUpdatePrompt={(actionId, prompt) => updateActionPromptMutation.mutate({ actionId, prompt })}
+                onUpdateDetails={(actionId, patch) => updateActionDetailsMutation.mutate({ actionId, patch })}
                 onDelete={handleActionDelete}
                 onImageActionStatus={showImageActionToast}
               />

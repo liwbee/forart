@@ -1,6 +1,7 @@
-import { ListFilter } from "lucide-react";
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { Ban, ListFilter } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { LibraryTagFilter } from "./filter";
 
 export interface LibraryFilterTag {
   id: string;
@@ -9,10 +10,11 @@ export interface LibraryFilterTag {
 
 interface LibraryTagFilterButtonProps {
   tags: LibraryFilterTag[];
-  activeTagIds: string[];
+  tagFilter: LibraryTagFilter;
+  tagCounts?: Record<string, number>;
   allLabel: string;
   ariaLabel: string;
-  onChange: (tagIds: string[]) => void;
+  onChange: (tagFilter: LibraryTagFilter) => void;
   className?: string;
   active?: boolean;
   menuContentBefore?: ReactNode;
@@ -22,16 +24,30 @@ function joinClassNames(...classNames: Array<string | false | undefined>) {
   return classNames.filter(Boolean).join(" ");
 }
 
-export function LibraryTagFilterButton({ tags, activeTagIds, allLabel, ariaLabel, onChange, className, active, menuContentBefore }: LibraryTagFilterButtonProps) {
+export function LibraryTagFilterButton({ tags, tagFilter, tagCounts = {}, allLabel, ariaLabel, onChange, className, active, menuContentBefore }: LibraryTagFilterButtonProps) {
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState({ left: 0, top: 0, width: 320, maxHeight: 280 });
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const activeTagSet = new Set(activeTagIds);
-  const activeTagNames = tags.filter((tag) => activeTagSet.has(tag.id)).map((tag) => tag.name);
+  const includeTagSet = new Set(tagFilter.includeTagIds);
+  const excludeTagSet = new Set(tagFilter.excludeTagIds);
+  const activeTagNames = [
+    ...tags.filter((tag) => includeTagSet.has(tag.id)).map((tag) => tag.name),
+    ...tags.filter((tag) => excludeTagSet.has(tag.id)).map((tag) => `不含 ${tag.name}`),
+  ];
 
-  function toggleTag(tagId: string) {
-    onChange(activeTagSet.has(tagId) ? activeTagIds.filter((activeTagId) => activeTagId !== tagId) : [...activeTagIds, tagId]);
+  function toggleIncludeTag(tagId: string) {
+    onChange({
+      includeTagIds: includeTagSet.has(tagId) ? tagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId) : [...tagFilter.includeTagIds, tagId],
+      excludeTagIds: tagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId),
+    });
+  }
+
+  function toggleExcludeTag(tagId: string) {
+    onChange({
+      includeTagIds: tagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId),
+      excludeTagIds: excludeTagSet.has(tagId) ? tagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId) : [...tagFilter.excludeTagIds, tagId],
+    });
   }
 
   function updateMenuPosition() {
@@ -92,28 +108,53 @@ export function LibraryTagFilterButton({ tags, activeTagIds, allLabel, ariaLabel
       <button
         type="button"
         role="menuitemcheckbox"
-        aria-checked={!activeTagIds.length}
-        className={!activeTagIds.length ? "active" : ""}
+        aria-checked={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length}
+        className={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length ? "active" : ""}
         onClick={() => {
-          onChange([]);
+          onChange({ includeTagIds: [], excludeTagIds: [] });
         }}
       >
         {allLabel}
       </button>
-      {tags.map((tag) => (
-        <button
-          key={tag.id}
-          type="button"
-          role="menuitemcheckbox"
-          aria-checked={activeTagSet.has(tag.id)}
-          className={activeTagSet.has(tag.id) ? "active" : ""}
-          onClick={() => {
-            toggleTag(tag.id);
-          }}
-        >
-          {tag.name}
-        </button>
-      ))}
+      {tags.map((tag) => {
+        const included = includeTagSet.has(tag.id);
+        const excluded = excludeTagSet.has(tag.id);
+        return (
+          <button
+            key={tag.id}
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={included || excluded}
+            className={`library-tag-filter-menu__tag${included ? " library-tag-filter-menu__tag--include" : ""}${excluded ? " library-tag-filter-menu__tag--exclude" : ""}`}
+            onClick={() => {
+              toggleIncludeTag(tag.id);
+            }}
+          >
+            <span>{tag.name}</span>
+            <span className="library-tag-filter-menu__count">{tagCounts[tag.id] || 0}</span>
+            <span
+              role="button"
+              tabIndex={0}
+              className="library-tag-filter-menu__exclude"
+              aria-label={`排除 ${tag.name}`}
+              title={`排除 ${tag.name}`}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleExcludeTag(tag.id);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                event.stopPropagation();
+                toggleExcludeTag(tag.id);
+              }}
+            >
+              <Ban size={12} aria-hidden="true" />
+            </span>
+          </button>
+        );
+      })}
       {!tags.length ? <div className="library-tag-filter-menu__empty">{allLabel}</div> : null}
     </div>,
     document.body,
@@ -124,12 +165,12 @@ export function LibraryTagFilterButton({ tags, activeTagIds, allLabel, ariaLabel
       <button
         ref={triggerRef}
         type="button"
-        className={joinClassNames("library-tag-filter-trigger", (active ?? Boolean(activeTagIds.length)) && "active", className)}
+        className={joinClassNames("library-tag-filter-trigger", (active ?? Boolean(tagFilter.includeTagIds.length || tagFilter.excludeTagIds.length)) && "active", className)}
         aria-label={activeTagNames.length ? `${ariaLabel}: ${activeTagNames.join(", ")}` : ariaLabel}
         title={activeTagNames.length ? activeTagNames.join(", ") : ariaLabel}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-pressed={active ?? Boolean(activeTagIds.length)}
+        aria-pressed={active ?? Boolean(tagFilter.includeTagIds.length || tagFilter.excludeTagIds.length)}
         onClick={() => setOpen((current) => !current)}
       >
         <ListFilter size={17} aria-hidden="true" />

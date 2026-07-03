@@ -397,7 +397,8 @@
 
 .model-toolbar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: var(--space-3);
   min-width: 0;
 }
@@ -413,12 +414,20 @@
 .library-tag-filter {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
   min-width: 0;
 }
 
 .library-tag-section {
   flex: 1;
+  align-items: flex-start;
+}
+
+.library-tag-section > .library-filter-label {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .library-tag-controls {
@@ -426,9 +435,64 @@
   flex: 1;
 }
 
+.library-tag-collapsible {
+  --library-tag-row-height: 44px;
+  --library-tag-toggle-width: 44px;
+  --library-tag-toggle-gap: var(--space-2);
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.library-tag-collapsible__content {
+  min-width: 0;
+  max-height: var(--library-tag-row-height);
+  overflow: hidden;
+  transition: max-height 160ms ease;
+}
+
+.library-tag-collapsible.expanded .library-tag-collapsible__content {
+  max-height: none;
+  overflow: visible;
+}
+
+.library-tag-collapsible.overflowing .library-tag-collapsible__content {
+  padding-right: calc(var(--library-tag-toggle-width) + var(--library-tag-toggle-gap));
+}
+
+.library-tag-collapsible__toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: var(--library-tag-toggle-width);
+  min-width: var(--library-tag-toggle-width);
+  height: var(--library-tag-row-height);
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 0;
+  background: var(--surface-control);
+  color: var(--state-hover-text);
+  box-shadow: -12px 0 16px color-mix(in srgb, var(--surface-card) 86%, transparent);
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.library-tag-collapsible__toggle:hover,
+.library-tag-collapsible__toggle:focus-visible {
+  border-color: var(--state-hover-border);
+  background: var(--state-hover-bg);
+  outline: 0;
+}
+
 .library-tag-filter {
   flex: 1;
-  overflow: hidden;
+  align-items: center;
+  overflow: visible;
 }
 
 .library-filter-label {
@@ -468,8 +532,7 @@
 
 .gender-icon-filter:hover,
 .model-tag-add-button:hover,
-.library-tag-more-button:hover,
-.library-tag-filter button:hover {
+.library-tag-more-button:hover {
   border-color: var(--state-hover-border);
   background: var(--state-hover-bg);
 }

@@ -178,7 +178,7 @@ export const NodeToolbar = memo(function NodeToolbar({
               <Ratio size={14} aria-hidden="true" />
               <span>{imageCrop.aspect === "original" ? t("infiniteCanvas:originalAspect") : imageCrop.aspect === "free" ? t("infiniteCanvas:freeAspect") : imageCrop.aspect}</span>
             </button>
-            <div className="ic-crop-aspect-list" role="menu" aria-label={t("infiniteCanvas:cropAspect")}>
+            <div className="ic-crop-aspect-list popover-surface popover-menu" role="menu" aria-label={t("infiniteCanvas:cropAspect")}>
               {CROP_ASPECT_OPTIONS.map((option) => (
                 <button key={option.key} type="button" role="menuitemradio" aria-checked={option.key === imageCrop.aspect} onClick={() => onChangeCropAspect(node.id, option.key)}>
                   <Ratio size={13} aria-hidden="true" />

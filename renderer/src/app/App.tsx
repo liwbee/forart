@@ -1,32 +1,15 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Download, Languages, Layers3, LayoutTemplate, LibraryBig, Moon, PanelLeftClose, PanelLeftOpen, RefreshCw, ScanSearch, Settings, Sun, Users, X, XCircle } from "lucide-react";
+import { CheckCircle2, Download, Languages, Moon, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, Sun, X, XCircle } from "lucide-react";
 import { setActiveForartConfig } from "../data-source/runtime";
-import { ImageReviewPage } from "../features/image-review/ImageReviewPage";
-import { ResourceLibraryPage } from "../features/resource-library/ResourceLibraryPage";
-import { SettingsPage } from "../features/settings/SettingsPage";
+import { isKeepAliveView, navRoutes, workspaceRouteById } from "./appRoutes";
 import { AppView, useAppStore } from "./appStore";
 import type { ForartAppConfig, ForartAppInfo, ForartUpdateCheckResult, ForartUpdateConnectivityResult, ForartUpdateNotes, ForartUpdateProgress, ForartUpdateRunResult } from "./appConfig";
 import { getAppTitle } from "./runtimeConfig";
 import { SetupPage } from "./SetupPage";
 
-const navItems: Array<{
-  id: AppView;
-  labelKey: string;
-  shortKey: string;
-  icon: typeof Users;
-}> = [
-  { id: "library", labelKey: "nav:library", shortKey: "nav:short.library", icon: LibraryBig },
-  { id: "free-canvas", labelKey: "nav:freeCanvas", shortKey: "nav:short.freeCanvas", icon: LayoutTemplate },
-  { id: "image-review", labelKey: "nav:imageReview", shortKey: "nav:short.imageReview", icon: ScanSearch },
-  { id: "canvas", labelKey: "nav:canvas", shortKey: "nav:short.canvas", icon: Layers3 },
-];
-
 const VIEW_TRANSITION_MS = 500;
-const FreeCanvasPage = lazy(() => import("../features/free-canvas/FreeCanvasPage").then((module) => ({ default: module.FreeCanvasPage })));
-const CanvasPage = lazy(() => import("../features/infinite-canvas/CanvasPage"));
-const KEEP_ALIVE_VIEWS = new Set<AppView>(["free-canvas", "canvas"]);
 const LIBRARY_QUERY_ROOTS = new Set([
   "storageSettings",
   "modelProjects",
@@ -106,10 +89,6 @@ function updatePhaseLabel(phase: string, language: "zh-CN" | "en-US") {
   return "Updating";
 }
 
-function isKeepAliveView(view: AppView) {
-  return KEEP_ALIVE_VIEWS.has(view);
-}
-
 function KeepAliveWorkspaceView({ active, children }: { active: boolean; children: ReactNode }) {
   return (
     <div className={`workspace-view workspace-view--keepalive${active ? " workspace-view--active" : " workspace-view--hidden"}`} aria-hidden={!active}>
@@ -119,24 +98,8 @@ function KeepAliveWorkspaceView({ active, children }: { active: boolean; childre
 }
 
 function renderView(view: AppView, appConfig: ForartAppConfig, onConfigChange: (config: ForartAppConfig) => void) {
-  if (view === "library") return <ResourceLibraryPage />;
-  if (view === "free-canvas") {
-    return (
-      <Suspense fallback={<div className="view-loading">{appConfig ? "Loading free canvas..." : ""}</div>}>
-        <FreeCanvasPage />
-      </Suspense>
-    );
-  }
-  if (view === "image-review") return <ImageReviewPage />;
-  if (view === "canvas") {
-    return (
-      <Suspense fallback={<div className="view-loading">{appConfig ? "Loading canvas..." : ""}</div>}>
-        <CanvasPage imageDownloadPath={appConfig.imageDownloadPath} />
-      </Suspense>
-    );
-  }
-  if (view === "settings") return <SettingsPage config={appConfig} onConfigChange={onConfigChange} />;
-  return <ResourceLibraryPage />;
+  const route = workspaceRouteById[view] || workspaceRouteById.library;
+  return route.render({ appConfig, onConfigChange });
 }
 
 export function App() {
@@ -442,7 +405,7 @@ export function App() {
         </div>
 
         <nav className="side-nav" aria-label={t("app:mainNavigation")}>
-          {navItems.map((item) => {
+          {navRoutes.map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;
             return (

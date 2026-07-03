@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./i18n";
 import { App } from "./app/App";
 import "./styles/global.css";
+import "./styles/shared/scrollbars.css";
+import "./styles/shared/popovers.css";
 import "./styles/components.css";
 import "./styles/model-library.css";
 import "./styles/outfit-library.css";

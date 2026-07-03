@@ -1,10 +1,10 @@
-import { Check, Copy, FolderInput, Layers, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Check, Cloud, Copy, Download, FileJson, FolderInput, HardDrive, Layers, MoreHorizontal, Pencil, Plus, RefreshCw, Server, Trash2, Upload, UploadCloud } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { CanvasDocumentRecord, CanvasProjectRecord } from "./types";
 
-export type CanvasHomeMode = "local";
+export type CanvasHomeMode = "local" | "server";
 export type CanvasSortMode = "recent" | "name";
 
 export type HomeCanvasRecord = CanvasDocumentRecord;
@@ -26,6 +26,7 @@ interface ProjectMenuState {
 
 interface CanvasMoveMenuState {
   canvasId: string;
+  action: "move" | "upload" | "copy";
   x: number;
   y: number;
 }
@@ -42,9 +43,15 @@ interface CanvasHomePanelProps {
   confirmingDeleteDocumentId: string;
   confirmingDeleteProjectId: string;
   sortMode: CanvasSortMode;
+  isRemoteServerMode?: boolean;
+  localProjectsForCopy?: CanvasProjectRecord[];
+  remoteProjectsForUpload?: CanvasProjectRecord[];
+  searchText?: string;
   onRefreshLocal: () => void;
+  onRefreshServer?: () => void;
   onCreateCanvas: () => void;
   onCreateProject: () => void;
+  onImportCanvas: () => void;
   onSelectDocument: (canvasId: string) => void;
   onOpenDocument: (canvasId: string) => void;
   onSelectProject: (projectId: string) => void;
@@ -55,12 +62,18 @@ interface CanvasHomePanelProps {
   onSubmitRenameDocument: (canvasId: string) => void;
   onSubmitRenameProject: (projectId: string) => void;
   onDuplicateDocument: (canvasId: string) => void;
+  onExportDocumentJson: (canvasId: string) => void;
+  onExportDocumentPackage: (canvasId: string) => void;
   onMoveDocumentToProject: (canvasId: string, projectId: string) => void;
+  onUploadDocumentToRemote?: (canvasId: string, projectId: string) => void;
+  onCopyRemoteDocumentToLocal?: (canvasId: string, projectId: string) => void;
   onConfirmDeleteDocument: (canvasId: string) => void;
   onConfirmDeleteProject: (projectId: string) => void;
   onDeleteDocument: (canvasId: string) => void;
   onDeleteProject: (projectId: string) => void;
   onSortModeChange: (mode: CanvasSortMode) => void;
+  onHomeModeChange?: (mode: CanvasHomeMode) => void;
+  onSearchTextChange?: (value: string) => void;
 }
 
 function formatProjectDate(timestamp: number) {
@@ -70,6 +83,7 @@ function formatProjectDate(timestamp: number) {
 }
 
 export function CanvasHomePanel({
+  mode,
   documents,
   projects,
   activeProjectId,
@@ -80,9 +94,15 @@ export function CanvasHomePanel({
   confirmingDeleteDocumentId,
   confirmingDeleteProjectId,
   sortMode,
+  isRemoteServerMode = false,
+  localProjectsForCopy = [],
+  remoteProjectsForUpload = [],
+  searchText = "",
   onRefreshLocal,
+  onRefreshServer,
   onCreateCanvas,
   onCreateProject,
+  onImportCanvas,
   onSelectDocument,
   onOpenDocument,
   onSelectProject,
@@ -93,17 +113,23 @@ export function CanvasHomePanel({
   onSubmitRenameDocument,
   onSubmitRenameProject,
   onDuplicateDocument,
+  onExportDocumentJson,
+  onExportDocumentPackage,
   onMoveDocumentToProject,
+  onUploadDocumentToRemote,
+  onCopyRemoteDocumentToLocal,
   onConfirmDeleteDocument,
   onConfirmDeleteProject,
   onDeleteDocument,
   onDeleteProject,
   onSortModeChange,
+  onHomeModeChange,
+  onSearchTextChange,
 }: CanvasHomePanelProps) {
   const { t } = useTranslation();
   const [cardMenu, setCardMenu] = useState<CanvasCardMenuState>({ target: null, x: 0, y: 0 });
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState>({ target: null, x: 0, y: 0 });
-  const [moveMenu, setMoveMenu] = useState<CanvasMoveMenuState>({ canvasId: "", x: 0, y: 0 });
+  const [moveMenu, setMoveMenu] = useState<CanvasMoveMenuState>({ canvasId: "", action: "move", x: 0, y: 0 });
   const cardMenuRef = useRef<HTMLDivElement | null>(null);
   const projectMenuRef = useRef<HTMLDivElement | null>(null);
   const moveMenuRef = useRef<HTMLDivElement | null>(null);
@@ -128,6 +154,8 @@ export function CanvasHomePanel({
   }, [cardMenu.target, projectMenu.target, moveMenu.canvasId]);
 
   const projectMoveTargets = projects.map((project) => ({ id: project.id, title: project.title || t("infiniteCanvas:untitledProject") }));
+  const remoteUploadTargets = remoteProjectsForUpload.map((project) => ({ id: project.id, title: project.title || t("infiniteCanvas:untitledProject") }));
+  const localCopyTargets = localProjectsForCopy.map((project) => ({ id: project.id, title: project.title || t("infiniteCanvas:untitledProject") }));
 
   const activeProjectTitle = activeProjectId
     ? projects.find((project) => project.id === activeProjectId)?.title || t("infiniteCanvas:untitledProject")
@@ -138,7 +166,7 @@ export function CanvasHomePanel({
     event.stopPropagation();
     const rect = event.currentTarget.getBoundingClientRect();
     const menuWidth = 192;
-    const menuHeight = 184;
+    const menuHeight = 264;
     const pad = 8;
     setCardMenu({
       target,
@@ -146,7 +174,7 @@ export function CanvasHomePanel({
       y: Math.max(pad, Math.min(rect.bottom + 8, window.innerHeight - menuHeight - pad)),
     });
     setProjectMenu({ target: null, x: 0, y: 0 });
-    setMoveMenu({ canvasId: "", x: 0, y: 0 });
+    setMoveMenu({ canvasId: "", action: "move", x: 0, y: 0 });
   };
 
   const openProjectMenu = (event: MouseEvent<HTMLButtonElement>, id: string) => {
@@ -162,10 +190,10 @@ export function CanvasHomePanel({
       y: Math.max(pad, Math.min(rect.bottom + 8, window.innerHeight - menuHeight - pad)),
     });
     setCardMenu({ target: null, x: 0, y: 0 });
-    setMoveMenu({ canvasId: "", x: 0, y: 0 });
+    setMoveMenu({ canvasId: "", action: "move", x: 0, y: 0 });
   };
 
-  const openMoveMenu = (element: HTMLElement, canvasId: string) => {
+  const openMoveMenu = (element: HTMLElement, canvasId: string, action: CanvasMoveMenuState["action"] = "move") => {
     const rect = element.getBoundingClientRect();
     const menuWidth = 184;
     const menuMaxHeight = 280;
@@ -174,6 +202,7 @@ export function CanvasHomePanel({
     const x = preferredX + menuWidth <= window.innerWidth - pad ? preferredX : rect.left - menuWidth - 8;
     setMoveMenu({
       canvasId,
+      action,
       x: Math.max(pad, Math.min(x, window.innerWidth - menuWidth - pad)),
       y: Math.max(pad, Math.min(rect.top, window.innerHeight - menuMaxHeight - pad)),
     });
@@ -182,7 +211,7 @@ export function CanvasHomePanel({
   const closeMenus = () => {
     setCardMenu({ target: null, x: 0, y: 0 });
     setProjectMenu({ target: null, x: 0, y: 0 });
-    setMoveMenu({ canvasId: "", x: 0, y: 0 });
+    setMoveMenu({ canvasId: "", action: "move", x: 0, y: 0 });
   };
 
   const renderCardMenu = () => {
@@ -199,13 +228,13 @@ export function CanvasHomePanel({
         onPointerLeave={(event) => {
           const nextTarget = event.relatedTarget as Node | null;
           if (nextTarget && moveMenuRef.current?.contains(nextTarget)) return;
-          setMoveMenu({ canvasId: "", x: 0, y: 0 });
+          setMoveMenu({ canvasId: "", action: "move", x: 0, y: 0 });
         }}
       >
         <button
           type="button"
           role="menuitem"
-          onPointerEnter={() => setMoveMenu({ canvasId: "", x: 0, y: 0 })}
+          onPointerEnter={() => setMoveMenu({ canvasId: "", action: "move", x: 0, y: 0 })}
           onClick={() => {
             closeMenus();
             if (canvas) onStartRenameDocument(canvas.id, canvas.title || "");
@@ -217,7 +246,7 @@ export function CanvasHomePanel({
         <button
           type="button"
           role="menuitem"
-          onPointerEnter={() => setMoveMenu({ canvasId: "", x: 0, y: 0 })}
+          onPointerEnter={() => setMoveMenu({ canvasId: "", action: "move", x: 0, y: 0 })}
           onClick={() => {
             closeMenus();
             onDuplicateDocument(target.id);
@@ -229,21 +258,112 @@ export function CanvasHomePanel({
         <button
           type="button"
           role="menuitem"
-          className={moveMenu.canvasId === target.id ? "active" : ""}
+          onPointerEnter={() => setMoveMenu({ canvasId: "", action: "move", x: 0, y: 0 })}
+          onClick={() => {
+            closeMenus();
+            onExportDocumentJson(target.id);
+          }}
+        >
+          <FileJson size={16} aria-hidden="true" />
+          <span>{t("infiniteCanvas:exportCanvasJson")}</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onPointerEnter={() => setMoveMenu({ canvasId: "", action: "move", x: 0, y: 0 })}
+          onClick={() => {
+            closeMenus();
+            onExportDocumentPackage(target.id);
+          }}
+        >
+          <Download size={16} aria-hidden="true" />
+          <span>{t("infiniteCanvas:exportCanvasWithResources")}</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className={moveMenu.canvasId === target.id && moveMenu.action === "move" ? "active" : ""}
           aria-haspopup="menu"
-          aria-expanded={moveMenu.canvasId === target.id}
-          onPointerEnter={(event) => openMoveMenu(event.currentTarget, target.id)}
-          onFocus={(event) => openMoveMenu(event.currentTarget, target.id)}
-          onClick={(event) => openMoveMenu(event.currentTarget, target.id)}
+          aria-expanded={moveMenu.canvasId === target.id && moveMenu.action === "move"}
+          onPointerEnter={(event) => openMoveMenu(event.currentTarget, target.id, "move")}
+          onFocus={(event) => openMoveMenu(event.currentTarget, target.id, "move")}
+          onClick={(event) => openMoveMenu(event.currentTarget, target.id, "move")}
         >
           <FolderInput size={16} aria-hidden="true" />
           <span>{t("infiniteCanvas:moveToProject")}</span>
+        </button>
+        {isRemoteServerMode && onUploadDocumentToRemote ? (
+          <button
+            type="button"
+            role="menuitem"
+            className={moveMenu.canvasId === target.id && moveMenu.action === "upload" ? "active" : ""}
+            aria-haspopup="menu"
+            aria-expanded={moveMenu.canvasId === target.id && moveMenu.action === "upload"}
+            onPointerEnter={(event) => openMoveMenu(event.currentTarget, target.id, "upload")}
+            onFocus={(event) => openMoveMenu(event.currentTarget, target.id, "upload")}
+            onClick={(event) => openMoveMenu(event.currentTarget, target.id, "upload")}
+          >
+            <UploadCloud size={16} aria-hidden="true" />
+            <span>{t("infiniteCanvas:uploadToRemote", { defaultValue: "Upload to server" })}</span>
+          </button>
+        ) : null}
+        <button
+          type="button"
+          role="menuitem"
+          className={confirmingDeleteDocumentId === target.id ? "danger confirming" : "danger"}
+          onPointerEnter={() => setMoveMenu({ canvasId: "", action: "move", x: 0, y: 0 })}
+          onClick={() => {
+            onSelectDocument(target.id);
+            if (confirmingDeleteDocumentId === target.id) {
+              closeMenus();
+              onDeleteDocument(target.id);
+              return;
+            }
+            onConfirmDeleteDocument(target.id);
+          }}
+        >
+          <Trash2 size={16} aria-hidden="true" />
+          <span>{confirmingDeleteDocumentId === target.id ? t("common:confirm.delete") : t("infiniteCanvas:deleteCanvas")}</span>
+        </button>
+      </div>,
+      document.body,
+    );
+  };
+
+  const renderServerCardMenu = () => {
+    if (!cardMenu.target || typeof document === "undefined") return null;
+    const target = cardMenu.target;
+    return createPortal(
+      <div
+        ref={cardMenuRef}
+        className="ic-project-card-menu"
+        role="menu"
+        style={{ left: cardMenu.x, top: cardMenu.y }}
+        onPointerDown={(event) => event.stopPropagation()}
+        onPointerLeave={(event) => {
+          const nextTarget = event.relatedTarget as Node | null;
+          if (nextTarget && moveMenuRef.current?.contains(nextTarget)) return;
+          setMoveMenu({ canvasId: "", action: "move", x: 0, y: 0 });
+        }}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          className={moveMenu.canvasId === target.id && moveMenu.action === "copy" ? "active" : ""}
+          aria-haspopup="menu"
+          aria-expanded={moveMenu.canvasId === target.id && moveMenu.action === "copy"}
+          onPointerEnter={(event) => openMoveMenu(event.currentTarget, target.id, "copy")}
+          onFocus={(event) => openMoveMenu(event.currentTarget, target.id, "copy")}
+          onClick={(event) => openMoveMenu(event.currentTarget, target.id, "copy")}
+        >
+          <Copy size={16} aria-hidden="true" />
+          <span>{t("infiniteCanvas:copyToLocal", { defaultValue: "Copy to local" })}</span>
         </button>
         <button
           type="button"
           role="menuitem"
           className={confirmingDeleteDocumentId === target.id ? "danger confirming" : "danger"}
-          onPointerEnter={() => setMoveMenu({ canvasId: "", x: 0, y: 0 })}
+          onPointerEnter={() => setMoveMenu({ canvasId: "", action: "move", x: 0, y: 0 })}
           onClick={() => {
             onSelectDocument(target.id);
             if (confirmingDeleteDocumentId === target.id) {
@@ -312,13 +432,22 @@ export function CanvasHomePanel({
     if (!moveMenu.canvasId || typeof document === "undefined") return null;
     const canvas = documents.find((item) => item.id === moveMenu.canvasId);
     const currentProjectId = canvas?.projectId || "";
-    const projectItems = projectMoveTargets;
+    const projectItems = moveMenu.action === "upload"
+      ? remoteUploadTargets
+      : moveMenu.action === "copy"
+        ? localCopyTargets
+        : projectMoveTargets;
+    const label = moveMenu.action === "upload"
+      ? t("infiniteCanvas:uploadToRemote", { defaultValue: "Upload to server" })
+      : moveMenu.action === "copy"
+        ? t("infiniteCanvas:copyToLocal", { defaultValue: "Copy to local" })
+        : t("infiniteCanvas:moveToProject");
     return createPortal(
       <div
         ref={moveMenuRef}
         className="ic-project-move-menu"
         role="menu"
-        aria-label={t("infiniteCanvas:moveToProject")}
+        aria-label={label}
         style={{ left: moveMenu.x, top: moveMenu.y }}
         onPointerDown={(event) => event.stopPropagation()}
       >
@@ -331,10 +460,12 @@ export function CanvasHomePanel({
               role="menuitemradio"
               aria-checked={selected}
               className={selected ? "selected" : ""}
-              disabled={selected}
+              disabled={moveMenu.action === "move" && selected}
               onClick={() => {
                 closeMenus();
-                onMoveDocumentToProject(moveMenu.canvasId, project.id);
+                if (moveMenu.action === "upload") onUploadDocumentToRemote?.(moveMenu.canvasId, project.id);
+                else if (moveMenu.action === "copy") onCopyRemoteDocumentToLocal?.(moveMenu.canvasId, project.id);
+                else onMoveDocumentToProject(moveMenu.canvasId, project.id);
               }}
             >
               {selected ? <Check size={14} aria-hidden="true" /> : <span className="ic-menu-check-spacer" />}
@@ -350,6 +481,28 @@ export function CanvasHomePanel({
   return (
     <div className="ic-project-home" aria-label={t("infiniteCanvas:homeAriaLabel")}>
       <aside className="ic-project-sidebar" aria-label={t("infiniteCanvas:projectSidebar")}>
+        {isRemoteServerMode && onHomeModeChange ? (
+          <div className="ic-project-source-switch" role="group" aria-label={t("infiniteCanvas:canvasSource", { defaultValue: "Canvas source" })}>
+            <button
+              type="button"
+              className={mode === "local" ? "active" : ""}
+              aria-pressed={mode === "local"}
+              onClick={() => onHomeModeChange("local")}
+            >
+              <HardDrive size={17} aria-hidden="true" />
+              <span>{t("infiniteCanvas:localCanvases", { defaultValue: "Local" })}</span>
+            </button>
+            <button
+              type="button"
+              className={mode === "server" ? "active" : ""}
+              aria-pressed={mode === "server"}
+              onClick={() => onHomeModeChange("server")}
+            >
+              <Server size={17} aria-hidden="true" />
+              <span>{t("infiniteCanvas:serverCanvases", { defaultValue: "Server" })}</span>
+            </button>
+          </div>
+        ) : null}
         <div className="ic-project-sidebar__header">
           <strong>{t("infiniteCanvas:projectsTitle")}</strong>
           <button type="button" title={t("infiniteCanvas:newProject")} aria-label={t("infiniteCanvas:newProject")} onClick={onCreateProject}>
@@ -416,7 +569,7 @@ export function CanvasHomePanel({
                 type="button"
                 title={t("infiniteCanvas:refreshCanvases")}
                 aria-label={t("infiniteCanvas:refreshCanvases")}
-                onClick={onRefreshLocal}
+                onClick={mode === "server" && onRefreshServer ? onRefreshServer : onRefreshLocal}
               >
                 <RefreshCw size={17} aria-hidden="true" />
               </button>
@@ -428,22 +581,44 @@ export function CanvasHomePanel({
               <button type="button" className={sortMode === "recent" ? "active" : ""} onClick={() => onSortModeChange("recent")}>{t("infiniteCanvas:sortRecent")}</button>
               <button type="button" className={sortMode === "name" ? "active" : ""} onClick={() => onSortModeChange("name")}>{t("infiniteCanvas:sortName")}</button>
             </div>
-            <button
-              className="ic-home-create-button"
-              type="button"
-              aria-label={t("infiniteCanvas:newCanvas")}
-              title={t("infiniteCanvas:newCanvas")}
-              onClick={onCreateCanvas}
-            >
-              <Plus size={17} aria-hidden="true" />
-            </button>
+            {mode === "server" ? (
+              <input
+                className="ic-project-search"
+                type="search"
+                value={searchText}
+                placeholder={t("common:actions.search", { defaultValue: "Search" })}
+                onChange={(event) => onSearchTextChange?.(event.target.value)}
+              />
+            ) : (
+              <>
+                <button
+                  className="ic-home-create-button ic-home-import-button"
+                  type="button"
+                  aria-label={t("infiniteCanvas:importCanvas")}
+                  title={t("infiniteCanvas:importCanvas")}
+                  onClick={onImportCanvas}
+                >
+                  <Upload size={17} aria-hidden="true" />
+                </button>
+                <button
+                  className="ic-home-create-button"
+                  type="button"
+                  aria-label={t("infiniteCanvas:newCanvas")}
+                  title={t("infiniteCanvas:newCanvas")}
+                  onClick={onCreateCanvas}
+                >
+                  <Plus size={17} aria-hidden="true" />
+                </button>
+              </>
+            )}
           </div>
         </div>
         <div className="ic-project-home__body">
-          <div className="ic-project-card-grid">
+          <div className="ic-project-card-grid scrollbar-thin-stable">
             {documents.length ? documents.map((document) => {
               const isActive = document.id === selectedDocumentId || (!selectedDocumentId && document.id === selectedDocument?.id);
               const isRenaming = document.id === renamingDocumentId;
+              const CanvasIcon = mode === "server" ? Cloud : Layers;
               return (
                 <article key={document.id} className={`ic-project-card${isActive ? " active" : ""}`} onClick={() => onSelectDocument(document.id)} onDoubleClick={() => {
                   onOpenDocument(document.id);
@@ -487,7 +662,7 @@ export function CanvasHomePanel({
                       </div>
                       <button className="ic-project-card__main" type="button" onClick={() => onSelectDocument(document.id)}>
                         <span className="ic-project-card__icon">
-                          <Layers size={18} aria-hidden="true" />
+                          <CanvasIcon size={18} aria-hidden="true" />
                         </span>
                         <strong>{document.title || t("infiniteCanvas:untitledCanvas")}</strong>
                         <small>{formatProjectDate(document.updatedAt || document.createdAt)}</small>
@@ -500,7 +675,7 @@ export function CanvasHomePanel({
           </div>
         </div>
       </div>
-      {renderCardMenu()}
+      {mode === "server" ? renderServerCardMenu() : renderCardMenu()}
       {renderProjectMenu()}
       {renderMoveMenu()}
     </div>

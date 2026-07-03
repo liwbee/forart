@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Copy, Download, ImagePlus, Images, MoreHorizontal, Pencil, Plus, Tags, Trash2, Users } from "lucide-react";
 import { createPortal } from "react-dom";
+import { CollapsibleTagFilterRow } from "../library-tags";
+import { LibraryTagChoiceButton } from "../library-tags";
 import { ImageViewer } from "../../lib/ImageViewer";
 import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
 import { copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
@@ -26,6 +28,7 @@ import {
 import { useOutfitLibraryStore } from "./outfitLibraryStore";
 import { AssetUploadPayload, OutfitEntry, OutfitProject, OutfitTag } from "./types";
 import { normalizeTags, toggleTag } from "../model-library/tagUtils";
+import { EMPTY_LIBRARY_TAG_FILTER, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
 
 type ComposerLibrary = "models" | "outfits";
 type SidebarProject = Pick<OutfitProject, "id" | "name">;
@@ -276,19 +279,24 @@ function OutfitProjectSidebar({
 
 function OutfitToolbar({
   tags,
-  activeTagIds,
+  tagFilter,
+  tagCounts,
   onTagToggle,
+  onTagExclude,
   onTagClear,
   onOpenTagManager,
 }: {
   tags: OutfitTag[];
-  activeTagIds: string[];
+  tagFilter: LibraryTagFilter;
+  tagCounts: Record<string, number>;
   onTagToggle: (tagId: string) => void;
+  onTagExclude: (tagId: string) => void;
   onTagClear: () => void;
   onOpenTagManager: () => void;
 }) {
   const { t } = useTranslation();
-  const activeTagSet = useMemo(() => new Set(activeTagIds), [activeTagIds]);
+  const includeTagSet = useMemo(() => new Set(tagFilter.includeTagIds), [tagFilter.includeTagIds]);
+  const excludeTagSet = useMemo(() => new Set(tagFilter.excludeTagIds), [tagFilter.excludeTagIds]);
   return (
     <div className="model-toolbar outfit-toolbar">
       <div className="library-tag-section">
@@ -297,22 +305,24 @@ function OutfitToolbar({
           <Pencil size={18} aria-hidden="true" />
         </button>
         <div className="library-tag-controls">
-          <div className="library-tag-filter">
-            <button className={activeTagIds.length ? "" : "active"} type="button" onClick={onTagClear}>
-              {t("common:labels.all")}
-            </button>
-            {tags.map((tag) => (
-              <button
-                key={tag.id}
-                className={activeTagSet.has(tag.id) ? "active" : ""}
-                type="button"
-                aria-pressed={activeTagSet.has(tag.id)}
-                onClick={() => onTagToggle(tag.id)}
-              >
-                {tag.name}
+          <CollapsibleTagFilterRow expandLabel="展开标签" collapseLabel="收起标签">
+            <div className="library-tag-filter">
+              <button className={hasLibraryTagFilter(tagFilter) ? "" : "active"} type="button" onClick={onTagClear}>
+                {t("common:labels.all")}
               </button>
-            ))}
-          </div>
+              {tags.map((tag) => (
+                <LibraryTagChoiceButton
+                  key={tag.id}
+                  name={tag.name}
+                  count={tagCounts[tag.id] || 0}
+                  included={includeTagSet.has(tag.id)}
+                  excluded={excludeTagSet.has(tag.id)}
+                  onToggleInclude={() => onTagToggle(tag.id)}
+                  onToggleExclude={() => onTagExclude(tag.id)}
+                />
+              ))}
+            </div>
+          </CollapsibleTagFilterRow>
         </div>
       </div>
     </div>
@@ -798,9 +808,9 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const [closeMenuToken, setCloseMenuToken] = useState(0);
   const { toast: imageActionToast, showToast: showImageActionToast } = useLibraryImageActionToast();
   const activeProjectId = useOutfitLibraryStore((state) => state.activeProjectId);
-  const activeTagIds = useOutfitLibraryStore((state) => state.activeTagIds);
+  const activeTagFilter = useOutfitLibraryStore((state) => state.activeTagFilter);
   const setActiveProjectId = useOutfitLibraryStore((state) => state.setActiveProjectId);
-  const setActiveTagIds = useOutfitLibraryStore((state) => state.setActiveTagIds);
+  const setActiveTagFilter = useOutfitLibraryStore((state) => state.setActiveTagFilter);
 
   const storageSettingsQuery = useQuery({
     queryKey: outfitLibraryKeys.storageSettings,
@@ -832,13 +842,18 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
 
   useEffect(() => {
     const tags = tagsQuery.data?.tags || [];
-    const validTagIds = activeTagIds.filter((tagId) => tags.some((tag) => tag.id === tagId));
-    if (validTagIds.length !== activeTagIds.length) setActiveTagIds(validTagIds);
-  }, [activeTagIds, setActiveTagIds, tagsQuery.data?.tags]);
+    const validFilter = cleanLibraryTagFilter(activeTagFilter, tags.map((tag) => tag.id));
+    if (
+      validFilter.includeTagIds.length !== activeTagFilter.includeTagIds.length
+      || validFilter.excludeTagIds.length !== activeTagFilter.excludeTagIds.length
+    ) {
+      setActiveTagFilter(validFilter);
+    }
+  }, [activeTagFilter, setActiveTagFilter, tagsQuery.data?.tags]);
 
   const outfitsQuery = useQuery({
-    queryKey: activeProjectId ? outfitLibraryKeys.outfits(activeProjectId, activeTagIds) : ["outfits", "empty"],
-    queryFn: () => listOutfits({ projectId: activeProjectId, tagIds: activeTagIds }),
+    queryKey: activeProjectId ? outfitLibraryKeys.outfits(activeProjectId, activeTagFilter) : ["outfits", "empty"],
+    queryFn: () => listOutfits({ projectId: activeProjectId, tagFilter: activeTagFilter }),
     enabled: Boolean(activeProjectId),
   });
 
@@ -849,7 +864,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
       return createOutfit(activeProjectId, payload);
     },
     onSuccess: async () => {
-      if (activeTagIds.length) setActiveTagIds([]);
+      if (hasLibraryTagFilter(activeTagFilter)) setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER);
       setDeleteConfirmOutfitId("");
       await queryClient.invalidateQueries({ queryKey: ["outfits", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.projects });
@@ -933,7 +948,12 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     },
     onSuccess: async (_result, tagId) => {
       setDeleteConfirmTagId("");
-      if (activeTagIds.includes(tagId)) setActiveTagIds(activeTagIds.filter((activeTagId) => activeTagId !== tagId));
+      if (activeTagFilter.includeTagIds.includes(tagId) || activeTagFilter.excludeTagIds.includes(tagId)) {
+        setActiveTagFilter(createLibraryTagFilter(
+          activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId),
+          activeTagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId),
+        ));
+      }
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : outfitLibraryKeys.tagRoot });
       await queryClient.invalidateQueries({ queryKey: ["outfits", activeProjectId] });
     },
@@ -985,7 +1005,21 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   }
 
   function handleToggleTagFilter(tagId: string) {
-    setActiveTagIds(activeTagIds.includes(tagId) ? activeTagIds.filter((activeTagId) => activeTagId !== tagId) : [...activeTagIds, tagId]);
+    setActiveTagFilter(createLibraryTagFilter(
+      activeTagFilter.includeTagIds.includes(tagId)
+        ? activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId)
+        : [...activeTagFilter.includeTagIds, tagId],
+      activeTagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId),
+    ));
+  }
+
+  function handleExcludeTagFilter(tagId: string) {
+    setActiveTagFilter(createLibraryTagFilter(
+      activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId),
+      activeTagFilter.excludeTagIds.includes(tagId)
+        ? activeTagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId)
+        : [...activeTagFilter.excludeTagIds, tagId],
+    ));
   }
 
   function handleDeleteTag(tagId: string, isConfirming: boolean) {
@@ -1006,6 +1040,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     });
   }, [outfits, normalizedSearchQuery]);
   const tags = tagsQuery.data?.tags || [];
+  const tagCounts = useMemo(() => countLibraryTags(filteredOutfits, tags), [filteredOutfits, tags]);
   const activeProject = projects.find((project) => project.id === activeProjectId) || null;
   const errorMessage = getRequestError([
     storageSettingsQuery.error,
@@ -1059,9 +1094,11 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
           <div className="model-content-head">
             <OutfitToolbar
               tags={tags}
-              activeTagIds={activeTagIds}
+              tagFilter={activeTagFilter}
+              tagCounts={tagCounts}
               onTagToggle={handleToggleTagFilter}
-              onTagClear={() => setActiveTagIds([])}
+              onTagExclude={handleExcludeTagFilter}
+              onTagClear={() => setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER)}
               onOpenTagManager={() => setTagManagerOpen(true)}
             />
           </div>

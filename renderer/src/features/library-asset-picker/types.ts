@@ -14,6 +14,7 @@ export interface LibraryAssetSelection {
 export interface LibraryAssetItem {
   id: string;
   name: string;
+  tags: string[];
   assetId?: string | null;
   url: string;
   updatedAt?: string;

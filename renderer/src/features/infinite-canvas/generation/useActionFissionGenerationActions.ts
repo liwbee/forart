@@ -102,7 +102,6 @@ export function useActionFissionGenerationActions({
       title: activeCanvasTitle,
       icon: activeProject?.icon,
       canvasType: activeProject?.canvasType,
-      source: activeProject?.source,
       nodes: sanitizeCanvasNodesForSave(nextNodes),
       connections,
       groups,

@@ -1,33 +1,14 @@
-import { Images, PersonStanding, Search, Users, X } from "lucide-react";
-import { useState } from "react";
+import { Search, X } from "lucide-react";
+import { Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ActionLibraryPage } from "../action-library/ActionLibraryPage";
-import { ModelLibraryPage } from "../model-library/ModelLibraryPage";
-import { OutfitLibraryPage } from "../outfit-library/OutfitLibraryPage";
-
-type ResourceLibraryTab = "models" | "actions" | "outfits";
-
-const libraryTabs: Array<{
-  id: ResourceLibraryTab;
-  labelKey: string;
-  icon: typeof Users;
-}> = [
-  { id: "models", labelKey: "resourceLibrary:models", icon: Users },
-  { id: "actions", labelKey: "resourceLibrary:actions", icon: PersonStanding },
-  { id: "outfits", labelKey: "resourceLibrary:outfits", icon: Images },
-];
-
-function renderLibrary(tab: ResourceLibraryTab, searchQuery: string) {
-  if (tab === "models") return <ModelLibraryPage searchQuery={searchQuery} />;
-  if (tab === "actions") return <ActionLibraryPage searchQuery={searchQuery} />;
-  return <OutfitLibraryPage searchQuery={searchQuery} />;
-}
+import { resourceLibraryTabById, resourceLibraryTabs, type ResourceLibraryTab } from "./resourceLibraryTabs";
 
 export function ResourceLibraryPage() {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<ResourceLibraryTab>("models");
   const [searchQuery, setSearchQuery] = useState("");
-  const activeTabLabel = libraryTabs.find((tab) => tab.id === activeTab)?.labelKey || "resourceLibrary:models";
+  const activeTabConfig = resourceLibraryTabById[activeTab] || resourceLibraryTabById.models;
+  const ActivePage = activeTabConfig.Page;
 
   return (
     <section className="resource-library-page" aria-label={t("resourceLibrary:title")}>
@@ -38,7 +19,7 @@ export function ResourceLibraryPage() {
 
         <nav className="resource-library-nav" aria-label={t("resourceLibrary:navigation")}>
           <div className="resource-library-tabs" role="tablist">
-            {libraryTabs.map((tab) => {
+            {resourceLibraryTabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               return (
@@ -73,8 +54,10 @@ export function ResourceLibraryPage() {
           </label>
         </nav>
 
-        <div className="resource-library-content" role="tabpanel" aria-label={t(activeTabLabel)}>
-          {renderLibrary(activeTab, searchQuery)}
+        <div className="resource-library-content" role="tabpanel" aria-label={t(activeTabConfig.labelKey)}>
+          <Suspense fallback={<div className="view-loading">{t(activeTabConfig.labelKey)}</div>}>
+            <ActivePage searchQuery={searchQuery} />
+          </Suspense>
         </div>
       </div>
     </section>

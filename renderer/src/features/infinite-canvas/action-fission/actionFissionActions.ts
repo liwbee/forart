@@ -18,19 +18,30 @@ export interface SelectActionForRowResult {
   eligibleCandidates: ActionEntry[];
 }
 
-export function selectedTagNames(row: ActionFissionRow, tags: ActionTag[]) {
+export function selectedIncludeTagNames(row: ActionFissionRow, tags: ActionTag[]) {
   const byId = new Map(tags.map((tag) => [tag.id, tag.name]));
-  return row.actionTagIds
+  return row.includeActionTagIds
+    .map((tagId) => byId.get(tagId) || "")
+    .filter(Boolean);
+}
+
+export function selectedExcludeTagNames(row: ActionFissionRow, tags: ActionTag[]) {
+  const byId = new Map(tags.map((tag) => [tag.id, tag.name]));
+  return row.excludeActionTagIds
     .map((tagId) => byId.get(tagId) || "")
     .filter(Boolean);
 }
 
 export function filterActionsForRow(row: ActionFissionRow, actions: ActionEntry[], tags: ActionTag[]) {
-  const names = selectedTagNames(row, tags);
+  const includeNames = selectedIncludeTagNames(row, tags);
+  const excludeNames = selectedExcludeTagNames(row, tags);
   if (!row.actionProjectId) return [];
   const projectActions = actions.filter((action) => action.project_id === row.actionProjectId);
-  if (!names.length) return projectActions;
-  return projectActions.filter((action) => names.every((tagName) => action.tags.includes(tagName)));
+  if (!includeNames.length && !excludeNames.length) return projectActions;
+  return projectActions.filter((action) => (
+    includeNames.every((tagName) => action.tags.includes(tagName))
+    && excludeNames.every((tagName) => !action.tags.includes(tagName))
+  ));
 }
 
 export function pickRandomAction(actions: ActionEntry[]) {

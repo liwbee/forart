@@ -8,7 +8,8 @@ export function createActionFissionRow(): ActionFissionRow {
   return {
     id: createId("action_row"),
     actionProjectId: "",
-    actionTagIds: [],
+    includeActionTagIds: [],
+    excludeActionTagIds: [],
   };
 }
 
@@ -83,18 +84,18 @@ export function changeActionFissionRowProject(state: ActionFissionState, rowId: 
     ...state,
     rows: state.rows.map((row) => (
       row.id === rowId
-        ? clearSelectedAction({ ...row, actionProjectId, actionTagIds: [], error: "" })
+        ? clearSelectedAction({ ...row, actionProjectId, includeActionTagIds: [], excludeActionTagIds: [], error: "" })
         : row
     )),
   };
 }
 
-export function changeActionFissionRowTags(state: ActionFissionState, rowId: string, actionTagIds: string[]): ActionFissionState {
+export function changeActionFissionRowTags(state: ActionFissionState, rowId: string, includeActionTagIds: string[], excludeActionTagIds: string[]): ActionFissionState {
   return {
     ...state,
     rows: state.rows.map((row) => (
       row.id === rowId
-        ? clearSelectedAction({ ...row, actionTagIds, error: "" })
+        ? clearSelectedAction({ ...row, includeActionTagIds, excludeActionTagIds, error: "" })
         : row
     )),
   };
