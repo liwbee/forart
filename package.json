@@ -28,8 +28,7 @@
       "!server/.forart-data/**/*",
       "!server/data/**/*",
       "package.json",
-      "VERSION",
-      "update-notes.json"
+      "VERSION"
     ],
     "win": {
       "target": [

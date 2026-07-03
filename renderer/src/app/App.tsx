@@ -76,14 +76,14 @@ function formatBytes(value: number) {
 
 function updatePhaseLabel(phase: string, language: "zh-CN" | "en-US") {
   if (language === "zh-CN") {
-    if (phase === "listing") return "正在获取更新列表";
-    if (phase === "downloading") return "正在下载更新";
+    if (phase === "listing") return "正在获取发布信息";
+    if (phase === "downloading") return "正在下载免安装包";
     if (phase === "scheduling") return "正在准备应用更新";
     if (phase === "scheduled") return "已准备应用更新";
     return "正在更新";
   }
-  if (phase === "listing") return "Fetching update list";
-  if (phase === "downloading") return "Downloading update";
+  if (phase === "listing") return "Fetching release";
+  if (phase === "downloading") return "Downloading portable package";
   if (phase === "scheduling") return "Preparing update";
   if (phase === "scheduled") return "Update ready to apply";
   return "Updating";

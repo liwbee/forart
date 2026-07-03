@@ -3,28 +3,9 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const REPO_URL = 'https://github.com/liwbee/forart';
-const GITHUB_BRANCH = 'main';
 const GITHUB_API_ROOT = 'https://api.github.com/repos/liwbee/forart';
-const GITHUB_RAW_ROOT = `https://raw.githubusercontent.com/liwbee/forart/${GITHUB_BRANCH}`;
-const REMOTE_TREE_URL = `${GITHUB_API_ROOT}/git/trees/${GITHUB_BRANCH}?recursive=1`;
-const REMOTE_VERSION_URL = `${GITHUB_RAW_ROOT}/VERSION`;
-const REMOTE_UPDATE_NOTES_URL = `${GITHUB_RAW_ROOT}/update-notes.json`;
-const MIRROR_SYNC_ROOTS = [
-  'electron/',
-  'renderer/',
-  'server/admin/',
-  'server/src/',
-];
-const MIRROR_SYNC_FILES = [
-  'server/.dockerignore',
-  'server/.gitignore',
-  'server/Dockerfile',
-  'server/README.md',
-  'server/START_FORART_SERVER.bat',
-  'server/forart-server.mjs',
-  'server/package-lock.json',
-  'server/package.json',
-];
+const LATEST_RELEASE_URL = `${GITHUB_API_ROOT}/releases/latest`;
+const PORTABLE_ASSET_PATTERN = /forart.*windows.*portable.*\.zip$/i;
 
 function readPackageInfo(rootDir) {
   try {
@@ -45,70 +26,66 @@ async function fetchJson(net, url) {
       'User-Agent': 'Forart-Updater',
     },
   });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
 }
 
-async function fetchText(net, url) {
+async function downloadFileWithProgress(net, url, filePath, onProgress) {
   const response = await net.fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, {
     headers: {
-      Accept: 'text/plain, application/json',
+      Accept: 'application/octet-stream, */*',
       'User-Agent': 'Forart-Updater',
     },
   });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.text();
-}
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-async function fetchBytes(net, url) {
-  const response = await net.fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, {
-    headers: {
-      Accept: 'application/octet-stream, text/plain, */*',
-      'User-Agent': 'Forart-Updater',
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return Buffer.from(await response.arrayBuffer());
-}
-
-async function fetchBytesWithProgress(net, url, onProgress) {
-  const response = await net.fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, {
-    headers: {
-      Accept: 'application/octet-stream, text/plain, */*',
-      'User-Agent': 'Forart-Updater',
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const totalBytes = Number(response.headers.get('content-length') || 0) || 0;
   const reader = response.body?.getReader?.();
-  if (!reader) {
-    const bytes = Buffer.from(await response.arrayBuffer());
-    onProgress?.({ receivedBytes: bytes.length, totalBytes, done: true });
-    return bytes;
+  const stream = fs.createWriteStream(filePath);
+  let receivedBytes = 0;
+
+  function writeChunk(chunk) {
+    return new Promise((resolve, reject) => {
+      stream.write(chunk, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
   }
 
-  const chunks = [];
-  let receivedBytes = 0;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    const chunk = Buffer.from(value);
-    chunks.push(chunk);
-    receivedBytes += chunk.length;
-    onProgress?.({ receivedBytes, totalBytes, done: false });
+  try {
+    if (!reader) {
+      const bytes = Buffer.from(await response.arrayBuffer());
+      await writeChunk(bytes);
+      receivedBytes = bytes.length;
+      onProgress?.({ receivedBytes, totalBytes, done: true });
+    } else {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        const chunk = Buffer.from(value);
+        await writeChunk(chunk);
+        receivedBytes += chunk.length;
+        onProgress?.({ receivedBytes, totalBytes, done: false });
+      }
+      onProgress?.({ receivedBytes, totalBytes, done: true });
+    }
+  } catch (error) {
+    stream.destroy();
+    fs.rmSync(filePath, { force: true });
+    throw error;
   }
-  onProgress?.({ receivedBytes, totalBytes, done: true });
-  return Buffer.concat(chunks);
+
+  await new Promise((resolve, reject) => {
+    stream.end((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+
+  return { receivedBytes, totalBytes };
 }
 
 function stripUtf8Bom(text) {
@@ -117,6 +94,28 @@ function stripUtf8Bom(text) {
 
 function parseJsonText(text) {
   return JSON.parse(stripUtf8Bom(text));
+}
+
+function normalizeVersion(value) {
+  return String(value || '').trim().replace(/^v/i, '');
+}
+
+function versionParts(value) {
+  return normalizeVersion(value).match(/\d+/g)?.map(Number) || [];
+}
+
+function compareVersions(a, b) {
+  const aa = versionParts(a);
+  const bb = versionParts(b);
+  const length = Math.max(aa.length, bb.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (aa[index] || 0) - (bb[index] || 0);
+    if (diff) return diff;
+  }
+  const left = normalizeVersion(a);
+  const right = normalizeVersion(b);
+  if (left === right) return 0;
+  return left > right ? 1 : -1;
 }
 
 function normalizeUpdateNotes(input, fallbackVersion = '') {
@@ -139,59 +138,25 @@ function normalizeUpdateNotes(input, fallbackVersion = '') {
   };
 }
 
+function notesFromReleaseBody(body, fallbackVersion = '') {
+  const text = String(body || '').trim();
+  if (!text) return normalizeUpdateNotes({}, fallbackVersion);
+  try {
+    return normalizeUpdateNotes(parseJsonText(text), fallbackVersion);
+  } catch {
+    const items = text
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^\s*[-*]\s*/, '').trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    return normalizeUpdateNotes({ version: fallbackVersion, items }, fallbackVersion);
+  }
+}
+
 function readLocalVersion(rootDir) {
   const version = fs.readFileSync(path.join(rootDir, 'VERSION'), 'utf8').trim().split(/\r?\n/)[0]?.trim();
   if (!version) throw new Error('Local VERSION is empty.');
-  return version;
-}
-
-async function readRemoteVersion(net) {
-  const text = await fetchText(net, REMOTE_VERSION_URL);
-  const version = String(text || '').trim().split(/\r?\n/)[0]?.trim() || '';
-  if (!version || version.includes('<') || version.includes('{') || !/\d/.test(version)) {
-    throw new Error('Remote VERSION is empty or invalid.');
-  }
-  return version;
-}
-
-function readLocalUpdateNotes(rootDir, fallbackVersion = '') {
-  try {
-    const filePath = path.join(rootDir, 'update-notes.json');
-    const payload = parseJsonText(fs.readFileSync(filePath, 'utf8'));
-    return normalizeUpdateNotes(payload, fallbackVersion);
-  } catch {
-    return normalizeUpdateNotes({}, fallbackVersion);
-  }
-}
-
-async function readRemoteUpdateNotes(net, latestVersion) {
-  try {
-    const payload = parseJsonText(await fetchText(net, REMOTE_UPDATE_NOTES_URL));
-    return normalizeUpdateNotes(payload, latestVersion);
-  } catch (error) {
-    return {
-      ...normalizeUpdateNotes({}, latestVersion),
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-function versionParts(value) {
-  return String(value || '').match(/\d+/g)?.map(Number) || [];
-}
-
-function compareVersions(a, b) {
-  const aa = versionParts(a);
-  const bb = versionParts(b);
-  const length = Math.max(aa.length, bb.length);
-  for (let index = 0; index < length; index += 1) {
-    const diff = (aa[index] || 0) - (bb[index] || 0);
-    if (diff) return diff;
-  }
-  const left = String(a || '').trim();
-  const right = String(b || '').trim();
-  if (left === right) return 0;
-  return left > right ? 1 : -1;
+  return normalizeVersion(version);
 }
 
 function portableDataRoot(rootDir) {
@@ -212,142 +177,10 @@ function updateApplyRoot(rootDir) {
   return directory;
 }
 
-function updateDeletedRoot(rootDir) {
-  const directory = path.join(portableDataRoot(rootDir), 'update_deleted');
-  fs.mkdirSync(directory, { recursive: true });
-  return directory;
-}
-
 function timestampName() {
   const now = new Date();
   const pad = (value) => String(value).padStart(2, '0');
   return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-}
-
-function normalizeUpdatePath(input) {
-  return String(input || '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
-}
-
-function hasSafeParts(rel) {
-  return Boolean(rel) && rel.split('/').every((part) => part && part !== '.' && part !== '..');
-}
-
-function updateAllowedFile(input) {
-  const rel = normalizeUpdatePath(input);
-  if (!hasSafeParts(rel)) return false;
-  if (rel === 'forart-config.json') return false;
-  if (rel.startsWith('.git/') || rel.startsWith('.forart-data/') || rel.startsWith('CanvasAssests/')) return false;
-  if (rel.startsWith('node_modules/') || rel.startsWith('dist/') || rel.startsWith('data/')) return false;
-  if (rel.startsWith('server/node_modules/') || rel.startsWith('server/.forart-data/') || rel.startsWith('server/data/')) return false;
-  if (/\.(log|err\.log)$/i.test(rel)) return false;
-
-  if ([
-    'VERSION',
-    'README.md',
-    'START_FORART_MAIN.bat',
-    'eslint.config.js',
-    'index.html',
-    'package-lock.json',
-    'package.json',
-    'tsconfig.app.json',
-    'tsconfig.json',
-    'tsconfig.node.json',
-    'update-notes.json',
-    'vite.config.ts',
-  ].includes(rel)) return true;
-
-  return (
-    rel.startsWith('electron/')
-    || rel.startsWith('renderer/')
-    || rel.startsWith('server/')
-  );
-}
-
-function isInsideOrSame(parent, target) {
-  const relative = path.relative(path.resolve(parent), path.resolve(target));
-  return relative === '' || (Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative));
-}
-
-function safeStagingTarget(stagingRoot, rel) {
-  const normalized = normalizeUpdatePath(rel);
-  if (!updateAllowedFile(normalized)) throw new Error(`Update file is not allowed: ${normalized}`);
-  const target = path.resolve(stagingRoot, ...normalized.split('/'));
-  if (!isInsideOrSame(stagingRoot, target)) throw new Error(`Unsafe staging path: ${normalized}`);
-  return target;
-}
-
-async function githubUpdateFileList(net) {
-  const payload = await fetchJson(net, REMOTE_TREE_URL);
-  const entries = Array.isArray(payload.tree) ? payload.tree : [];
-  const files = entries
-    .filter((entry) => entry?.type === 'blob')
-    .map((entry) => normalizeUpdatePath(entry.path))
-    .filter(updateAllowedFile)
-    .sort();
-
-  if (!files.includes('VERSION')) throw new Error('Remote update source is missing VERSION.');
-  if (!files.includes('package.json')) throw new Error('Remote update source is missing package.json.');
-  if (!files.some((file) => file.startsWith('electron/'))) throw new Error('Remote update source did not return electron files.');
-  if (!files.some((file) => file.startsWith('renderer/'))) throw new Error('Remote update source did not return renderer files.');
-
-  return [...new Set(files)];
-}
-
-async function downloadGithubUpdateFiles(net, files, stagingRoot, onProgress) {
-  const startedAt = Date.now();
-  let downloadedBytes = 0;
-  let lastEmittedAt = 0;
-
-  const emitProgress = (payload, force = false) => {
-    const now = Date.now();
-    if (!force && now - lastEmittedAt < 180) return;
-    lastEmittedAt = now;
-    const elapsedSeconds = Math.max((now - startedAt) / 1000, 0.001);
-    onProgress?.({
-      phase: 'downloading',
-      downloadedBytes,
-      bytesPerSecond: downloadedBytes / elapsedSeconds,
-      ...payload,
-    });
-  };
-
-  for (let index = 0; index < files.length; index += 1) {
-    const rel = files[index];
-    const target = safeStagingTarget(stagingRoot, rel);
-    const rawUrl = `${GITHUB_RAW_ROOT}/${rel.split('/').map(encodeURIComponent).join('/')}`;
-    let lastFileBytes = 0;
-    emitProgress({
-      currentFile: rel,
-      fileIndex: index + 1,
-      fileCount: files.length,
-      fileBytes: 0,
-      fileTotalBytes: 0,
-      percent: files.length ? (index / files.length) * 100 : 0,
-    }, true);
-    const bytes = await fetchBytesWithProgress(net, rawUrl, ({ receivedBytes, totalBytes, done }) => {
-      downloadedBytes += Math.max(0, receivedBytes - lastFileBytes);
-      lastFileBytes = receivedBytes;
-      const fileFraction = totalBytes > 0 ? Math.min(receivedBytes / totalBytes, 1) : (done ? 1 : 0.5);
-      emitProgress({
-        currentFile: rel,
-        fileIndex: index + 1,
-        fileCount: files.length,
-        fileBytes: receivedBytes,
-        fileTotalBytes: totalBytes,
-        percent: files.length ? Math.min(((index + fileFraction) / files.length) * 100, 99.8) : 0,
-      }, done);
-    });
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, bytes);
-    emitProgress({
-      currentFile: rel,
-      fileIndex: index + 1,
-      fileCount: files.length,
-      fileBytes: bytes.length,
-      fileTotalBytes: bytes.length,
-      percent: files.length ? ((index + 1) / files.length) * 100 : 100,
-    }, true);
-  }
 }
 
 function wait(ms) {
@@ -361,21 +194,50 @@ async function removeDirectoryBestEffort(directory) {
       await fs.promises.rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
       return;
     } catch {
-      if (attempt === 4) {
-        return;
-      }
+      if (attempt === 4) return;
       await wait(150 * (attempt + 1));
     }
   }
 }
 
-function readStagedVersion(stagingRoot) {
-  try {
-    const version = fs.readFileSync(safeStagingTarget(stagingRoot, 'VERSION'), 'utf8').trim().split(/\r?\n/)[0]?.trim();
-    return version || '';
-  } catch {
-    return '';
+function safeFileName(fileName, fallback = 'Forart-windows-portable.zip') {
+  const baseName = path.basename(String(fileName || fallback));
+  return baseName.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || fallback;
+}
+
+function findPortableAsset(release) {
+  const assets = Array.isArray(release?.assets) ? release.assets : [];
+  return assets.find((asset) => PORTABLE_ASSET_PATTERN.test(String(asset?.name || '')))
+    || assets.find((asset) => /portable.*\.zip$/i.test(String(asset?.name || '')))
+    || assets.find((asset) => /\.zip$/i.test(String(asset?.name || '')))
+    || null;
+}
+
+async function readLatestRelease(net) {
+  const release = await fetchJson(net, LATEST_RELEASE_URL);
+  const tagName = String(release.tag_name || '').trim();
+  const version = normalizeVersion(tagName);
+  if (!version || !/\d/.test(version)) throw new Error('Latest GitHub Release tag is empty or invalid.');
+  const asset = findPortableAsset(release);
+  if (!asset?.browser_download_url) {
+    throw new Error('Latest GitHub Release does not contain a Forart Windows portable zip asset.');
   }
+  const notes = notesFromReleaseBody(release.body || '', version);
+  return {
+    id: release.id,
+    name: String(release.name || tagName || version),
+    tagName,
+    version,
+    publishedAt: String(release.published_at || release.created_at || ''),
+    htmlUrl: String(release.html_url || REPO_URL),
+    notes,
+    asset: {
+      name: String(asset.name || 'Forart-windows-portable.zip'),
+      size: Number(asset.size || 0),
+      url: String(asset.browser_download_url),
+      digest: String(asset.digest || ''),
+    },
+  };
 }
 
 async function readTextIfExists(filePath, maxLength = 1600) {
@@ -393,13 +255,9 @@ async function waitForApplyStatus(statusPath, expectedState, timeoutMs = 10000, 
     try {
       const payload = parseJsonText(await fs.promises.readFile(statusPath, 'utf8'));
       if (payload?.state === expectedState) return payload;
-      if (payload?.state === 'failed') {
-        throw new Error(payload.error || 'Update apply script failed before takeover.');
-      }
+      if (payload?.state === 'failed') throw new Error(payload.error || 'Update apply script failed before takeover.');
     } catch (error) {
-      if (error?.code !== 'ENOENT' && !String(error?.message || '').includes('Unexpected end')) {
-        throw error;
-      }
+      if (error?.code !== 'ENOENT' && !String(error?.message || '').includes('Unexpected end')) throw error;
     }
     await wait(150);
   }
@@ -411,7 +269,7 @@ async function waitForApplyStatus(statusPath, expectedState, timeoutMs = 10000, 
   throw new Error(`Timed out waiting for update apply script to take over.${details.length ? ` ${details.join(' ')}` : ''}`);
 }
 
-function writeUpdateApplyScript(scriptPath) {
+function writePortableApplyScript(scriptPath) {
   const script = String.raw`param(
   [Parameter(Mandatory = $true)]
   [string]$PlanPath
@@ -427,271 +285,6 @@ function Write-Log {
   Add-Content -LiteralPath $script:LogPath -Value $line -Encoding UTF8
 }
 
-function Join-UpdatePath {
-  param([string]$BasePath, [string]$RelativePath)
-  $nativeRelative = $RelativePath -replace "/", [System.IO.Path]::DirectorySeparatorChar
-  return [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($BasePath, $nativeRelative))
-}
-
-function Test-PathInsideOrSame {
-  param([string]$ParentPath, [string]$ChildPath)
-  $parentFull = [System.IO.Path]::GetFullPath($ParentPath).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
-  $childFull = [System.IO.Path]::GetFullPath($ChildPath).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
-  if ($childFull -eq $parentFull) {
-    return $true
-  }
-  return $childFull.StartsWith($parentFull + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
-}
-
-function Get-UpdateRelativePath {
-  param([string]$BasePath, [string]$ChildPath)
-  $baseFull = [System.IO.Path]::GetFullPath($BasePath).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
-  $childFull = [System.IO.Path]::GetFullPath($ChildPath).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
-  if ($childFull -eq $baseFull) {
-    return ""
-  }
-  if (-not $childFull.StartsWith($baseFull + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "Path is outside update root: $ChildPath"
-  }
-  return $childFull.Substring($baseFull.Length + 1).Replace([string][System.IO.Path]::DirectorySeparatorChar, "/").Replace([string][System.IO.Path]::AltDirectorySeparatorChar, "/")
-}
-
-function Copy-FileWithRetry {
-  param([string]$Source, [string]$Destination)
-  $parent = Split-Path -Path $Destination -Parent
-  if ($parent) {
-    New-Item -ItemType Directory -Force -Path $parent | Out-Null
-  }
-
-  $temp = "$Destination.update_tmp"
-  for ($attempt = 1; $attempt -le 8; $attempt += 1) {
-    try {
-      if (Test-Path -LiteralPath $temp) {
-        Remove-Item -LiteralPath $temp -Force
-      }
-      Copy-Item -LiteralPath $Source -Destination $temp -Force
-      if (Test-Path -LiteralPath $Destination) {
-        Remove-Item -LiteralPath $Destination -Force
-      }
-      Move-Item -LiteralPath $temp -Destination $Destination -Force
-      return
-    } catch {
-      if ($attempt -eq 8) {
-        throw
-      }
-      Start-Sleep -Milliseconds (250 * $attempt)
-    }
-  }
-}
-
-function Remove-TreeBestEffort {
-  param([string]$Directory)
-  if (-not $Directory -or -not (Test-Path -LiteralPath $Directory)) {
-    return
-  }
-  for ($attempt = 1; $attempt -le 5; $attempt += 1) {
-    try {
-      Remove-Item -LiteralPath $Directory -Recurse -Force
-      return
-    } catch {
-      if ($attempt -eq 5) {
-        Write-Log ("Could not remove temporary directory: {0}. {1}" -f $Directory, $_.Exception.Message)
-        return
-      }
-      Start-Sleep -Milliseconds (300 * $attempt)
-    }
-  }
-}
-
-function Move-StaleUpdateFile {
-  param([string]$RelativePath)
-  $source = Join-UpdatePath -BasePath $script:RootDir -RelativePath $RelativePath
-  if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-    return
-  }
-
-  if (-not (Test-PathInsideOrSame -ParentPath $script:RootDir -ChildPath $source)) {
-    throw "Refusing to move stale file outside root: $RelativePath"
-  }
-
-  $backup = Join-UpdatePath -BasePath $script:DeletedBackupRoot -RelativePath $RelativePath
-  $backupParent = Split-Path -Path $backup -Parent
-  if ($backupParent) {
-    New-Item -ItemType Directory -Force -Path $backupParent | Out-Null
-  }
-  Move-Item -LiteralPath $source -Destination $backup -Force
-  Write-Log ("Moved stale update file to backup: {0}" -f $RelativePath)
-}
-
-function Remove-EmptyDirectoriesUnder {
-  param([string]$Directory)
-  if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
-    return
-  }
-  Get-ChildItem -LiteralPath $Directory -Directory -Recurse -Force |
-    Sort-Object { $_.FullName.Length } -Descending |
-    ForEach-Object {
-      try {
-        if (-not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue | Select-Object -First 1)) {
-          Remove-Item -LiteralPath $_.FullName -Force
-          Write-Log ("Removed empty update directory: {0}" -f $_.FullName)
-        }
-      } catch {
-        Write-Log ("Could not remove empty directory {0}: {1}" -f $_.FullName, $_.Exception.Message)
-      }
-    }
-}
-
-function Prune-OldDeletedBackups {
-  if (-not $script:DeletedBackupRoot) {
-    return
-  }
-
-  $backupRoot = Split-Path -Path $script:DeletedBackupRoot -Parent
-  if (-not $backupRoot -or -not (Test-Path -LiteralPath $backupRoot -PathType Container)) {
-    return
-  }
-
-  Get-ChildItem -LiteralPath $backupRoot -Directory -Force |
-    Where-Object { $_.FullName -ne $script:DeletedBackupRoot } |
-    ForEach-Object {
-      try {
-        Remove-Item -LiteralPath $_.FullName -Recurse -Force
-        Write-Log ("Removed old deleted-file backup: {0}" -f $_.FullName)
-      } catch {
-        Write-Log ("Could not remove old deleted-file backup {0}: {1}" -f $_.FullName, $_.Exception.Message)
-      }
-    }
-}
-
-function Invoke-MirrorSyncCleanup {
-  if (-not $script:DeletedBackupRoot) {
-    return
-  }
-
-  $remoteFiles = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-  foreach ($file in $plan.files) {
-    [void]$remoteFiles.Add(([string]$file).Replace("\", "/"))
-  }
-
-  $staleFiles = New-Object 'System.Collections.Generic.List[string]'
-  foreach ($root in $plan.mirrorRoots) {
-    $rootRel = ([string]$root).Replace("\", "/").TrimStart("/")
-    if (-not $rootRel.EndsWith("/")) {
-      $rootRel = "$rootRel/"
-    }
-    $rootPath = Join-UpdatePath -BasePath $script:RootDir -RelativePath $rootRel
-    if (-not (Test-Path -LiteralPath $rootPath -PathType Container)) {
-      continue
-    }
-    if (-not (Test-PathInsideOrSame -ParentPath $script:RootDir -ChildPath $rootPath)) {
-      throw "Refusing to mirror-sync unsafe directory: $rootRel"
-    }
-    Get-ChildItem -LiteralPath $rootPath -File -Recurse -Force | ForEach-Object {
-      $relative = Get-UpdateRelativePath -BasePath $script:RootDir -ChildPath $_.FullName
-      if (-not $remoteFiles.Contains($relative)) {
-        $staleFiles.Add($relative)
-      }
-    }
-  }
-
-  foreach ($file in $plan.mirrorFiles) {
-    $relative = ([string]$file).Replace("\", "/").TrimStart("/")
-    if ($relative -and -not $remoteFiles.Contains($relative)) {
-      $target = Join-UpdatePath -BasePath $script:RootDir -RelativePath $relative
-      if (Test-Path -LiteralPath $target -PathType Leaf) {
-        $staleFiles.Add($relative)
-      }
-    }
-  }
-
-  $uniqueStaleFiles = @($staleFiles | Sort-Object -Unique)
-  if ($uniqueStaleFiles.Count -eq 0) {
-    Write-Log "Mirror sync cleanup found no stale files."
-    return
-  }
-
-  Write-Log ("Mirror sync cleanup moving {0} stale file(s) to {1}." -f $uniqueStaleFiles.Count, $script:DeletedBackupRoot)
-  foreach ($relative in $uniqueStaleFiles) {
-    Move-StaleUpdateFile -RelativePath $relative
-  }
-  foreach ($root in $plan.mirrorRoots) {
-    $rootPath = Join-UpdatePath -BasePath $script:RootDir -RelativePath ([string]$root)
-    Remove-EmptyDirectoriesUnder -Directory $rootPath
-  }
-}
-
-function Test-TcpPortOpen {
-  param([int]$Port)
-  $client = New-Object System.Net.Sockets.TcpClient
-  try {
-    $async = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
-    if (-not $async.AsyncWaitHandle.WaitOne(300)) {
-      return $false
-    }
-    $client.EndConnect($async)
-    return $true
-  } catch {
-    return $false
-  } finally {
-    $client.Close()
-  }
-}
-
-function Get-PortOwningProcessIds {
-  param([int]$Port)
-  try {
-    return @(Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.OwningProcess } | Sort-Object -Unique)
-  } catch {
-    Write-Log ("Could not inspect dev server port {0}: {1}" -f $Port, $_.Exception.Message)
-    return @()
-  }
-}
-
-function Stop-DevServerOnPort {
-  param([int]$Port)
-  Write-Log ("Stopping dev server on port {0}." -f $Port)
-  $processIds = Get-PortOwningProcessIds -Port $Port
-  foreach ($processId in $processIds) {
-    if ($processId -le 0 -or $processId -eq $PID) {
-      continue
-    }
-    try {
-      $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
-      if ($process) {
-        Write-Log ("Stopping process {0} ({1}) on port {2}." -f $processId, $process.ProcessName, $Port)
-        Stop-Process -Id $processId -Force -ErrorAction Stop
-      }
-    } catch {
-      Write-Log ("Could not stop process {0}: {1}" -f $processId, $_.Exception.Message)
-    }
-  }
-
-  for ($attempt = 1; $attempt -le 60; $attempt += 1) {
-    if (-not (Test-TcpPortOpen -Port $Port)) {
-      return $true
-    }
-    Start-Sleep -Milliseconds 250
-  }
-
-  Write-Log ("Dev server port {0} is still open after stop attempt." -f $Port)
-  return $false
-}
-
-function Invoke-NpmInstall {
-  param([string]$WorkingDirectory)
-  Write-Log ("Running npm install in {0}" -f $WorkingDirectory)
-  Push-Location -LiteralPath $WorkingDirectory
-  try {
-    & cmd.exe /c "npm install" 2>&1 | ForEach-Object { Write-Log ("npm: {0}" -f $_) }
-    if ($LASTEXITCODE -ne 0) {
-      throw "npm install failed with exit code $LASTEXITCODE"
-    }
-  } finally {
-    Pop-Location
-  }
-}
-
 function Write-Status {
   param([string]$State, [string]$ErrorMessage = "")
   $payload = [ordered]@{
@@ -703,72 +296,117 @@ function Write-Status {
   [System.IO.File]::WriteAllText($script:StatusPath, $json, (New-Object System.Text.UTF8Encoding($false)))
 }
 
-function Cleanup-UpdateDirs {
-  Start-Sleep -Milliseconds 300
-  Remove-TreeBestEffort -Directory $stagingRoot
+function Remove-TreeWithRetry {
+  param([string]$Target)
+  if (-not $Target -or -not (Test-Path -LiteralPath $Target)) {
+    return
+  }
+  for ($attempt = 1; $attempt -le 10; $attempt += 1) {
+    try {
+      Remove-Item -LiteralPath $Target -Recurse -Force
+      return
+    } catch {
+      if ($attempt -eq 10) {
+        throw
+      }
+      Start-Sleep -Milliseconds (300 * $attempt)
+    }
+  }
 }
 
-function Start-ForartAgain {
-  Write-Log "Restarting with npm run dev"
-  Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "npm run dev") -WorkingDirectory $script:RootDir
+function Copy-TreeWithRetry {
+  param([string]$Source, [string]$Destination)
+  for ($attempt = 1; $attempt -le 10; $attempt += 1) {
+    try {
+      Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
+      return
+    } catch {
+      if ($attempt -eq 10) {
+        throw
+      }
+      Start-Sleep -Milliseconds (300 * $attempt)
+    }
+  }
+}
+
+function Wait-ForForartToExit {
+  param([string]$ExePath, [int]$MainPid)
+  if ($MainPid -gt 0) {
+    Write-Log ("Waiting for Forart process {0} to exit." -f $MainPid)
+  }
+  for ($attempt = 1; $attempt -le 180; $attempt += 1) {
+    $running = @(Get-CimInstance Win32_Process -Filter "name = 'Forart.exe'" -ErrorAction SilentlyContinue |
+      Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq [System.IO.Path]::GetFullPath($ExePath)) })
+    if ($running.Count -eq 0) {
+      return
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  throw "Timed out waiting for Forart to exit."
+}
+
+function Resolve-ExtractedRoot {
+  param([string]$ExtractRoot)
+  $directExe = Join-Path $ExtractRoot "Forart.exe"
+  if (Test-Path -LiteralPath $directExe -PathType Leaf) {
+    return $ExtractRoot
+  }
+  $candidate = Get-ChildItem -LiteralPath $ExtractRoot -Filter "Forart.exe" -File -Recurse -ErrorAction SilentlyContinue |
+    Where-Object { Test-Path -LiteralPath (Join-Path $_.DirectoryName "resources") -PathType Container } |
+    Select-Object -First 1
+  if ($candidate) {
+    return $candidate.DirectoryName
+  }
+  throw "Portable package does not contain Forart.exe."
 }
 
 $plan = Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8 | ConvertFrom-Json
-$script:RootDir = [string]$plan.rootDir
-$stagingRoot = [string]$plan.stagingRoot
+$script:InstallRoot = [string]$plan.installRoot
+$script:ZipPath = [string]$plan.zipPath
+$script:ExtractRoot = [string]$plan.extractRoot
 $script:LogPath = [string]$plan.logPath
 $script:StatusPath = [string]$plan.statusPath
-$script:DeletedBackupRoot = [string]$plan.deletedBackupRoot
+$exePath = [string]$plan.exePath
 $electronPid = [int]$plan.electronPid
+$preserveNames = @("forart-config.json", "CanvasAssests", ".forart-data")
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Path $script:LogPath -Parent) | Out-Null
 
 try {
   Write-Status -State "running"
-  Write-Log ("Forart update apply script started. Plan: {0}" -f $PlanPath)
-  if ($electronPid -gt 0) {
-    Write-Log ("Waiting for Electron process {0} to exit." -f $electronPid)
-    for ($attempt = 1; $attempt -le 180; $attempt += 1) {
-      $process = Get-Process -Id $electronPid -ErrorAction SilentlyContinue
-      if (-not $process) {
-        break
-      }
-      Start-Sleep -Milliseconds 500
+  Write-Log ("Forart portable update started. Plan: {0}" -f $PlanPath)
+  Wait-ForForartToExit -ExePath $exePath -MainPid $electronPid
+
+  Remove-TreeWithRetry -Target $script:ExtractRoot
+  New-Item -ItemType Directory -Force -Path $script:ExtractRoot | Out-Null
+  Write-Log ("Extracting portable package: {0}" -f $script:ZipPath)
+  Expand-Archive -LiteralPath $script:ZipPath -DestinationPath $script:ExtractRoot -Force
+  $sourceRoot = Resolve-ExtractedRoot -ExtractRoot $script:ExtractRoot
+  Write-Log ("Using extracted root: {0}" -f $sourceRoot)
+
+  foreach ($item in Get-ChildItem -LiteralPath $script:InstallRoot -Force) {
+    if ($preserveNames -contains $item.Name) {
+      Write-Log ("Preserved user data: {0}" -f $item.Name)
+      continue
     }
-    if (Get-Process -Id $electronPid -ErrorAction SilentlyContinue) {
-      throw "Timed out waiting for Forart to exit."
-    }
+    Write-Log ("Removing old app item: {0}" -f $item.FullName)
+    Remove-TreeWithRetry -Target $item.FullName
   }
 
-  Stop-DevServerOnPort -Port 6981 | Out-Null
-  Start-Sleep -Milliseconds 500
-
-  Invoke-MirrorSyncCleanup
-
-  foreach ($file in $plan.files) {
-    $rel = [string]$file
-    $source = Join-UpdatePath -BasePath $stagingRoot -RelativePath $rel
-    $target = Join-UpdatePath -BasePath $script:RootDir -RelativePath $rel
-    if (-not (Test-Path -LiteralPath $source)) {
-      throw "Staged update file is missing: $rel"
+  foreach ($item in Get-ChildItem -LiteralPath $sourceRoot -Force) {
+    if ($preserveNames -contains $item.Name) {
+      continue
     }
-
-    Copy-FileWithRetry -Source $source -Destination $target
-    Write-Log ("Updated {0}" -f $rel)
-  }
-
-  if ($plan.needsRootInstall) {
-    Invoke-NpmInstall -WorkingDirectory $script:RootDir
-  }
-  if ($plan.needsServerInstall) {
-    Invoke-NpmInstall -WorkingDirectory (Join-Path $script:RootDir "server")
+    $target = Join-Path $script:InstallRoot $item.Name
+    Write-Log ("Installing app item: {0}" -f $item.Name)
+    Copy-TreeWithRetry -Source $item.FullName -Destination $target
   }
 
   Write-Status -State "success"
-  Write-Log "Forart update applied successfully."
-  Prune-OldDeletedBackups
-  Start-ForartAgain
-  Cleanup-UpdateDirs
+  Write-Log "Forart portable update applied successfully."
+  Start-Process -FilePath (Join-Path $script:InstallRoot "Forart.exe") -WorkingDirectory $script:InstallRoot
+  Start-Sleep -Milliseconds 500
+  Remove-TreeWithRetry -Target $script:ExtractRoot
 } catch {
   $message = $_.Exception.Message
   Write-Log ("Update failed: {0}" -f $message)
@@ -779,7 +417,7 @@ try {
   fs.writeFileSync(scriptPath, script, 'utf8');
 }
 
-function writeUpdateApplyLauncherScript(scriptPath) {
+function writePortableLauncherScript(scriptPath) {
   const script = String.raw`param(
   [Parameter(Mandatory = $true)]
   [string]$ApplyPath,
@@ -824,14 +462,7 @@ try {
     (Quote-ProcessArgument -Value $PlanPath)
   ) -join " "
 
-  $startInfo = @{
-    FilePath = "powershell.exe"
-    ArgumentList = $argumentList
-    WorkingDirectory = $WorkingDirectory
-    WindowStyle = "Normal"
-  }
-  Start-Process @startInfo
-
+  Start-Process -FilePath "powershell.exe" -ArgumentList $argumentList -WorkingDirectory $WorkingDirectory -WindowStyle Normal
   Write-LauncherStatus -State "launched"
 } catch {
   Write-LauncherStatus -State "failed" -ErrorMessage $_.Exception.Message
@@ -842,40 +473,35 @@ try {
   fs.writeFileSync(scriptPath, script, 'utf8');
 }
 
-async function scheduleStagedUpdateApply({ rootDir, stagingRoot, files, needsRootInstall, needsServerInstall }) {
-  if (process.platform !== 'win32') {
-    throw new Error('Automatic source update is currently supported on Windows only.');
-  }
+async function schedulePortableUpdateApply({ installRoot, zipPath, version }) {
+  if (process.platform !== 'win32') throw new Error('Automatic portable update is currently supported on Windows only.');
 
-  const applyRoot = path.join(updateApplyRoot(rootDir), `${timestampName()}-${process.pid}`);
+  const applyRoot = path.join(updateApplyRoot(installRoot), `${timestampName()}-${process.pid}`);
   fs.mkdirSync(applyRoot, { recursive: true });
-  const scriptPath = path.join(applyRoot, 'apply-update.ps1');
-  const launcherPath = path.join(applyRoot, 'apply-launcher.ps1');
-  const planPath = path.join(applyRoot, 'update-plan.json');
-  const logPath = path.join(applyRoot, 'apply-update.log');
+  const scriptPath = path.join(applyRoot, 'apply-portable-update.ps1');
+  const launcherPath = path.join(applyRoot, 'portable-update-launcher.ps1');
+  const planPath = path.join(applyRoot, 'portable-update-plan.json');
+  const logPath = path.join(applyRoot, 'apply-portable-update.log');
   const statusPath = path.join(applyRoot, 'apply-status.json');
   const launcherStatusPath = path.join(applyRoot, 'launcher-status.json');
-  const deletedBackupRoot = path.join(updateDeletedRoot(rootDir), `${timestampName()}-${process.pid}`);
+  const extractRoot = path.join(applyRoot, 'extracted');
 
   const plan = {
-    applyRoot,
-    rootDir,
-    stagingRoot,
-    files,
-    mirrorRoots: MIRROR_SYNC_ROOTS,
-    mirrorFiles: MIRROR_SYNC_FILES,
-    deletedBackupRoot,
-    needsRootInstall,
-    needsServerInstall,
+    installRoot,
+    zipPath,
+    extractRoot,
+    version,
+    exePath: process.execPath,
     electronPid: process.pid,
     logPath,
     statusPath,
     createdAt: new Date().toISOString(),
   };
 
-  writeUpdateApplyScript(scriptPath);
-  writeUpdateApplyLauncherScript(launcherPath);
+  writePortableApplyScript(scriptPath);
+  writePortableLauncherScript(launcherPath);
   fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf8');
+
   const child = spawn('powershell.exe', [
     '-NoProfile',
     '-ExecutionPolicy',
@@ -887,14 +513,14 @@ async function scheduleStagedUpdateApply({ rootDir, stagingRoot, files, needsRoo
     '-PlanPath',
     planPath,
     '-WorkingDirectory',
-    rootDir,
+    installRoot,
     '-StatusPath',
     launcherStatusPath,
   ], {
-      cwd: rootDir,
-      stdio: 'ignore',
-      windowsHide: true,
-    });
+    cwd: installRoot,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
 
   await new Promise((resolve, reject) => {
     const onError = (error) => reject(error);
@@ -964,13 +590,12 @@ async function probeWritable(rootDir) {
 async function appInfoPayload(rootDir) {
   const packageInfo = readPackageInfo(rootDir);
   const version = readLocalVersion(rootDir);
-  const localNotes = readLocalUpdateNotes(rootDir, version);
   return {
     name: packageInfo.name,
     repoUrl: REPO_URL,
-    updateUrl: REMOTE_VERSION_URL,
+    updateUrl: LATEST_RELEASE_URL,
     currentRevision: version,
-    currentUpdatedAt: localNotes.updatedAt || version,
+    currentUpdatedAt: version,
   };
 }
 
@@ -1043,18 +668,23 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
   ipcMain.handle('app:check-update', async () => {
     const info = await appInfoPayload(rootDir);
     try {
-      const latestVersion = await readRemoteVersion(net);
-      const remoteNotes = await readRemoteUpdateNotes(net, latestVersion);
-      const updateAvailable = compareVersions(latestVersion, info.currentRevision) > 0;
+      const latestRelease = await readLatestRelease(net);
+      const updateAvailable = compareVersions(latestRelease.version, info.currentRevision) > 0;
       return {
         ok: true,
         currentRevision: info.currentRevision,
-        latestRevision: latestVersion,
+        latestRevision: latestRelease.version,
         currentUpdatedAt: info.currentUpdatedAt,
-        latestUpdatedAt: remoteNotes.updatedAt || latestVersion,
+        latestUpdatedAt: latestRelease.publishedAt || latestRelease.version,
         updateAvailable,
-        repoUrl: REPO_URL,
-        updateNotes: remoteNotes.items.length ? { ...remoteNotes, source: 'update-notes.json' } : remoteNotes,
+        repoUrl: latestRelease.htmlUrl || REPO_URL,
+        updateNotes: {
+          ...latestRelease.notes,
+          version: latestRelease.version,
+          updatedAt: latestRelease.publishedAt || latestRelease.notes.updatedAt,
+          revision: latestRelease.tagName,
+          source: 'github-release',
+        },
       };
     } catch (error) {
       return {
@@ -1071,16 +701,6 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
   });
 
   ipcMain.handle('app:run-update', async (event) => {
-    if (app.isPackaged) {
-      return {
-        ok: false,
-        updated: [],
-        count: 0,
-        error: 'Packaged portable updates are not enabled yet. Download the latest portable build and replace the app files.',
-      };
-    }
-
-    const stagingRoot = path.join(updateStagingRoot(dataRoot), `${timestampName()}-${process.pid}`);
     const sendProgress = (payload) => {
       event.sender.send('app:update-progress', {
         phase: payload.phase || 'downloading',
@@ -1094,26 +714,79 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
         fileTotalBytes: Number(payload.fileTotalBytes || 0),
       });
     };
+
+    if (!app.isPackaged) {
+      return {
+        ok: false,
+        updated: [],
+        count: 0,
+        error: 'Development builds do not use the portable updater. Use git pull and npm install.',
+      };
+    }
+
+    const stagingRoot = path.join(updateStagingRoot(dataRoot), `${timestampName()}-${process.pid}`);
     try {
       await removeDirectoryBestEffort(stagingRoot);
       fs.mkdirSync(stagingRoot, { recursive: true });
 
       sendProgress({ phase: 'listing', percent: 0 });
-      const files = await githubUpdateFileList(net);
-      sendProgress({ phase: 'downloading', percent: 0, fileCount: files.length });
-      await downloadGithubUpdateFiles(net, files, stagingRoot, sendProgress);
-      sendProgress({ phase: 'scheduling', percent: 100, fileCount: files.length });
-      const needsRootInstall = files.includes('package.json') || files.includes('package-lock.json');
-      const needsServerInstall = files.includes('server/package.json') || files.includes('server/package-lock.json');
-      await scheduleStagedUpdateApply({
-        rootDir,
-        stagingRoot,
-        files,
-        needsRootInstall,
-        needsServerInstall,
+      const latestRelease = await readLatestRelease(net);
+      const currentVersion = readLocalVersion(rootDir);
+      if (compareVersions(latestRelease.version, currentVersion) <= 0) {
+        return {
+          ok: false,
+          updated: [],
+          count: 0,
+          error: 'No newer portable release is available.',
+        };
+      }
+
+      const zipName = safeFileName(latestRelease.asset.name, `Forart-${latestRelease.version}-windows-portable.zip`);
+      const zipPath = path.join(stagingRoot, zipName);
+      const startedAt = Date.now();
+      let lastEmittedAt = 0;
+      sendProgress({
+        phase: 'downloading',
+        percent: 0,
+        currentFile: zipName,
+        fileIndex: 1,
+        fileCount: 1,
+        fileBytes: 0,
+        fileTotalBytes: latestRelease.asset.size,
       });
-      const version = readStagedVersion(stagingRoot);
-      sendProgress({ phase: 'scheduled', percent: 100, fileCount: files.length });
+      await downloadFileWithProgress(net, latestRelease.asset.url, zipPath, ({ receivedBytes, totalBytes, done }) => {
+        const now = Date.now();
+        if (!done && now - lastEmittedAt < 180) return;
+        lastEmittedAt = now;
+        const elapsedSeconds = Math.max((now - startedAt) / 1000, 0.001);
+        const knownTotal = totalBytes || latestRelease.asset.size || 0;
+        sendProgress({
+          phase: 'downloading',
+          percent: knownTotal ? Math.min((receivedBytes / knownTotal) * 100, 99.5) : (done ? 100 : 50),
+          downloadedBytes: receivedBytes,
+          bytesPerSecond: receivedBytes / elapsedSeconds,
+          currentFile: zipName,
+          fileIndex: 1,
+          fileCount: 1,
+          fileBytes: receivedBytes,
+          fileTotalBytes: knownTotal,
+        });
+      });
+
+      sendProgress({
+        phase: 'scheduling',
+        percent: 100,
+        downloadedBytes: fs.statSync(zipPath).size,
+        currentFile: zipName,
+        fileIndex: 1,
+        fileCount: 1,
+      });
+      await schedulePortableUpdateApply({
+        installRoot: dataRoot,
+        zipPath,
+        version: latestRelease.version,
+      });
+      sendProgress({ phase: 'scheduled', percent: 100, currentFile: zipName, fileIndex: 1, fileCount: 1 });
 
       setTimeout(() => {
         app.quit();
@@ -1121,9 +794,9 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
 
       return {
         ok: true,
-        updated: files,
-        count: files.length,
-        version,
+        updated: [zipName],
+        count: 1,
+        version: latestRelease.version,
       };
     } catch (error) {
       await removeDirectoryBestEffort(stagingRoot);
@@ -1138,8 +811,7 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
 
   ipcMain.handle('app:update-connectivity', async () => {
     const results = await Promise.all([
-      probeNet('GitHub VERSION', net, REMOTE_VERSION_URL),
-      probeNet('GitHub update tree', net, REMOTE_TREE_URL),
+      probeNet('GitHub latest release', net, LATEST_RELEASE_URL),
       probeWritable(dataRoot),
     ]);
     const required = results.filter((item) => item.required);
