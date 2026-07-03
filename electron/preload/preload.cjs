@@ -1,5 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+contextBridge.exposeInMainWorld('forartWindow', {
+  minimize: () => ipcRenderer.invoke('window:minimize'),
+  toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
+  close: () => ipcRenderer.invoke('window:close'),
+});
+
 contextBridge.exposeInMainWorld('easyTool', {
   saveResult: (payload) => ipcRenderer.invoke('save-result', payload),
   listCanvases: () => ipcRenderer.invoke('canvas:list'),

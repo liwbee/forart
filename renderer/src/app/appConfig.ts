@@ -122,6 +122,12 @@ export interface ForartConfigApi {
   updateConnectivity: () => Promise<ForartUpdateConnectivityResult>;
 }
 
+export interface ForartWindowApi {
+  minimize: () => Promise<{ ok: boolean }>;
+  toggleMaximize: () => Promise<{ ok: boolean; maximized?: boolean }>;
+  close: () => Promise<{ ok: boolean }>;
+}
+
 export interface EasyToolApi {
   saveResult: (payload: { dataUrl?: string; url?: string; defaultName?: string; directory?: string }) => Promise<{ canceled: boolean; filePath?: string }>;
   listCanvases: () => Promise<{
@@ -368,6 +374,7 @@ export interface LibtvApi {
 
 declare global {
   interface Window {
+    forartWindow?: ForartWindowApi;
     forartConfig?: ForartConfigApi;
     easyTool?: EasyToolApi;
     forartReview?: ImageReviewApi;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Download, Languages, Moon, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, Sun, X, XCircle } from "lucide-react";
+import { CheckCircle2, Download, Languages, Minus, Moon, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, Square, Sun, X, XCircle } from "lucide-react";
 import { setActiveForartConfig } from "../data-source/runtime";
 import { isKeepAliveView, navRoutes, workspaceRouteById } from "./appRoutes";
 import { AppView, useAppStore } from "./appStore";
@@ -100,6 +100,95 @@ function KeepAliveWorkspaceView({ active, children }: { active: boolean; childre
 function renderView(view: AppView, appConfig: ForartAppConfig, onConfigChange: (config: ForartAppConfig) => void) {
   const route = workspaceRouteById[view] || workspaceRouteById.library;
   return route.render({ appConfig, onConfigChange });
+}
+
+interface WindowTitleBarProps {
+  updateStatus: UpdateStatus;
+  updateButtonTitle: string;
+  updateButtonLabel: string;
+  UpdateIcon: typeof RefreshCw;
+  onUpdateClick: () => void;
+  ThemeIcon: typeof Moon;
+  themeToggleLabel: string;
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
+  languageTitle: string;
+  languageCode: string;
+  onToggleLanguage: () => void;
+}
+
+function WindowTitleBar({
+  updateStatus,
+  updateButtonTitle,
+  updateButtonLabel,
+  UpdateIcon,
+  onUpdateClick,
+  ThemeIcon,
+  themeToggleLabel,
+  theme,
+  onToggleTheme,
+  languageTitle,
+  languageCode,
+  onToggleLanguage,
+}: WindowTitleBarProps) {
+  return (
+    <header className="window-titlebar" aria-label="Window controls" onDoubleClick={() => void window.forartWindow?.toggleMaximize()}>
+      <div className="window-titlebar-spacer" aria-hidden="true" />
+      <div className="window-titlebar-actions" onDoubleClick={(event) => event.stopPropagation()}>
+        <button
+          className="window-titlebar-update"
+          type="button"
+          data-status={updateStatus}
+          disabled={updateStatus === "checking" || updateStatus === "updating"}
+          aria-label={updateButtonTitle}
+          title={updateButtonTitle}
+          onClick={onUpdateClick}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          <UpdateIcon className="side-version-icon" aria-hidden="true" size={14} />
+          <span className="side-version-main">{updateButtonLabel}</span>
+        </button>
+        <button
+          className="window-titlebar-tool"
+          type="button"
+          aria-pressed={theme === "dark"}
+          aria-label={themeToggleLabel}
+          title={themeToggleLabel}
+          onClick={onToggleTheme}
+        >
+          <ThemeIcon size={15} aria-hidden="true" />
+        </button>
+        <button
+          className="window-titlebar-tool window-titlebar-tool--language"
+          type="button"
+          aria-label={languageTitle}
+          title={languageTitle}
+          onClick={onToggleLanguage}
+        >
+          <Languages size={15} aria-hidden="true" />
+          <span>{languageCode}</span>
+        </button>
+        <button className="window-titlebar-button" type="button" aria-label="Minimize" title="Minimize" onClick={() => void window.forartWindow?.minimize()}>
+          <Minus size={15} aria-hidden="true" />
+        </button>
+        <button className="window-titlebar-button" type="button" aria-label="Maximize" title="Maximize" onClick={() => void window.forartWindow?.toggleMaximize()}>
+          <Square size={13} aria-hidden="true" />
+        </button>
+        <button className="window-titlebar-button window-titlebar-button--close" type="button" aria-label="Close" title="Close" onClick={() => void window.forartWindow?.close()}>
+          <X size={16} aria-hidden="true" />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+function AppFrame({ electron, titleBar, children }: { electron: boolean; titleBar: ReactNode; children: ReactNode }) {
+  return (
+    <div className={`app-frame${electron ? " app-frame--electron" : ""}`}>
+      {electron ? titleBar : null}
+      {children}
+    </div>
+  );
 }
 
 export function App() {
@@ -329,15 +418,17 @@ export function App() {
 
   const currentUpdateDateLabel = formatUpdateDate(appInfo?.currentUpdatedAt || latestUpdatedAt || "");
   const latestUpdateDateLabel = formatUpdateDate(latestUpdatedAt || appInfo?.currentUpdatedAt || "");
+  const currentVersionLabel = appInfo?.currentRevision || updateCheckResult?.currentRevision || "";
+  const latestVersionLabel = updateCheckResult?.latestRevision || updateNotes?.version || "";
   const updateButtonLabel = updateStatus === "available"
-    ? `${currentLanguage === "zh-CN" ? updateText.updateAvailableShort : "Update"}v${latestUpdateDateLabel}`
+    ? `${currentLanguage === "zh-CN" ? updateText.updateAvailableShort : "Update"} v${latestVersionLabel || latestUpdateDateLabel}`
     : updateStatus === "checking"
       ? (currentLanguage === "zh-CN" ? updateText.checking : "Checking")
       : updateStatus === "updating"
         ? (currentLanguage === "zh-CN" ? updateText.updating : "Updating")
         : updateStatus === "updated"
           ? (currentLanguage === "zh-CN" ? updateText.restart : "Restart")
-          : `v${currentUpdateDateLabel}`;
+          : `v${currentVersionLabel || currentUpdateDateLabel}`;
   const updateButtonTitle = updateMessage || (currentLanguage === "zh-CN" ? updateText.checkingTitle : "Click to check for updates");
   const UpdateIcon = updateStatus === "available" ? Download : RefreshCw;
   const modalTitle = updateStatus === "available"
@@ -348,9 +439,9 @@ export function App() {
   const notesItems = updateNotes?.items || [];
   const updateCanRun = updateStatus === "available";
   const updateSummaryText = updateStatus === "available"
-    ? `${currentLanguage === "zh-CN" ? "\u6709\u53ef\u7528\u66f4\u65b0" : "Update available"} ${latestUpdateDateLabel}`
+    ? `${currentLanguage === "zh-CN" ? "\u6709\u53ef\u7528\u66f4\u65b0" : "Update available"} v${latestVersionLabel || latestUpdateDateLabel}`
     : updateStatus === "current"
-      ? `${currentLanguage === "zh-CN" ? "\u5df2\u662f\u6700\u65b0\u7248\u672c" : "Already up to date"} ${currentUpdateDateLabel}`
+      ? `${currentLanguage === "zh-CN" ? "\u5df2\u662f\u6700\u65b0\u7248\u672c" : "Already up to date"} v${currentVersionLabel || currentUpdateDateLabel}`
       : updateMessage || (currentLanguage === "zh-CN" ? updateText.connectivityWarn : "Check status before updating");
   const updateProgressPercent = Math.max(0, Math.min(100, updateProgress?.percent || 0));
   const updateProgressVisible = Boolean(updateProgress && (updateStatus === "updating" || updateStatus === "updated"));
@@ -360,6 +451,25 @@ export function App() {
   const updateProgressFile = updateProgress?.currentFile || "";
   const sidebarToggleLabel = sidebarCollapsed ? t("nav:expandSidebar") : t("nav:collapseSidebar");
   const SidebarToggleIcon = sidebarCollapsed ? PanelLeftOpen : PanelLeftClose;
+  const isElectron = Boolean(window.forartWindow);
+  const themeToggleLabel = theme === "dark" ? t("nav:theme.switchToLight") : t("nav:theme.switchToDark");
+  const languageTitle = `${t("settings:language")}: ${nextLanguageLabel}`;
+  const titleBar = (
+    <WindowTitleBar
+      updateStatus={updateStatus}
+      updateButtonTitle={updateButtonTitle}
+      updateButtonLabel={updateButtonLabel}
+      UpdateIcon={UpdateIcon}
+      onUpdateClick={handleUpdateClick}
+      ThemeIcon={ThemeIcon}
+      themeToggleLabel={themeToggleLabel}
+      theme={theme}
+      onToggleTheme={toggleTheme}
+      languageTitle={languageTitle}
+      languageCode={nextLanguage === "zh-CN" ? "CN" : "EN"}
+      onToggleLanguage={toggleLanguage}
+    />
+  );
 
   const keepAliveViewsToRender = isKeepAliveView(activeView)
     ? new Set([...mountedKeepAliveViews, activeView])
@@ -367,24 +477,31 @@ export function App() {
 
   if (!configLoaded) {
     return (
-      <main className="setup-shell">
-        <section className="setup-panel setup-panel--loading" aria-label={t("app:loadingLabel")}>
-          <div className="brand setup-brand" aria-label={appTitle}>
-            <span className="brand-mark" aria-hidden="true" />
-            <strong className="brand-name">{appTitle}</strong>
-          </div>
-          <p>{t("app:loadingConfig")}</p>
-        </section>
-      </main>
+      <AppFrame electron={isElectron} titleBar={titleBar}>
+        <main className="setup-shell">
+          <section className="setup-panel setup-panel--loading" aria-label={t("app:loadingLabel")}>
+            <div className="brand setup-brand" aria-label={appTitle}>
+              <span className="brand-mark" aria-hidden="true" />
+              <strong className="brand-name">{appTitle}</strong>
+            </div>
+            <p>{t("app:loadingConfig")}</p>
+          </section>
+        </main>
+      </AppFrame>
     );
   }
 
   if (!appConfig) {
-    return <SetupPage initialConfig={null} onConfigured={updateConfig} />;
+    return (
+      <AppFrame electron={isElectron} titleBar={titleBar}>
+        <SetupPage initialConfig={null} onConfigured={updateConfig} />
+      </AppFrame>
+    );
   }
 
   return (
-    <div className={`app-shell${sidebarCollapsed ? " app-shell--sidebar-collapsed" : ""}`}>
+    <AppFrame electron={isElectron} titleBar={titleBar}>
+      <div className={`app-shell${sidebarCollapsed ? " app-shell--sidebar-collapsed" : ""}`}>
       <aside className="left-panel" aria-label={`${appTitle} navigation`}>
         <div className="side-head">
           <div className="brand" aria-label={appTitle}>
@@ -438,29 +555,31 @@ export function App() {
             <span className="nav-label">{t("nav:settings")}</span>
           </button>
 
-          <button
-            className="side-version-button"
-            type="button"
-            data-status={updateStatus}
-            data-tooltip={updateButtonTitle}
-            disabled={updateStatus === "checking" || updateStatus === "updating"}
-            aria-label={updateButtonTitle}
-            title={updateButtonTitle}
-            onClick={handleUpdateClick}
-          >
-            <UpdateIcon className="side-version-icon" aria-hidden="true" size={16} />
-            <span className="side-version-main">{updateButtonLabel}</span>
-          </button>
+          {!isElectron ? (
+            <button
+              className="side-version-button"
+              type="button"
+              data-status={updateStatus}
+              data-tooltip={updateButtonTitle}
+              disabled={updateStatus === "checking" || updateStatus === "updating"}
+              aria-label={updateButtonTitle}
+              title={updateButtonTitle}
+              onClick={handleUpdateClick}
+            >
+              <UpdateIcon className="side-version-icon" aria-hidden="true" size={16} />
+              <span className="side-version-main">{updateButtonLabel}</span>
+            </button>
+          ) : null}
 
-          <div className="side-footer-control-row">
+          {!isElectron ? <div className="side-footer-control-row">
             <button
               className="side-nav-item side-footer-button side-icon-button theme-toggle"
               type="button"
               data-short={theme === "dark" ? t("nav:short.light") : t("nav:short.dark")}
-              data-tooltip={theme === "dark" ? t("nav:theme.switchToLight") : t("nav:theme.switchToDark")}
+              data-tooltip={themeToggleLabel}
               aria-pressed={theme === "dark"}
-              aria-label={theme === "dark" ? t("nav:theme.switchToLight") : t("nav:theme.switchToDark")}
-              title={theme === "dark" ? t("nav:theme.switchToLight") : t("nav:theme.switchToDark")}
+              aria-label={themeToggleLabel}
+              title={themeToggleLabel}
               onClick={toggleTheme}
             >
               <ThemeIcon className="nav-icon" aria-hidden="true" size={20} />
@@ -469,15 +588,15 @@ export function App() {
             <button
               className="side-nav-item side-footer-button side-icon-button language-toggle"
               type="button"
-              data-tooltip={`${t("settings:language")}: ${nextLanguageLabel}`}
-              aria-label={`${t("settings:language")}: ${nextLanguageLabel}`}
-              title={`${t("settings:language")}: ${nextLanguageLabel}`}
+              data-tooltip={languageTitle}
+              aria-label={languageTitle}
+              title={languageTitle}
               onClick={toggleLanguage}
             >
               <Languages className="nav-icon" aria-hidden="true" size={20} />
               <span className="language-toggle__code">{nextLanguage === "zh-CN" ? "CN" : "EN"}</span>
             </button>
-          </div>
+          </div> : null}
         </div>
       </aside>
 
@@ -595,6 +714,7 @@ export function App() {
           </section>
         </div>
       ) : null}
-    </div>
+      </div>
+    </AppFrame>
   );
 }

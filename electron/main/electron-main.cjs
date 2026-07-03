@@ -1,4 +1,4 @@
-const { app, ipcMain, dialog, protocol, net, shell, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -44,7 +44,7 @@ const configStore = createConfigStore({ app, rootDir: portableRootDir });
 const generationTaskStore = createGenerationTaskStore({ rootDir: portableRootDir });
 const imageGenerationRunner = createImageGenerationRunner({ net, assetStore, generationTaskStore });
 const imageReviewStore = createImageReviewStore();
-const localServer = createLocalServerManager({ app, rootDir: appRootDir });
+const localServer = createLocalServerManager({ app, rootDir: appRootDir, dataRoot: portableRootDir });
 const libtv = createLibtvAdapter({ rootDir: appRootDir });
 const libtvGenerationRunner = createLibtvGenerationRunner({ libtv, assetStore });
 let mainWindow = null;
@@ -79,6 +79,26 @@ ipcMain.handle('canvas-cache:open-root', async () => canvasCacheStore.openRoot()
 registerImageReviewIpc({ ipcMain, imageReviewStore });
 registerLibtvIpc({ ipcMain, libtv, libtvGenerationRunner });
 registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, rootDir: appRootDir, dataRoot: portableRootDir, net });
+ipcMain.handle('window:minimize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) win.minimize();
+  return { ok: true };
+});
+ipcMain.handle('window:toggle-maximize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return { ok: false };
+  if (win.isMaximized()) {
+    win.unmaximize();
+  } else {
+    win.maximize();
+  }
+  return { ok: true, maximized: win.isMaximized() };
+});
+ipcMain.handle('window:close', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) win.close();
+  return { ok: true };
+});
 ipcMain.handle('canvas:write-clipboard', async (_event, payload = {}) => {
   clipboard.writeText(JSON.stringify({
     kind: CANVAS_NODES_CLIPBOARD_KIND,

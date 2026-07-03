@@ -47,7 +47,7 @@ FORART_DATA_DIR=/data
 FORART_LANGUAGE=zh-CN
 ```
 
-Mount `/data` to a NAS/shared volume to share the resource library. The server creates library folders directly under `/data`.
+Mount `/data` to a NAS/shared volume to share the resource library. The server creates library folders and `CanvasAssests` directly under `/data`.
 
 Set `FORART_LANGUAGE=en-US` if you want newly-created library folders and default records to use English names:
 

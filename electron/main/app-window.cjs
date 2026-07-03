@@ -8,6 +8,7 @@ async function createWindow({ rootDir, isDev }) {
     minWidth: 940,
     minHeight: 620,
     backgroundColor: '#f5f7fb',
+    frame: false,
     title: 'Forart',
     webPreferences: {
       preload: path.join(rootDir, 'electron', 'preload', 'preload.cjs'),

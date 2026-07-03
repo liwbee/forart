@@ -43,6 +43,7 @@ export function createAdminContext({
   getDatabaseDir,
   getDatabasePath,
   getStorageRoot,
+  getCanvasStorageRoot,
   getDb,
 }) {
   function serverPayload() {
@@ -72,6 +73,7 @@ export function createAdminContext({
       storage: {
         dataDir: getDataDir(),
         storageRoot: getStorageRoot(),
+        canvasStorageRoot: getCanvasStorageRoot?.() || getStorageRoot(),
         databaseDir: getDatabaseDir(),
         databaseFilename,
         databasePath,
@@ -125,4 +127,3 @@ export function createAdminContext({
     environmentPayload,
   };
 }
-

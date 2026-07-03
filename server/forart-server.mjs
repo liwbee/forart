@@ -18,6 +18,7 @@ const ADMIN_ROOT = path.join(SERVER_DIR, "admin");
 const DEFAULT_DATA_ROOT = path.join(ROOT_DIR, ".forart-data");
 const DATABASE_DIR = path.resolve(process.env.FORART_DATABASE_DIR || path.join(DEFAULT_DATA_ROOT, "database"));
 const DEFAULT_DATA_DIR = path.resolve(process.env.FORART_DATA_DIR || path.join(DEFAULT_DATA_ROOT, "library"));
+const CANVAS_STORAGE_ROOT = path.resolve(process.env.FORART_CANVAS_STORAGE_ROOT || process.env.FORART_DATA_DIR || ROOT_DIR);
 const DATABASE_FILENAME = "forart-library.sqlite";
 const SERVER_LANGUAGE = process.env.FORART_LANGUAGE === "en-US" ? "en-US" : "zh-CN";
 const LIBRARY_LABELS = SERVER_LANGUAGE === "en-US"
@@ -420,6 +421,7 @@ const adminContext = createAdminContext({
   getDatabaseDir: () => DATABASE_DIR,
   getDatabasePath: () => DATABASE_PATH,
   getStorageRoot: () => STORAGE_ROOT,
+  getCanvasStorageRoot: () => CANVAS_STORAGE_ROOT,
   getDb: () => db,
 });
 
@@ -429,7 +431,7 @@ const handleAdminRoute = createAdminRouter({
 });
 
 const canvasExchangeContext = createCanvasExchangeContext({
-  getStorageRoot: () => STORAGE_ROOT,
+  getStorageRoot: () => CANVAS_STORAGE_ROOT,
 });
 
 const handleCanvasExchangeRoute = createCanvasExchangeRouter({

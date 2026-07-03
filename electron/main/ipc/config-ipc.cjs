@@ -404,13 +404,22 @@ try {
 
   Write-Status -State "success"
   Write-Log "Forart portable update applied successfully."
-  Start-Process -FilePath (Join-Path $script:InstallRoot "Forart.exe") -WorkingDirectory $script:InstallRoot
-  Start-Sleep -Milliseconds 500
+  $nextExePath = Join-Path $script:InstallRoot "Forart.exe"
+  Write-Log ("Restarting Forart: {0}" -f $nextExePath)
+  Start-Process -FilePath $nextExePath -WorkingDirectory $script:InstallRoot
+  Start-Sleep -Seconds 1
   Remove-TreeWithRetry -Target $script:ExtractRoot
+  Write-Log "Update finished. Closing updater window."
+  exit 0
 } catch {
   $message = $_.Exception.Message
   Write-Log ("Update failed: {0}" -f $message)
   Write-Status -State "failed" -ErrorMessage $message
+  Write-Host ""
+  Write-Host "Forart update failed. Please keep this window open and send the log file to support:"
+  Write-Host $script:LogPath
+  Read-Host "Press Enter to close"
+  exit 1
 }
 `;
   fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
@@ -595,7 +604,7 @@ async function appInfoPayload(rootDir) {
     repoUrl: REPO_URL,
     updateUrl: LATEST_RELEASE_URL,
     currentRevision: version,
-    currentUpdatedAt: version,
+    currentUpdatedAt: '',
   };
 }
 

@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
-function createLocalServerManager({ app, rootDir, fetchImpl = fetch, port = 6980, nodeExe = process.env.FORART_SERVER_NODE || 'node' }) {
+function createLocalServerManager({ app, rootDir, dataRoot = rootDir, fetchImpl = fetch, port = 6980, nodeExe = process.env.FORART_SERVER_NODE || 'node' }) {
   const bundledServerDir = path.join(rootDir, 'server');
   const bundledServerEntry = path.join(bundledServerDir, 'forart-server.mjs');
   let serverProcess = null;
@@ -18,6 +18,7 @@ function createLocalServerManager({ app, rootDir, fetchImpl = fetch, port = 6980
       PORT: String(port),
       FORART_DATABASE_DIR: path.join(libraryRoot, '.forart', 'database'),
       FORART_DATA_DIR: libraryRoot,
+      FORART_CANVAS_STORAGE_ROOT: dataRoot,
     };
   }
 

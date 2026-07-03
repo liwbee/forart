@@ -31,6 +31,7 @@
       "VERSION"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "dir"
       ]

@@ -159,9 +159,171 @@ body {
   color: var(--text-primary);
 }
 
+.app-frame {
+  width: 100%;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--surface-app);
+}
+
+.app-frame--electron {
+  grid-template-rows: 34px minmax(0, 1fr);
+}
+
+.window-titlebar {
+  min-width: 0;
+  height: 34px;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--surface-panel) 88%, var(--surface-app));
+  border-bottom: 1px solid var(--border-subtle);
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+:root.theme-dark .window-titlebar {
+  background: color-mix(in srgb, var(--surface-app) 74%, #05070a);
+}
+
+.window-titlebar-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.window-titlebar-controls {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  -webkit-app-region: no-drag;
+}
+
+.window-titlebar-update {
+  align-self: center;
+  flex: 0 1 auto;
+  min-width: 118px;
+  max-width: 220px;
+  height: 26px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  padding: 0 var(--space-3) 0 0;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--surface-card) 86%, var(--surface-app));
+  box-shadow: none;
+  margin-right: 6px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition:
+    background 130ms ease,
+    border-color 130ms ease,
+    color 130ms ease;
+}
+
+.window-titlebar-update:hover:not(:disabled),
+.window-titlebar-update:focus-visible {
+  border-color: var(--state-hover-border);
+  background: var(--state-hover-bg);
+  outline: none;
+}
+
+.window-titlebar-update:disabled {
+  cursor: default;
+  opacity: 0.82;
+}
+
+.window-titlebar-update[data-status="available"] {
+  border-color: #16a34a;
+  color: #ffffff;
+  background: #16a34a;
+}
+
+.window-titlebar-update[data-status="error"] {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.window-titlebar-actions {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  -webkit-app-region: no-drag;
+}
+
+.window-titlebar-tool {
+  min-width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 0;
+  padding: 0 9px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background 130ms ease,
+    color 130ms ease;
+}
+
+.window-titlebar-tool:hover,
+.window-titlebar-tool:focus-visible {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  outline: none;
+}
+
+.window-titlebar-tool--language {
+  min-width: 54px;
+}
+
+.window-titlebar-tool--language span {
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.window-titlebar-button {
+  width: 44px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: default;
+  transition:
+    background 130ms ease,
+    color 130ms ease;
+}
+
+.window-titlebar-button:hover,
+.window-titlebar-button:focus-visible {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  outline: none;
+}
+
+.window-titlebar-button--close:hover,
+.window-titlebar-button--close:focus-visible {
+  color: #ffffff;
+  background: #d92d20;
+}
+
 .setup-shell {
   width: 100%;
-  min-height: 100dvh;
+  min-height: 0;
+  height: 100%;
   display: grid;
   place-items: center;
   padding: clamp(20px, 5vw, 56px);
@@ -2171,7 +2333,8 @@ input[type="color"]:focus-visible {
 .app-shell {
   display: grid;
   grid-template-columns: var(--app-nav-width) minmax(0, 1fr);
-  height: 100dvh;
+  min-height: 0;
+  height: 100%;
   overflow: hidden;
   transition: grid-template-columns 260ms var(--ease-fluid);
 }
@@ -2188,7 +2351,7 @@ input[type="color"]:focus-visible {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  height: 100dvh;
+  height: 100%;
   padding: var(--space-4) 14px;
   background: var(--surface-panel);
   border-right: 1px solid var(--border-subtle);
@@ -2216,9 +2379,7 @@ input[type="color"]:focus-visible {
   width: 30px;
   height: 30px;
   flex: 0 0 30px;
-  border-radius: var(--radius-sm);
-  background: linear-gradient(135deg, #f45b69 0%, #ffd166 46%, #06d6a0 100%);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.38);
+  background: url("../assets/forart-logo.png") center / contain no-repeat;
 }
 
 .brand-name {
@@ -2644,7 +2805,7 @@ input[type="color"]:focus-visible {
 
 .workspace {
   min-width: 0;
-  height: 100dvh;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   padding: var(--space-5);
