@@ -11,6 +11,9 @@ ENV NODE_ENV=production \
 WORKDIR /app
 
 COPY package.json ./
+COPY package-lock.json ./
+RUN npm ci --omit=dev
+
 COPY forart-server.mjs ./
 COPY src ./src
 COPY admin ./admin
