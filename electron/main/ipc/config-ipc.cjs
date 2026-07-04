@@ -572,6 +572,16 @@ async function probeNet(name, net, url, required = true) {
   }
 }
 
+async function checkServerHealth(net, baseUrl) {
+  try {
+    const response = await net.fetch(baseUrl.replace(/\/+$/, '') + '/api/health');
+    if (!response.ok) return { ok: false, status: response.status };
+    return { ok: true, payload: await response.json() };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 async function probeWritable(rootDir) {
   const startedAt = Date.now();
   const filePath = path.join(portableDataRoot(rootDir), `.update-write-test-${process.pid}.tmp`);
@@ -608,7 +618,7 @@ async function appInfoPayload(rootDir) {
   };
 }
 
-function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, rootDir, dataRoot = rootDir, net }) {
+function registerConfigIpc({ ipcMain, dialog, configStore, app, rootDir, dataRoot = rootDir, net }) {
   let activeAppConfig = null;
 
   ipcMain.handle('config:load', async () => {
@@ -616,7 +626,6 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
       const config = configStore.load();
       if (!config) return null;
       activeAppConfig = config;
-      if (config.mode === 'local') await localServer.ensure(config);
       return config;
     } catch {
       return null;
@@ -626,11 +635,6 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
   ipcMain.handle('config:save', async (_event, payload) => {
     const config = configStore.save(payload);
     activeAppConfig = config;
-    if (config.mode === 'local') {
-      await localServer.ensure(config);
-    } else {
-      localServer.stop();
-    }
     return { ok: true, config };
   });
 
@@ -667,10 +671,22 @@ function registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, roo
   ipcMain.handle('server:test-remote', async (_event, serverUrl) => {
     const baseUrl = String(serverUrl || '').trim();
     if (!baseUrl) return { ok: false, error: 'Server URL is required' };
-    return localServer.checkHealth(baseUrl);
+    return checkServerHealth(net, baseUrl);
   });
 
-  ipcMain.handle('server:local-status', async () => localServer.localStatus());
+  ipcMain.handle('server:local-status', async () => {
+    const config = activeAppConfig || configStore.load();
+    if (!config?.localLibraryPath) {
+      return { ok: false, managed: false, localLibraryPath: '', error: 'Local library path is not configured.' };
+    }
+    return {
+      ok: true,
+      managed: false,
+      transport: 'ipc',
+      localLibraryPath: config.localLibraryPath,
+      payload: { ok: true, transport: 'ipc' },
+    };
+  });
 
   ipcMain.handle('app:info', async () => appInfoPayload(rootDir));
 

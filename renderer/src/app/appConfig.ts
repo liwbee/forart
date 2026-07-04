@@ -114,7 +114,7 @@ export interface ForartConfigApi {
   defaultPaths: () => Promise<{ imageDownloadPath: string }>;
   chooseDirectory: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
   testServer: (serverUrl: string) => Promise<{ ok: boolean; status?: number; error?: string; payload?: unknown }>;
-  localServerStatus: () => Promise<{ ok: boolean; managed?: boolean; localLibraryPath?: string; status?: number; error?: string; payload?: unknown }>;
+  localServerStatus: () => Promise<{ ok: boolean; managed?: boolean; transport?: "ipc" | "http"; localLibraryPath?: string; status?: number; error?: string; payload?: unknown }>;
   appInfo: () => Promise<ForartAppInfo>;
   checkUpdate: () => Promise<ForartUpdateCheckResult>;
   runUpdate: () => Promise<ForartUpdateRunResult>;
@@ -260,6 +260,23 @@ export interface ImageReviewApi {
   saveIssue: (payload: { root: string; path: string; issue: string }) => Promise<{ ok: true }>;
 }
 
+export interface ForartLocalApiRequestPayload {
+  path: string;
+  method?: string;
+  body?: unknown;
+  headers?: Record<string, string>;
+}
+
+export interface ForartLocalApiResponse {
+  ok: boolean;
+  status: number;
+  body: unknown;
+}
+
+export interface ForartLocalApi {
+  request: (payload: ForartLocalApiRequestPayload) => Promise<ForartLocalApiResponse>;
+}
+
 export interface LibtvAccountRecord {
   accountId?: number | string;
   accountName?: string;
@@ -378,6 +395,7 @@ declare global {
     forartConfig?: ForartConfigApi;
     easyTool?: EasyToolApi;
     forartReview?: ImageReviewApi;
+    forartLocalApi?: ForartLocalApi;
     libtv?: LibtvApi;
   }
 }

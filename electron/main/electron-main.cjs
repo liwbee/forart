@@ -7,6 +7,7 @@ const { createWindow } = require('./app-window.cjs');
 const { registerCanvasIpc } = require('./ipc/canvas-ipc.cjs');
 const { registerConfigIpc } = require('./ipc/config-ipc.cjs');
 const { registerImageReviewIpc } = require('./ipc/image-review-ipc.cjs');
+const { registerLocalApiIpc } = require('./ipc/local-api-ipc.cjs');
 const { registerLibtvIpc } = require('./ipc/libtv-ipc.cjs');
 const { createAssetStore } = require('./modules/asset-store.cjs');
 const { createCanvasCacheStore } = require('./modules/canvas-cache-store.cjs');
@@ -18,7 +19,6 @@ const { createImageGenerationRunner } = require('./modules/image-generation-runn
 const { createImageReviewStore } = require('./modules/image-review-store.cjs');
 const { createLibtvAdapter } = require('./modules/libtv-adapter.cjs');
 const { createLibtvGenerationRunner } = require('./modules/libtv-generation-runner.cjs');
-const { createLocalServerManager } = require('./modules/local-server-manager.cjs');
 
 const isDev = !app.isPackaged;
 const appRootDir = isDev ? path.resolve(__dirname, '..', '..') : path.join(process.resourcesPath, 'app');
@@ -44,14 +44,14 @@ const configStore = createConfigStore({ app, rootDir: portableRootDir });
 const generationTaskStore = createGenerationTaskStore({ rootDir: portableRootDir });
 const imageGenerationRunner = createImageGenerationRunner({ net, assetStore, generationTaskStore });
 const imageReviewStore = createImageReviewStore();
-const localServer = createLocalServerManager({ app, rootDir: appRootDir, dataRoot: portableRootDir });
 const libtv = createLibtvAdapter({ rootDir: appRootDir });
 const libtvGenerationRunner = createLibtvGenerationRunner({ libtv, assetStore });
+let localApi = null;
 let mainWindow = null;
 
 function registerCanvasAssetProtocol() {
-  protocol.handle('forart-asset', (request) => {
-    const target = assetStore.resolveAssetUrl(request.url);
+  protocol.handle('forart-asset', async (request) => {
+    const target = assetStore.resolveAssetUrl(request.url) || await localApi?.resolveAssetUrl?.(request.url);
     if (!target || !fs.existsSync(target)) {
       return new Response('Asset not found', { status: 404 });
     }
@@ -78,7 +78,8 @@ ipcMain.handle('canvas-cache:reveal', async (_event, payload) => canvasCacheStor
 ipcMain.handle('canvas-cache:open-root', async () => canvasCacheStore.openRoot());
 registerImageReviewIpc({ ipcMain, imageReviewStore });
 registerLibtvIpc({ ipcMain, libtv, libtvGenerationRunner });
-registerConfigIpc({ ipcMain, dialog, configStore, localServer, app, rootDir: appRootDir, dataRoot: portableRootDir, net });
+localApi = registerLocalApiIpc({ ipcMain, configStore, app, dataRoot: portableRootDir });
+registerConfigIpc({ ipcMain, dialog, configStore, app, rootDir: appRootDir, dataRoot: portableRootDir, net });
 ipcMain.handle('window:minimize', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win) win.minimize();
@@ -121,10 +122,5 @@ app.on('second-instance', () => {
 });
 
 app.on('window-all-closed', () => {
-  localServer.stop();
   if (process.platform !== 'darwin') app.quit();
-});
-
-app.on('before-quit', () => {
-  localServer.stop();
 });

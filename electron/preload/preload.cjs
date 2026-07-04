@@ -71,6 +71,10 @@ contextBridge.exposeInMainWorld('forartReview', {
   saveIssue: (payload) => ipcRenderer.invoke('image-review:save-issue', payload),
 });
 
+contextBridge.exposeInMainWorld('forartLocalApi', {
+  request: (payload) => ipcRenderer.invoke('local-api:request', payload),
+});
+
 contextBridge.exposeInMainWorld('libtv', {
   status: () => ipcRenderer.invoke('libtv:status'),
   install: () => ipcRenderer.invoke('libtv:install'),

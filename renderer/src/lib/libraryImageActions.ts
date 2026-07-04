@@ -4,6 +4,7 @@ function resolveImageUrl(url: string) {
   const source = String(url || "").trim();
   if (!source) return "";
   if (/^data:/i.test(source)) return source;
+  if (/^forart-asset:/i.test(source)) return source;
   if (/^https?:\/\//i.test(source)) return source;
   const apiBaseUrl = getApiBaseUrl();
   const baseUrl = apiBaseUrl || (typeof window !== "undefined" ? window.location.origin : "");

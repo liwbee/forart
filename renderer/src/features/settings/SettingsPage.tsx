@@ -336,7 +336,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
       if (result?.ok) {
         setStatus({
           tone: "ready",
-          text: result.managed ? t("settings:localStatusManaged") : t("settings:localStatusExternal"),
+          text: result.transport === "ipc" ? t("settings:serverOk") : result.managed ? t("settings:localStatusManaged") : t("settings:localStatusExternal"),
         });
         return;
       }

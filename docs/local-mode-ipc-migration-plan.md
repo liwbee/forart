@@ -4,10 +4,10 @@
 
 Forart currently has two runtime modes:
 
-- Local mode: the desktop app starts a bundled local HTTP server on `127.0.0.1:6980`.
+- Local mode: the desktop app calls Electron main through `window.forartLocalApi` IPC and stores data in the local library folder.
 - Remote mode: the renderer talks to a configured remote server URL, including Docker deployments.
 
-The renderer's local library APIs currently go through the same HTTP client used by remote mode. This makes local mode depend on a localhost port. On Windows, Hyper-V/HNS/WinNAT can reserve low development ports through TCP excluded port ranges, causing startup failures such as `EACCES: permission denied 127.0.0.1:6980`.
+Historically, the renderer's local library APIs used the same HTTP client as remote mode, which made local mode depend on a localhost port. Windows Hyper-V/HNS/WinNAT can reserve development ports through TCP excluded port ranges, causing startup failures such as `EACCES: permission denied 127.0.0.1:6980`. Local mode has now been migrated away from that dependency.
 
 The goal is to remove the localhost HTTP dependency from desktop local mode while preserving the existing HTTP API and Docker server behavior for remote mode.
 
@@ -40,7 +40,7 @@ Local library data:
 
 - Renderer calls `apiRequest("/api/...")`.
 - `apiRequest` resolves the base URL through `getApiBaseUrl()`.
-- Local mode resolves to `http://127.0.0.1:6980`.
+- Local mode resolves route-shaped `/api/...` calls to Electron IPC, not to a localhost HTTP URL.
 - Remote mode resolves to `config.serverUrl`.
 
 Canvas data:
@@ -116,7 +116,7 @@ Expected outcome:
 
 - The renderer can prove local IPC routing works.
 - Existing feature APIs do not need to be rewritten yet.
-- The bundled local HTTP server can still be retained as fallback.
+- The bundled local HTTP server is no longer used by normal local desktop mode.
 
 ### Phase 2: Extract Shared Library Services
 
@@ -211,7 +211,7 @@ After the local library and asset paths no longer use HTTP:
 - Stop calling `localServer.ensure(config)` for normal local desktop mode.
 - Keep the server module for remote/Docker builds.
 - Remove the normal production local-mode dependency on `6980`.
-- Optional developer-only fallback can exist during implementation, but it should not remain part of normal local-mode behavior.
+- No local HTTP fallback remains in the desktop local-mode path.
 
 Expected outcome:
 
@@ -220,20 +220,9 @@ Expected outcome:
 
 ## Rollback Strategy
 
-Use a temporary fallback switch during migration only:
+The temporary local HTTP fallback switch used during migration has been removed. Rollback should now be done through git by reverting the IPC migration commit(s).
 
-```text
-FORART_LOCAL_API=http
-```
-
-Possible behaviors:
-
-- `ipc`: local mode uses IPC.
-- `http`: local mode uses the current bundled local server.
-
-This allows each phase to ship safely and makes debugging easier if a local IPC route behaves differently from the HTTP route.
-
-The final intended product behavior is:
+The intended product behavior is now active:
 
 - Local desktop mode does not start or depend on the bundled HTTP server.
 - Remote mode and Docker deployments continue to use the HTTP server.
@@ -281,7 +270,7 @@ renderer/src/api-contract/API.md
 6. The first implementation should keep `/api/...` route-shaped calls hidden behind `apiRequest`.
 7. Migration order is model library, then outfit library, then action library.
 8. `/api/admin/*` is out of scope for local IPC.
-9. A temporary `FORART_LOCAL_API=http` fallback is allowed during migration.
+9. The temporary local HTTP fallback was allowed during migration and has now been removed.
 10. Local canvas storage remains on the existing `window.easyTool` IPC APIs and is not folded into `forartLocalApi`.
 11. Image-review remains on `window.forartReview` and is not folded into `forartLocalApi`.
 12. Resource-library image download/save-as continues to use existing `easyTool.saveResult`.
@@ -401,6 +390,22 @@ Recommendation:
 
 ## Execution Checklist
 
+Current implementation status:
+
+- Step 1 complete: renderer local `apiRequest` uses `window.forartLocalApi.request` in local mode.
+- Step 2 complete: `/api/settings/storage` is served by local IPC.
+- Step 5 complete for local IPC: model projects, model entries, model images, and model tags are served by local IPC.
+- Step 6 complete for local IPC: outfit projects, outfits, outfit image replacement, and outfit tags are served by local IPC.
+- Step 7 complete for local IPC: action projects, actions, action image replacement, action prompt/tags, and action tags are served by local IPC.
+- Local IPC resource-library display URLs now return `forart-asset://library/{assetId}` and are resolved by the Electron `forart-asset` protocol.
+- Normal local startup no longer starts the bundled `6980` HTTP server.
+- The temporary local HTTP fallback switches have been removed after model/outfit/action migration.
+- Electron no longer imports or starts the local server manager; remote server health checks use a direct `/api/health` fetch against the configured remote URL.
+- Step 8 complete: local resource-library asset display, copy, and save-as flows use `forart-asset://library/{assetId}` instead of localhost asset URLs.
+- Step 9 complete: desktop local mode has no normal local server startup path and no local HTTP fallback flag.
+- Step 10 mostly complete: docs and local-mode settings copy have been updated; `npm run build` passes; `npm run validate:i18n` still reports unrelated pre-existing missing keys.
+- Remote/Docker HTTP server behavior remains unchanged.
+
 ### Step 1: Add Local IPC Request Skeleton
 
 - Add `forartLocalApi.request` to preload.
@@ -412,12 +417,18 @@ Recommendation:
 - Verify local `/api/health` through IPC.
 - Verify remote `/api/health` still uses HTTP.
 
+Implementation note:
+
+- The bundled local HTTP server is no longer used for normal local mode.
+- Local `apiRequest` calls IPC directly.
+- Unhandled local IPC routes now fail instead of falling back to `6980`, which makes missing migration work visible.
+
 ### Step 2: Add Storage Settings IPC Route
 
 - Implement `/api/settings/storage` for local IPC.
 - Make it read the same local library configuration used by the desktop app.
 - Verify setup/settings pages still report storage state correctly.
-- Keep HTTP fallback only during migration.
+- No local HTTP fallback remains after migration.
 
 ### Step 3: Extract Shared Library Context
 
@@ -460,28 +471,29 @@ Recommendation:
 
 ### Step 8: Replace Local Asset HTTP URLs
 
-- Audit every local use of `/api/assets/:assetId/file`.
-- Audit every local use of `/api/assets/:assetId/download`.
-- Add a local asset URL resolver if needed.
-- Use `forart-asset://...` for local display URLs.
-- Keep remote asset URLs HTTP.
-- Update `libraryImageActions.ts` to handle local protocol URLs without HTTP URL rewriting.
+- Completed: audited local asset display and download paths.
+- Completed: local IPC returns `forart-asset://library/{assetId}` display URLs.
+- Completed: Electron resolves `forart-asset://library/{assetId}` through the local library asset table.
+- Completed: `libraryImageActions.ts` handles local protocol URLs without HTTP URL rewriting.
+- Remote asset URLs remain HTTP.
 
 ### Step 9: Stop Normal Local Server Startup
 
-- Remove normal local-mode calls to `localServer.ensure(config)`.
-- Keep remote server testing unchanged.
-- Keep remote/Docker server code unchanged.
-- Remove `6980` from renderer local data-source behavior.
-- Keep any fallback flag developer-only and disabled by default.
+- Completed: removed normal local-mode server startup.
+- Completed: removed Electron local server manager import/start/stop path.
+- Completed: remote server testing still checks the configured remote `/api/health`.
+- Completed: remote/Docker server code remains unchanged.
+- Completed: renderer local data-source behavior no longer resolves to `6980`.
+- Completed: no local HTTP fallback flag remains in the desktop path.
 
 ### Step 10: Final Cleanup
 
-- Remove obsolete `getApiBaseUrl()` local `6980` behavior.
-- Update settings copy that says port `6980` if it applies to local mode.
-- Update docs and API notes.
-- Run build and i18n validation.
-- Test packaged local mode without any process listening on `6980`.
+- Completed: removed obsolete `getApiBaseUrl()` local `6980` behavior.
+- Completed: updated local-mode settings copy away from server/port wording.
+- Completed: updated migration docs and API notes.
+- Completed: `npm run build` passes.
+- Known existing gap: `npm run validate:i18n` still reports missing keys outside this migration.
+- Pending optional check: test packaged local mode without any process listening on `6980`.
 
 ## Open Questions
 

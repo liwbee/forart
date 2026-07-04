@@ -43,6 +43,7 @@ function createAssetStore({ rootDir, net }) {
     try {
       const parsed = new URL(String(source || ''));
       if (parsed.protocol !== 'forart-asset:') return '';
+      if (parsed.host !== 'canvas') return '';
       const rawPath = decodeURIComponent((parsed.host + parsed.pathname).replace(/^canvas\/?/, ''));
       const assetRoot = canvasAssetsRoot();
       const target = path.resolve(assetRoot, rawPath.replace(/^\/+/, ''));

@@ -2,6 +2,12 @@ import { getApiBaseUrl } from "../../../data-source/runtime";
 import { apiRequest } from "../../../lib/apiClient";
 import type { RemoteCanvasListOptions, RemoteCanvasManifest, RemoteCanvasProject, RemoteCanvasUploadResult, RemoteCanvasWarning, ServerCanvasDocument } from "./remoteCanvasTypes";
 
+function requireRemoteApiBaseUrl() {
+  const apiBaseUrl = getApiBaseUrl();
+  if (!apiBaseUrl) throw new Error("Remote server URL is not configured.");
+  return apiBaseUrl;
+}
+
 function buildQuery(params: Record<string, string | undefined>) {
   const query = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -12,8 +18,7 @@ function buildQuery(params: Record<string, string | undefined>) {
 }
 
 function resolveApiUrl(path: string) {
-  const apiBaseUrl = getApiBaseUrl();
-  if (!apiBaseUrl) return path;
+  const apiBaseUrl = requireRemoteApiBaseUrl();
   return `${apiBaseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
@@ -37,11 +42,13 @@ function cloneWithResolvedRemoteAssetUrls<T>(value: T): T {
 }
 
 export async function listRemoteCanvasProjects(): Promise<RemoteCanvasProject[]> {
+  requireRemoteApiBaseUrl();
   const result = await apiRequest<{ projects: RemoteCanvasProject[] }>("/api/canvas-exchange/projects");
   return result.projects || [];
 }
 
 export async function createRemoteCanvasProject(title: string): Promise<RemoteCanvasProject> {
+  requireRemoteApiBaseUrl();
   const result = await apiRequest<{ project: RemoteCanvasProject }>("/api/canvas-exchange/projects", {
     method: "POST",
     body: JSON.stringify({ title }),
@@ -50,6 +57,7 @@ export async function createRemoteCanvasProject(title: string): Promise<RemoteCa
 }
 
 export async function renameRemoteCanvasProject(projectId: string, title: string): Promise<RemoteCanvasProject> {
+  requireRemoteApiBaseUrl();
   const result = await apiRequest<{ project: RemoteCanvasProject }>(`/api/canvas-exchange/projects/${encodeURIComponent(projectId)}`, {
     method: "PATCH",
     body: JSON.stringify({ title }),
@@ -58,10 +66,12 @@ export async function renameRemoteCanvasProject(projectId: string, title: string
 }
 
 export async function deleteRemoteCanvasProject(projectId: string): Promise<{ deletedCanvasIds: string[] }> {
+  requireRemoteApiBaseUrl();
   return apiRequest(`/api/canvas-exchange/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
 }
 
 export async function listRemoteCanvases(options: RemoteCanvasListOptions = {}): Promise<RemoteCanvasManifest[]> {
+  requireRemoteApiBaseUrl();
   const result = await apiRequest<{ canvases: RemoteCanvasManifest[] }>(`/api/canvas-exchange/canvases${buildQuery({
     project_id: options.projectId,
     search: options.search,
@@ -71,6 +81,7 @@ export async function listRemoteCanvases(options: RemoteCanvasListOptions = {}):
 }
 
 export async function loadRemoteCanvas(remoteCanvasId: string): Promise<ServerCanvasDocument> {
+  requireRemoteApiBaseUrl();
   const canvas = await apiRequest<ServerCanvasDocument>(`/api/canvas-exchange/canvases/${encodeURIComponent(remoteCanvasId)}`);
   return cloneWithResolvedRemoteAssetUrls(canvas);
 }
@@ -95,5 +106,6 @@ export async function downloadRemoteCanvasPackage(remoteCanvasId: string): Promi
 }
 
 export async function deleteRemoteCanvas(remoteCanvasId: string): Promise<void> {
+  requireRemoteApiBaseUrl();
   await apiRequest(`/api/canvas-exchange/canvases/${encodeURIComponent(remoteCanvasId)}`, { method: "DELETE" });
 }

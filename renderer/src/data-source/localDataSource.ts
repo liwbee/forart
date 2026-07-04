@@ -7,7 +7,7 @@ export class LocalDataSource implements ForartDataSource {
   status() {
     return {
       mode: this.config.mode,
-      apiBaseUrl: "http://127.0.0.1:6980",
+      apiBaseUrl: "",
       configured: Boolean(this.config.localLibraryPath),
     };
   }
