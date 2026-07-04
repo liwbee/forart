@@ -35,6 +35,19 @@ function getRequestError(errors: unknown[]) {
   return first instanceof Error ? first.message : String(first);
 }
 
+function normalizeLibraryName(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function isSafeLibraryFileName(value: string) {
+  return Boolean(value)
+    && value.length <= 80
+    && !/[<>:"/\\|?*\x00-\x1f]/.test(value)
+    && value !== "."
+    && value !== ".."
+    && !/[ .]$/.test(value);
+}
+
 function fileToUploadPayload(file: File): Promise<AssetUploadPayload> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -322,15 +335,19 @@ function ActionCard({
   onUpdateDetails,
   onDelete,
   onImageActionStatus,
+  renameError,
+  onClearRenameError,
 }: {
   action: ActionEntry;
   tags: ActionTag[];
   deleteConfirmActionId: string;
   isDeleting: boolean;
   onToggleTag: (actionId: string, tagName: string) => void;
-  onUpdateDetails: (actionId: string, patch: Partial<Pick<ActionEntry, "name" | "prompt">>) => void;
+  onUpdateDetails: (actionId: string, patch: Partial<Pick<ActionEntry, "name" | "prompt">>) => boolean;
   onDelete: (actionId: string, isConfirming: boolean) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
+  renameError: string;
+  onClearRenameError: (actionId: string) => void;
 }) {
   const { t } = useTranslation();
   const [menuState, setMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
@@ -350,6 +367,7 @@ function ActionCard({
     setDraftPrompt(action.prompt || "");
     committedNameRef.current = action.name || "";
     committedPromptRef.current = action.prompt || "";
+    onClearRenameError(action.id);
   }, [action.id, action.name, action.prompt]);
 
   useEffect(() => {
@@ -436,24 +454,23 @@ function ActionCard({
   }
 
   function commitDetails() {
-    const nextName = draftName.trim();
+    const nextName = normalizeLibraryName(draftName);
     const nextPrompt = draftPrompt;
     const patch: Partial<Pick<ActionEntry, "name" | "prompt">> = {};
     if (nextName && nextName !== committedNameRef.current) patch.name = nextName;
     if (nextPrompt !== committedPromptRef.current) patch.prompt = nextPrompt;
     if (!Object.keys(patch).length) {
       if (!nextName) setDraftName(committedNameRef.current);
-      return;
+      return true;
     }
-    if (patch.name) committedNameRef.current = patch.name;
-    if (patch.prompt !== undefined) committedPromptRef.current = patch.prompt;
     if (!nextName) setDraftName(committedNameRef.current);
-    onUpdateDetails(action.id, patch);
+    const accepted = onUpdateDetails(action.id, patch);
+    if (accepted && patch.prompt !== undefined) committedPromptRef.current = patch.prompt;
+    return accepted;
   }
 
   function closePromptEditor() {
-    commitDetails();
-    setPromptOpen(false);
+    if (commitDetails()) setPromptOpen(false);
   }
 
   return (
@@ -497,14 +514,19 @@ function ActionCard({
             <ArrowLeft size={18} aria-hidden="true" />
           </button>
           <label className="action-card__name-field">
+            {renameError ? <span className="library-rename-error-popover">{renameError}</span> : null}
             <input
               ref={nameInputRef}
+              className={renameError ? "library-rename-input--error" : undefined}
               value={draftName}
               maxLength={120}
               tabIndex={promptOpen ? 0 : -1}
               aria-label={t("common:labels.name")}
               placeholder={t("common:labels.name")}
-              onChange={(event) => setDraftName(event.target.value)}
+              onChange={(event) => {
+                onClearRenameError(action.id);
+                setDraftName(event.target.value);
+              }}
               onBlur={commitDetails}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
@@ -627,6 +649,8 @@ function ActionGrid({
   onUpdateDetails,
   onDelete,
   onImageActionStatus,
+  renameErrors,
+  onClearRenameError,
 }: {
   actions: ActionEntry[];
   tags: ActionTag[];
@@ -635,9 +659,11 @@ function ActionGrid({
   deleteConfirmActionId: string;
   onCreate: (file: File) => void;
   onToggleTag: (actionId: string, tagName: string) => void;
-  onUpdateDetails: (actionId: string, patch: Partial<Pick<ActionEntry, "name" | "prompt">>) => void;
+  onUpdateDetails: (actionId: string, patch: Partial<Pick<ActionEntry, "name" | "prompt">>) => boolean;
   onDelete: (actionId: string, isConfirming: boolean) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
+  renameErrors: Record<string, string>;
+  onClearRenameError: (actionId: string) => void;
 }) {
   return (
     <div className="outfit-grid">
@@ -653,6 +679,8 @@ function ActionGrid({
           onUpdateDetails={onUpdateDetails}
           onDelete={onDelete}
           onImageActionStatus={onImageActionStatus}
+          renameError={renameErrors[action.id] || ""}
+          onClearRenameError={onClearRenameError}
         />
       ))}
     </div>
@@ -858,6 +886,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const [deleteConfirmProjectId, setDeleteConfirmProjectId] = useState("");
   const [deleteConfirmActionId, setDeleteConfirmActionId] = useState("");
   const [deleteConfirmTagId, setDeleteConfirmTagId] = useState("");
+  const [actionRenameErrors, setActionRenameErrors] = useState<Record<string, string>>({});
   const [closeMenuToken, setCloseMenuToken] = useState(0);
   const { toast: imageActionToast, showToast: showImageActionToast } = useLibraryImageActionToast();
   const activeProjectId = useActionLibraryStore((state) => state.activeProjectId);
@@ -910,6 +939,12 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     enabled: Boolean(activeProjectId),
   });
 
+  const allActionsQuery = useQuery({
+    queryKey: activeProjectId ? actionLibraryKeys.actions(activeProjectId) : ["actions", "all", "empty"],
+    queryFn: () => listActions({ projectId: activeProjectId }),
+    enabled: Boolean(activeProjectId),
+  });
+
   const createActionMutation = useMutation({
     mutationFn: async (file: File) => {
       if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
@@ -945,8 +980,20 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
 
   const updateActionDetailsMutation = useMutation({
     mutationFn: ({ actionId, patch }: { actionId: string; patch: Partial<Pick<ActionEntry, "name" | "prompt">> }) => updateAction(actionId, patch),
-    onSuccess: async () => {
+    onSuccess: async (_result, variables) => {
+      setActionRenameErrors((errors) => {
+        const next = { ...errors };
+        delete next[variables.actionId];
+        return next;
+      });
       await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
+    },
+    onError: (error, variables) => {
+      if (!variables.patch.name) return;
+      setActionRenameErrors((errors) => ({
+        ...errors,
+        [variables.actionId]: error instanceof Error ? error.message : String(error),
+      }));
     },
   });
 
@@ -1052,6 +1099,34 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     updateActionTagsMutation.mutate({ actionId, tags: nextTags });
   }
 
+  function clearActionRenameError(actionId: string) {
+    setActionRenameErrors((errors) => {
+      if (!errors[actionId]) return errors;
+      const next = { ...errors };
+      delete next[actionId];
+      return next;
+    });
+  }
+
+  function handleUpdateActionDetails(actionId: string, patch: Partial<Pick<ActionEntry, "name" | "prompt">>) {
+    if (patch.name !== undefined) {
+      const nextName = normalizeLibraryName(patch.name);
+      if (!isSafeLibraryFileName(nextName)) {
+        setActionRenameErrors((errors) => ({ ...errors, [actionId]: t("common:errors.invalidFileNameCharacters") }));
+        return false;
+      }
+      const allActions = allActionsQuery.data?.actions || actions;
+      const duplicate = allActions.some((action) => action.id !== actionId && normalizeLibraryName(action.name) === nextName);
+      if (duplicate) {
+        setActionRenameErrors((errors) => ({ ...errors, [actionId]: t("common:errors.nameAlreadyExists") }));
+        return false;
+      }
+      clearActionRenameError(actionId);
+    }
+    updateActionDetailsMutation.mutate({ actionId, patch });
+    return true;
+  }
+
   function handleCreateTag(name: string) {
     const next = normalizeTags([name])[0];
     if (!next) return;
@@ -1107,10 +1182,10 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     projectsQuery.error,
     tagsQuery.error,
     actionsQuery.error,
+    allActionsQuery.error,
     createActionMutation.error,
     deleteActionMutation.error,
     updateActionTagsMutation.error,
-    updateActionDetailsMutation.error,
     createProjectMutation.error,
     renameProjectMutation.error,
     deleteProjectMutation.error,
@@ -1170,9 +1245,11 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
                 deleteConfirmActionId={deleteConfirmActionId}
                 onCreate={(file) => createActionMutation.mutate(file)}
                 onToggleTag={handleToggleActionTag}
-                onUpdateDetails={(actionId, patch) => updateActionDetailsMutation.mutate({ actionId, patch })}
+                onUpdateDetails={handleUpdateActionDetails}
                 onDelete={handleActionDelete}
                 onImageActionStatus={showImageActionToast}
+                renameErrors={actionRenameErrors}
+                onClearRenameError={clearActionRenameError}
               />
             ) : null}
           </div>

@@ -73,7 +73,7 @@ export function createOutfit(projectId: string, payload: AssetUploadPayload) {
   });
 }
 
-export function updateOutfit(outfitId: string, payload: Partial<Pick<OutfitEntry, "tags">>) {
+export function updateOutfit(outfitId: string, payload: Partial<Pick<OutfitEntry, "name" | "tags">>) {
   return apiRequest<OutfitEntry>(`/api/outfits/${encodeURIComponent(outfitId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),

@@ -1,5 +1,5 @@
 .image-review-page {
-  height: calc(100dvh - 40px);
+  height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -510,10 +510,23 @@
 
 .review-product-items {
   min-height: 0;
+  position: relative;
   overflow: auto;
+}
+
+.review-product-items__spacer {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.review-product-items__virtual {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
   display: grid;
-  align-content: start;
   gap: var(--space-2);
+  padding-bottom: var(--space-2);
 }
 
 .review-product-items button {
@@ -788,11 +801,24 @@
 .review-thumb-strip {
   min-width: 0;
   min-height: 78px;
-  display: flex;
-  gap: var(--space-2);
+  position: relative;
   overflow: auto;
   padding: var(--space-2) var(--space-3);
   overscroll-behavior-x: contain;
+}
+
+.review-thumb-strip__spacer {
+  position: relative;
+  height: 58px;
+  min-width: 100%;
+}
+
+.review-thumb-strip__virtual {
+  position: absolute;
+  inset: 0 auto auto 0;
+  height: 58px;
+  display: flex;
+  gap: var(--space-2);
 }
 
 .review-thumb-strip button {

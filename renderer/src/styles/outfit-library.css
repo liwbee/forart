@@ -195,6 +195,7 @@
 }
 
 .action-card__name-field {
+  position: relative;
   min-width: 0;
   display: block;
 }

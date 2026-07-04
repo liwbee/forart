@@ -34,6 +34,10 @@ export async function listLibtvImageModels() {
   return libtvApi().imageModels();
 }
 
+export async function ensureLibtvReadyProject(payload: { workspaceId: string }) {
+  return libtvApi().ensureReadyProject(payload);
+}
+
 export async function generateLibtvImage(payload: {
   workspaceId?: string;
   projectUuid?: string;
@@ -52,6 +56,7 @@ export async function generateLibtvImage(payload: {
 export async function generateLibtvBatch(payload: {
   workspaceId?: string;
   projectUuid?: string;
+  projectName?: string;
   modelName?: string;
   aspectRatio?: string;
   quality?: string;

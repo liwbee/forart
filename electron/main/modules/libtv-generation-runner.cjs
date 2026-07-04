@@ -182,12 +182,31 @@ function createLibtvGenerationRunner({ libtv, assetStore }) {
     const workspaceId = firstString(payload.workspaceId);
     if (!projectUuid) {
       if (!workspaceId) throw new Error('LibTV workspace is required.');
-      const ensuredProject = await libtv.ensureDailyProject({ workspaceId });
-      projectUuid = firstString(ensuredProject.project?.uuid);
-      projectName = firstString(ensuredProject.project?.name, projectName);
+      const ensuredProject = await ensureReadyProject({ workspaceId });
+      projectUuid = firstString(ensuredProject.projectUuid);
+      projectName = firstString(ensuredProject.projectName, projectName);
       if (!projectUuid) throw new Error('LibTV daily canvas could not be created or resolved.');
     }
     return { projectUuid, projectName };
+  }
+
+  async function ensureReadyProject(payload = {}) {
+    const workspaceId = firstString(payload.workspaceId);
+    if (!workspaceId) throw new Error('LibTV workspace is required.');
+    const ensuredProject = await libtv.ensureDailyProject({ workspaceId });
+    const projectUuid = firstString(ensuredProject.project?.uuid);
+    const projectName = firstString(ensuredProject.project?.name);
+    if (!projectUuid) throw new Error('LibTV daily canvas could not be created or resolved.');
+    if (libtv.waitForProjectReady) {
+      await libtv.waitForProjectReady({ workspaceId, projectUuid, projectName });
+    }
+    return {
+      ok: true,
+      created: Boolean(ensuredProject.created),
+      projectUuid,
+      projectName,
+      project: ensuredProject.project,
+    };
   }
 
   function normalizeJobs(payload = {}) {
@@ -440,6 +459,7 @@ function createLibtvGenerationRunner({ libtv, assetStore }) {
   }
 
   return {
+    ensureReadyProject,
     generateBatch,
     generateImage,
   };

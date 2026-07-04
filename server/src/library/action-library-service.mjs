@@ -260,35 +260,43 @@ export function createActionLibraryService(runtime, options = {}) {
     const oldDir = projectDirForName(project.name);
     const nextDir = projectDirForName(nextName);
     renameDirectoryIfNeeded(oldDir, nextDir);
-    const actions = db.prepare(
+    const assetRows = db.prepare(
       `
-      SELECT oe.*, a.path AS asset_path, a.filename AS asset_filename, a.mime_type AS asset_mime_type
-      FROM action_entries oe
-      LEFT JOIN assets a ON a.id = oe.asset_id
-      WHERE oe.project_id = ?
-      ORDER BY oe.created_at ASC
+      SELECT DISTINCT a.id, a.path
+      FROM assets a
+      LEFT JOIN action_entries ae ON ae.asset_id = a.id
+      LEFT JOIN action_projects ap ON ap.cover_asset_id = a.id
+      WHERE ae.project_id = ? OR ap.id = ?
       `
-    ).all(project.id);
-    actions.forEach((action, index) => {
-      const nextActionName = nextActionNameForIndex(nextName, index + 1);
-      const assetPath = assetAbsolutePath(action.asset_path || "");
-      const suffix = path.extname(assetPath || action.asset_filename || "") || guessSuffix(action.asset_filename || "", action.asset_mime_type || "");
-      const nextPath = path.join(nextDir, `${nextActionName}${suffix}`);
-      const currentPath = assetPath && existsSync(assetPath) ? assetPath : replacePathPrefix(assetPath || "", oldDir, nextDir);
-      ensureDir(nextDir);
-      if (currentPath && existsSync(currentPath) && path.resolve(currentPath) !== path.resolve(nextPath)) {
-        if (existsSync(nextPath)) throw new Error(`Image file already exists: ${path.basename(nextPath)}`);
-        renameSync(currentPath, nextPath);
-      }
-      db.prepare("UPDATE assets SET filename = ?, path = ? WHERE id = ?").run(path.basename(nextPath), assetRelativePath(nextPath), action.asset_id);
-      db.prepare("UPDATE action_entries SET name = ?, updated_at = ? WHERE id = ?").run(nextActionName, nowIso(), action.id);
-    });
-    const coverAssetRows = db.prepare("SELECT cover_asset_id AS asset_id FROM action_projects WHERE id = ?").all(project.id);
-    for (const row of coverAssetRows) {
-      const asset = row.asset_id ? loadAsset(row.asset_id) : null;
-      if (asset?.path) {
-        db.prepare("UPDATE assets SET path = ? WHERE id = ?").run(assetRelativePath(replacePathPrefix(asset.path, oldDir, nextDir)), asset.id);
-      }
+    ).all(project.id, project.id);
+    for (const asset of assetRows) {
+      if (asset?.path) db.prepare("UPDATE assets SET path = ? WHERE id = ?").run(assetRelativePath(replacePathPrefix(asset.path, oldDir, nextDir)), asset.id);
+    }
+  }
+
+  function renameActionImage(action, nextName) {
+    const project = loadProject(action.project_id);
+    if (!project) throw new Error("Action project not found");
+    const asset = action.asset_id ? loadAsset(action.asset_id) : null;
+    if (!asset?.path) return;
+    const currentPath = assetAbsolutePath(asset.path);
+    const targetDir = projectDirForName(project.name);
+    const suffix = path.extname(currentPath || asset.filename || "") || guessSuffix(asset.filename || "", asset.mime_type || "");
+    const nextPath = path.join(targetDir, `${folderName(nextName, "action name")}${suffix}`);
+    if (path.resolve(currentPath) === path.resolve(nextPath)) return;
+    ensureDir(targetDir);
+    if (existsSync(currentPath)) {
+      if (existsSync(nextPath)) throw new Error(`Image file already exists: ${path.basename(nextPath)}`);
+      renameSync(currentPath, nextPath);
+    }
+    db.prepare("UPDATE assets SET filename = ?, path = ? WHERE id = ?").run(path.basename(nextPath), assetRelativePath(nextPath), asset.id);
+  }
+
+  function updateActionName(action, nextName) {
+    if (actionNameExists(action.project_id, nextName, action.id)) throw new Error("Action name must be unique");
+    if (nextName !== action.name) {
+      renameActionImage(action, nextName);
+      db.prepare("UPDATE action_entries SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), action.id);
     }
   }
 
@@ -478,6 +486,10 @@ export function createActionLibraryService(runtime, options = {}) {
     const action = loadAction(actionId);
     if (!action) return null;
     return runDbTransaction(db, () => {
+      if (payload.name !== undefined) {
+        const nextName = validateFileNamePart(payload.name || labels.defaultAction, "action name");
+        updateActionName(action, nextName);
+      }
       if (payload.tags !== undefined) {
         updateEntryTags(actionId, action.project_id, payload.tags);
         db.prepare("UPDATE action_entries SET updated_at = ? WHERE id = ?").run(nowIso(), actionId);

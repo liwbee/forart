@@ -55,6 +55,19 @@ function getRequestError(errors: unknown[]) {
   return first instanceof Error ? first.message : String(first);
 }
 
+function normalizeLibraryName(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function isSafeLibraryFileName(value: string) {
+  return Boolean(value)
+    && value.length <= 80
+    && !/[<>:"/\\|?*\x00-\x1f]/.test(value)
+    && value !== "."
+    && value !== ".."
+    && !/[ .]$/.test(value);
+}
+
 function fileToUploadPayload(file: File): Promise<AssetUploadPayload> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -477,6 +490,8 @@ function ModelInlineEditor({
   onDeleteImage,
   onSetCover,
   onImageActionStatus,
+  renameError,
+  onClearRenameError,
 }: {
   model: ModelEntry;
   tags: ModelTag[];
@@ -492,6 +507,8 @@ function ModelInlineEditor({
   onDeleteImage: (imageId: string) => void;
   onSetCover: (modelId: string, imageId: string) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
+  renameError: string;
+  onClearRenameError: (modelId: string) => void;
 }) {
   const { t } = useTranslation();
   const [draftName, setDraftName] = useState(model.name || "");
@@ -512,6 +529,7 @@ function ModelInlineEditor({
 
   useEffect(() => {
     setDraftName(model.name || "");
+    onClearRenameError(model.id);
   }, [model.id, model.name]);
 
   useEffect(() => {
@@ -553,7 +571,7 @@ function ModelInlineEditor({
   }, [openImageMenuState.imageId]);
 
   function submitName() {
-    const nextName = draftName.trim();
+    const nextName = normalizeLibraryName(draftName);
     if (!nextName || nextName === model.name) {
       setDraftName(model.name || "");
       return;
@@ -676,11 +694,15 @@ function ModelInlineEditor({
         <div className="model-inline-title-area">
           <label className="model-inline-name-field">
             <span>{t("modelLibrary:modelName")}</span>
+            {renameError ? <span className="library-rename-error-popover">{renameError}</span> : null}
             <input
-              className="library-entry-title-input"
+              className={`library-entry-title-input${renameError ? " library-rename-input--error" : ""}`}
               type="text"
               value={draftName}
-              onChange={(event) => setDraftName(event.target.value)}
+              onChange={(event) => {
+                onClearRenameError(model.id);
+                setDraftName(event.target.value);
+              }}
               onBlur={submitName}
               onKeyDown={handleNameKeyDown}
               disabled={isSaving || isDeleting}
@@ -904,6 +926,8 @@ function ModelGrid({
   onDeleteImage,
   onSetCover,
   onImageActionStatus,
+  renameErrors,
+  onClearRenameError,
 }: {
   models: ModelEntry[];
   openModelId: string;
@@ -923,6 +947,8 @@ function ModelGrid({
   onDeleteImage: (imageId: string) => void;
   onSetCover: (modelId: string, imageId: string) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
+  renameErrors: Record<string, string>;
+  onClearRenameError: (modelId: string) => void;
 }) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [columnCount, setColumnCount] = useState(1);
@@ -981,6 +1007,8 @@ function ModelGrid({
           onDeleteImage={onDeleteImage}
           onSetCover={onSetCover}
           onImageActionStatus={onImageActionStatus}
+          renameErrors={renameErrors}
+          onClearRenameError={onClearRenameError}
         />
       ))}
     </div>
@@ -1006,6 +1034,8 @@ function FragmentWithEditor({
   onDeleteImage,
   onSetCover,
   onImageActionStatus,
+  renameErrors,
+  onClearRenameError,
 }: {
   model: ModelEntry;
   isOpen: boolean;
@@ -1025,6 +1055,8 @@ function FragmentWithEditor({
   onDeleteImage: (imageId: string) => void;
   onSetCover: (modelId: string, imageId: string) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
+  renameErrors: Record<string, string>;
+  onClearRenameError: (modelId: string) => void;
 }) {
   return (
     <>
@@ -1045,6 +1077,8 @@ function FragmentWithEditor({
           onDeleteImage={onDeleteImage}
           onSetCover={onSetCover}
           onImageActionStatus={onImageActionStatus}
+          renameError={renameErrors[openModel.id] || ""}
+          onClearRenameError={onClearRenameError}
         />
       ) : null}
     </>
@@ -1256,6 +1290,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   const [closeMenuToken, setCloseMenuToken] = useState(0);
   const [deleteConfirmModelId, setDeleteConfirmModelId] = useState("");
   const [deleteConfirmTagId, setDeleteConfirmTagId] = useState("");
+  const [modelRenameErrors, setModelRenameErrors] = useState<Record<string, string>>({});
   const { toast: imageActionToast, showToast: showImageActionToast } = useLibraryImageActionToast();
   const activeProjectId = useModelLibraryStore((state) => state.activeProjectId);
   const activeTagFilter = useModelLibraryStore((state) => state.activeTagFilter);
@@ -1342,8 +1377,19 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
 
   const updateModelNameMutation = useMutation({
     mutationFn: ({ modelId, name }: { modelId: string; name: string }) => updateModel(modelId, { name }),
-    onSuccess: async () => {
+    onSuccess: async (_result, variables) => {
+      setModelRenameErrors((errors) => {
+        const next = { ...errors };
+        delete next[variables.modelId];
+        return next;
+      });
       await queryClient.invalidateQueries({ queryKey: ["models", activeProjectId] });
+    },
+    onError: (error, variables) => {
+      setModelRenameErrors((errors) => ({
+        ...errors,
+        [variables.modelId]: error instanceof Error ? error.message : String(error),
+      }));
     },
   });
 
@@ -1479,7 +1525,33 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   }
 
   function handleSaveModelName(modelId: string, name: string) {
-    updateModelNameMutation.mutate({ modelId, name });
+    const nextName = normalizeLibraryName(name);
+    if (!isSafeLibraryFileName(nextName)) {
+      setModelRenameErrors((errors) => ({ ...errors, [modelId]: t("common:errors.invalidFileNameCharacters") }));
+      return;
+    }
+    const allModels = allModelsQuery.data?.models || models;
+    const duplicate = allModels.some((model) => model.id !== modelId && normalizeLibraryName(model.name) === nextName);
+    if (duplicate) {
+      setModelRenameErrors((errors) => ({ ...errors, [modelId]: t("common:errors.nameAlreadyExists") }));
+      return;
+    }
+    setModelRenameErrors((errors) => {
+      if (!errors[modelId]) return errors;
+      const next = { ...errors };
+      delete next[modelId];
+      return next;
+    });
+    updateModelNameMutation.mutate({ modelId, name: nextName });
+  }
+
+  function clearModelRenameError(modelId: string) {
+    setModelRenameErrors((errors) => {
+      if (!errors[modelId]) return errors;
+      const next = { ...errors };
+      delete next[modelId];
+      return next;
+    });
   }
 
   function handleDeleteModel(modelId: string, isConfirming: boolean) {
@@ -1562,7 +1634,6 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     createProjectMutation.error,
     renameProjectMutation.error,
     deleteProjectMutation.error,
-    updateModelNameMutation.error,
     deleteModelMutation.error,
     updateModelTagsMutation.error,
     uploadModelImageMutation.error,
@@ -1640,6 +1711,8 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
                   onDeleteImage={(imageId) => deleteModelImageMutation.mutate(imageId)}
                   onSetCover={(modelId, imageId) => setModelCoverMutation.mutate({ modelId, imageId })}
                   onImageActionStatus={showImageActionToast}
+                  renameErrors={modelRenameErrors}
+                  onClearRenameError={clearModelRenameError}
                 />
               </>
             ) : null}

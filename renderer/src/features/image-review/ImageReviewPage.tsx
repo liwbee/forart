@@ -1,4 +1,4 @@
-import { PointerEvent, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type MutableRefObject, type WheelEvent as ReactWheelEvent } from "react";
+import { PointerEvent, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type WheelEvent as ReactWheelEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleHelp, Flag, FolderOpen, ImageOff, Save, Search, X } from "lucide-react";
 
@@ -28,12 +28,80 @@ const THUMB_WHEEL_VELOCITY_RATIO = 0.012;
 const THUMB_WHEEL_FRICTION = 0.9;
 const THUMB_WHEEL_MAX_VELOCITY = 3.2;
 const THUMB_WHEEL_STOP_VELOCITY = 0.02;
+const PRODUCT_ROW_HEIGHT = 80;
+const PRODUCT_COLUMN_WIDTH = 208;
+const THUMB_ITEM_WIDTH = 66;
 
 type ThumbScrollMomentum = {
   frame: number;
   lastTime: number;
   velocity: number;
 };
+
+type VirtualAxis = "vertical" | "horizontal";
+
+function useVirtualWindow(
+  containerRef: MutableRefObject<HTMLDivElement | null>,
+  itemCount: number,
+  itemSize: number,
+  axis: VirtualAxis,
+  buffer = 4,
+) {
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const [viewportSize, setViewportSize] = useState(0);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+
+    function measure() {
+      if (!containerRef.current) return;
+      setViewportSize(axis === "vertical" ? containerRef.current.clientHeight : containerRef.current.clientWidth);
+      setScrollOffset(axis === "vertical" ? containerRef.current.scrollTop : containerRef.current.scrollLeft);
+    }
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [axis, containerRef]);
+
+  const visibleRange = useMemo(() => {
+    if (!itemCount || !itemSize || !viewportSize) return { start: 0, end: Math.min(itemCount, buffer * 2 + 1) };
+    const firstVisible = Math.floor(scrollOffset / itemSize);
+    const visibleCount = Math.ceil(viewportSize / itemSize);
+    const start = Math.max(0, firstVisible - buffer);
+    const end = Math.min(itemCount, firstVisible + visibleCount + buffer);
+    return { start, end };
+  }, [buffer, itemCount, itemSize, scrollOffset, viewportSize]);
+
+  const onScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    setScrollOffset(axis === "vertical" ? event.currentTarget.scrollTop : event.currentTarget.scrollLeft);
+  }, [axis]);
+
+  return {
+    ...visibleRange,
+    onScroll,
+    totalSize: itemCount * itemSize,
+  };
+}
+
+function scrollVirtualItemIntoView(container: HTMLDivElement | null, index: number, itemSize: number, axis: VirtualAxis) {
+  if (!container || index < 0) return;
+  const start = index * itemSize;
+  const end = start + itemSize;
+  const viewportStart = axis === "vertical" ? container.scrollTop : container.scrollLeft;
+  const viewportSize = axis === "vertical" ? container.clientHeight : container.clientWidth;
+  const viewportEnd = viewportStart + viewportSize;
+  let nextOffset = viewportStart;
+
+  if (start < viewportStart) nextOffset = start;
+  else if (end > viewportEnd) nextOffset = Math.max(0, end - viewportSize);
+  else return;
+
+  if (axis === "vertical") container.scrollTop = nextOffset;
+  else container.scrollLeft = nextOffset;
+}
 
 type ProductImagePaneHandle = {
   goImages: (direction: -1 | 1) => void;
@@ -169,10 +237,36 @@ const ProductList = memo(function ProductList({
   onSelectProduct: (productId: string) => void;
 }) {
   const { t } = useTranslation();
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [virtualAxis, setVirtualAxis] = useState<VirtualAxis>("vertical");
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
   const filteredProducts = normalizedQuery
     ? products.filter((product) => product.id.toLocaleLowerCase().includes(normalizedQuery))
     : products;
+  const itemSize = virtualAxis === "vertical" ? PRODUCT_ROW_HEIGHT : PRODUCT_COLUMN_WIDTH;
+  const virtual = useVirtualWindow(listRef, filteredProducts.length, itemSize, virtualAxis, 5);
+  const visibleProducts = filteredProducts.slice(virtual.start, virtual.end);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+
+    function updateAxis() {
+      if (!listRef.current) return;
+      const styles = window.getComputedStyle(listRef.current);
+      setVirtualAxis(styles.gridAutoFlow === "column" ? "horizontal" : "vertical");
+    }
+
+    updateAxis();
+    const observer = new ResizeObserver(updateAxis);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const index = filteredProducts.findIndex((product) => product.id === activeProductId);
+    scrollVirtualItemIntoView(listRef.current, index, itemSize, virtualAxis);
+  }, [activeProductId, filteredProducts, itemSize, virtualAxis]);
 
   return (
     <aside className="review-product-list" aria-label={t("imageReview:productList")}>
@@ -191,8 +285,18 @@ const ProductList = memo(function ProductList({
         <span>{filteredProducts.length} / {products.length}</span>
       </div>
 
-      <div className="review-product-items">
-        {filteredProducts.map((product) => {
+      <div className="review-product-items" ref={listRef} onScroll={virtual.onScroll}>
+        <div
+          className="review-product-items__spacer"
+          style={virtualAxis === "vertical" ? { height: virtual.totalSize } : { width: virtual.totalSize }}
+        >
+          <div
+            className="review-product-items__virtual"
+            style={virtualAxis === "vertical"
+              ? { transform: `translateY(${virtual.start * itemSize}px)` }
+              : { transform: `translateX(${virtual.start * itemSize}px)` }}
+          >
+        {visibleProducts.map((product) => {
           const isActive = product.id === activeProductId;
           const missingModel = !product.hasModelImages;
           return (
@@ -208,6 +312,8 @@ const ProductList = memo(function ProductList({
             </button>
           );
         })}
+          </div>
+        </div>
         {!products.length ? <div className="review-pair-empty">{t("imageReview:mountReviewFolders")}</div> : null}
         {products.length && !filteredProducts.length ? <div className="review-pair-empty">{t("imageReview:noMatchingProductIds")}</div> : null}
       </div>
@@ -239,6 +345,13 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
   onWheel: (event: ReactWheelEvent<HTMLDivElement>) => void;
 }) {
   const { t } = useTranslation();
+  const virtual = useVirtualWindow(thumbStripRef, images.length, THUMB_ITEM_WIDTH, "horizontal", 8);
+  const visibleImages = images.slice(virtual.start, virtual.end);
+
+  useEffect(() => {
+    scrollVirtualItemIntoView(thumbStripRef.current, activeIndex, THUMB_ITEM_WIDTH, "horizontal");
+  }, [activeIndex, thumbStripRef]);
+
   return (
     <div className="review-thumb-nav">
       <button
@@ -253,23 +366,36 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
       >
         <ChevronLeft size={24} aria-hidden="true" />
       </button>
-      <div className="review-thumb-strip" ref={(node) => { thumbStripRef.current = node; }} aria-label={t("imageReview:thumbsLabel", { title })} onWheel={onWheel}>
-        {images.map((item, index) => (
-          <button
-            key={item.id}
-            ref={index === activeIndex ? (node) => { activeThumbRef.current = node; } : undefined}
-            className={index === activeIndex ? "active" : ""}
-            type="button"
-            aria-label={t("imageReview:viewImage", { name: item.name })}
-            aria-current={index === activeIndex ? "true" : undefined}
-            onClick={() => {
-              onActivate(group);
-              onSelectImage(index);
-            }}
-          >
-            <img src={item.url} alt="" loading={index === activeIndex ? "eager" : "lazy"} decoding="async" draggable={false} />
-          </button>
-        ))}
+      <div
+        className="review-thumb-strip"
+        ref={(node) => { thumbStripRef.current = node; }}
+        aria-label={t("imageReview:thumbsLabel", { title })}
+        onScroll={virtual.onScroll}
+        onWheel={onWheel}
+      >
+        <div className="review-thumb-strip__spacer" style={{ width: virtual.totalSize }}>
+          <div className="review-thumb-strip__virtual" style={{ transform: `translateX(${virtual.start * THUMB_ITEM_WIDTH}px)` }}>
+        {visibleImages.map((item, offset) => {
+          const index = virtual.start + offset;
+          return (
+            <button
+              key={item.id}
+              ref={index === activeIndex ? (node) => { activeThumbRef.current = node; } : undefined}
+              className={index === activeIndex ? "active" : ""}
+              type="button"
+              aria-label={t("imageReview:viewImage", { name: item.name })}
+              aria-current={index === activeIndex ? "true" : undefined}
+              onClick={() => {
+                onActivate(group);
+                onSelectImage(index);
+              }}
+            >
+              <img src={item.url} alt="" loading={index === activeIndex ? "eager" : "lazy"} decoding="async" draggable={false} />
+            </button>
+          );
+        })}
+          </div>
+        </div>
         {!images.length ? <div className="review-thumb-empty">{t("imageReview:noImages")}</div> : null}
       </div>
       <button

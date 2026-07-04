@@ -870,7 +870,8 @@
 .model-inline-editor {
   grid-column: 1 / -1;
   position: relative;
-  overflow: hidden;
+  z-index: 1;
+  overflow: visible;
   padding: var(--space-5);
   border-color: color-mix(in srgb, var(--border-strong) 50%, var(--border-subtle));
   background:
@@ -895,6 +896,7 @@
 }
 
 .model-inline-name-field {
+  position: relative;
   display: grid;
   gap: var(--space-2);
   color: var(--text-muted);
@@ -913,6 +915,29 @@
   font-size: 18px;
   font-weight: var(--font-weight-semibold);
   box-shadow: none;
+}
+
+.library-rename-input--error {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 14%, transparent) !important;
+}
+
+.library-rename-error-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 4;
+  max-width: min(260px, 100%);
+  border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--border-subtle));
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--danger-soft) 94%, var(--surface-card));
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
 }
 
 .model-inline-summary {

@@ -1,18 +1,4 @@
 /* Canvas node content bodies: prompt, LLM, image, loader, and shared node fields. */
-.ic-prompt-display {
-  width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--canvas-state-hover-text);
-  cursor: grab;
-  line-height: 1.45;
-  white-space: pre-wrap;
-}
-
-.ic-prompt-display.empty {
-  color: var(--canvas-node-muted);
-}
-
 .ic-llm-node-body {
   grid-template-rows: auto minmax(74px, 0.78fr) minmax(86px, 1fr) auto;
   overflow: visible;

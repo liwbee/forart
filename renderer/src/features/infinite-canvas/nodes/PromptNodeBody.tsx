@@ -22,6 +22,14 @@ export function PromptNodeBody({ node, isEditing, onEditingChange, onPatch, onCo
     textareaRef.current?.select();
   }, [isEditing]);
 
+  useEffect(() => {
+    if (isEditing) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.setSelectionRange(0, 0);
+    textarea.blur();
+  }, [isEditing]);
+
   function enterEditing() {
     onEditingChange(true);
   }
@@ -34,27 +42,28 @@ export function PromptNodeBody({ node, isEditing, onEditingChange, onPatch, onCo
 
   return (
     <div className="ic-node-body nowheel">
-      {isEditing ? (
-        <textarea
-          ref={textareaRef}
-          className="nodrag nopan nowheel ic-prompt-textarea"
-          value={node.text || ""}
-          placeholder={t("infiniteCanvas:promptPlaceholder")}
-          onBlur={(event) => {
-            commitText(event.target.value);
-            onEditingChange(false);
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== "Escape") return;
-            event.preventDefault();
-            commitText(event.currentTarget.value);
-            onEditingChange(false);
-          }}
-          onChange={(event) => onPatch({ text: event.target.value })}
-        />
-      ) : (
+      <textarea
+        ref={textareaRef}
+        readOnly={!isEditing}
+        className="nodrag nopan nowheel ic-prompt-textarea scrollbar-thin-stable"
+        value={node.text || ""}
+        placeholder={t("infiniteCanvas:promptPlaceholder")}
+        onBlur={(event) => {
+          if (!isEditing) return;
+          commitText(event.target.value);
+          onEditingChange(false);
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          commitText(event.currentTarget.value);
+          onEditingChange(false);
+        }}
+        onChange={(event) => onPatch({ text: event.target.value })}
+      />
+      {!isEditing ? (
         <div
-          className={`ic-prompt-textarea ic-prompt-display${node.text ? "" : " empty"}`}
+          className="ic-prompt-edit-shield"
           onPointerDown={(event) => {
             if (event.button !== 0 || event.detail < 2) return;
             event.preventDefault();
@@ -66,10 +75,8 @@ export function PromptNodeBody({ node, isEditing, onEditingChange, onPatch, onCo
             event.stopPropagation();
             enterEditing();
           }}
-        >
-          {node.text || t("infiniteCanvas:promptPlaceholder")}
-        </div>
-      )}
+        />
+      ) : null}
     </div>
   );
 }

@@ -86,6 +86,7 @@ contextBridge.exposeInMainWorld('libtv', {
   workspaces: (payload) => ipcRenderer.invoke('libtv:workspaces', payload),
   projects: (payload) => ipcRenderer.invoke('libtv:projects', payload),
   imageModels: () => ipcRenderer.invoke('libtv:image-models'),
+  ensureReadyProject: (payload) => ipcRenderer.invoke('libtv:ensure-ready-project', payload),
   generateImage: (payload) => ipcRenderer.invoke('libtv:generate-image', payload),
   generateBatch: (payload) => ipcRenderer.invoke('libtv:generate-batch', payload),
 });

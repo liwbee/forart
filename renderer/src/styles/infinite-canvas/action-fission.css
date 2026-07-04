@@ -685,6 +685,21 @@
   align-items: center;
 }
 
+.ic-action-fission-footer__left {
+  min-width: 0;
+}
+
+.ic-action-fission-status {
+  min-width: 0;
+  margin-bottom: 6px;
+  overflow: hidden;
+  color: var(--canvas-node-muted);
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ic-action-fission-params {
   min-width: 0;
   display: grid;

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -567,6 +567,17 @@ function renameDirectoryIfNeeded(oldDir, nextDir) {
   renameSync(oldPath, nextPath);
 }
 
+function isPathInside(parent, target) {
+  const relative = path.relative(path.resolve(parent), path.resolve(target));
+  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function removeDirectoryInside(root, directory, errorLabel) {
+  const target = path.resolve(directory);
+  if (!isPathInside(root, target)) throw new Error(`Refusing to delete a folder outside the ${errorLabel}`);
+  if (existsSync(target)) rmSync(target, { recursive: true, force: true });
+}
+
 function renameProjectFolder(project, nextName) {
   const oldDir = projectDirForName(project.name);
   const nextDir = projectDirForName(nextName);
@@ -625,36 +636,33 @@ function renameActionProjectFolder(project, nextName) {
   const oldDir = actionProjectDirForName(project.name);
   const nextDir = actionProjectDirForName(nextName);
   renameDirectoryIfNeeded(oldDir, nextDir);
-  const actions = db.prepare(
+  const assetRows = db.prepare(
     `
-    SELECT ae.*, a.path AS asset_path, a.filename AS asset_filename, a.mime_type AS asset_mime_type
-    FROM action_entries ae
-    LEFT JOIN assets a ON a.id = ae.asset_id
-    WHERE ae.project_id = ?
-    ORDER BY ae.created_at ASC
+    SELECT DISTINCT a.id, a.path
+    FROM assets a
+    LEFT JOIN action_entries ae ON ae.asset_id = a.id
+    LEFT JOIN action_projects ap ON ap.cover_asset_id = a.id
+    WHERE ae.project_id = ? OR ap.id = ?
     `
-  ).all(project.id);
-  for (const action of actions) {
-    const nextActionName = nextActionNameForIndex(nextName, actions.indexOf(action) + 1);
-    const assetPath = assetAbsolutePath(action.asset_path || "");
-    const suffix = path.extname(assetPath || action.asset_filename || "") || guessSuffix(action.asset_filename || "", action.asset_mime_type || "");
-    const nextPath = path.join(nextDir, `${nextActionName}${suffix}`);
-    const currentPath = assetPath && existsSync(assetPath) ? assetPath : replacePathPrefix(assetPath || "", oldDir, nextDir);
-    ensureDir(nextDir);
-    if (currentPath && existsSync(currentPath) && path.resolve(currentPath) !== path.resolve(nextPath)) {
-      if (existsSync(nextPath)) throw new Error(`Image file already exists: ${path.basename(nextPath)}`);
-      renameSync(currentPath, nextPath);
-    }
-    db.prepare("UPDATE assets SET filename = ?, path = ? WHERE id = ?").run(path.basename(nextPath), assetRelativePath(nextPath), action.asset_id);
-    db.prepare("UPDATE action_entries SET name = ?, updated_at = ? WHERE id = ?").run(nextActionName, nowIso(), action.id);
+  ).all(project.id, project.id);
+  for (const asset of assetRows) {
+    if (asset?.path) db.prepare("UPDATE assets SET path = ? WHERE id = ?").run(assetRelativePath(replacePathPrefix(asset.path, oldDir, nextDir)), asset.id);
   }
-  const coverAssetRows = db.prepare("SELECT cover_asset_id AS asset_id FROM action_projects WHERE id = ?").all(project.id);
-  for (const row of coverAssetRows) {
-    const asset = row.asset_id ? loadAsset(row.asset_id) : null;
-    if (asset?.path) {
-      db.prepare("UPDATE assets SET path = ? WHERE id = ?").run(assetRelativePath(replacePathPrefix(asset.path, oldDir, nextDir)), asset.id);
-    }
+}
+
+function renameSingleLibraryAsset(assetId, nextName, targetDir, nameLabel) {
+  const asset = assetId ? loadAsset(assetId) : null;
+  if (!asset?.path) return;
+  const currentPath = assetAbsolutePath(asset.path);
+  const suffix = path.extname(currentPath || asset.filename || "") || guessSuffix(asset.filename || "", asset.mime_type || "");
+  const nextPath = path.join(targetDir, `${folderName(nextName, nameLabel)}${suffix}`);
+  if (path.resolve(currentPath) === path.resolve(nextPath)) return;
+  ensureDir(targetDir);
+  if (existsSync(currentPath)) {
+    if (existsSync(nextPath)) throw new Error(`Image file already exists: ${path.basename(nextPath)}`);
+    renameSync(currentPath, nextPath);
   }
+  db.prepare("UPDATE assets SET filename = ?, path = ? WHERE id = ?").run(path.basename(nextPath), assetRelativePath(nextPath), asset.id);
 }
 
 function renameModelFolderAndImages(model, nextName) {
@@ -1115,6 +1123,7 @@ function handleModelLibraryApi(req, res, url) {
         sendJson(res, 404, { detail: "Outfit project not found" });
         return true;
       }
+      const projectDir = outfitProjectDirForName(project.name);
       const assetRows = db.prepare("SELECT asset_id FROM outfit_entries WHERE project_id = ?").all(projectId);
       const coverAssetRows = db.prepare("SELECT cover_asset_id AS asset_id FROM outfit_projects WHERE id = ?").all(projectId);
       runDbTransaction(() => {
@@ -1124,6 +1133,7 @@ function handleModelLibraryApi(req, res, url) {
         for (const row of coverAssetRows) removeAssetIfUnused(row.asset_id);
         ensureDefaultOutfitProject();
       });
+      removeDirectoryInside(outfitLibraryRoot(), projectDir, "outfit library");
       sendJson(res, 200, { ok: true });
       return true;
     }
@@ -1216,6 +1226,16 @@ function handleModelLibraryApi(req, res, url) {
           const outfit = loadOutfit(outfitId);
           if (!outfit) return sendJson(res, 404, { detail: "Outfit not found" });
           const nextOutfit = runDbTransaction(() => {
+            if (payload.name !== undefined) {
+              const nextName = validateFileNamePart(payload.name || DEFAULT_OUTFIT_NAME, "outfit name");
+              if (outfitNameExists(outfit.project_id, nextName, outfitId)) throw new Error("Outfit name must be unique");
+              if (nextName !== outfit.name) {
+                const project = loadOutfitProject(outfit.project_id);
+                if (!project) throw new Error("Outfit project not found");
+                renameSingleLibraryAsset(outfit.asset_id, nextName, outfitProjectDirForName(project.name), "outfit name");
+                db.prepare("UPDATE outfit_entries SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), outfitId);
+              }
+            }
             if (payload.tags !== undefined) {
               updateEntryTags("outfit", outfitId, outfit.project_id, payload.tags);
               db.prepare("UPDATE outfit_entries SET updated_at = ? WHERE id = ?").run(nowIso(), outfitId);
@@ -1344,6 +1364,7 @@ function handleModelLibraryApi(req, res, url) {
         sendJson(res, 404, { detail: "Action project not found" });
         return true;
       }
+      const projectDir = actionProjectDirForName(project.name);
       const assetRows = db.prepare("SELECT asset_id FROM action_entries WHERE project_id = ?").all(projectId);
       const coverAssetRows = db.prepare("SELECT cover_asset_id AS asset_id FROM action_projects WHERE id = ?").all(projectId);
       runDbTransaction(() => {
@@ -1353,6 +1374,7 @@ function handleModelLibraryApi(req, res, url) {
         for (const row of coverAssetRows) removeAssetIfUnused(row.asset_id);
         ensureDefaultActionProject();
       });
+      removeDirectoryInside(actionLibraryRoot(), projectDir, "action library");
       sendJson(res, 200, { ok: true });
       return true;
     }
@@ -1445,6 +1467,16 @@ function handleModelLibraryApi(req, res, url) {
           const action = loadAction(actionId);
           if (!action) return sendJson(res, 404, { detail: "Action not found" });
           const nextAction = runDbTransaction(() => {
+            if (payload.name !== undefined) {
+              const nextName = validateFileNamePart(payload.name || DEFAULT_ACTION_NAME, "action name");
+              if (actionNameExists(action.project_id, nextName, actionId)) throw new Error("Action name must be unique");
+              if (nextName !== action.name) {
+                const project = loadActionProject(action.project_id);
+                if (!project) throw new Error("Action project not found");
+                renameSingleLibraryAsset(action.asset_id, nextName, actionProjectDirForName(project.name), "action name");
+                db.prepare("UPDATE action_entries SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), actionId);
+              }
+            }
             if (payload.tags !== undefined) {
               updateEntryTags("action", actionId, action.project_id, payload.tags);
               db.prepare("UPDATE action_entries SET updated_at = ? WHERE id = ?").run(nowIso(), actionId);
@@ -1577,6 +1609,7 @@ function handleModelLibraryApi(req, res, url) {
         sendJson(res, 404, { detail: "Model project not found" });
         return true;
       }
+      const projectDir = projectDirForName(project.name);
       const modelRows = db.prepare("SELECT id FROM model_entries WHERE project_id = ?").all(projectId);
       const imageRows = db.prepare(
         "SELECT mi.asset_id FROM model_images mi JOIN model_entries me ON me.id = mi.model_id WHERE me.project_id = ?"
@@ -1594,6 +1627,7 @@ function handleModelLibraryApi(req, res, url) {
         for (const asset of coverAssetRows) removeAssetIfUnused(asset.asset_id);
         ensureDefaultProject();
       });
+      removeDirectoryInside(modelLibraryRoot(), projectDir, "model library");
       sendJson(res, 200, { ok: true });
       return true;
     }
@@ -1708,12 +1742,15 @@ function handleModelLibraryApi(req, res, url) {
         sendJson(res, 404, { detail: "Model not found" });
         return true;
       }
+      const project = loadProject(model.project_id);
+      const modelDir = project ? modelDirForNames(project.name, model.name) : "";
       const imageRows = db.prepare("SELECT asset_id FROM model_images WHERE model_id = ?").all(modelId);
       runDbTransaction(() => {
         db.prepare("DELETE FROM library_entry_tags WHERE kind = 'model' AND entry_id = ?").run(modelId);
         db.prepare("DELETE FROM model_entries WHERE id = ?").run(modelId);
         for (const row of imageRows) removeAssetIfUnused(row.asset_id);
       });
+      if (modelDir) removeDirectoryInside(modelLibraryRoot(), modelDir, "model library");
       sendJson(res, 200, { ok: true });
       return true;
     }

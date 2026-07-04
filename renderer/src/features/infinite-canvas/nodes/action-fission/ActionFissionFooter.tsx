@@ -149,39 +149,42 @@ export function ActionFissionFooter({
 
   return (
     <div className="ic-action-fission-footer">
-      <div className="ic-action-fission-params">
-        {renderNodeSelect(
-          "model",
-          isLibtvApi ? t("infiniteCanvas:libtvModel") : t("infiniteCanvas:model"),
-          modelValue,
-          modelOptions,
-          (value) => {
-            if (isLibtvApi) {
-              onSetLibtvModel(value);
-              return;
-            }
-            const nextRule = selectedProvider ? getImageModelRule(selectedProvider.modelRules.image[value] || detectImageModelRuleId(value)) : getImageModelRule("generic-image");
-            const nextSize = normalizeImageModelSizeSelection(nextRule, state.resolution, state.aspectRatio);
-            onSetModel(value, selectedProvider?.id || "", nextSize);
-          },
-          isLibtvApi ? false : !selectedProvider,
-        )}
-        <SizePresetPicker
-          open={openSelectId === sizePanelId}
-          resolution={selectedResolution}
-          aspectRatio={selectedAspectRatio}
-          resolutionOptions={resolutionValues.map((value) => ({ value, label: formatSizeValueLabel(value) }))}
-          aspectRatioOptions={aspectRatioValues.map((value) => ({ value, label: value === "1:1" ? t("infiniteCanvas:ratioSquare") : value === AUTO_SIZE_VALUE ? t("infiniteCanvas:auto") : value }))}
-          labels={{
-            trigger: `${t("infiniteCanvas:resolution")} / ${t("infiniteCanvas:ratio")}`,
-            resolution: t("infiniteCanvas:resolution"),
-            aspectRatio: t("infiniteCanvas:ratio"),
-          }}
-          formatTrigger={(resolution, aspectRatio) => [formatSizeValueLabel(resolution), aspectRatio === AUTO_SIZE_VALUE ? t("infiniteCanvas:auto") : aspectRatio].filter(Boolean).join(" / ")}
-          onOpenChange={(open) => onOpenSelectChange(open ? sizePanelId : "")}
-          onResolutionChange={(value) => onSetResolution(value === AUTO_SIZE_VALUE ? "" : value)}
-          onAspectRatioChange={onSetAspectRatio}
-        />
+      <div className="ic-action-fission-footer__left">
+        {state.status ? <div className="ic-action-fission-status" role="status">{state.status}</div> : null}
+        <div className="ic-action-fission-params">
+          {renderNodeSelect(
+            "model",
+            isLibtvApi ? t("infiniteCanvas:libtvModel") : t("infiniteCanvas:model"),
+            modelValue,
+            modelOptions,
+            (value) => {
+              if (isLibtvApi) {
+                onSetLibtvModel(value);
+                return;
+              }
+              const nextRule = selectedProvider ? getImageModelRule(selectedProvider.modelRules.image[value] || detectImageModelRuleId(value)) : getImageModelRule("generic-image");
+              const nextSize = normalizeImageModelSizeSelection(nextRule, state.resolution, state.aspectRatio);
+              onSetModel(value, selectedProvider?.id || "", nextSize);
+            },
+            isLibtvApi ? false : !selectedProvider,
+          )}
+          <SizePresetPicker
+            open={openSelectId === sizePanelId}
+            resolution={selectedResolution}
+            aspectRatio={selectedAspectRatio}
+            resolutionOptions={resolutionValues.map((value) => ({ value, label: formatSizeValueLabel(value) }))}
+            aspectRatioOptions={aspectRatioValues.map((value) => ({ value, label: value === "1:1" ? t("infiniteCanvas:ratioSquare") : value === AUTO_SIZE_VALUE ? t("infiniteCanvas:auto") : value }))}
+            labels={{
+              trigger: `${t("infiniteCanvas:resolution")} / ${t("infiniteCanvas:ratio")}`,
+              resolution: t("infiniteCanvas:resolution"),
+              aspectRatio: t("infiniteCanvas:ratio"),
+            }}
+            formatTrigger={(resolution, aspectRatio) => [formatSizeValueLabel(resolution), aspectRatio === AUTO_SIZE_VALUE ? t("infiniteCanvas:auto") : aspectRatio].filter(Boolean).join(" / ")}
+            onOpenChange={(open) => onOpenSelectChange(open ? sizePanelId : "")}
+            onResolutionChange={(value) => onSetResolution(value === AUTO_SIZE_VALUE ? "" : value)}
+            onAspectRatioChange={onSetAspectRatio}
+          />
+        </div>
       </div>
       <div className="ic-action-fission-run-all">
         <button

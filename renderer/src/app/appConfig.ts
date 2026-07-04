@@ -355,6 +355,7 @@ export interface LibtvApi {
   workspaces: (payload?: { page?: number; pageSize?: number }) => Promise<{ ok: true; workspaces: LibtvWorkspaceRecord[] }>;
   projects: (payload: { workspaceId: string; page?: number; pageSize?: number }) => Promise<{ ok: true; projects: LibtvProjectRecord[] }>;
   imageModels: () => Promise<{ ok: true; models: LibtvImageModelRecord[] }>;
+  ensureReadyProject: (payload: { workspaceId: string }) => Promise<{ ok: true; created?: boolean; projectUuid: string; projectName?: string; project?: LibtvProjectRecord }>;
   generateImage: (payload: {
     workspaceId?: string;
     projectUuid?: string;
@@ -370,6 +371,7 @@ export interface LibtvApi {
   generateBatch: (payload: {
     workspaceId?: string;
     projectUuid?: string;
+    projectName?: string;
     modelName?: string;
     aspectRatio?: string;
     quality?: string;

@@ -1752,6 +1752,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     const target = event.target as HTMLElement;
     const blockedByInteractive = Boolean(target.closest(".nodrag, input, textarea, select, button"));
     if (event.button !== 0 || blockedByInteractive) return;
+    event.preventDefault();
     event.stopPropagation();
     if (node.id !== editingPromptId) setEditingPromptId("");
     const dragSelectionIds = selectedIds.has(node.id) ? new Set(selectedIds) : new Set([node.id]);

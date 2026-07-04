@@ -478,6 +478,30 @@ export function createOutfitLibraryService(runtime, options = {}) {
     const outfit = loadOutfit(outfitId);
     if (!outfit) return null;
     return runDbTransaction(db, () => {
+      if (payload.name !== undefined) {
+        const nextName = validateFileNamePart(payload.name || labels.defaultOutfit, "outfit name");
+        if (outfitNameExists(outfit.project_id, nextName, outfitId)) throw new Error("Outfit name must be unique");
+        if (nextName !== outfit.name) {
+          const project = loadProject(outfit.project_id);
+          if (!project) throw new Error("Outfit project not found");
+          const asset = outfit.asset_id ? loadAsset(outfit.asset_id) : null;
+          if (asset?.path) {
+            const currentPath = assetAbsolutePath(asset.path);
+            const targetDir = projectDirForName(project.name);
+            const suffix = path.extname(currentPath || asset.filename || "") || guessSuffix(asset.filename || "", asset.mime_type || "");
+            const nextPath = path.join(targetDir, `${folderName(nextName, "outfit name")}${suffix}`);
+            if (path.resolve(currentPath) !== path.resolve(nextPath)) {
+              ensureDir(targetDir);
+              if (existsSync(currentPath)) {
+                if (existsSync(nextPath)) throw new Error(`Image file already exists: ${path.basename(nextPath)}`);
+                renameSync(currentPath, nextPath);
+              }
+              db.prepare("UPDATE assets SET filename = ?, path = ? WHERE id = ?").run(path.basename(nextPath), assetRelativePath(nextPath), asset.id);
+            }
+          }
+          db.prepare("UPDATE outfit_entries SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), outfitId);
+        }
+      }
       if (payload.tags !== undefined) {
         updateEntryTags(outfitId, outfit.project_id, payload.tags);
         db.prepare("UPDATE outfit_entries SET updated_at = ? WHERE id = ?").run(nowIso(), outfitId);

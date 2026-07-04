@@ -29,7 +29,9 @@ export const zhCN = {
     imageDownloadStarted: "已开始下载图片"
   },
   errors: {
-    imageActionFailed: "图片操作失败：{{message}}"
+    imageActionFailed: "图片操作失败：{{message}}",
+    nameAlreadyExists: "名称已存在",
+    invalidFileNameCharacters: "名称不能包含这些字符：< > : \" / \\ | ? *"
   },
   empty: {
     noImage: "暂无图片",
@@ -84,7 +86,9 @@ export const enUS = {
     imageDownloadStarted: "Image download started"
   },
   errors: {
-    imageActionFailed: "Image action failed: {{message}}"
+    imageActionFailed: "Image action failed: {{message}}",
+    nameAlreadyExists: "Name already exists",
+    invalidFileNameCharacters: "Name cannot contain these characters: < > : \" / \\ | ? *"
   },
   empty: {
     noImage: "No image",

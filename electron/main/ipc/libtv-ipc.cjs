@@ -9,6 +9,7 @@ function registerLibtvIpc({ ipcMain, libtv, libtvGenerationRunner }) {
   ipcMain.handle('libtv:workspaces', async (_event, payload) => libtv.listWorkspaces(payload));
   ipcMain.handle('libtv:projects', async (_event, payload) => libtv.listProjects(payload));
   ipcMain.handle('libtv:image-models', async () => libtv.imageModels());
+  ipcMain.handle('libtv:ensure-ready-project', async (_event, payload) => libtvGenerationRunner.ensureReadyProject(payload));
   ipcMain.handle('libtv:generate-image', async (_event, payload) => libtvGenerationRunner.generateImage(payload));
   ipcMain.handle('libtv:generate-batch', async (_event, payload) => libtvGenerationRunner.generateBatch(payload));
 }

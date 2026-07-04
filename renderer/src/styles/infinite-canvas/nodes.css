@@ -14,12 +14,22 @@
   box-shadow: var(--shadow-ui);
   cursor: grab;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
   overflow: visible;
   transition:
     border-color 180ms var(--ease-fluid),
     box-shadow 180ms var(--ease-fluid),
     opacity 180ms var(--ease-fluid),
     transform 180ms var(--ease-fluid);
+}
+
+.ic-node input,
+.ic-node textarea,
+.ic-node select,
+.ic-node [contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .ic-node.connecting {
@@ -138,13 +148,13 @@
 }
 
 .ic-node--prompt .ic-node-body {
+  position: relative;
   grid-row: 1;
   gap: 0;
   overflow: hidden;
 }
 
-.ic-node--prompt .ic-node-body textarea,
-.ic-node--prompt .ic-node-body .ic-prompt-display {
+.ic-node--prompt .ic-node-body textarea {
   height: 100%;
   min-height: 0;
   border: 0;
@@ -152,12 +162,24 @@
   padding: 6px 7px;
   background: transparent;
   resize: none;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .ic-node--prompt .ic-node-body textarea:focus {
   border: 0;
   box-shadow: none;
   outline: 0;
+}
+
+.ic-prompt-edit-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: grab;
+  background: transparent;
 }
 
 .ic-node--actionFission {

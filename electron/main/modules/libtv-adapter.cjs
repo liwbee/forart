@@ -122,6 +122,10 @@ function createLibtvAdapter({ rootDir }) {
     return `${year}-${month}-${day}`;
   }
 
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   async function resolveInstallCommand() {
     try {
       const result = await runProcess('powershell.exe', [
@@ -274,6 +278,34 @@ function createLibtvAdapter({ rootDir }) {
     return { ok: true, created: true, project: created.project };
   }
 
+  async function waitForProjectReady(payload = {}) {
+    const workspaceId = requireText(payload.workspaceId, 'LibTV workspace');
+    const projectUuid = requireText(payload.projectUuid, 'LibTV project');
+    const projectName = String(payload.projectName || '').trim();
+    const attempts = Math.max(1, Math.min(10, Number(payload.attempts || 6)));
+    const delayMs = Math.max(250, Math.min(5000, Number(payload.delayMs || 900)));
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const listed = await listProjects({ workspaceId, page: 1, pageSize: 100, name: projectName || undefined });
+        const project = listed.projects.find((item) => item.uuid === projectUuid)
+          || (projectName ? listed.projects.find((item) => item.name === projectName) : null);
+        if (project?.uuid) {
+          await runLibtv(['node', 'list', '-p', project.uuid], { timeoutMs: 60000 });
+          return { ok: true, project };
+        }
+      } catch (error) {
+        lastError = error;
+      }
+      if (attempt < attempts) await sleep(delayMs);
+    }
+
+    throw new Error(lastError instanceof Error
+      ? `LibTV canvas is not ready: ${lastError.message}`
+      : 'LibTV canvas is not ready.');
+  }
+
   async function imageModels() {
     const result = await runLibtv(['model', 'search', '--type', 'image'], { timeoutMs: 60000 });
     const parsed = parseJsonOutput(result.stdout);
@@ -386,6 +418,7 @@ function createLibtvAdapter({ rootDir }) {
     status,
     uploadImageNode,
     useAccount,
+    waitForProjectReady,
   };
 }
 

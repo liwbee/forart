@@ -73,7 +73,7 @@ export function createAction(projectId: string, payload: AssetUploadPayload) {
   });
 }
 
-export function updateAction(actionId: string, payload: Partial<Pick<ActionEntry, "prompt" | "tags">>) {
+export function updateAction(actionId: string, payload: Partial<Pick<ActionEntry, "name" | "prompt" | "tags">>) {
   return apiRequest<ActionEntry>(`/api/actions/${encodeURIComponent(actionId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),

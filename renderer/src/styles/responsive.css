@@ -136,9 +136,23 @@
   }
 
   .review-product-items {
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(200px, 1fr);
     overflow-x: auto;
+  }
+
+  .review-product-items__spacer {
+    height: 80px;
+  }
+
+  .review-product-items__virtual {
+    width: auto;
+    height: 80px;
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .review-product-items button {
+    flex: 0 0 200px;
+    width: 200px;
   }
 
   .review-side-list {

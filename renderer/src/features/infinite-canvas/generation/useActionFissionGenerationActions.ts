@@ -11,7 +11,7 @@ import type { CanvasConnection, CanvasDocumentRecord, CanvasGenerationTask, Canv
 import { createLocalGenerationTask, getLocalGenerationTask, resumeLocalGenerationTask, stopLocalGenerationTasksForNode, stopLocalGenerationTasksForTarget, updateLocalGenerationTask, waitForLocalGenerationTask } from "./generationTaskRegistry";
 import { collectGenerationTasksFromNodes } from "./nodeGenerationTaskAnchors";
 import { isGenerationTaskActive } from "./generationTaskRuntime";
-import { generateLibtvBatch } from "../libtv-generation/libtvGenerationApi";
+import { ensureLibtvReadyProject, generateLibtvBatch, listLibtvImageModels, listLibtvWorkspaces } from "../libtv-generation/libtvGenerationApi";
 import { readImageDimensions } from "../imageCrop";
 import { sanitizeCanvasNodesForSave } from "../canvasSerialization";
 
@@ -75,6 +75,10 @@ function normalizeLibtvQuality(value: unknown) {
   if (text === '4k') return '4K';
   if (text === '2k') return '2K';
   return '1K';
+}
+
+function matchesLibtvModel(model: { modelName?: string; modelKey?: string }, modelName: string) {
+  return (model.modelName || model.modelKey) === modelName;
 }
 
 export function useActionFissionGenerationActions({
@@ -242,11 +246,43 @@ export function useActionFissionGenerationActions({
     };
 
     try {
+      const setPreflightStatus = (status: string) => {
+        patchNodeActionFission(setNodes, nodeId, (state) => ({ ...state, status, error: "" }));
+      };
+
+      setPreflightStatus(t("infiniteCanvas:libtvCheckingCli"));
+      const availability = await Promise.all([
+        listLibtvWorkspaces(),
+        listLibtvImageModels(),
+      ]);
+      const workspaceResult = availability[0];
+      const modelResult = availability[1];
+      const workspace = (workspaceResult.workspaces || []).find((item) => item.id === workspaceId);
+      if (!workspace) throw new Error(t("infiniteCanvas:libtvWorkspaceRequired"));
+      setPreflightStatus(t("infiniteCanvas:libtvCheckingWorkspace"));
+      const hasModel = (modelResult.models || []).some((model) => matchesLibtvModel(model, modelName));
+      if (!hasModel) throw new Error(t("infiniteCanvas:libtvModelRequired"));
+      setPreflightStatus(t("infiniteCanvas:libtvCheckingModel"));
+      setPreflightStatus(t("infiniteCanvas:libtvCheckingProject"));
+      const readyProject = await ensureLibtvReadyProject({ workspaceId });
+      const readyProjectUuid = readyProject.projectUuid || "";
+      if (!readyProjectUuid) throw new Error(t("infiniteCanvas:libtvProjectRequired"));
+      patchNodeActionFission(setNodes, nodeId, (state) => ({
+        ...state,
+        status: "",
+        error: "",
+        libtvWorkspaceName: workspace.name || state.libtvWorkspaceName,
+        libtvProjectUuid: readyProjectUuid,
+        libtvProjectName: readyProject.projectName || state.libtvProjectName,
+      }));
+
       for (const job of jobs) {
         await writeRowResult(job.id, { libtvQueued: false, libtvRunning: true, error: "" });
         try {
           const batch = await generateLibtvBatch({
             workspaceId,
+            projectUuid: readyProjectUuid,
+            projectName: readyProject.projectName,
             modelName,
             aspectRatio: sourceState.aspectRatio || "1:1",
             quality: normalizeLibtvQuality(sourceState.resolution),
@@ -287,6 +323,28 @@ export function useActionFissionGenerationActions({
           await writeRowResult(job.id, { libtvQueued: false, libtvRunning: false, error: message });
         }
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      let nextNodesForSave: CanvasNode[] = [];
+      setNodes((current) => {
+        nextNodesForSave = current.map((currentNode) => {
+          if (currentNode.id !== nodeId) return currentNode;
+          const state = normalizeActionFissionState(currentNode.actionFission);
+          return {
+            ...currentNode,
+            actionFission: {
+              ...state,
+              status: "",
+              error: message,
+              rows: state.rows.map((row) => preparedRows.has(row.id)
+                ? { ...row, libtvQueued: false, libtvRunning: false, error: message }
+                : row),
+            },
+          };
+        });
+        return nextNodesForSave;
+      });
+      await saveActiveNodes(nextNodesForSave);
     } finally {
       let nextNodesForSave: CanvasNode[] = [];
       setNodes((current) => {
