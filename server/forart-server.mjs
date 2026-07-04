@@ -17,8 +17,8 @@ const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ADMIN_ROOT = path.join(SERVER_DIR, "admin");
 const DEFAULT_DATA_ROOT = path.join(ROOT_DIR, ".forart-data");
 const DATABASE_DIR = path.resolve(process.env.FORART_DATABASE_DIR || path.join(DEFAULT_DATA_ROOT, "database"));
-const DEFAULT_DATA_DIR = path.resolve(process.env.FORART_DATA_DIR || path.join(DEFAULT_DATA_ROOT, "library"));
-const CANVAS_STORAGE_ROOT = path.resolve(process.env.FORART_CANVAS_STORAGE_ROOT || process.env.FORART_DATA_DIR || ROOT_DIR);
+const LIBRARY_DIR = path.resolve(process.env.FORART_LIBRARY_DIR || path.join(DEFAULT_DATA_ROOT, "library"));
+const CANVAS_STORAGE_ROOT = path.resolve(process.env.FORART_CANVAS_STORAGE_ROOT || process.env.FORART_LIBRARY_DIR || LIBRARY_DIR);
 const DATABASE_FILENAME = "forart-library.sqlite";
 const SERVER_LANGUAGE = process.env.FORART_LANGUAGE === "en-US" ? "en-US" : "zh-CN";
 const LIBRARY_LABELS = SERVER_LANGUAGE === "en-US"
@@ -410,7 +410,7 @@ function ensureDefaultActionProject() {
   ).run(newId("action_project"), name, timestamp, timestamp);
 }
 
-switchDataDir(process.env.FORART_DATA_DIR || DEFAULT_DATA_DIR);
+switchDataDir(LIBRARY_DIR);
 
 const adminContext = createAdminContext({
   serverHost: SERVER_HOST,
@@ -440,7 +440,7 @@ const handleCanvasExchangeRoute = createCanvasExchangeRouter({
 
 function ensureStorageConfigured(res) {
   if (db) return true;
-  sendJson(res, 409, { detail: "Asset library storage is unavailable. Check FORART_DATA_DIR or default data directory permissions.", code: "MODEL_LIBRARY_STORAGE_NOT_CONFIGURED" });
+  sendJson(res, 409, { detail: "Asset library storage is unavailable. Check FORART_LIBRARY_DIR or default library directory permissions.", code: "MODEL_LIBRARY_STORAGE_NOT_CONFIGURED" });
   return false;
 }
 

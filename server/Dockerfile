@@ -3,9 +3,8 @@ FROM node:24-bookworm-slim
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=6980 \
-    FORART_APP_TITLE=Forart \
-    FORART_DATABASE_DIR=/data/.forart/database \
-    FORART_DATA_DIR=/data \
+    FORART_DATABASE_DIR=/database \
+    FORART_LIBRARY_DIR=/library \
     FORART_LANGUAGE=zh-CN
 
 WORKDIR /app
@@ -18,7 +17,7 @@ COPY forart-server.mjs ./
 COPY src ./src
 COPY admin ./admin
 
-VOLUME ["/data"]
+VOLUME ["/library", "/database"]
 EXPOSE 6980
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
