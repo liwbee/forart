@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import { CollapsibleTagFilterRow } from "../library-tags";
 import { LibraryTagChoiceButton } from "../library-tags";
 import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
-import { copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
+import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
 import { sortByName } from "../../lib/sortByName";
 import { normalizeTags, toggleTag } from "../model-library/tagUtils";
 import { EMPTY_LIBRARY_TAG_FILTER, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
@@ -342,7 +342,7 @@ function ActionCard({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const committedNameRef = useRef(action.name || "");
   const committedPromptRef = useRef(action.prompt || "");
-  const assetUrl = action.asset_url ? `${action.asset_url}?t=${encodeURIComponent(action.updated_at || action.asset_id)}` : "";
+  const assetUrl = cacheBustedLibraryImageUrl(action.asset_url || "", action.updated_at || action.asset_id);
   const imageAlt = action.name || t("actionLibrary:actionImage");
 
   useEffect(() => {

@@ -8,7 +8,7 @@ import { ImageViewer } from "../../lib/ImageViewer";
 import { CollapsibleTagFilterRow } from "../library-tags";
 import { LibraryTagChoiceButton } from "../library-tags";
 import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
-import { copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
+import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalImage, resolveLibraryImageUrl } from "../../lib/libraryImageActions";
 import { sortByName } from "../../lib/sortByName";
 import { EMPTY_LIBRARY_TAG_FILTER, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
 import {
@@ -388,7 +388,7 @@ function ModelCard({
 }) {
   const { t } = useTranslation();
   const coverCacheKey = model.cover_image_id || model.cover_asset_id || "";
-  const coverUrl = model.cover_url ? `${model.cover_url}?t=${encodeURIComponent(coverCacheKey)}` : "";
+  const coverUrl = cacheBustedLibraryImageUrl(model.cover_url || "", coverCacheKey);
 
   return (
     <button className={`model-card${isOpen ? " active" : ""}`} type="button" onClick={onOpen}>
@@ -752,7 +752,7 @@ function ModelInlineEditor({
             {images.length ? (
               images.map((image) => {
                 const isCover = model.cover_image_id === image.id;
-                const src = image.asset_url || "";
+                const src = resolveLibraryImageUrl(image.asset_url || "");
                 const menuOpen = openImageMenuState.imageId === image.id;
                 const altText = image.caption || model.name || image.filename || t("modelLibrary:imagePreview");
                 return (

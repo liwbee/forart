@@ -7,7 +7,7 @@ import { CollapsibleTagFilterRow } from "../library-tags";
 import { LibraryTagChoiceButton } from "../library-tags";
 import { ImageViewer } from "../../lib/ImageViewer";
 import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
-import { copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
+import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
 import { sortByName } from "../../lib/sortByName";
 import {
   createOutfit,
@@ -371,7 +371,7 @@ function OutfitCard({
   const [menuState, setMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
   const [tagMenuState, setTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
   const [viewerOpen, setViewerOpen] = useState(false);
-  const assetUrl = outfit.asset_url ? `${outfit.asset_url}?t=${encodeURIComponent(outfit.updated_at || outfit.asset_id)}` : "";
+  const assetUrl = cacheBustedLibraryImageUrl(outfit.asset_url || "", outfit.updated_at || outfit.asset_id);
   const imageAlt = outfit.name || t("outfitLibrary:outfitImage");
 
   useEffect(() => {

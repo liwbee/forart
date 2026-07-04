@@ -2,6 +2,7 @@ import { Check, Crosshair, Crop, Eye, Images, Layers, Map as MapIcon, Play, Rati
 import { PointerEvent, WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ImageViewer } from "../../lib/ImageViewer";
+import { resolveLibraryImageUrl } from "../../lib/libraryImageActions";
 import { API_PROVIDER_CHANGED_EVENT, getModelDisplayName, loadApiSettings, readApiProviders, type ApiProvider } from "../settings/apiProviders";
 import { CanvasHomePanel } from "./CanvasHomePanel";
 import { CanvasTabsBar } from "./CanvasTabsBar";
@@ -1897,7 +1898,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   });
   const previewActionFissionActionStable = useStableEvent((nodeId: string, row: ActionFissionRow) => {
     if (!row.selectedActionAssetUrl) return;
-    setActionFissionPreview({ src: row.selectedActionAssetUrl, alt: row.selectedActionName || `${nodeId}-${row.id}-action` });
+    setActionFissionPreview({ src: resolveLibraryImageUrl(row.selectedActionAssetUrl), alt: row.selectedActionName || `${nodeId}-${row.id}-action` });
   });
   const downloadActionFissionResultStable = useStableEvent((nodeId: string, row: ActionFissionRow) => {
     if (!row.resultUrl) return;

@@ -8,12 +8,13 @@ import { useModelLibraryStore } from "../model-library/modelLibraryStore";
 import { getStorageSettings, listOutfitProjects, listOutfits, listOutfitTags, outfitLibraryKeys } from "../outfit-library/api";
 import { useOutfitLibraryStore } from "../outfit-library/outfitLibraryStore";
 import { cleanLibraryTagFilter, countLibraryTags, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
+import { cacheBustedLibraryImageUrl } from "../../lib/libraryImageActions";
 import type { LibraryAssetItem, LibraryAssetTab } from "./types";
 
 export const defaultLibraryAssetTabs: LibraryAssetTab[] = ["models", "outfits", "actions"];
 
 export function cacheBustedLibraryAssetUrl(url: string, stamp?: string) {
-  return stamp ? `${url}?t=${encodeURIComponent(stamp)}` : url;
+  return cacheBustedLibraryImageUrl(url, stamp);
 }
 
 function getRequestError(errors: unknown[]) {

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { ActionEntry, ActionProject, ActionTag } from "../../../action-library/types";
 import type { ApiProvider } from "../../../settings/apiProviders";
+import { resolveLibraryImageUrl } from "../../../../lib/libraryImageActions";
 import type { ActionFissionRow } from "../../action-fission/actionFissionTypes";
 import { resolveActionFissionRowNotice } from "../../action-fission/actionFissionRowNotice";
 import type { CanvasGenerationTask } from "../../types";
@@ -97,6 +98,7 @@ export function ActionFissionRowItem({
   const disabled = isRowActive;
   const resultAlt = row.resultFileName || row.selectedActionName || "action result";
   const promptPreview = row.selectedActionPrompt?.trim() || t("infiniteCanvas:actionFissionNoSelectedPrompt");
+  const selectedActionImageUrl = resolveLibraryImageUrl(row.selectedActionAssetUrl || "");
   const [noticeNow, setNoticeNow] = useState(Date.now());
   const notice = resolveActionFissionRowNotice({
     row,
@@ -347,17 +349,20 @@ export function ActionFissionRowItem({
         <div className="ic-action-fission-selector-panel__section ic-action-fission-selector-panel__results">
           <span className="ic-action-fission-selector-panel__label">筛选结果 · {candidateCount}</span>
           <div className="ic-action-fission-selector-panel__result-list scrollbar-stable">
-            {candidates.length ? candidates.slice(0, 12).map((action) => (
-              <div key={action.id} className="ic-action-fission-selector-panel__result" title={action.name}>
-                {action.asset_url ? (
-                  <img
-                    src={action.asset_url}
-                    alt={action.name}
-                    draggable={false}
-                  />
-                ) : null}
-              </div>
-            )) : <span className="ic-action-fission-selector-panel__empty">{row.actionProjectId ? t("infiniteCanvas:actionFissionNoCandidates") : "先选择项目"}</span>}
+            {candidates.length ? candidates.slice(0, 12).map((action) => {
+              const actionImageUrl = resolveLibraryImageUrl(action.asset_url || "");
+              return (
+                <div key={action.id} className="ic-action-fission-selector-panel__result" title={action.name}>
+                  {actionImageUrl ? (
+                    <img
+                      src={actionImageUrl}
+                      alt={action.name}
+                      draggable={false}
+                    />
+                  ) : null}
+                </div>
+              );
+            }) : <span className="ic-action-fission-selector-panel__empty">{row.actionProjectId ? t("infiniteCanvas:actionFissionNoCandidates") : "先选择项目"}</span>}
           </div>
         </div>
       </div>
@@ -515,9 +520,9 @@ export function ActionFissionRowItem({
             onPreviewAction(row);
           }}
         >
-          {row.selectedActionAssetUrl ? (
+          {selectedActionImageUrl ? (
             <img
-              src={row.selectedActionAssetUrl}
+              src={selectedActionImageUrl}
               alt={row.selectedActionName || "action preview"}
               draggable={false}
             />

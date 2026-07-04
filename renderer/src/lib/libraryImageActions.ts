@@ -1,6 +1,6 @@
 import { getApiBaseUrl } from "../data-source/runtime";
 
-function resolveImageUrl(url: string) {
+export function resolveLibraryImageUrl(url: string) {
   const source = String(url || "").trim();
   if (!source) return "";
   if (/^data:/i.test(source)) return source;
@@ -11,8 +11,13 @@ function resolveImageUrl(url: string) {
   return baseUrl ? new URL(source, baseUrl).toString() : source;
 }
 
+export function cacheBustedLibraryImageUrl(url: string, stamp?: string) {
+  const resolved = resolveLibraryImageUrl(url);
+  return resolved && stamp ? `${resolved}${resolved.includes("?") ? "&" : "?"}t=${encodeURIComponent(stamp)}` : resolved;
+}
+
 function toDownloadUrl(url: string) {
-  const resolved = resolveImageUrl(url);
+  const resolved = resolveLibraryImageUrl(url);
   return resolved.replace(/\/api\/assets\/([^/?#]+)\/file(?=([?#]|$))/, "/api/assets/$1/download");
 }
 
@@ -29,7 +34,7 @@ function fileNameWithExtension(fileName: string, extension: string) {
 }
 
 async function fetchImageBlob(url: string) {
-  const response = await fetch(resolveImageUrl(url));
+  const response = await fetch(resolveLibraryImageUrl(url));
   if (!response.ok) throw new Error(`Failed to read image: ${response.status}`);
   return response.blob();
 }
