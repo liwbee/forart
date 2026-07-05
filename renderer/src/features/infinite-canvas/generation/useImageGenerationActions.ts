@@ -29,7 +29,7 @@ function fitGenerationNodeSize(aspectRatio: string) {
 }
 
 function supportsStandardImageGeneration(provider: ApiProvider) {
-  return provider.protocol !== "gemini";
+  return provider.protocol === "openai" || provider.protocol === "compatible" || provider.protocol === "gemini";
 }
 
 export function useImageGenerationActions({

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Select } from "../../../../components/Select";
-import type { ApiProvider } from "../../../settings/apiProviders";
+import type { ApiProvider, ApiProviderOrderItem } from "../../../settings/apiProviders";
 import { detectImageModelRuleId, getImageModelRule, normalizeImageModelSizeSelection } from "../../../settings/imageModelRules";
 import type { ActionFissionState } from "../../action-fission/actionFissionTypes";
 import { listLibtvWorkspaces } from "../../libtv-generation/libtvGenerationApi";
@@ -12,7 +12,9 @@ interface ActionFissionApiBarProps {
   state: ActionFissionState;
   selectedProvider: ApiProvider | null;
   imageProviders: ApiProvider[];
+  imageProviderOrderItems: ApiProviderOrderItem[];
   libtvReady: boolean;
+  effectiveApiType: NonNullable<ActionFissionState["apiType"]>;
   openSelectId: string;
   onOpenSelectChange: (selectId: string) => void;
   onSetApiType: (apiType: NonNullable<ActionFissionState["apiType"]>) => void;
@@ -29,7 +31,9 @@ export function ActionFissionApiBar({
   state,
   selectedProvider,
   imageProviders,
+  imageProviderOrderItems,
   libtvReady,
+  effectiveApiType,
   openSelectId,
   onOpenSelectChange,
   onSetApiType,
@@ -38,7 +42,7 @@ export function ActionFissionApiBar({
 }: ActionFissionApiBarProps) {
   const { t } = useTranslation();
   const [libtvWorkspaces, setLibtvWorkspaces] = useState<LibtvWorkspaceRecord[]>([]);
-  const isLibtvApi = state.apiType === "libtv-api";
+  const isLibtvApi = effectiveApiType === "libtv-api";
   const loadSeqRef = useRef(0);
   const workspaceIdRef = useRef(state.libtvWorkspaceId || "");
   const setWorkspaceRef = useRef(onSetLibtvWorkspace);
@@ -81,10 +85,10 @@ export function ActionFissionApiBar({
     };
   }, [isLibtvApi, libtvReady, loadLibtvWorkspaces]);
 
-  const apiOptions = [
-    ...imageProviders.map((provider) => ({ value: provider.id, label: provider.name || provider.id })),
-    ...(libtvReady ? [{ value: "libtv-api", label: "LibTV" }] : []),
-  ];
+  const apiOptions = imageProviderOrderItems.flatMap((item) => {
+    if (item.type === "libtv") return libtvReady ? [{ value: "libtv-api", label: "LibTV" }] : [];
+    return item.provider.imageModels.length ? [{ value: item.provider.id, label: item.provider.name || item.provider.id }] : [];
+  });
   const workspaceOptions = libtvWorkspaces.length
     ? libtvWorkspaces.map((workspace) => ({ value: workspace.id, label: workspace.name || workspace.id }))
     : [{ value: "", label: t("infiniteCanvas:libtvNoWorkspaces") }];

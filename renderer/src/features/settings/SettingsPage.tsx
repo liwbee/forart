@@ -1,5 +1,5 @@
-import { ChevronDown, Download, FolderOpen, HardDrive, KeyRound, LogIn, LogOut, Plus, RefreshCw, Settings, TestTube2, Trash2 } from "lucide-react";
-import { PointerEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Download, FolderOpen, GripVertical, HardDrive, KeyRound, LogIn, LogOut, Plus, RefreshCw, Settings, TestTube2, Trash2 } from "lucide-react";
+import { PointerEvent, UIEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { ForartAppConfig, ForartMode, normalizeConfig, type CanvasCacheAsset, type CanvasCacheDeleteResult, type CanvasCacheScanResult, type LibtvAccountRecord } from "../../app/appConfig";
 import { Select } from "../../components/Select";
@@ -22,6 +22,12 @@ type ApiAction = "verify" | "fetch" | "libtv-check" | "libtv-install" | "libtv-l
 type CacheAction = "scan" | "delete" | "delete-old" | "open-root" | "";
 type CacheKindFilter = "all" | "input" | "output";
 type CacheStatusFilter = "all" | "referenced" | "cleanable" | "missing";
+type ApiSidebarItem = { id: "libtv"; type: "libtv" } | { id: string; type: "provider"; provider: ApiProvider };
+interface ApiSidebarDragOverlay {
+  item: ApiSidebarItem;
+  top: number;
+  width: number;
+}
 
 interface FetchedModelEntry {
   id: string;
@@ -71,6 +77,22 @@ function summarizeLibtvAccount(account: unknown): LibtvAccountSummary {
 
 function libtvAccountTypeLabel(account: LibtvAccountRecord, t: (key: string) => string) {
   return account.accountType === 2 ? t("settings:libtvTeamAccount") : t("settings:libtvPersonalAccount");
+}
+
+function apiProviderProtocolLabel(provider: ApiProvider, t: (key: string) => string) {
+  if (provider.protocol === "gemini") return t("settings:protocolGemini");
+  if (provider.protocol === "compatible") return t("settings:protocolCompatible");
+  return t("settings:protocolOpenAI");
+}
+
+function normalizeProviderOrder(order: string[] | undefined, providers: ApiProvider[]) {
+  const validIds = new Set(["libtv", ...providers.map((provider) => provider.id)]);
+  const next = (order || []).map(String).filter((id, index, ids) => validIds.has(id) && ids.indexOf(id) === index);
+  providers.forEach((provider) => {
+    if (!next.includes(provider.id)) next.push(provider.id);
+  });
+  if (!next.includes("libtv")) next.unshift("libtv");
+  return next;
 }
 
 function sameAppConfig(left: ForartAppConfig, right: ForartAppConfig) {
@@ -171,6 +193,12 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   const savingConfigRef = useRef(false);
   const pendingSaveRef = useRef(false);
   const [apiProviders, setApiProviders] = useState<ApiProvider[]>(readApiProviders);
+  const [apiProviderOrder, setApiProviderOrder] = useState<string[]>(() => normalizeProviderOrder([], readApiProviders()));
+  const [draggedApiSidebarItemId, setDraggedApiSidebarItemId] = useState("");
+  const [apiSidebarDragOverlay, setApiSidebarDragOverlay] = useState<ApiSidebarDragOverlay | null>(null);
+  const [apiSidebarInsertIndex, setApiSidebarInsertIndex] = useState<number | null>(null);
+  const apiSidebarInsertIndexRef = useRef<number | null>(null);
+  const apiSidebarListRef = useRef<HTMLDivElement | null>(null);
   const [selectedProviderId, setSelectedProviderId] = useState(() => readApiProviders()[0]?.id || "");
   const [activeApiPane, setActiveApiPane] = useState<ApiSettingsPane>("provider");
   const [apiAction, setApiAction] = useState<ApiAction>("");
@@ -224,7 +252,14 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   }, [cacheAssets, cacheCanvasFilter, cacheKindFilter, cacheStatusFilter]);
   const selectedCacheAssets = useMemo(() => cacheAssets.filter((asset) => selectedCacheAssetIds.has(asset.id)), [cacheAssets, selectedCacheAssetIds]);
   const selectedCleanableCacheAssets = useMemo(() => selectedCacheAssets.filter((asset) => asset.exists && !asset.referenced), [selectedCacheAssets]);
-
+  const apiSidebarItems = useMemo<ApiSidebarItem[]>(() => {
+    const providersById = new Map(apiProviders.map((provider) => [provider.id, provider]));
+    return normalizeProviderOrder(apiProviderOrder, apiProviders).reduce<ApiSidebarItem[]>((items, id) => {
+      if (id === "libtv") return [...items, { id: "libtv", type: "libtv" }];
+      const provider = providersById.get(id);
+      return provider ? [...items, { id, type: "provider", provider }] : items;
+    }, []);
+  }, [apiProviderOrder, apiProviders]);
   useEffect(() => {
     if (savingConfigRef.current) return;
     setMode(config.mode);
@@ -251,6 +286,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
       const settings = await loadApiSettings();
       if (canceled) return;
       setApiProviders(settings.providers);
+      setApiProviderOrder(normalizeProviderOrder(settings.providerOrder, settings.providers));
       setSelectedProviderId((current) => (
         current && settings.providers.some((provider) => provider.id === current)
           ? current
@@ -266,12 +302,17 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
 
   useEffect(() => {
     if (!apiSettingsLoaded) return;
-    void saveApiSettings({ providers: apiProviders });
+    const nextOrder = normalizeProviderOrder(apiProviderOrder, apiProviders);
+    if (nextOrder.join("\n") !== apiProviderOrder.join("\n")) {
+      setApiProviderOrder(nextOrder);
+      return;
+    }
+    void saveApiSettings({ providers: apiProviders, providerOrder: nextOrder });
     if (apiProviders.length && !apiProviders.some((provider) => provider.id === selectedProviderId)) {
       setSelectedProviderId(apiProviders[0].id);
     }
     if (!apiProviders.length && selectedProviderId) setSelectedProviderId("");
-  }, [apiProviders, apiSettingsLoaded, selectedProviderId]);
+  }, [apiProviderOrder, apiProviders, apiSettingsLoaded, selectedProviderId]);
 
   useEffect(() => {
     setApiStatus({ tone: "idle", text: t("settings:apiActionReady") });
@@ -484,13 +525,139 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
       const provider = createApiProvider(current);
       setSelectedProviderId(provider.id);
       setActiveApiPane("provider");
+      setApiProviderOrder((order) => normalizeProviderOrder([...order, provider.id], [...current, provider]));
       return [...current, provider];
     });
+  }
+
+  function applyApiSidebarOrder(nextOrder: string[]) {
+    setApiProviderOrder(nextOrder);
+    setApiProviders((current) => {
+      const providerById = new Map(current.map((provider) => [provider.id, provider]));
+      return nextOrder
+        .filter((id) => id !== "libtv")
+        .map((id) => providerById.get(id))
+        .filter((provider): provider is ApiProvider => Boolean(provider));
+    });
+  }
+
+  function getApiSidebarInsertIndex(container: HTMLElement, clientY: number, sourceId: string) {
+    const cards = Array.from(container.querySelectorAll<HTMLElement>(":scope > .settings-api-provider-card[data-sidebar-item-id]"));
+    const currentOrder = normalizeProviderOrder(apiProviderOrder, apiProviders);
+    const sourceIndex = currentOrder.indexOf(sourceId);
+    const visibleCards = cards.filter((card) => card.dataset.sidebarItemId !== sourceId);
+    let compactIndex = visibleCards.length;
+    for (let index = 0; index < visibleCards.length; index += 1) {
+      const rect = visibleCards[index].getBoundingClientRect();
+      if (clientY <= rect.top + rect.height / 2) {
+        compactIndex = index;
+        break;
+      }
+    }
+    return sourceIndex >= 0 && compactIndex >= sourceIndex ? compactIndex + 1 : compactIndex;
+  }
+
+  function setApiSidebarInsertIndexValue(index: number | null) {
+    apiSidebarInsertIndexRef.current = index;
+    setApiSidebarInsertIndex(index);
+  }
+
+  function moveApiSidebarItemToIndex(sourceId: string, insertIndex: number) {
+    if (!sourceId) return;
+    const currentOrder = normalizeProviderOrder(apiProviderOrder, apiProviders);
+    const sourceIndex = currentOrder.indexOf(sourceId);
+    if (sourceIndex < 0) return;
+    const nextOrder = currentOrder.filter((id) => id !== sourceId);
+    const adjustedIndex = Math.max(0, Math.min(insertIndex > sourceIndex ? insertIndex - 1 : insertIndex, nextOrder.length));
+    nextOrder.splice(adjustedIndex, 0, sourceId);
+    applyApiSidebarOrder(nextOrder);
+  }
+
+  function finishApiSidebarDrag(sourceId: string, insertIndex: number | null) {
+    setDraggedApiSidebarItemId("");
+    setApiSidebarDragOverlay(null);
+    setApiSidebarInsertIndexValue(null);
+    if (insertIndex !== null) moveApiSidebarItemToIndex(sourceId, insertIndex);
+  }
+
+  function handleApiSidebarPointerDown(event: PointerEvent<HTMLElement>, id: string) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const list = apiSidebarListRef.current;
+    if (!list) return;
+    const sourceId = id;
+    const sourceItem = apiSidebarItems.find((item) => item.id === sourceId);
+    if (!sourceItem) return;
+    const sourceIndex = normalizeProviderOrder(apiProviderOrder, apiProviders).indexOf(sourceId);
+    const listRect = list.getBoundingClientRect();
+    const cardRect = event.currentTarget.closest<HTMLElement>(".settings-api-provider-card")?.getBoundingClientRect();
+    const pointerOffsetY = cardRect ? event.clientY - cardRect.top : 0;
+    setDraggedApiSidebarItemId(sourceId);
+    setApiSidebarDragOverlay({
+      item: sourceItem,
+      top: (cardRect ? cardRect.top : event.clientY) - listRect.top,
+      width: cardRect?.width || listRect.width,
+    });
+    setApiSidebarInsertIndexValue(sourceIndex >= 0 ? sourceIndex : null);
+
+    const handlePointerMove = (moveEvent: globalThis.PointerEvent) => {
+      moveEvent.preventDefault();
+      const nextListRect = list.getBoundingClientRect();
+      setApiSidebarDragOverlay((current) => current ? {
+        ...current,
+        top: moveEvent.clientY - nextListRect.top - pointerOffsetY,
+      } : current);
+      const nextIndex = getApiSidebarInsertIndex(list, moveEvent.clientY, sourceId);
+      setApiSidebarInsertIndexValue(nextIndex);
+    };
+
+    const handlePointerUp = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+      finishApiSidebarDrag(sourceId, apiSidebarInsertIndexRef.current);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, { passive: false });
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
   }
 
   function patchSelectedProvider(patch: Partial<ApiProvider>) {
     if (!selectedProvider) return;
     setApiProviders((current) => current.map((provider) => (provider.id === selectedProvider.id ? normalizeApiProvider({ ...provider, ...patch }, current.filter((item) => item.id !== provider.id)) : provider)));
+  }
+
+  function renderApiSidebarCardContent(item: ApiSidebarItem) {
+    if (item.type === "libtv") {
+      return (
+        <>
+          <span className="settings-api-provider-drag-handle" aria-hidden="true" onPointerDown={(event) => handleApiSidebarPointerDown(event, "libtv")}>
+            <GripVertical size={14} />
+          </span>
+          <span className="settings-api-provider-logo">
+            <LibtvLogo />
+          </span>
+        </>
+      );
+    }
+    return (
+      <>
+        <span className="settings-api-provider-drag-handle" aria-hidden="true" onPointerDown={(event) => handleApiSidebarPointerDown(event, item.provider.id)}>
+          <GripVertical size={14} />
+        </span>
+        <span className="settings-api-provider-mark">
+          <KeyRound size={15} aria-hidden="true" />
+        </span>
+        <span className="settings-api-provider-info">
+          <strong>{item.provider.name || item.provider.id}</strong>
+          <small>{item.provider.baseUrl || t("settings:baseUrlNotConfigured")}</small>
+        </span>
+        <span className="settings-api-provider-pill">{item.provider.protocol}</span>
+      </>
+    );
   }
 
   async function requestProviderModels(provider: ApiProvider) {
@@ -522,8 +689,9 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
 
   async function verifyApiAddress() {
     if (!selectedProvider) return;
+    const protocol = apiProviderProtocolLabel(selectedProvider, t);
     setApiAction("verify");
-    setApiStatus({ tone: "busy", text: t("settings:apiVerifyingAddress") });
+    setApiStatus({ tone: "busy", text: "" });
     try {
       const models = await requestProviderModels(selectedProvider);
       if (!models.length) {
@@ -545,7 +713,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
           ? t("settings:apiBaseUrlRequired")
           : message === "base-url-invalid"
             ? t("settings:apiBaseUrlInvalid")
-            : t("settings:apiVerifyFailed", { message }),
+            : t("settings:apiVerifyFailedWithProtocol", { protocol, message }),
       });
     } finally {
       setApiAction("");
@@ -662,8 +830,9 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
 
   async function fetchApiModels() {
     if (!selectedProvider) return;
+    const protocol = apiProviderProtocolLabel(selectedProvider, t);
     setApiAction("fetch");
-    setApiStatus({ tone: "busy", text: t("settings:apiFetchingModels") });
+    setApiStatus({ tone: "busy", text: "" });
     try {
       const models = await requestProviderModels(selectedProvider);
       if (!models.length) {
@@ -706,7 +875,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
           ? t("settings:apiBaseUrlRequired")
           : message === "base-url-invalid"
             ? t("settings:apiBaseUrlInvalid")
-            : t("settings:apiFetchFailed", { message }),
+            : t("settings:apiFetchFailedWithProtocol", { protocol, message }),
       });
     } finally {
       setApiAction("");
@@ -775,6 +944,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     if (!selectedProvider) return;
     setApiProviders((current) => {
       const next = current.filter((provider) => provider.id !== selectedProvider.id);
+      setApiProviderOrder((order) => normalizeProviderOrder(order.filter((id) => id !== selectedProvider.id), next));
       setSelectedProviderId(next[0]?.id || "");
       if (!next.length) setActiveApiPane("libtv");
       return next;
@@ -1298,51 +1468,69 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
           <div className="settings-api-layout" role="tabpanel" aria-label={t("settings:apiSettings")}>
             <aside className="settings-api-sidebar" aria-label={t("settings:providerList")}>
               <div className="settings-api-sidebar-title">{t("settings:providerList")}</div>
-              <div className="settings-api-provider-list">
-                <div
-                  role="button"
-                  tabIndex={0}
-                  className={`settings-api-provider-card settings-api-provider-card--libtv${activeApiPane === "libtv" ? " active" : ""}`}
-                  aria-label={t("settings:libtvCliSettings")}
-                  title={t("settings:libtvCliSettings")}
-                  onClick={() => setActiveApiPane("libtv")}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter" && event.key !== " ") return;
-                    event.preventDefault();
-                    setActiveApiPane("libtv");
-                  }}
-                >
-                  <span className="settings-api-provider-logo">
-                    <LibtvLogo />
-                  </span>
-                </div>
-                {apiProviders.length ? apiProviders.map((provider) => (
+              <div
+                ref={apiSidebarListRef}
+                className={`settings-api-provider-list${draggedApiSidebarItemId ? " is-sorting" : ""}${apiSidebarInsertIndex !== null ? " has-insert" : ""}`}
+                style={apiSidebarInsertIndex !== null ? { "--settings-api-insert-index": apiSidebarInsertIndex } as CSSProperties : undefined}
+              >
+                {apiSidebarItems.map((item) => {
+                  if (item.type === "libtv") {
+                    return (
+                      <div
+                        key="libtv"
+                        role="button"
+                        tabIndex={0}
+                        data-sidebar-item-id="libtv"
+                        className={`settings-api-provider-card settings-api-provider-card--libtv${activeApiPane === "libtv" ? " active" : ""}${draggedApiSidebarItemId === "libtv" ? " is-dragging" : ""}`}
+                        aria-label={t("settings:libtvCliSettings")}
+                        title={t("settings:libtvCliSettings")}
+                        onClick={() => setActiveApiPane("libtv")}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          setActiveApiPane("libtv");
+                        }}
+                      >
+                        {renderApiSidebarCardContent(item)}
+                      </div>
+                    );
+                  }
+                  const provider = item.provider;
+                  return (
+                    <div
+                      key={provider.id}
+                      role="button"
+                      tabIndex={0}
+                      data-sidebar-item-id={provider.id}
+                      className={`settings-api-provider-card${activeApiPane === "provider" && provider.id === selectedProvider?.id ? " active" : ""}${draggedApiSidebarItemId === provider.id ? " is-dragging" : ""}`}
+                      onClick={() => {
+                        setActiveApiPane("provider");
+                        setSelectedProviderId(provider.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        setActiveApiPane("provider");
+                        setSelectedProviderId(provider.id);
+                      }}
+                    >
+                      {renderApiSidebarCardContent(item)}
+                    </div>
+                  );
+                })}
+                {apiSidebarDragOverlay ? (
                   <div
-                    key={provider.id}
-                    role="button"
-                    tabIndex={0}
-                    className={`settings-api-provider-card${activeApiPane === "provider" && provider.id === selectedProvider?.id ? " active" : ""}`}
-                    onClick={() => {
-                      setActiveApiPane("provider");
-                      setSelectedProviderId(provider.id);
+                    className={`settings-api-provider-card settings-api-provider-card--overlay${apiSidebarDragOverlay.item.type === "libtv" ? " settings-api-provider-card--libtv" : ""}`}
+                    style={{
+                      top: apiSidebarDragOverlay.top,
+                      width: apiSidebarDragOverlay.width,
                     }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" && event.key !== " ") return;
-                      event.preventDefault();
-                      setActiveApiPane("provider");
-                      setSelectedProviderId(provider.id);
-                    }}
+                    aria-hidden="true"
                   >
-                    <span className="settings-api-provider-mark">
-                      <KeyRound size={15} aria-hidden="true" />
-                    </span>
-                    <span className="settings-api-provider-info">
-                      <strong>{provider.name || provider.id}</strong>
-                      <small>{provider.baseUrl || t("settings:baseUrlNotConfigured")}</small>
-                    </span>
-                    <span className="settings-api-provider-pill">{provider.protocol}</span>
+                    {renderApiSidebarCardContent(apiSidebarDragOverlay.item)}
                   </div>
-                )) : <div className="settings-api-provider-empty">{t("settings:noApiProviders")}</div>}
+                ) : null}
+                {!apiProviders.length ? <div className="settings-api-provider-empty">{t("settings:noApiProviders")}</div> : null}
               </div>
               <button type="button" className="settings-api-add-button" onClick={addApiProvider}>
                 <Plus size={16} aria-hidden="true" />
@@ -1461,38 +1649,56 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                         <span>{t("settings:apiKey")}</span>
                         <input type="password" value={selectedProvider.apiKey} onChange={(event) => patchSelectedProvider({ apiKey: event.target.value })} placeholder={t("settings:apiKeyPlaceholder")} />
                       </label>
-                      <label className="settings-field">
-                        <span>{t("settings:protocol")}</span>
-                        <Select
-                          value={selectedProvider.protocol}
-                          className="settings-select"
-                          menuClassName="settings-select-menu"
-                          options={[
-                            { value: "openai", label: t("settings:protocolOpenAI") },
-                            { value: "async", label: t("settings:protocolAsync") },
-                            { value: "gemini", label: t("settings:protocolGemini") },
-                          ]}
-                          onChange={(protocol) => patchSelectedProvider({ protocol: protocol as ApiProvider["protocol"] })}
-                          ariaLabel={t("settings:protocol")}
-                          portal
-                          menuPlacement="bottom"
-                        />
-                      </label>
-                      <div className="settings-api-test-row">
-                        <div className="settings-inline-status settings-api-action-status" data-tone={apiStatus.tone}>
+                      <div className="settings-api-control-row" data-has-request-mode={selectedProvider.protocol === "openai" ? "true" : "false"}>
+                        <label className="settings-field">
+                          <span>{t("settings:protocol")}</span>
+                          <Select
+                            value={selectedProvider.protocol}
+                            className="settings-select"
+                            menuClassName="settings-select-menu"
+                            options={[
+                              { value: "compatible", label: t("settings:protocolCompatible") },
+                              { value: "openai", label: t("settings:protocolOpenAI") },
+                              { value: "gemini", label: t("settings:protocolGemini") },
+                            ]}
+                            onChange={(protocol) => patchSelectedProvider({ protocol: protocol as ApiProvider["protocol"] })}
+                            ariaLabel={t("settings:protocol")}
+                            portal
+                            menuPlacement="bottom"
+                          />
+                        </label>
+                        {selectedProvider.protocol === "openai" ? (
+                          <label className="settings-field">
+                            <span>{t("settings:imageRequestMode")}</span>
+                            <Select
+                              value={selectedProvider.imageRequestMode}
+                              className="settings-select"
+                              menuClassName="settings-select-menu"
+                              options={[
+                                { value: "openai", label: t("settings:imageRequestModeOpenAI") },
+                                { value: "openai-json", label: t("settings:imageRequestModeOpenAIJson") },
+                              ]}
+                              onChange={(imageRequestMode) => patchSelectedProvider({ imageRequestMode: imageRequestMode as ApiProvider["imageRequestMode"] })}
+                              ariaLabel={t("settings:imageRequestMode")}
+                              portal
+                              menuPlacement="bottom"
+                            />
+                          </label>
+                        ) : null}
+                        <button type="button" className="settings-api-action-button settings-api-control-button" disabled={apiAction !== ""} onClick={verifyApiAddress}>
+                          <TestTube2 size={15} aria-hidden="true" />
+                          <span>{apiAction === "verify" ? t("settings:apiVerifying") : t("settings:verifyAddress")}</span>
+                        </button>
+                        <button type="button" className="settings-api-action-button settings-api-action-button--primary settings-api-control-button" disabled={apiAction !== ""} onClick={fetchApiModels}>
+                          <RefreshCw size={15} aria-hidden="true" />
+                          <span>{apiAction === "fetch" ? t("settings:apiFetching") : t("settings:fetchModels")}</span>
+                        </button>
+                      </div>
+                      {apiStatus.text && (apiStatus.tone === "ready" || apiStatus.tone === "error") ? (
+                        <div className="settings-inline-status settings-api-action-status" data-tone={apiStatus.tone} aria-live="polite">
                           {apiStatus.text}
                         </div>
-                        <div className="settings-api-test-actions">
-                          <button type="button" className="settings-api-action-button" disabled={apiAction !== ""} onClick={verifyApiAddress}>
-                            <TestTube2 size={15} aria-hidden="true" />
-                            <span>{apiAction === "verify" ? t("settings:apiVerifying") : t("settings:verifyAddress")}</span>
-                          </button>
-                          <button type="button" className="settings-api-action-button settings-api-action-button--primary" disabled={apiAction !== ""} onClick={fetchApiModels}>
-                            <RefreshCw size={15} aria-hidden="true" />
-                            <span>{apiAction === "fetch" ? t("settings:apiFetching") : t("settings:fetchModels")}</span>
-                          </button>
-                        </div>
-                      </div>
+                      ) : null}
                     </div>
                   </section>
 

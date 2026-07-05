@@ -51,10 +51,10 @@
 }
 
 .outfit-grid {
-  --library-grid-columns: 3;
+  --library-card-width: 220px;
   display: grid;
-  grid-template-columns: repeat(var(--library-grid-columns), minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--library-card-width)), 1fr));
+  gap: var(--space-5);
   align-items: start;
 }
 
@@ -275,11 +275,15 @@
 .outfit-card__tags {
   position: absolute;
   left: 8px;
-  right: 50px;
+  right: 8px;
   bottom: 8px;
+  z-index: 2;
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  align-content: flex-end;
+  max-height: calc(100% - 56px);
+  overflow: hidden;
   pointer-events: none;
 }
 
@@ -478,30 +482,6 @@
   padding: 8px;
   color: var(--text-muted);
   font-size: 0.82rem;
-}
-
-@container (min-width: 620px) {
-  .outfit-grid {
-    --library-grid-columns: 2;
-  }
-}
-
-@container (min-width: 900px) {
-  .outfit-grid {
-    --library-grid-columns: 3;
-  }
-}
-
-@container (min-width: 1180px) {
-  .outfit-grid {
-    --library-grid-columns: 4;
-  }
-}
-
-@container (min-width: 1500px) {
-  .outfit-grid {
-    --library-grid-columns: 5;
-  }
 }
 
 

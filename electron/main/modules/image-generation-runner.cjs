@@ -16,6 +16,46 @@ function imageGenerationsUrl(baseUrl) {
   return joinApiPath(normalized, 'v1/images/generations');
 }
 
+function providerEndpointUrl(provider, key, defaultPath) {
+  const baseUrl = String(provider?.baseUrl || '').trim().replace(/\/+$/, '');
+  const override = String(provider?.[key] || '').trim();
+  if (override) {
+    if (/^https?:\/\//i.test(override)) return override.replace(/\/+$/, '');
+    if (override.startsWith('/')) {
+      try {
+        const parsed = new URL(baseUrl);
+        return `${parsed.protocol}//${parsed.host}${override}`;
+      } catch {
+        return override;
+      }
+    }
+    return joinApiPath(baseUrl, override);
+  }
+  const normalizedDefault = String(defaultPath || '').replace(/^\/+/, '');
+  if (normalizedDefault && baseUrl.toLowerCase().endsWith(`/${normalizedDefault.toLowerCase()}`)) return baseUrl;
+  if (/\/images\/generations$/i.test(baseUrl) && /\/images\/generations$/i.test(defaultPath)) return baseUrl;
+  if (/\/images\/edits$/i.test(baseUrl) && /\/images\/edits$/i.test(defaultPath)) return baseUrl;
+  for (const prefix of ['/api/v3', '/v1beta', '/v1', '/v2']) {
+    if (baseUrl.endsWith(prefix) && String(defaultPath || '').startsWith(`${prefix}/`)) {
+      return `${baseUrl}${defaultPath.slice(prefix.length)}`;
+    }
+  }
+  return joinApiPath(baseUrl, defaultPath);
+}
+
+function imageEditsUrl(provider) {
+  return providerEndpointUrl(provider, 'imageEditEndpoint', '/v1/images/edits');
+}
+
+function geminiModelName(model) {
+  return String(model || '').trim().replace(/^models\//, '') || 'gemini-3-pro-image-preview';
+}
+
+function geminiGenerateContentUrl(provider, model) {
+  const modelName = encodeURIComponent(geminiModelName(model));
+  return providerEndpointUrl(provider, 'imageGenerationEndpoint', `/v1beta/models/${modelName}:generateContent`);
+}
+
 function imageUploadsUrl(baseUrl) {
   const normalized = String(baseUrl || '')
     .replace(/\/+$/, '')
@@ -29,12 +69,18 @@ function taskUrlCandidates(baseUrl, taskId) {
   const normalized = String(baseUrl || '').replace(/\/+$/, '').replace(/\/images\/generations$/i, '');
   const taskPath = `tasks/${encodeURIComponent(taskId)}`;
   const imageTaskPath = `images/tasks/${encodeURIComponent(taskId)}`;
+  const imageGenerationPath = `images/generations/${encodeURIComponent(taskId)}`;
   const candidates = [
     joinApiPath(normalized, taskPath),
     joinApiPath(normalized, imageTaskPath),
+    joinApiPath(normalized, imageGenerationPath),
   ];
   if (!/\/v\d(?:beta)?$/i.test(normalized) && !/\/api\/v\d$/i.test(normalized)) {
-    candidates.push(joinApiPath(normalized, `v1/${taskPath}`), joinApiPath(normalized, `v1/${imageTaskPath}`));
+    candidates.push(
+      joinApiPath(normalized, `v1/${taskPath}`),
+      joinApiPath(normalized, `v1/${imageTaskPath}`),
+      joinApiPath(normalized, `v1/${imageGenerationPath}`),
+    );
   }
   return [...new Set(candidates)];
 }
@@ -50,8 +96,9 @@ function isHttpImageUrl(value) {
 function valueToImage(value) {
   if (typeof value !== 'string') return null;
   const text = value.trim();
-  if (!isHttpImageUrl(text)) return null;
-  return { url: text, fileName: 'generated-image.png' };
+  if (isHttpImageUrl(text)) return { url: text, fileName: 'generated-image.png' };
+  if (/^data:image\//i.test(text)) return { dataUrl: text, fileName: 'generated-image.png' };
+  return null;
 }
 
 function findImageInPayload(payload) {
@@ -74,6 +121,45 @@ function findImageInPayload(payload) {
       if (nestedUrl && isHttpImageUrl(nestedUrl)) return { url: nestedUrl, fileName: 'generated-image.png' };
     }
     Object.values(value).forEach((childValue) => queue.push(childValue));
+  }
+  return null;
+}
+
+function findBase64ImageInPayload(payload) {
+  const queue = [payload];
+  const seen = new Set();
+  while (queue.length) {
+    const value = queue.shift();
+    if (!value || typeof value !== 'object' || seen.has(value)) continue;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      value.forEach((item) => queue.push(item));
+      continue;
+    }
+    const b64 = firstString(value.b64_json, value.base64, value.image_base64, value.imageBase64);
+    if (b64) {
+      const mimeType = firstString(value.mime_type, value.mimeType) || 'image/png';
+      return { dataUrl: `data:${mimeType};base64,${b64}`, fileName: 'generated-image.png' };
+    }
+    Object.values(value).forEach((childValue) => queue.push(childValue));
+  }
+  return null;
+}
+
+function findGeminiImageInPayload(payload) {
+  const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
+  for (const candidate of candidates) {
+    const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    for (const part of parts) {
+      const inline = part?.inlineData || part?.inline_data;
+      const data = firstString(inline?.data);
+      if (data) {
+        return {
+          dataUrl: `data:${firstString(inline?.mimeType, inline?.mime_type) || 'image/png'};base64,${data}`,
+          fileName: 'generated-image.png',
+        };
+      }
+    }
   }
   return null;
 }
@@ -213,6 +299,17 @@ async function readReferenceBlob({ net, assetStore }, source, signal) {
   };
 }
 
+async function referenceToFile(context, source, index, signal) {
+  const { blob, contentType, source: readableSource } = await readReferenceBlob(context, source, signal);
+  const mimeType = blob.type || contentType || 'image/png';
+  if (!/^image\//i.test(mimeType)) throw new Error(`Reference image must be an image file, received ${mimeType}.`);
+  return {
+    blob,
+    mimeType,
+    fileName: fileNameFromImageSource(readableSource, mimeType, index),
+  };
+}
+
 async function uploadReferenceImage(context, uploadUrl, headers, source, index, signal) {
   const { blob, contentType, source: readableSource } = await readReferenceBlob(context, source, signal);
   const mimeType = blob.type || contentType || 'image/png';
@@ -298,6 +395,54 @@ function openAiSizeFor(resolution, aspectRatio) {
   return `${Math.round(shortEdge * ratioW / ratioH)}x${shortEdge}`;
 }
 
+function isGptImage2Model(model) {
+  return /gpt[-_. ]?image[-_. ]?(?:v)?2/i.test(String(model || ''));
+}
+
+function geminiImageConfig(resolution, aspectRatio) {
+  const rawResolution = String(resolution || '').trim().toUpperCase();
+  const imageSize = ['1K', '2K', '4K'].includes(rawResolution) ? rawResolution : '2K';
+  const ratio = /^\d+\s*:\s*\d+$/.test(String(aspectRatio || '').trim())
+    ? String(aspectRatio).replace(/\s+/g, '')
+    : '1:1';
+  return { aspectRatio: ratio, imageSize };
+}
+
+function dataUriToGeminiPart(dataUri) {
+  const match = String(dataUri || '').match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/s);
+  if (!match) return null;
+  return { inlineData: { mimeType: match[1] || 'image/png', data: match[2] || '' } };
+}
+
+async function generateGeminiImage(context, provider, model, prompt, referenceImages, resolution, aspectRatio, taskId, signal) {
+  const apiKey = String(provider.apiKey || '').trim();
+  const parts = [{ text: prompt }];
+  const refs = await normalizeReferenceImageDataUris(context, referenceImages, taskId, signal);
+  refs.forEach((ref) => {
+    const part = dataUriToGeminiPart(ref);
+    if (part) parts.push(part);
+  });
+  const payload = await requestJson(context.net, geminiGenerateContentUrl(provider, model), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      ...(apiKey ? { 'x-goog-api-key': apiKey } : {}),
+    },
+    signal,
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts }],
+      generationConfig: {
+        responseModalities: ['TEXT', 'IMAGE'],
+        imageConfig: geminiImageConfig(resolution, aspectRatio),
+      },
+    }),
+  });
+  const result = findGeminiImageInPayload(payload) || findBase64ImageInPayload(payload) || findImageInPayload(payload);
+  if (!result) throw new Error(`The Gemini response did not contain an image (${summarizePayloadShape(payload)}).`);
+  return saveOutputAsset(context, result);
+}
+
 async function pollImageTask(context, baseUrl, headers, taskId, upstreamTaskId, initialPayload, signal) {
   let lastPayload = initialPayload;
   context.generationTaskStore.updateTask(taskId, { status: 'running', message: 'Waiting for image result...' });
@@ -311,7 +456,7 @@ async function pollImageTask(context, baseUrl, headers, taskId, upstreamTaskId, 
       signal,
     });
     lastPayload = payload;
-    const result = findImageInPayload(payload);
+    const result = findImageInPayload(payload) || findBase64ImageInPayload(payload);
     if (result) return result;
     const status = readTaskStatus(payload).toLowerCase();
     if (status) context.generationTaskStore.updateTask(taskId, { status: 'running', message: `Generating: ${status}` });
@@ -326,14 +471,36 @@ async function pollImageTask(context, baseUrl, headers, taskId, upstreamTaskId, 
 async function saveOutputAsset(context, result) {
   const saved = await context.assetStore.saveAsset({
     url: result.url,
+    dataUrl: result.dataUrl,
     defaultName: result.fileName || 'generated-image.png',
     kind: 'output',
   });
   return {
     ...result,
+    url: result.url || result.dataUrl || '',
     localUrl: saved.url,
     fileName: saved.fileName || result.fileName || 'generated-image.png',
   };
+}
+
+async function submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, size, signal) {
+  const formData = new FormData();
+  formData.append('model', model);
+  formData.append('prompt', prompt);
+  formData.append('size', size);
+  formData.append('response_format', 'url');
+  formData.append('n', '1');
+  for (let index = 0; index < referenceImages.length; index += 1) {
+    const file = await referenceToFile(context, referenceImages[index], index, signal);
+    formData.append('image', file.blob, file.fileName);
+  }
+  const { 'Content-Type': _contentType, ...multipartHeaders } = headers;
+  return requestJson(context.net, imageEditsUrl(provider), {
+    method: 'POST',
+    headers: multipartHeaders,
+    signal,
+    body: formData,
+  });
 }
 
 async function executeImageTask(context, task, payload, signal) {
@@ -345,11 +512,9 @@ async function executeImageTask(context, task, payload, signal) {
   const aspectRatio = String(payload.aspectRatio || task.aspectRatio || '1:1');
   const rule = payload.modelRule && typeof payload.modelRule === 'object' ? payload.modelRule : {};
   const baseUrl = String(provider.baseUrl || '').trim();
+  const protocol = String(provider.protocol || 'openai').trim().toLowerCase();
   if (!baseUrl) throw new Error('API provider base URL is empty.');
   if (!model) throw new Error('No image model selected.');
-  if (provider.protocol === 'gemini') throw new Error('Gemini native image generation is disabled because it uses base64 image payloads. Use an OpenAI-compatible image endpoint instead.');
-  if (/edit/i.test(model)) throw new Error('Image editing endpoints are disabled. Only text-to-image and image-to-image generation are supported.');
-
   const headers = {
     'Content-Type': 'application/json',
     ...(String(provider.apiKey || '').trim() ? { Authorization: `Bearer ${String(provider.apiKey || '').trim()}` } : {}),
@@ -360,14 +525,59 @@ async function executeImageTask(context, task, payload, signal) {
     return saveOutputAsset(context, polledResult);
   }
   context.generationTaskStore.updateTask(task.id, { status: 'running', message: referenceImages.length ? 'Preparing reference images...' : 'Preparing text-to-image request...' });
+  if (protocol === 'gemini') {
+    context.generationTaskStore.updateTask(task.id, { status: 'running', message: 'Submitting Gemini image generation...' });
+    return generateGeminiImage(context, provider, model, prompt, referenceImages, resolution, aspectRatio, task.id, signal);
+  }
+
+  if (protocol === 'openai') {
+    const requestSize = payload.size || openAiSizeFor(resolution, aspectRatio);
+    const requestMode = provider.imageRequestMode === 'openai-json' ? 'openai-json' : 'openai';
+    let submitPayload;
+    if (referenceImages.length && requestMode === 'openai') {
+      context.generationTaskStore.updateTask(task.id, { status: 'running', message: 'Submitting image edit request...' });
+      try {
+        submitPayload = await submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, requestSize, signal);
+      } catch (error) {
+        if (isGptImage2Model(model)) throw error;
+        context.generationTaskStore.updateTask(task.id, { status: 'running', message: 'Retrying image generation with JSON references...' });
+      }
+    }
+    if (!submitPayload) {
+      const refs = referenceImages.length ? await normalizeReferenceImageDataUris(context, referenceImages, task.id, signal) : [];
+      const requestBody = {
+        model,
+        prompt,
+        size: requestSize,
+        response_format: 'url',
+        n: 1,
+        ...(refs.length ? { image: refs } : {}),
+      };
+      context.generationTaskStore.updateTask(task.id, { status: 'running', message: 'Submitting image generation...' });
+      submitPayload = await requestJson(context.net, providerEndpointUrl(provider, 'imageGenerationEndpoint', '/v1/images/generations'), {
+        method: 'POST',
+        headers,
+        signal,
+        body: JSON.stringify(requestBody),
+      });
+    }
+    const directResult = findImageInPayload(submitPayload) || findBase64ImageInPayload(submitPayload);
+    if (directResult) return saveOutputAsset(context, directResult);
+    const upstreamTaskId = readTaskId(submitPayload);
+    if (!upstreamTaskId) throw new Error(`The image API response did not contain an image or task_id (${summarizePayloadShape(submitPayload)}).`);
+    context.generationTaskStore.updateTask(task.id, { upstreamTaskId, status: 'running' });
+    const polledResult = await pollImageTask(context, baseUrl, headers, task.id, upstreamTaskId, submitPayload, signal);
+    return saveOutputAsset(context, polledResult);
+  }
+
   const requestFormat = rule.requestFormat || 'standard';
   const refs = requestFormat === 'openai-json-extra-body'
     ? await normalizeReferenceImageDataUris(context, referenceImages, task.id, signal)
     : await normalizeReferenceImages(context, baseUrl, uploadHeaders, referenceImages, task.id, signal);
-  const sizeMode = rule.sizeMode || (provider.protocol === 'async' ? 'ratio' : 'pixel');
+  const sizeMode = rule.sizeMode || (provider.protocol === 'compatible' ? 'ratio' : 'pixel');
   const resolutionCase = rule.resolutionCase || 'lower';
   const resolutionField = rule.sizeRule?.resolutionField || rule.resolutionField || 'resolution';
-  const requestSize = sizeMode === 'ratio' || provider.protocol === 'async' ? aspectRatio : payload.size || openAiSizeFor(resolution, aspectRatio);
+  const requestSize = sizeMode === 'ratio' || provider.protocol === 'compatible' ? aspectRatio : payload.size || openAiSizeFor(resolution, aspectRatio);
   const requestResolution = resolutionCase === 'upper' ? resolution.toUpperCase() : resolution.toLowerCase();
   const sizePayload = resolutionField === 'size'
     ? { size: requestSize }
@@ -395,13 +605,13 @@ async function executeImageTask(context, task, payload, signal) {
     };
 
   context.generationTaskStore.updateTask(task.id, { status: 'running', message: 'Submitting image generation...' });
-  const submitPayload = await requestJson(context.net, imageGenerationsUrl(baseUrl), {
+  const submitPayload = await requestJson(context.net, providerEndpointUrl(provider, 'imageGenerationEndpoint', '/v1/images/generations') || imageGenerationsUrl(baseUrl), {
     method: 'POST',
     headers,
     signal,
     body: JSON.stringify(requestBody),
   });
-  const directResult = findImageInPayload(submitPayload);
+  const directResult = findImageInPayload(submitPayload) || findBase64ImageInPayload(submitPayload);
   if (directResult) return saveOutputAsset(context, directResult);
   const upstreamTaskId = readTaskId(submitPayload);
   if (!upstreamTaskId) throw new Error(`The image API response did not contain an image or task_id (${summarizePayloadShape(submitPayload)}).`);

@@ -9,7 +9,7 @@ import { CollapsibleTagFilterRow } from "../library-tags";
 import { LibraryTagChoiceButton } from "../library-tags";
 import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
 import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalImage, resolveLibraryImageUrl } from "../../lib/libraryImageActions";
-import { sortByName } from "../../lib/sortByName";
+import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
 import { EMPTY_LIBRARY_TAG_FILTER, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
 import {
   createModel,
@@ -951,6 +951,8 @@ function ModelGrid({
   onClearRenameError: (modelId: string) => void;
 }) {
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const cardSize = useLibraryCardSize("model");
+  const librarySort = useLibrarySort();
   const [columnCount, setColumnCount] = useState(1);
   const openModel = models.find((model) => model.id === openModelId) || null;
   const openIndex = models.findIndex((model) => model.id === openModelId);
@@ -984,33 +986,46 @@ function ModelGrid({
   }, []);
 
   return (
-    <div ref={gridRef} className="model-grid">
-      <AddModelCard disabled={creating} onCreate={onCreate} />
-      {models.map((model, index) => (
-        <FragmentWithEditor
-          key={model.id}
-          model={model}
-          isOpen={model.id === openModelId}
-          shouldRenderEditor={Boolean(openModel && index === insertAfterIndex)}
-          openModel={openModel}
-          tags={tags}
-          images={images}
-          savingModelId={savingModelId}
-          deletingModelId={deletingModelId}
-          deleteConfirmModelId={deleteConfirmModelId}
-          onOpenModel={onOpenModel}
-          onSaveModelName={onSaveModelName}
-          onCloseEditor={onCloseEditor}
-          onDeleteModel={onDeleteModel}
-          onToggleTag={onToggleTag}
-          onUploadImage={onUploadImage}
-          onDeleteImage={onDeleteImage}
-          onSetCover={onSetCover}
-          onImageActionStatus={onImageActionStatus}
-          renameErrors={renameErrors}
-          onClearRenameError={onClearRenameError}
-        />
-      ))}
+    <div className="library-card-size-scope">
+      <div ref={gridRef} className="model-grid" style={cardSize.gridStyle}>
+        <AddModelCard disabled={creating} onCreate={onCreate} />
+        {models.map((model, index) => (
+          <FragmentWithEditor
+            key={model.id}
+            model={model}
+            isOpen={model.id === openModelId}
+            shouldRenderEditor={Boolean(openModel && index === insertAfterIndex)}
+            openModel={openModel}
+            tags={tags}
+            images={images}
+            savingModelId={savingModelId}
+            deletingModelId={deletingModelId}
+            deleteConfirmModelId={deleteConfirmModelId}
+            onOpenModel={onOpenModel}
+            onSaveModelName={onSaveModelName}
+            onCloseEditor={onCloseEditor}
+            onDeleteModel={onDeleteModel}
+            onToggleTag={onToggleTag}
+            onUploadImage={onUploadImage}
+            onDeleteImage={onDeleteImage}
+            onSetCover={onSetCover}
+            onImageActionStatus={onImageActionStatus}
+            renameErrors={renameErrors}
+            onClearRenameError={onClearRenameError}
+          />
+        ))}
+      </div>
+      <LibraryCardToolbar
+        activePresetId={cardSize.activePresetId}
+        activePresetIndex={cardSize.activePresetIndex}
+        activePresetLabel={cardSize.activePresetLabel}
+        presets={cardSize.presets}
+        sortField={librarySort.sortField}
+        sortDirection={librarySort.sortDirection}
+        onSelectPreset={cardSize.setPresetId}
+        onSelectSortField={librarySort.setSortField}
+        onSelectSortDirection={librarySort.setSortDirection}
+      />
     </div>
   );
 }
@@ -1607,7 +1622,14 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     updateModelTagsMutation.mutate({ modelId, tags: nextTags });
   }
 
-  const models = useMemo(() => sortByName(modelsQuery.data?.models || [], (model) => model.name), [modelsQuery.data?.models]);
+  const librarySort = useLibrarySort();
+  const models = useMemo(
+    () => sortLibraryItems(modelsQuery.data?.models || [], {
+      field: librarySort.sortField,
+      direction: librarySort.sortDirection,
+    }),
+    [librarySort.sortDirection, librarySort.sortField, modelsQuery.data?.models],
+  );
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
   const filteredModels = useMemo(() => {
     if (!normalizedSearchQuery) return models;

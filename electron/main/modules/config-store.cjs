@@ -39,7 +39,10 @@ function normalizeApiProvider(input = {}, providers = []) {
     apiKey: String(input.apiKey || ''),
     accessKey: String(input.accessKey || ''),
     secretKey: String(input.secretKey || ''),
-    protocol: input.protocol === 'async' || input.protocol === 'gemini' ? input.protocol : 'openai',
+    protocol: input.protocol === 'compatible' || input.protocol === 'gemini' ? input.protocol : 'openai',
+    imageRequestMode: input.imageRequestMode === 'openai-json' ? 'openai-json' : 'openai',
+    imageGenerationEndpoint: String(input.imageGenerationEndpoint || '').trim(),
+    imageEditEndpoint: String(input.imageEditEndpoint || '').trim(),
     imageModels: Array.isArray(input.imageModels) ? input.imageModels.map(String).filter(Boolean) : [],
     chatModels: Array.isArray(input.chatModels) ? input.chatModels.map(String).filter(Boolean) : [],
     videoModels: Array.isArray(input.videoModels) ? input.videoModels.map(String).filter(Boolean) : [],
@@ -92,7 +95,15 @@ function normalizeApiSettings(payload = {}) {
   const defaultImageProviderId = providers.some((provider) => provider.id === payload.defaultImageProviderId)
     ? String(payload.defaultImageProviderId)
     : '';
-  return { providers, defaultImageProviderId };
+  const validOrderIds = new Set(['libtv', ...providers.map((provider) => provider.id)]);
+  const providerOrder = Array.isArray(payload.providerOrder)
+    ? [...new Set(payload.providerOrder.map(String))].filter((id) => validOrderIds.has(id))
+    : [];
+  providers.forEach((provider) => {
+    if (!providerOrder.includes(provider.id)) providerOrder.push(provider.id);
+  });
+  if (!providerOrder.includes('libtv')) providerOrder.unshift('libtv');
+  return { providers, defaultImageProviderId, providerOrder };
 }
 
 function createConfigStore({ app, rootDir }) {

@@ -51,7 +51,9 @@ let mainWindow = null;
 
 function registerCanvasAssetProtocol() {
   protocol.handle('forart-asset', async (request) => {
-    const target = assetStore.resolveAssetUrl(request.url) || await localApi?.resolveAssetUrl?.(request.url);
+    const target = assetStore.resolveAssetUrl(request.url)
+      || await localApi?.resolveAssetUrl?.(request.url)
+      || localApi?.resolveActionImportPreviewUrl?.(request.url);
     if (!target || !fs.existsSync(target)) {
       return new Response('Asset not found', { status: 404 });
     }
@@ -65,9 +67,7 @@ function registerImageReviewProtocol() {
     if (!target || !fs.existsSync(target)) {
       return new Response('Image not found', { status: 404 });
     }
-    return new Response(fs.readFileSync(target), {
-      headers: { 'content-type': imageReviewStore.imageMimeType(target) },
-    });
+    return net.fetch(pathToFileURL(target).toString());
   });
 }
 

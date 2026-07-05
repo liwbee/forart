@@ -1,5 +1,7 @@
-export type ApiProviderProtocol = "openai" | "async" | "gemini";
+export type ApiProviderProtocol = "openai" | "compatible" | "gemini";
+export type ApiProviderImageRequestMode = "openai" | "openai-json";
 export type ApiModelKind = "image" | "chat" | "video";
+export type ApiProviderOrderItem = { type: "provider"; id: string; provider: ApiProvider } | { type: "libtv"; id: "libtv" };
 
 export interface ApiModelAliases {
   image: Record<string, string>;
@@ -19,6 +21,9 @@ export interface ApiProvider {
   accessKey: string;
   secretKey: string;
   protocol: ApiProviderProtocol;
+  imageRequestMode: ApiProviderImageRequestMode;
+  imageGenerationEndpoint: string;
+  imageEditEndpoint: string;
   imageModels: string[];
   chatModels: string[];
   videoModels: string[];
@@ -31,11 +36,13 @@ export const API_PROVIDER_CHANGED_EVENT = "forart-api-providers-changed";
 export interface ApiSettings {
   providers: ApiProvider[];
   defaultImageProviderId?: string;
+  providerOrder?: string[];
 }
 
 let apiSettingsCache: ApiSettings = {
   providers: [],
   defaultImageProviderId: "",
+  providerOrder: [],
 };
 let apiSettingsCacheLoaded = false;
 
@@ -124,6 +131,9 @@ export function createApiProvider(providers: ApiProvider[]): ApiProvider {
     accessKey: "",
     secretKey: "",
     protocol: "openai",
+    imageRequestMode: "openai",
+    imageGenerationEndpoint: "",
+    imageEditEndpoint: "",
     imageModels: [],
     chatModels: [],
     videoModels: [],
@@ -141,7 +151,10 @@ export function normalizeApiProvider(input: Partial<ApiProvider>, providers: Api
     apiKey: String(input.apiKey || ""),
     accessKey: String(input.accessKey || ""),
     secretKey: String(input.secretKey || ""),
-    protocol: input.protocol === "async" || input.protocol === "gemini" ? input.protocol : "openai",
+    protocol: input.protocol === "compatible" || input.protocol === "gemini" ? input.protocol : "openai",
+    imageRequestMode: input.imageRequestMode === "openai-json" ? "openai-json" : "openai",
+    imageGenerationEndpoint: String(input.imageGenerationEndpoint || "").trim(),
+    imageEditEndpoint: String(input.imageEditEndpoint || "").trim(),
     imageModels: Array.isArray(input.imageModels) ? input.imageModels.map(String).filter(Boolean) : [],
     chatModels: Array.isArray(input.chatModels) ? input.chatModels.map(String).filter(Boolean) : [],
     videoModels: Array.isArray(input.videoModels) ? input.videoModels.map(String).filter(Boolean) : [],
@@ -156,7 +169,15 @@ function normalizeApiSettings(input: Partial<ApiSettings>): ApiSettings {
     return result.some((provider) => provider.id === next.id) ? result : [...result, next];
   }, []) : [];
   const defaultImageProviderId = providers.some((provider) => provider.id === input.defaultImageProviderId) ? String(input.defaultImageProviderId) : "";
-  return { providers, defaultImageProviderId };
+  const validOrderIds = new Set(["libtv", ...providers.map((provider) => provider.id)]);
+  const providerOrder = Array.isArray(input.providerOrder)
+    ? uniqueModels(input.providerOrder.map(String)).filter((id) => validOrderIds.has(id))
+    : [];
+  providers.forEach((provider) => {
+    if (!providerOrder.includes(provider.id)) providerOrder.push(provider.id);
+  });
+  if (!providerOrder.includes("libtv")) providerOrder.unshift("libtv");
+  return { providers, defaultImageProviderId, providerOrder };
 }
 
 function setApiSettingsCache(settings: Partial<ApiSettings>) {
@@ -174,6 +195,33 @@ export function readApiSettings(): ApiSettings {
   return apiSettingsCache;
 }
 
+export function orderedApiProviders(providers: ApiProvider[], providerOrder: string[] | undefined = []) {
+  const byId = new Map(providers.map((provider) => [provider.id, provider]));
+  const ordered = (providerOrder || [])
+    .map((id) => byId.get(id))
+    .filter((provider): provider is ApiProvider => Boolean(provider));
+  providers.forEach((provider) => {
+    if (!ordered.some((item) => item.id === provider.id)) ordered.push(provider);
+  });
+  return ordered;
+}
+
+export function orderedApiProviderItems(providers: ApiProvider[], providerOrder: string[] | undefined = []) {
+  const byId = new Map(providers.map((provider) => [provider.id, provider]));
+  const result = (providerOrder || []).reduce<ApiProviderOrderItem[]>((items, id) => {
+    if (id === "libtv") return [...items, { type: "libtv", id: "libtv" }];
+    const provider = byId.get(id);
+    return provider ? [...items, { type: "provider", id, provider }] : items;
+  }, []);
+  if (!result.some((item) => item.type === "libtv")) result.unshift({ type: "libtv", id: "libtv" });
+  providers.forEach((provider) => {
+    if (!result.some((item) => item.type === "provider" && item.id === provider.id)) {
+      result.push({ type: "provider", id: provider.id, provider });
+    }
+  });
+  return result;
+}
+
 export async function loadApiSettings(): Promise<ApiSettings> {
   if (!window.forartConfig?.loadApiSettings) {
     return apiSettingsCacheLoaded ? apiSettingsCache : setApiSettingsCache({});
@@ -185,7 +233,11 @@ export async function loadApiSettings(): Promise<ApiSettings> {
 export async function saveApiSettings(settings: ApiSettings): Promise<ApiSettings> {
   const normalized = setApiSettingsCache(settings);
   if (window.forartConfig?.saveApiSettings) {
-    const result = await window.forartConfig.saveApiSettings({ ...normalized, defaultImageProviderId: normalized.defaultImageProviderId || "" });
+    const result = await window.forartConfig.saveApiSettings({
+      ...normalized,
+      defaultImageProviderId: normalized.defaultImageProviderId || "",
+      providerOrder: normalized.providerOrder || [],
+    });
     return setApiSettingsCache(normalizeApiSettings(result.apiSettings as Partial<ApiSettings>));
   }
   return normalized;

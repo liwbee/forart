@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { ActionEntry, ActionTag } from "../../action-library/types";
-import type { ApiProvider } from "../../settings/apiProviders";
+import type { ApiProvider, ApiProviderOrderItem } from "../../settings/apiProviders";
 import { selectActionForRow } from "../action-fission/actionFissionActions";
 import { resolveActionFissionBulkActions } from "../action-fission/actionFissionBulkActions";
 import type { ActionFissionRow } from "../action-fission/actionFissionTypes";
@@ -25,7 +25,9 @@ interface SavedCanvasAsset {
 interface ActionFissionNodeBodyProps {
   node: CanvasNode;
   imageProviders: ApiProvider[];
+  imageProviderOrderItems: ApiProviderOrderItem[];
   defaultImageProvider: ApiProvider | null;
+  defaultImageApiType: "third-party-api" | "libtv-api";
   libtvReady: boolean;
   libtvUnavailableMessage: string;
   openSelectId: string;
@@ -63,7 +65,9 @@ function selectedProviderFor(stateProviderId: string | undefined, defaultImagePr
 export function ActionFissionNodeBody({
   node,
   imageProviders,
+  imageProviderOrderItems,
   defaultImageProvider,
+  defaultImageApiType,
   libtvReady,
   libtvUnavailableMessage,
   openSelectId,
@@ -106,14 +110,17 @@ export function ActionFissionNodeBody({
     setAspectRatio,
   } = useActionFissionNodeState({ node, onPatchNode, onBeforeRemoveRow });
   const { projects, rowData } = useActionFissionLibraryData(state);
-  const selectedProvider = selectedProviderFor(state.providerId, defaultImageProvider, imageProviders);
+  const effectiveApiType: NonNullable<typeof state.apiType> = state.providerId || state.model || state.apiType === "libtv-api"
+    ? state.apiType || "third-party-api"
+    : defaultImageApiType;
+  const selectedProvider = selectedProviderFor(state.providerId, effectiveApiType === "libtv-api" ? null : defaultImageProvider, imageProviders);
   const selectedModel = state.model && selectedProvider?.imageModels.includes(state.model) ? state.model : selectedProvider?.imageModels[0] || "";
   const isRowActive = (row: ActionFissionRow) => Boolean(row.libtvQueued || row.libtvRunning || isGenerationTargetActive?.({ type: "actionFissionRow", nodeId: node.id, rowId: row.id }));
   const bulkActions = resolveActionFissionBulkActions({
     state,
     rowData,
-    selectedProvider: state.apiType === "libtv-api" ? (libtvReady ? ({ id: "libtv-api" } as ApiProvider) : null) : selectedProvider,
-    selectedModel: state.apiType === "libtv-api" && libtvReady ? state.libtvModelName || "" : selectedModel,
+    selectedProvider: effectiveApiType === "libtv-api" ? (libtvReady ? ({ id: "libtv-api" } as ApiProvider) : null) : selectedProvider,
+    selectedModel: effectiveApiType === "libtv-api" && libtvReady ? state.libtvModelName || "" : selectedModel,
     isRowActive,
   });
   const publicReferenceCount = useActionFissionReferencePreviews(node.id).length;
@@ -148,7 +155,9 @@ export function ActionFissionNodeBody({
         state={state}
         selectedProvider={selectedProvider}
         imageProviders={imageProviders}
+        imageProviderOrderItems={imageProviderOrderItems}
         libtvReady={libtvReady}
+        effectiveApiType={effectiveApiType}
         openSelectId={openSelectId}
         onOpenSelectChange={onOpenSelectChange}
         onSetApiType={setApiType}
@@ -178,8 +187,8 @@ export function ActionFissionNodeBody({
             tagCounts={countLibraryTags(candidates, tags)}
             publicReferenceCount={publicReferenceCount}
             publicReferenceLimit={BASE_PUBLIC_REFERENCE_LIMIT}
-            selectedProvider={state.apiType === "libtv-api" ? (libtvReady ? ({ id: "libtv-api" } as ApiProvider) : null) : selectedProvider}
-            selectedModel={state.apiType === "libtv-api" && libtvReady ? state.libtvModelName || "" : selectedModel}
+            selectedProvider={effectiveApiType === "libtv-api" ? (libtvReady ? ({ id: "libtv-api" } as ApiProvider) : null) : selectedProvider}
+            selectedModel={effectiveApiType === "libtv-api" && libtvReady ? state.libtvModelName || "" : selectedModel}
             projects={projects}
             openSelectId={openSelectId}
             onOpenSelectChange={onOpenSelectChange}
@@ -210,7 +219,7 @@ export function ActionFissionNodeBody({
             ? `${t("infiniteCanvas:actionFissionRowLimit", { count: MAX_ACTION_FISSION_ROWS })} (${state.rows.length}/${MAX_ACTION_FISSION_ROWS})`
             : `${t("infiniteCanvas:actionFissionAddRow")} (${state.rows.length}/${MAX_ACTION_FISSION_ROWS})`}
         </button>
-        {state.error || (state.apiType === "libtv-api" && !libtvReady ? libtvUnavailableMessage : "") ? (
+        {state.error || (effectiveApiType === "libtv-api" && !libtvReady ? libtvUnavailableMessage : "") ? (
           <div className="ic-action-fission-node-error" role="alert">{state.error || libtvUnavailableMessage}</div>
         ) : null}
       </div>
@@ -221,6 +230,7 @@ export function ActionFissionNodeBody({
         selectedProvider={selectedProvider}
         selectedModel={selectedModel}
         libtvReady={libtvReady}
+        effectiveApiType={effectiveApiType}
         openSelectId={openSelectId}
         bulkActions={bulkActions}
         onOpenSelectChange={onOpenSelectChange}

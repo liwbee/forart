@@ -39,7 +39,15 @@ export const zhCN = {
     noTagsYet: "还没有标签。"
   },
   labels: {
+    ascending: "升序",
+    createdAt: "创建时间",
+    descending: "降序",
+    libraryViewOptions: "资源库视图选项",
+    sort: "排序",
+    sortDirection: "排序方向",
+    sortField: "排序字段",
     all: "全部",
+    cardSize: "卡片尺寸",
     editTag: "编辑标签",
     emptyTagEditor: "创建标签后可在这里编辑。",
     name: "名称",
@@ -96,7 +104,15 @@ export const enUS = {
     noTagsYet: "No tags yet."
   },
   labels: {
+    ascending: "Asc",
+    createdAt: "Created",
+    descending: "Desc",
+    libraryViewOptions: "Library view options",
+    sort: "Sort",
+    sortDirection: "Sort direction",
+    sortField: "Sort field",
     all: "All",
+    cardSize: "Card size",
     editTag: "Edit tag",
     emptyTagEditor: "Create a tag, then edit it here.",
     name: "Name",

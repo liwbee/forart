@@ -1332,18 +1332,47 @@ body {
 }
 
 .settings-api-provider-list {
+  --settings-api-card-height: 58px;
+  --settings-api-card-gap: var(--space-2);
+  --settings-api-insert-index: 0;
+  position: relative;
   display: grid;
-  gap: var(--space-2);
+  gap: var(--settings-api-card-gap);
   border-bottom: 1px solid var(--border-subtle);
   padding-bottom: var(--space-3);
+  user-select: none;
+}
+
+.settings-api-provider-list::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(
+    (var(--settings-api-insert-index) * (var(--settings-api-card-height) + var(--settings-api-card-gap)))
+    - (var(--settings-api-card-gap) / 2)
+  );
+  height: 2px;
+  border-radius: 999px;
+  background: var(--state-selected-border);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.settings-api-provider-list.has-insert::after {
+  opacity: 1;
 }
 
 .settings-api-provider-card {
+  position: relative;
+  z-index: 1;
   width: 100%;
   min-width: 0;
-  min-height: 56px;
+  height: var(--settings-api-card-height);
+  min-height: var(--settings-api-card-height);
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 18px 34px minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-2);
   border: 1px solid transparent;
@@ -1353,6 +1382,7 @@ body {
   background: transparent;
   text-align: left;
   cursor: pointer;
+  user-select: none;
 }
 
 .settings-api-provider-card:hover,
@@ -1361,10 +1391,35 @@ body {
   background: var(--state-selected-bg);
 }
 
+.settings-api-provider-card.is-dragging {
+  opacity: 0.28;
+  pointer-events: none;
+  transition: none;
+}
+
+.settings-api-provider-card--overlay {
+  position: absolute;
+  left: 0;
+  z-index: 3;
+  opacity: 0.92;
+  pointer-events: none;
+  box-shadow: var(--shadow-md);
+}
+
 .settings-api-provider-card--libtv {
-  grid-template-columns: minmax(0, 1fr);
-  justify-items: center;
-  min-height: 58px;
+  grid-template-columns: 18px minmax(0, 1fr);
+}
+
+.settings-api-provider-drag-handle {
+  width: 18px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  cursor: grab;
+}
+
+.settings-api-provider-card:active .settings-api-provider-drag-handle {
+  cursor: grabbing;
 }
 
 .settings-api-provider-logo {
@@ -1767,6 +1822,21 @@ body {
   gap: var(--space-4);
 }
 
+.settings-api-control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(140px, auto) minmax(140px, auto);
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.settings-api-control-row[data-has-request-mode="false"] {
+  grid-template-columns: minmax(0, 2.4fr) minmax(140px, auto) minmax(140px, auto);
+}
+
+.settings-api-control-button {
+  min-height: var(--input-min-height);
+}
+
 .settings-field select {
   width: 100%;
   min-height: 46px;
@@ -1849,6 +1919,18 @@ body {
   .settings-download-path-control {
     width: 100%;
     flex-basis: auto;
+  }
+
+  .settings-api-control-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-api-control-row[data-has-request-mode="false"] {
+    grid-template-columns: minmax(0, 1fr) repeat(2, minmax(140px, auto));
+  }
+
+  .settings-api-control-button {
+    width: 100%;
   }
 
   .settings-libtv-card {

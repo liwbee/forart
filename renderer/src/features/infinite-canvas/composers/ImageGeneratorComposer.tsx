@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { useTranslation } from "react-i18next";
 import { Select } from "../../../components/Select";
 import { SizePresetPicker } from "../../../components/SizePresetPicker";
-import { getModelDisplayName, type ApiProvider } from "../../settings/apiProviders";
+import { getModelDisplayName, type ApiProvider, type ApiProviderOrderItem } from "../../settings/apiProviders";
 import { clamp, WORLD_CENTER } from "../canvasGeometry";
 import type { ImageGenerationReadiness } from "../core/imageGenerationReadiness";
 import { isGenerationTaskActive } from "../generation/generationTaskRuntime";
@@ -22,6 +22,8 @@ interface ImageGeneratorComposerProps {
   selectedProvider: ApiProvider | null;
   selectedModel: string;
   imageProviders: ApiProvider[];
+  imageProviderOrderItems: ApiProviderOrderItem[];
+  defaultImageApiType: "third-party-api" | "libtv-api";
   libtvReady: boolean;
   libtvUnavailableMessage: string;
   inputPreviews: ImageGeneratorInputPreview[];
@@ -46,6 +48,8 @@ export function ImageGeneratorComposer({
   selectedProvider,
   selectedModel,
   imageProviders,
+  imageProviderOrderItems,
+  defaultImageApiType,
   libtvReady,
   libtvUnavailableMessage,
   inputPreviews,
@@ -69,7 +73,11 @@ export function ImageGeneratorComposer({
   const [libtvLoadError, setLibtvLoadError] = useState("");
 
   useEffect(() => {
-    if (!node || node.type !== "imageGenerator" || node.imageGenerationApiType !== "libtv-api") return;
+    if (!node || node.type !== "imageGenerator") return;
+    const effectiveApiType = node.imageProviderId || node.imageModel || node.imageGenerationApiType === "libtv-api"
+      ? node.imageGenerationApiType || "third-party-api"
+      : defaultImageApiType;
+    if (effectiveApiType !== "libtv-api") return;
     let canceled = false;
     setLibtvLoadError("");
     void Promise.all([listLibtvWorkspaces(), listLibtvImageModels()])
@@ -84,11 +92,13 @@ export function ImageGeneratorComposer({
     return () => {
       canceled = true;
     };
-  }, [node?.id, node?.type, node?.imageGenerationApiType]);
+  }, [defaultImageApiType, node?.id, node?.type, node?.imageGenerationApiType, node?.imageModel, node?.imageProviderId]);
 
   if (!node || node.type !== "imageGenerator") return null;
 
-  const apiType = node.imageGenerationApiType || "third-party-api";
+  const apiType = node.imageProviderId || node.imageModel || node.imageGenerationApiType === "libtv-api"
+    ? node.imageGenerationApiType || "third-party-api"
+    : defaultImageApiType;
   const isLibtvApi = apiType === "libtv-api";
   const libtvState = node.libtvImageGeneration || {};
   const selectedRule = selectedProvider && selectedModel
@@ -132,10 +142,10 @@ export function ImageGeneratorComposer({
             ? t("infiniteCanvas:imageGenerationTooManyReferenceImages", { count: generationReadiness.maxReferenceImages || 0 })
             : ""
   );
-  const apiOptions = [
-    ...imageProviders.map((provider) => ({ value: provider.id, label: provider.name || provider.id })),
-    ...(libtvReady ? [{ value: "libtv-api", label: "LibTV" }] : []),
-  ];
+  const apiOptions = imageProviderOrderItems.flatMap((item) => {
+    if (item.type === "libtv") return libtvReady ? [{ value: "libtv-api", label: "LibTV" }] : [];
+    return item.provider.imageModels.length ? [{ value: item.provider.id, label: item.provider.name || item.provider.id }] : [];
+  });
   const selectedApiValue = isLibtvApi ? "libtv-api" : selectedProvider?.id || "";
   const libtvWorkspaceOptions = (
     libtvWorkspaces.length

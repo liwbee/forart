@@ -9,6 +9,8 @@ import { createAdminContext } from "./src/admin/admin-context.mjs";
 import { createAdminRouter } from "./src/http/admin-router.mjs";
 import { createCanvasExchangeContext } from "./src/canvas-exchange/canvas-exchange-context.mjs";
 import { createCanvasExchangeRouter } from "./src/http/canvas-exchange-router.mjs";
+import { createActionFolderImportService } from "./src/library/action-folder-import-service.mjs";
+import { createActionLibraryService } from "./src/library/action-library-service.mjs";
 
 const SERVER_PORT = Number(process.env.PORT || 6980);
 const SERVER_HOST = process.env.HOST || "0.0.0.0";
@@ -79,6 +81,8 @@ let DATA_DIR = "";
 let DATABASE_PATH = path.join(DATABASE_DIR, DATABASE_FILENAME);
 let STORAGE_ROOT = "";
 let db;
+let activeActionImportRuntime = null;
+let activeActionImportService = null;
 const SERVER_STARTED_AT = new Date();
 
 const CORS_HEADERS = {
@@ -442,6 +446,24 @@ function ensureStorageConfigured(res) {
   if (db) return true;
   sendJson(res, 409, { detail: "Asset library storage is unavailable. Check FORART_LIBRARY_DIR or default library directory permissions.", code: "MODEL_LIBRARY_STORAGE_NOT_CONFIGURED" });
   return false;
+}
+
+function actionImportRuntime() {
+  return {
+    db,
+    labels: LIBRARY_LABELS,
+    storageRoot: STORAGE_ROOT,
+  };
+}
+
+function getActionImportService() {
+  if (activeActionImportService && activeActionImportRuntime?.db === db && activeActionImportRuntime?.storageRoot === STORAGE_ROOT) {
+    return activeActionImportService;
+  }
+  activeActionImportRuntime = actionImportRuntime();
+  const actionService = createActionLibraryService(activeActionImportRuntime);
+  activeActionImportService = createActionFolderImportService(activeActionImportRuntime, actionService);
+  return activeActionImportService;
 }
 
 function assetUrl(assetId) {
@@ -943,6 +965,28 @@ function nextActionName(projectId, projectName) {
     if (match) max = Math.max(max, Number.parseInt(match[1], 10) || 0);
   }
   return `${prefix}${String(max + 1).padStart(3, "0")}`;
+}
+
+function createActionFromFile(projectId, payload = {}) {
+  const project = loadActionProject(projectId);
+  if (!project) return null;
+  const content = Buffer.isBuffer(payload.buffer) ? payload.buffer : Buffer.from(payload.buffer || "");
+  if (!content.length) throw new Error("Invalid image data");
+  const timestamp = nowIso();
+  const id = newId("action");
+  const name = validateFileNamePart(payload.name || DEFAULT_ACTION_NAME, "action name");
+  if (actionNameExists(projectId, name)) throw new Error("Action name must be unique");
+  const relDir = path.relative(STORAGE_ROOT, actionProjectDirForName(project.name));
+  return writeAssetInTransaction(content, String(payload.mime_type || "image/png"), payload.filename || "image", {
+    source: "action-library",
+    subdir: relDir,
+    filenameStem: name,
+  }, (asset) => {
+    db.prepare("INSERT INTO action_entries (id, project_id, name, asset_id, prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(id, projectId, name, asset.id, String(payload.prompt || "").slice(0, 4000), timestamp, timestamp);
+    db.prepare("UPDATE action_projects SET cover_asset_id = COALESCE(cover_asset_id, ?), updated_at = ? WHERE id = ?").run(asset.id, timestamp, projectId);
+    return actionWithAssetAndTags(loadAction(id));
+  });
 }
 
 function nextCode(projectId, projectName) {
@@ -1455,6 +1499,19 @@ function handleModelLibraryApi(req, res, url) {
         .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
     }
+  }
+
+  const actionImportEntriesMatch = pathname.match(/^\/api\/action-projects\/([^/]+)\/actions\/import-entries$/);
+  if (actionImportEntriesMatch && method === "POST") {
+    parseJsonBody(req)
+      .then((payload) => {
+        const projectId = decodeURIComponent(actionImportEntriesMatch[1]);
+        const result = getActionImportService().importActionEntries(projectId, payload || {});
+        if (!result) return sendJson(res, 404, { detail: "Action project not found" });
+        sendJson(res, 200, result);
+      })
+      .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
+    return true;
   }
 
   const actionMatch = pathname.match(/^\/api\/actions\/([^/]+)(?:\/image\/upload)?$/);

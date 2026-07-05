@@ -8,7 +8,8 @@ import { LibraryTagChoiceButton } from "../library-tags";
 import { ImageViewer } from "../../lib/ImageViewer";
 import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
 import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
-import { sortByName } from "../../lib/sortByName";
+import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
+import { LibraryImageDropZone } from "../resource-library/LibraryImageDropZone";
 import {
   createOutfit,
   createOutfitProject,
@@ -482,7 +483,7 @@ function OutfitCard({
       </div>
       {outfit.tags.length ? (
         <div className="outfit-card__tags" aria-label={t("outfitLibrary:outfitTags")}>
-          {outfit.tags.slice(0, 3).map((tag) => (
+          {outfit.tags.map((tag) => (
             <span key={tag}>{tag}</span>
           ))}
         </div>
@@ -587,21 +588,36 @@ function OutfitGrid({
   onDelete: (outfitId: string, isConfirming: boolean) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
 }) {
+  const cardSize = useLibraryCardSize("outfit");
+  const librarySort = useLibrarySort();
   return (
-    <div className="outfit-grid">
-      <AddOutfitCard disabled={creating} onCreate={onCreate} />
-      {outfits.map((outfit) => (
-        <OutfitCard
-          key={outfit.id}
-          outfit={outfit}
-          tags={tags}
-          deleteConfirmOutfitId={deleteConfirmOutfitId}
-          isDeleting={deletingOutfitId === outfit.id}
-          onToggleTag={onToggleTag}
-          onDelete={onDelete}
-          onImageActionStatus={onImageActionStatus}
-        />
-      ))}
+    <div className="library-card-size-scope">
+      <div className="outfit-grid" style={cardSize.gridStyle}>
+        <AddOutfitCard disabled={creating} onCreate={onCreate} />
+        {outfits.map((outfit) => (
+          <OutfitCard
+            key={outfit.id}
+            outfit={outfit}
+            tags={tags}
+            deleteConfirmOutfitId={deleteConfirmOutfitId}
+            isDeleting={deletingOutfitId === outfit.id}
+            onToggleTag={onToggleTag}
+            onDelete={onDelete}
+            onImageActionStatus={onImageActionStatus}
+          />
+        ))}
+      </div>
+      <LibraryCardToolbar
+        activePresetId={cardSize.activePresetId}
+        activePresetIndex={cardSize.activePresetIndex}
+        activePresetLabel={cardSize.activePresetLabel}
+        presets={cardSize.presets}
+        sortField={librarySort.sortField}
+        sortDirection={librarySort.sortDirection}
+        onSelectPreset={cardSize.setPresetId}
+        onSelectSortField={librarySort.setSortField}
+        onSelectSortDirection={librarySort.setSortDirection}
+      />
     </div>
   );
 }
@@ -1030,7 +1046,14 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     deleteTagMutation.mutate(tagId);
   }
 
-  const outfits = useMemo(() => sortByName(outfitsQuery.data?.outfits || [], (outfit) => outfit.name), [outfitsQuery.data?.outfits]);
+  const librarySort = useLibrarySort();
+  const outfits = useMemo(
+    () => sortLibraryItems(outfitsQuery.data?.outfits || [], {
+      field: librarySort.sortField,
+      direction: librarySort.sortDirection,
+    }),
+    [librarySort.sortDirection, librarySort.sortField, outfitsQuery.data?.outfits],
+  );
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
   const filteredOutfits = useMemo(() => {
     if (!normalizedSearchQuery) return outfits;
@@ -1109,17 +1132,23 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
             {!storageConfigured ? <div className="model-lib-empty">{t("outfitLibrary:storageUnavailable")}</div> : null}
             {storageConfigured && !projectsQuery.isLoading && !projects.length ? <div className="model-lib-empty">{t("common:empty.noProjects")}</div> : null}
             {activeProject ? (
-              <OutfitGrid
-                outfits={filteredOutfits}
-                tags={tags}
-                creating={createOutfitMutation.isPending}
-                deletingOutfitId={deleteOutfitMutation.isPending ? deleteOutfitMutation.variables || "" : ""}
-                deleteConfirmOutfitId={deleteConfirmOutfitId}
-                onCreate={(file) => createOutfitMutation.mutate(file)}
-                onToggleTag={handleToggleOutfitTag}
-                onDelete={handleOutfitDelete}
-                onImageActionStatus={showImageActionToast}
-              />
+              <LibraryImageDropZone
+                disabled={!storageConfigured || createOutfitMutation.isPending}
+                label={t("outfitLibrary:dropToAddOutfit")}
+                onDropImage={(file) => createOutfitMutation.mutate(file)}
+              >
+                <OutfitGrid
+                  outfits={filteredOutfits}
+                  tags={tags}
+                  creating={createOutfitMutation.isPending}
+                  deletingOutfitId={deleteOutfitMutation.isPending ? deleteOutfitMutation.variables || "" : ""}
+                  deleteConfirmOutfitId={deleteConfirmOutfitId}
+                  onCreate={(file) => createOutfitMutation.mutate(file)}
+                  onToggleTag={handleToggleOutfitTag}
+                  onDelete={handleOutfitDelete}
+                  onImageActionStatus={showImageActionToast}
+                />
+              </LibraryImageDropZone>
             ) : null}
           </div>
         </main>

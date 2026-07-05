@@ -3,7 +3,7 @@ import { PointerEvent, WheelEvent, useCallback, useEffect, useMemo, useRef, useS
 import { useTranslation } from "react-i18next";
 import { ImageViewer } from "../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../lib/libraryImageActions";
-import { API_PROVIDER_CHANGED_EVENT, getModelDisplayName, loadApiSettings, readApiProviders, type ApiProvider } from "../settings/apiProviders";
+import { API_PROVIDER_CHANGED_EVENT, getModelDisplayName, loadApiSettings, orderedApiProviderItems, orderedApiProviders, readApiProviders, type ApiProvider, type ApiProviderOrderItem } from "../settings/apiProviders";
 import { CanvasHomePanel } from "./CanvasHomePanel";
 import { CanvasTabsBar } from "./CanvasTabsBar";
 import { ACTION_FISSION_NODE_MIN_HEIGHT, ACTION_FISSION_NODE_MIN_WIDTH } from "./constants";
@@ -323,6 +323,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   const [isZoomMenuOpen, setIsZoomMenuOpen] = useState(false);
   const [zoomInput, setZoomInput] = useState(() => String(Math.round(initialRef.current.viewport.scale * 100)));
   const [apiProviders, setApiProviders] = useState<ApiProvider[]>(readApiProviders);
+  const [apiProviderOrder, setApiProviderOrder] = useState<string[]>([]);
   const defaultImageProviderId = "";
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [draggedInputConnectionId, setDraggedInputConnectionId] = useState("");
@@ -440,7 +441,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     width: selectedNodesBounds.width + GROUP_PADDING * 2,
     height: selectedNodesBounds.height + GROUP_PADDING * 2,
   }) : null, [selectedNodesBounds]);
-  const imageProviders = useMemo(() => apiProviders.filter((provider) => provider.protocol !== "gemini" && provider.imageModels.length), [apiProviders]);
+  const imageProviders = useMemo(() => orderedApiProviders(apiProviders.filter((provider) => provider.imageModels.length), apiProviderOrder), [apiProviderOrder, apiProviders]);
+  const imageProviderOrderItems = useMemo<ApiProviderOrderItem[]>(() => orderedApiProviderItems(imageProviders, apiProviderOrder), [apiProviderOrder, imageProviders]);
   const chatProviders = useMemo(() => apiProviders.filter((provider) => provider.chatModels.length), [apiProviders]);
   const libtvAvailability = useLibtvAvailability();
   const libtvUnavailableMessage = libtvAvailability.available
@@ -472,7 +474,11 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
       : { x: window.innerWidth / 2, y: window.innerHeight / 2 };
   }, []);
 
-  const defaultImageProvider = useMemo(() => imageProviders[0] || null, [imageProviders]);
+  const defaultImageOrderItem = useMemo(() => {
+    return imageProviderOrderItems.find((item) => item.type === "provider" || libtvAvailability.ready) || null;
+  }, [imageProviderOrderItems, libtvAvailability.ready]);
+  const defaultImageProvider = defaultImageOrderItem?.type === "provider" ? defaultImageOrderItem.provider : imageProviders[0] || null;
+  const defaultImageApiType = defaultImageOrderItem?.type === "libtv" ? "libtv-api" : "third-party-api";
   const defaultChatProvider = useMemo(() => chatProviders[0] || apiProviders.find((provider) => provider.chatModels.length) || null, [apiProviders, chatProviders]);
   const minimap = useMemo(() => {
     const viewportWorld = {
@@ -721,6 +727,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     viewport,
     apiProviders,
     defaultImageProviderId,
+    defaultImageApiType,
     imageProviders,
     libtvReady: libtvAvailability.ready,
     libtvUnavailableMessage,
@@ -757,10 +764,14 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
 
   useEffect(() => {
     const syncApiProviders = () => {
-      setApiProviders(readApiProviders());
+      void loadApiSettings().then((settings) => {
+        setApiProviders(settings.providers);
+        setApiProviderOrder(settings.providerOrder || []);
+      });
     };
     void loadApiSettings().then((settings) => {
       setApiProviders(settings.providers);
+      setApiProviderOrder(settings.providerOrder || []);
     });
     window.addEventListener("storage", syncApiProviders);
     window.addEventListener("focus", syncApiProviders);
@@ -1952,7 +1963,9 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     commitPrompt: commitPromptStable,
     patchPrompt: patchPromptStable,
     imageProviders,
+    imageProviderOrderItems,
     defaultImageProvider,
+    defaultImageApiType,
     libtvReady: libtvAvailability.ready,
     libtvUnavailableMessage,
     draggedInputConnectionId,
@@ -1988,6 +2001,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     downloadStatus,
     editingPromptChangeStable,
     defaultImageProvider,
+    defaultImageApiType,
     draggedInputConnectionId,
     getGenerationTaskForTargetStable,
     patchNode,
@@ -1996,6 +2010,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     previewActionFissionResultStable,
     previewActionFissionActionStable,
     imageProviders,
+    imageProviderOrderItems,
     isGenerationTargetActiveStable,
     libtvAvailability.ready,
     libtvUnavailableMessage,
@@ -2110,6 +2125,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         selectedProvider={selectedProvider}
         selectedModel={selectedModel}
         imageProviders={imageProviders}
+        imageProviderOrderItems={imageProviderOrderItems}
+        defaultImageApiType={defaultImageApiType}
         libtvReady={libtvAvailability.ready}
         libtvUnavailableMessage={libtvUnavailableMessage}
         inputPreviews={inputPreviews}
@@ -2121,12 +2138,18 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
         onPatchNode={patchNode}
         onRun={(nodeId) => {
           const target = nodeMap.get(nodeId);
-          if (target?.imageGenerationApiType === "libtv-api") runLibtvImageGeneratorStable(nodeId);
+          const targetApiType = target?.imageProviderId || target?.imageModel || target?.imageGenerationApiType === "libtv-api"
+            ? target?.imageGenerationApiType || "third-party-api"
+            : defaultImageApiType;
+          if (targetApiType === "libtv-api") runLibtvImageGeneratorStable(nodeId);
           else runImageComposer(nodeId);
         }}
         onStop={(nodeId) => {
           const target = nodeMap.get(nodeId);
-          if (target?.imageGenerationApiType === "libtv-api") stopLibtvImageGeneratorStable(nodeId);
+          const targetApiType = target?.imageProviderId || target?.imageModel || target?.imageGenerationApiType === "libtv-api"
+            ? target?.imageGenerationApiType || "third-party-api"
+            : defaultImageApiType;
+          if (targetApiType === "libtv-api") stopLibtvImageGeneratorStable(nodeId);
           else stopImageComposer(nodeId);
         }}
         onRemoveInput={removeImageGeneratorInput}

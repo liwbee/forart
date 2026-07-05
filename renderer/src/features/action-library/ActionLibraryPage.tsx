@@ -1,13 +1,14 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, ChevronRight, Copy, Download, ImagePlus, MoreHorizontal, Pencil, Plus, Tags, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronRight, Copy, Download, FolderPlus, ImagePlus, MoreHorizontal, Pencil, Plus, Tags, Trash2 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { CollapsibleTagFilterRow } from "../library-tags";
 import { LibraryTagChoiceButton } from "../library-tags";
 import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
 import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
-import { sortByName } from "../../lib/sortByName";
+import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
+import { LibraryImageDropZone } from "../resource-library/LibraryImageDropZone";
 import { normalizeTags, toggleTag } from "../model-library/tagUtils";
 import { EMPTY_LIBRARY_TAG_FILTER, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
 import {
@@ -26,6 +27,7 @@ import {
   updateActionProject,
   updateActionTag,
 } from "./api";
+import { ActionFolderImportDialog } from "./ActionFolderImportDialog";
 import { useActionLibraryStore } from "./actionLibraryStore";
 import { ActionEntry, ActionProject, ActionTag, AssetUploadPayload } from "./types";
 
@@ -261,6 +263,8 @@ function ActionToolbar({
   onTagExclude,
   onTagClear,
   onOpenTagManager,
+  onOpenBulkImport,
+  bulkImportDisabled,
 }: {
   tags: ActionTag[];
   tagFilter: LibraryTagFilter;
@@ -269,12 +273,18 @@ function ActionToolbar({
   onTagExclude: (tagId: string) => void;
   onTagClear: () => void;
   onOpenTagManager: () => void;
+  onOpenBulkImport: () => void;
+  bulkImportDisabled: boolean;
 }) {
   const { t } = useTranslation();
   const includeTagSet = useMemo(() => new Set(tagFilter.includeTagIds), [tagFilter.includeTagIds]);
   const excludeTagSet = useMemo(() => new Set(tagFilter.excludeTagIds), [tagFilter.excludeTagIds]);
   return (
     <div className="model-toolbar outfit-toolbar">
+      <button className="model-lib-button action-bulk-import-button" type="button" disabled={bulkImportDisabled} onClick={onOpenBulkImport}>
+        <FolderPlus size={16} aria-hidden="true" />
+        <span>{t("actionLibrary:bulkImportButton")}</span>
+      </button>
       <div className="library-tag-section">
         <span className="library-filter-label">{t("common:labels.tags")}</span>
         <button className="model-tag-add-button" type="button" aria-label={t("common:labels.manageTags")} title={t("common:labels.manageTags")} onClick={onOpenTagManager}>
@@ -503,7 +513,7 @@ function ActionCard({
           </div>
           {action.tags.length ? (
             <div className="outfit-card__tags" aria-label={t("actionLibrary:actionTags")}>
-              {action.tags.slice(0, 3).map((tag) => (
+              {action.tags.map((tag) => (
                 <span key={tag}>{tag}</span>
               ))}
             </div>
@@ -665,24 +675,39 @@ function ActionGrid({
   renameErrors: Record<string, string>;
   onClearRenameError: (actionId: string) => void;
 }) {
+  const cardSize = useLibraryCardSize("action");
+  const librarySort = useLibrarySort();
   return (
-    <div className="outfit-grid">
-      <AddActionCard disabled={creating} onCreate={onCreate} />
-      {actions.map((action) => (
-        <ActionCard
-          key={action.id}
-          action={action}
-          tags={tags}
-          deleteConfirmActionId={deleteConfirmActionId}
-          isDeleting={deletingActionId === action.id}
-          onToggleTag={onToggleTag}
-          onUpdateDetails={onUpdateDetails}
-          onDelete={onDelete}
-          onImageActionStatus={onImageActionStatus}
-          renameError={renameErrors[action.id] || ""}
-          onClearRenameError={onClearRenameError}
-        />
-      ))}
+    <div className="library-card-size-scope">
+      <div className="outfit-grid" style={cardSize.gridStyle}>
+        <AddActionCard disabled={creating} onCreate={onCreate} />
+        {actions.map((action) => (
+          <ActionCard
+            key={action.id}
+            action={action}
+            tags={tags}
+            deleteConfirmActionId={deleteConfirmActionId}
+            isDeleting={deletingActionId === action.id}
+            onToggleTag={onToggleTag}
+            onUpdateDetails={onUpdateDetails}
+            onDelete={onDelete}
+            onImageActionStatus={onImageActionStatus}
+            renameError={renameErrors[action.id] || ""}
+            onClearRenameError={onClearRenameError}
+          />
+        ))}
+      </div>
+      <LibraryCardToolbar
+        activePresetId={cardSize.activePresetId}
+        activePresetIndex={cardSize.activePresetIndex}
+        activePresetLabel={cardSize.activePresetLabel}
+        presets={cardSize.presets}
+        sortField={librarySort.sortField}
+        sortDirection={librarySort.sortDirection}
+        onSelectPreset={cardSize.setPresetId}
+        onSelectSortField={librarySort.setSortField}
+        onSelectSortDirection={librarySort.setSortDirection}
+      />
     </div>
   );
 }
@@ -882,6 +907,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const queryClient = useQueryClient();
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState("");
   const [deleteConfirmProjectId, setDeleteConfirmProjectId] = useState("");
   const [deleteConfirmActionId, setDeleteConfirmActionId] = useState("");
@@ -1165,7 +1191,21 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     deleteTagMutation.mutate(tagId);
   }
 
-  const actions = useMemo(() => sortByName(actionsQuery.data?.actions || [], (action) => action.name), [actionsQuery.data?.actions]);
+  async function refreshActionLibraryAfterBulkImport() {
+    if (hasLibraryTagFilter(activeTagFilter)) setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER);
+    await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
+    await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.projects });
+    await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
+  }
+
+  const librarySort = useLibrarySort();
+  const actions = useMemo(
+    () => sortLibraryItems(actionsQuery.data?.actions || [], {
+      field: librarySort.sortField,
+      direction: librarySort.sortDirection,
+    }),
+    [actionsQuery.data?.actions, librarySort.sortDirection, librarySort.sortField],
+  );
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
   const filteredActions = useMemo(() => {
     if (!normalizedSearchQuery) return actions;
@@ -1228,6 +1268,8 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
               onTagExclude={handleExcludeTagFilter}
               onTagClear={() => setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER)}
               onOpenTagManager={() => setTagManagerOpen(true)}
+              onOpenBulkImport={() => setBulkImportOpen(true)}
+              bulkImportDisabled={!storageConfigured || !activeProjectId}
             />
           </div>
 
@@ -1237,20 +1279,26 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
             {!storageConfigured ? <div className="model-lib-empty">{t("actionLibrary:storageUnavailable")}</div> : null}
             {storageConfigured && !projectsQuery.isLoading && !projects.length ? <div className="model-lib-empty">{t("common:empty.noProjects")}</div> : null}
             {activeProject ? (
-              <ActionGrid
-                actions={filteredActions}
-                tags={tags}
-                creating={createActionMutation.isPending}
-                deletingActionId={deleteActionMutation.isPending ? deleteActionMutation.variables || "" : ""}
-                deleteConfirmActionId={deleteConfirmActionId}
-                onCreate={(file) => createActionMutation.mutate(file)}
-                onToggleTag={handleToggleActionTag}
-                onUpdateDetails={handleUpdateActionDetails}
-                onDelete={handleActionDelete}
-                onImageActionStatus={showImageActionToast}
-                renameErrors={actionRenameErrors}
-                onClearRenameError={clearActionRenameError}
-              />
+              <LibraryImageDropZone
+                disabled={!storageConfigured || createActionMutation.isPending}
+                label={t("actionLibrary:dropToAddAction")}
+                onDropImage={(file) => createActionMutation.mutate(file)}
+              >
+                <ActionGrid
+                  actions={filteredActions}
+                  tags={tags}
+                  creating={createActionMutation.isPending}
+                  deletingActionId={deleteActionMutation.isPending ? deleteActionMutation.variables || "" : ""}
+                  deleteConfirmActionId={deleteConfirmActionId}
+                  onCreate={(file) => createActionMutation.mutate(file)}
+                  onToggleTag={handleToggleActionTag}
+                  onUpdateDetails={handleUpdateActionDetails}
+                  onDelete={handleActionDelete}
+                  onImageActionStatus={showImageActionToast}
+                  renameErrors={actionRenameErrors}
+                  onClearRenameError={clearActionRenameError}
+                />
+              </LibraryImageDropZone>
             ) : null}
           </div>
         </main>
@@ -1271,6 +1319,14 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         onCreateTag={handleCreateTag}
         onRenameTag={handleRenameTag}
         onDeleteTag={handleDeleteTag}
+      />
+      <ActionFolderImportDialog
+        isOpen={bulkImportOpen}
+        projectId={activeProjectId}
+        projectName={activeProject?.name || ""}
+        existingActionNames={(allActionsQuery.data?.actions || actions).map((action) => action.name)}
+        onClose={() => setBulkImportOpen(false)}
+        onImported={refreshActionLibraryAfterBulkImport}
       />
       <LibraryImageActionToast toast={imageActionToast} />
     </section>

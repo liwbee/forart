@@ -269,6 +269,10 @@
 }
 
 @media (max-width: 560px) {
+  .settings-api-control-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .left-panel {
     position: sticky;
     height: 100dvh;
@@ -299,16 +303,6 @@
   .model-toolbar-search-slot {
     width: 100%;
     margin-left: 0;
-  }
-
-  .model-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-3);
-  }
-
-  .outfit-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-3);
   }
 
   .outfit-card__menu-button {

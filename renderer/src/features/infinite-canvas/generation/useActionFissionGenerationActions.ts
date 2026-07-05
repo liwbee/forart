@@ -22,6 +22,7 @@ interface UseActionFissionGenerationActionsOptions {
   connections: CanvasConnection[];
   apiProviders: ApiProvider[];
   defaultImageProviderId: string;
+  defaultImageApiType: "third-party-api" | "libtv-api";
   imageProviders: ApiProvider[];
   libtvReady: boolean;
   libtvUnavailableMessage: string;
@@ -42,7 +43,7 @@ function isAbortError(error: unknown) {
 }
 
 function supportsStandardImageGeneration(provider: ApiProvider) {
-  return provider.protocol !== "gemini";
+  return provider.protocol === "openai" || provider.protocol === "compatible" || provider.protocol === "gemini";
 }
 
 function taskRuntimeKey(task: CanvasGenerationTask) {
@@ -86,6 +87,7 @@ export function useActionFissionGenerationActions({
   connections,
   apiProviders,
   defaultImageProviderId,
+  defaultImageApiType,
   imageProviders,
   libtvReady,
   libtvUnavailableMessage,
@@ -123,6 +125,12 @@ export function useActionFissionGenerationActions({
       || imageProviders[0]
       || null;
   }, [apiProviders, defaultImageProviderId, imageProviders]);
+
+  const getApiTypeForState = useCallback((state: ActionFissionState) => {
+    return state.providerId || state.model || state.apiType === "libtv-api"
+      ? state.apiType || "third-party-api"
+      : defaultImageApiType;
+  }, [defaultImageApiType]);
 
   const runLibtvActionFissionRows = useCallback(async (
     nodeId: string,
@@ -450,7 +458,7 @@ export function useActionFissionGenerationActions({
       return;
     }
     const state = normalizeActionFissionState(node.actionFission);
-    if (state.apiType === "libtv-api") {
+    if (getApiTypeForState(state) === "libtv-api") {
       await runLibtvActionFissionRows(nodeId, [{ rowId, actions, tags }], preselectedAction ? new Map([[rowId, preselectedAction]]) : undefined);
       return;
     }
@@ -562,7 +570,7 @@ export function useActionFissionGenerationActions({
       if (upstreamTaskKey) activeTaskKeysRef.current.delete(upstreamTaskKey);
       if (abortControllersRef.current[key] === abortController) delete abortControllersRef.current[key];
     }
-  }, [activeCanvasId, connections, getProviderForNode, nodeMap, nodes, patchNode, runLibtvActionFissionRows, setNodes, t, writebackGenerationTask]);
+  }, [activeCanvasId, connections, getApiTypeForState, getProviderForNode, nodeMap, nodes, patchNode, runLibtvActionFissionRows, setNodes, t, writebackGenerationTask]);
 
   const runAllActionFissionRows = useCallback(async (nodeId: string, rowsData: Array<{ rowId: string; actions: ActionEntry[]; tags: ActionTag[] }>) => {
     if (!rowsData.length) return;
@@ -588,14 +596,14 @@ export function useActionFissionGenerationActions({
       plannedRows[rowIndex] = { ...row, ...actionPatchFromEntry(selection.action) };
       return true;
     });
-    if (state.apiType === "libtv-api") {
+    if (getApiTypeForState(state) === "libtv-api") {
       await runLibtvActionFissionRows(nodeId, runnableRowsData, preselectedActions);
       return;
     }
     await Promise.allSettled(runnableRowsData.map(async (rowData) => {
       await runActionFissionRow(nodeId, rowData.rowId, rowData.actions, rowData.tags, preselectedActions.get(rowData.rowId));
     }));
-  }, [nodeMap, runActionFissionRow, runLibtvActionFissionRows, setNodes, t]);
+  }, [getApiTypeForState, nodeMap, runActionFissionRow, runLibtvActionFissionRows, setNodes, t]);
 
   const resumeActionFissionTask = useCallback(async (task: CanvasGenerationTask) => {
     if (task.target?.type !== "actionFissionRow" || !isGenerationTaskActive(task)) return;

@@ -8,7 +8,7 @@ export interface ForartAppConfig {
   language: "zh-CN" | "en-US";
 }
 
-export type ForartApiProviderProtocol = "openai" | "async" | "gemini";
+export type ForartApiProviderProtocol = "openai" | "compatible" | "gemini";
 
 export interface ForartApiProviderConfig {
   id: string;
@@ -18,6 +18,9 @@ export interface ForartApiProviderConfig {
   accessKey?: string;
   secretKey?: string;
   protocol: ForartApiProviderProtocol;
+  imageRequestMode?: "openai" | "openai-json";
+  imageGenerationEndpoint?: string;
+  imageEditEndpoint?: string;
   imageModels: string[];
   chatModels: string[];
   videoModels: string[];
@@ -34,6 +37,7 @@ export interface ForartApiProviderConfig {
 export interface ForartApiSettingsConfig {
   providers: ForartApiProviderConfig[];
   defaultImageProviderId: string;
+  providerOrder?: string[];
 }
 
 export interface ForartImageReviewSettings {

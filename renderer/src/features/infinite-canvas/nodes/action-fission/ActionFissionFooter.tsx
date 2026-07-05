@@ -19,6 +19,7 @@ interface ActionFissionFooterProps {
   selectedProvider: ApiProvider | null;
   selectedModel: string;
   libtvReady: boolean;
+  effectiveApiType: NonNullable<ActionFissionState["apiType"]>;
   openSelectId: string;
   bulkActions: ActionFissionBulkActions;
   onOpenSelectChange: (selectId: string) => void;
@@ -42,6 +43,7 @@ export function ActionFissionFooter({
   selectedProvider,
   selectedModel,
   libtvReady,
+  effectiveApiType,
   openSelectId,
   bulkActions,
   onOpenSelectChange,
@@ -82,7 +84,7 @@ export function ActionFissionFooter({
   }, []);
 
   useEffect(() => {
-    if (state.apiType !== "libtv-api" || !libtvReady) return;
+    if (effectiveApiType !== "libtv-api" || !libtvReady) return;
     let canceled = false;
     void loadLibtvModels().then((models) => {
       if (canceled) return;
@@ -97,7 +99,7 @@ export function ActionFissionFooter({
     return () => {
       canceled = true;
     };
-  }, [loadLibtvModels, state.apiType]);
+  }, [effectiveApiType, libtvReady, loadLibtvModels]);
 
   const renderNodeSelect = (name: string, ariaLabel: string, value: string, options: Array<{ value: string; label: string; hint?: string }>, onChange: (value: string) => void, disabled = false) => {
     const id = selectId(nodeId, name);
@@ -110,7 +112,7 @@ export function ActionFissionFooter({
         open={openSelectId === id && !disabled}
         onOpenChange={(open) => {
           onOpenSelectChange(open ? id : "");
-          if (open && name === "model" && state.apiType === "libtv-api" && libtvReady) void loadLibtvModels();
+          if (open && name === "model" && effectiveApiType === "libtv-api" && libtvReady) void loadLibtvModels();
         }}
         onChange={onChange}
         menuPlacement="top"
@@ -119,7 +121,7 @@ export function ActionFissionFooter({
     );
   };
   const sizePanelId = selectId(nodeId, "size");
-  const isLibtvApi = state.apiType === "libtv-api" && libtvReady;
+  const isLibtvApi = effectiveApiType === "libtv-api" && libtvReady;
   const modelValue = isLibtvApi ? state.libtvModelName || "" : selectedModel;
   const selectedRule = selectedProvider && selectedModel
     ? getImageModelRule(selectedProvider.modelRules.image[selectedModel] || detectImageModelRuleId(selectedModel))

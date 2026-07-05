@@ -29,6 +29,7 @@ let runtimeModulePromise = null;
 let modelLibraryModulePromise = null;
 let outfitLibraryModulePromise = null;
 let actionLibraryModulePromise = null;
+let actionFolderImportModulePromise = null;
 let activeRuntime = null;
 let activeRuntimeKey = '';
 let activeModelService = null;
@@ -37,6 +38,9 @@ let activeOutfitService = null;
 let activeOutfitServiceKey = '';
 let activeActionService = null;
 let activeActionServiceKey = '';
+let activeActionFolderImportService = null;
+let activeActionFolderImportServiceKey = '';
+let activeActionImportPreview = null;
 
 function libraryRuntimeModule() {
   if (!runtimeModulePromise) {
@@ -66,6 +70,13 @@ function actionLibraryModule() {
   return actionLibraryModulePromise;
 }
 
+function actionFolderImportModule() {
+  if (!actionFolderImportModulePromise) {
+    actionFolderImportModulePromise = import('../../../server/src/library/action-folder-import-service.mjs');
+  }
+  return actionFolderImportModulePromise;
+}
+
 async function getLibraryRuntime({ configStore, app, dataRoot }) {
   const config = configStore.load();
   const localLibraryPath = String(config?.localLibraryPath || '').trim();
@@ -83,6 +94,9 @@ async function getLibraryRuntime({ configStore, app, dataRoot }) {
   activeOutfitServiceKey = '';
   activeActionService = null;
   activeActionServiceKey = '';
+  activeActionFolderImportService = null;
+  activeActionFolderImportServiceKey = '';
+  activeActionImportPreview = null;
   const { createLibraryRuntime } = await libraryRuntimeModule();
   activeRuntime = createLibraryRuntime({
     dataDir: localLibraryPath,
@@ -120,6 +134,36 @@ async function getActionLibraryService(runtime) {
   activeActionService = createActionLibraryService(runtime, { localAssetUrl: localLibraryAssetUrl });
   activeActionServiceKey = activeRuntimeKey;
   return activeActionService;
+}
+
+async function getActionFolderImportService(runtime) {
+  if (activeActionFolderImportService && activeActionFolderImportServiceKey === activeRuntimeKey) return activeActionFolderImportService;
+  const { createActionFolderImportService } = await actionFolderImportModule();
+  const actionService = await getActionLibraryService(runtime);
+  activeActionFolderImportService = createActionFolderImportService(runtime, actionService);
+  activeActionFolderImportServiceKey = activeRuntimeKey;
+  return activeActionFolderImportService;
+}
+
+function registerActionImportPreview(preview) {
+  if (!preview) return null;
+  const rows = new Map();
+  for (const row of preview?.rows || []) {
+    if (row?.id && row.image_path) rows.set(String(row.id), row.image_path);
+  }
+  activeActionImportPreview = {
+    id: String(preview?.preview_id || ''),
+    rows,
+  };
+  return {
+    ...preview,
+    rows: (preview?.rows || []).map((row) => ({
+      ...row,
+      thumbnail_url: row.image_path && preview?.preview_id
+        ? `forart-asset://action-import-preview/${encodeURIComponent(preview.preview_id)}/${encodeURIComponent(row.id)}`
+        : '',
+    })),
+  };
 }
 
 function success(body, status = 200) {
@@ -263,6 +307,23 @@ async function dispatchActionLibraryRoute({ method, url, body, runtime }) {
       if (method === 'POST') return success(service.createProject(body || {}));
     }
 
+    const importEntriesMatch = pathname.match(/^\/api\/action-projects\/([^/]+)\/actions\/import-entries$/);
+    if (importEntriesMatch && method === 'POST') {
+      const projectId = decodeURIComponent(importEntriesMatch[1]);
+      const importService = await getActionFolderImportService(runtime);
+      return notFoundIfNull(importService.importActionEntries(projectId, body || {}), 'Action project not found');
+    }
+
+    const importMatch = pathname.match(/^\/api\/action-projects\/([^/]+)\/actions\/import-folder(?:\/(preview))?$/);
+    if (importMatch && method === 'POST') {
+      const projectId = decodeURIComponent(importMatch[1]);
+      const importService = await getActionFolderImportService(runtime);
+      if (importMatch[2] === 'preview') {
+        return notFoundIfNull(registerActionImportPreview(importService.previewActionFolderImport(projectId, body || {})), 'Action project not found');
+      }
+      return notFoundIfNull(importService.importActionFolder(projectId, body || {}), 'Action project not found');
+    }
+
     const projectMatch = pathname.match(/^\/api\/action-projects\/([^/]+)(?:\/(cover\/upload|actions))?$/);
     if (projectMatch) {
       const projectId = decodeURIComponent(projectMatch[1]);
@@ -403,6 +464,22 @@ function registerLocalApiIpc({ ipcMain, configStore, app, dataRoot }) {
       if (!asset?.path) return '';
       const target = nodePath.isAbsolute(asset.path) ? asset.path : nodePath.join(runtime.storageRoot, asset.path);
       if (!isInside(runtime.storageRoot, target) || !fs.existsSync(target)) return '';
+      return target;
+    },
+    resolveActionImportPreviewUrl(source) {
+      let parsed;
+      try {
+        parsed = new URL(String(source || ''));
+      } catch {
+        return '';
+      }
+      if (parsed.protocol !== 'forart-asset:' || parsed.host !== 'action-import-preview') return '';
+      const parts = parsed.pathname.split('/').filter(Boolean).map((part) => decodeURIComponent(part));
+      const previewId = parts[0] || '';
+      const rowId = parts[1] || '';
+      if (!previewId || !rowId || previewId !== activeActionImportPreview?.id) return '';
+      const target = activeActionImportPreview.rows.get(rowId) || '';
+      if (!target || !fs.existsSync(target)) return '';
       return target;
     },
   };

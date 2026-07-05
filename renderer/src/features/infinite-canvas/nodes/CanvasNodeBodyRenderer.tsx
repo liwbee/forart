@@ -1,5 +1,5 @@
 import { memo, type PointerEvent } from "react";
-import type { ApiProvider } from "../../settings/apiProviders";
+import type { ApiProvider, ApiProviderOrderItem } from "../../settings/apiProviders";
 import type { ActionEntry, ActionTag } from "../../action-library/types";
 import type { ActionFissionRow } from "../action-fission/actionFissionTypes";
 import { isImageLikeNode } from "../nodePredicates";
@@ -29,7 +29,9 @@ export interface CanvasNodeBodyActions {
   commitPrompt: (nodeId: string, text: string) => void;
   patchPrompt: (nodeId: string, patch: Partial<CanvasNode>) => void;
   imageProviders: ApiProvider[];
+  imageProviderOrderItems: ApiProviderOrderItem[];
   defaultImageProvider: ApiProvider | null;
+  defaultImageApiType: "third-party-api" | "libtv-api";
   libtvReady: boolean;
   libtvUnavailableMessage: string;
   draggedInputConnectionId: string;
@@ -83,7 +85,9 @@ export const CanvasNodeBodyRenderer = memo(function CanvasNodeBodyRenderer({
       <ActionFissionNodeBody
         node={node}
         imageProviders={actions.imageProviders}
+        imageProviderOrderItems={actions.imageProviderOrderItems}
         defaultImageProvider={actions.defaultImageProvider}
+        defaultImageApiType={actions.defaultImageApiType}
         libtvReady={actions.libtvReady}
         libtvUnavailableMessage={actions.libtvUnavailableMessage}
         openSelectId={openSelectId}

@@ -482,6 +482,28 @@ export function createActionLibraryService(runtime, options = {}) {
     });
   }
 
+  function createActionFromFile(projectId, payload = {}) {
+    const project = loadProject(projectId);
+    if (!project) return null;
+    const content = Buffer.isBuffer(payload.buffer) ? payload.buffer : Buffer.from(payload.buffer || "");
+    if (!content.length) throw new Error("Invalid image data");
+    const timestamp = nowIso();
+    const id = newId("action");
+    const name = validateFileNamePart(payload.name || labels.defaultAction, "action name");
+    if (actionNameExists(projectId, name)) throw new Error("Action name must be unique");
+    const relDir = path.relative(storageRoot, projectDirForName(project.name));
+    return writeAssetInTransaction(content, String(payload.mime_type || "image/png"), payload.filename || "image", {
+      source: "action-library",
+      subdir: relDir,
+      filenameStem: name,
+    }, (asset) => {
+      db.prepare("INSERT INTO action_entries (id, project_id, name, asset_id, prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(id, projectId, name, asset.id, String(payload.prompt || "").slice(0, 4000), timestamp, timestamp);
+      db.prepare("UPDATE action_projects SET cover_asset_id = COALESCE(cover_asset_id, ?), updated_at = ? WHERE id = ?").run(asset.id, timestamp, projectId);
+      return actionWithAssetAndTags(loadAction(id));
+    });
+  }
+
   function updateAction(actionId, payload = {}) {
     const action = loadAction(actionId);
     if (!action) return null;
@@ -582,6 +604,7 @@ export function createActionLibraryService(runtime, options = {}) {
     uploadProjectCover,
     listActions,
     createAction,
+    createActionFromFile,
     updateAction,
     deleteAction,
     replaceActionImage,
