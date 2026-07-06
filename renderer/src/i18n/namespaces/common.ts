@@ -1,5 +1,6 @@
 export const zhCN = {
   actions: {
+    viewImage: "查看原图",
     add: "添加",
     back: "返回",
     cancel: "取消",
@@ -85,6 +86,7 @@ export const zhCN = {
 
 export const enUS = {
   actions: {
+    viewImage: "View original image",
     add: "Add",
     back: "Back",
     cancel: "Cancel",

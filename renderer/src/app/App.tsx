@@ -64,6 +64,15 @@ function formatUpdateDate(value: string) {
   return `${year}.${month}.${day}`;
 }
 
+function normalizeVersionLabel(value: string) {
+  return String(value || "").trim().replace(/^v/i, "");
+}
+
+function displayVersion(value: string) {
+  const normalized = normalizeVersionLabel(value);
+  return normalized ? `v${normalized}` : "";
+}
+
 function formatBytes(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -423,17 +432,19 @@ export function App() {
 
   const currentUpdateDateLabel = formatUpdateDate(appInfo?.currentUpdatedAt || latestUpdatedAt || "");
   const latestUpdateDateLabel = formatUpdateDate(latestUpdatedAt || appInfo?.currentUpdatedAt || "");
-  const currentVersionLabel = appInfo?.currentRevision || updateCheckResult?.currentRevision || "";
-  const latestVersionLabel = updateCheckResult?.latestRevision || updateNotes?.version || "";
+  const currentVersionLabel = normalizeVersionLabel(appInfo?.currentRevision || updateCheckResult?.currentRevision || "");
+  const latestVersionLabel = normalizeVersionLabel(updateCheckResult?.latestRevision || updateNotes?.version || "");
+  const currentVersionDisplay = displayVersion(currentVersionLabel) || currentUpdateDateLabel;
+  const latestVersionDisplay = displayVersion(latestVersionLabel) || latestUpdateDateLabel;
   const updateButtonLabel = updateStatus === "available"
-    ? `${currentLanguage === "zh-CN" ? updateText.updateAvailableShort : "Update"} v${latestVersionLabel || latestUpdateDateLabel}`
+    ? `${currentLanguage === "zh-CN" ? updateText.updateAvailableShort : "Update"} ${latestVersionDisplay}`
     : updateStatus === "checking"
       ? (currentLanguage === "zh-CN" ? updateText.checking : "Checking")
       : updateStatus === "updating"
         ? (currentLanguage === "zh-CN" ? updateText.updating : "Updating")
         : updateStatus === "updated"
           ? (currentLanguage === "zh-CN" ? updateText.restart : "Restart")
-          : `v${currentVersionLabel || currentUpdateDateLabel}`;
+          : currentVersionDisplay;
   const updateButtonTitle = updateMessage || (currentLanguage === "zh-CN" ? updateText.checkingTitle : "Click to check for updates");
   const UpdateIcon = updateStatus === "available" ? Download : RefreshCw;
   const modalTitle = updateStatus === "available"
@@ -444,9 +455,9 @@ export function App() {
   const notesItems = updateNotes?.items || [];
   const updateCanRun = updateStatus === "available";
   const updateSummaryText = updateStatus === "available"
-    ? `${currentLanguage === "zh-CN" ? "\u6709\u53ef\u7528\u66f4\u65b0" : "Update available"} v${latestVersionLabel || latestUpdateDateLabel}`
+    ? `${currentLanguage === "zh-CN" ? "\u6709\u53ef\u7528\u66f4\u65b0" : "Update available"} ${latestVersionDisplay}`
     : updateStatus === "current"
-      ? `${currentLanguage === "zh-CN" ? "\u5df2\u662f\u6700\u65b0\u7248\u672c" : "Already up to date"} v${currentVersionLabel || currentUpdateDateLabel}`
+      ? `${currentLanguage === "zh-CN" ? "\u5df2\u662f\u6700\u65b0\u7248\u672c" : "Already up to date"} ${currentVersionDisplay}`
       : updateMessage || (currentLanguage === "zh-CN" ? updateText.connectivityWarn : "Check status before updating");
   const updateProgressPercent = Math.max(0, Math.min(100, updateProgress?.percent || 0));
   const updateProgressVisible = Boolean(updateProgress && (updateStatus === "updating" || updateStatus === "updated"));

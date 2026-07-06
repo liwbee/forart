@@ -1,11 +1,12 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, ChevronRight, Copy, Download, FolderPlus, ImagePlus, MoreHorizontal, Pencil, Plus, Tags, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronRight, Copy, Download, Eye, FolderPlus, ImagePlus, MoreHorizontal, Pencil, Plus, Tags, Trash2 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { LazyImage } from "../../components/LazyImage";
 import { CollapsibleTagFilterRow } from "../library-tags";
 import { LibraryTagChoiceButton } from "../library-tags";
+import { ImageViewer } from "../../lib/ImageViewer";
 import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
 import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
 import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
@@ -373,6 +374,7 @@ function ActionCard({
   const { t } = useTranslation();
   const [menuState, setMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
   const [tagMenuState, setTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
+  const [viewerOpen, setViewerOpen] = useState(false);
   const [promptOpen, setPromptOpen] = useState(false);
   const [draftName, setDraftName] = useState(action.name || "");
   const [draftPrompt, setDraftPrompt] = useState(action.prompt || "");
@@ -450,6 +452,13 @@ function ActionCard({
       x: Math.max(pad, Math.min(x, window.innerWidth - menuWidth - pad)),
       y: Math.max(pad, Math.min(rect.top, window.innerHeight - menuMaxHeight - pad)),
     });
+  }
+
+  function handleViewImage() {
+    if (!assetUrl) return;
+    setMenuState({ open: false, x: 0, y: 0 });
+    setTagMenuState({ open: false, x: 0, y: 0 });
+    setViewerOpen(true);
   }
 
   async function handleCopyImage() {
@@ -618,6 +627,10 @@ function ActionCard({
                 <span>{t("common:labels.tags")}</span>
                 <ChevronRight className="outfit-card-menu__chevron" size={15} aria-hidden="true" />
               </button>
+              <button type="button" role="menuitem" disabled={!assetUrl} onClick={handleViewImage}>
+                <Eye size={16} aria-hidden="true" />
+                <span>{t("common:actions.viewImage")}</span>
+              </button>
               <button type="button" role="menuitem" disabled={!assetUrl} onClick={() => void handleDownloadOriginalImage()}>
                 <Download size={16} aria-hidden="true" />
                 <span>{t("common:actions.downloadOriginalImage")}</span>
@@ -669,6 +682,7 @@ function ActionCard({
             document.body,
           )
         : null}
+      {viewerOpen && assetUrl ? <ImageViewer src={assetUrl} alt={imageAlt} onClose={() => setViewerOpen(false)} /> : null}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, Copy, Download, ImagePlus, Images, MoreHorizontal, Pencil, Plus, Tags, Trash2, Users } from "lucide-react";
+import { ChevronRight, Copy, Download, Eye, ImagePlus, Images, MoreHorizontal, Pencil, Plus, Tags, Trash2, Users } from "lucide-react";
 import { createPortal } from "react-dom";
 import { LazyImage } from "../../components/LazyImage";
 import { CollapsibleTagFilterRow } from "../library-tags";
@@ -443,6 +443,13 @@ function OutfitCard({
     });
   }
 
+  function handleViewImage() {
+    if (!assetUrl) return;
+    setMenuState({ open: false, x: 0, y: 0 });
+    setTagMenuState({ open: false, x: 0, y: 0 });
+    setViewerOpen(true);
+  }
+
   async function handleCopyImage() {
     if (!assetUrl) return;
     setMenuState({ open: false, x: 0, y: 0 });
@@ -534,6 +541,10 @@ function OutfitCard({
                 <Tags size={16} aria-hidden="true" />
                 <span>{t("common:labels.tags")}</span>
                 <ChevronRight className="outfit-card-menu__chevron" size={15} aria-hidden="true" />
+              </button>
+              <button type="button" role="menuitem" disabled={!assetUrl} onClick={handleViewImage}>
+                <Eye size={16} aria-hidden="true" />
+                <span>{t("common:actions.viewImage")}</span>
               </button>
               <button type="button" role="menuitem" disabled={!assetUrl} onClick={() => void handleDownloadOriginalImage()}>
                 <Download size={16} aria-hidden="true" />

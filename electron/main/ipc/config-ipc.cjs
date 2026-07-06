@@ -100,6 +100,10 @@ function normalizeVersion(value) {
   return String(value || '').trim().replace(/^v/i, '');
 }
 
+function normalizeVersionField(value, fallbackVersion = '') {
+  return normalizeVersion(value || fallbackVersion);
+}
+
 function versionParts(value) {
   return normalizeVersion(value).match(/\d+/g)?.map(Number) || [];
 }
@@ -131,9 +135,9 @@ function normalizeUpdateNotes(input, fallbackVersion = '') {
     : [];
 
   return {
-    version: String(payload.version || fallbackVersion || '').trim(),
+    version: normalizeVersionField(payload.version, fallbackVersion),
     updatedAt: String(payload.updatedAt || payload.updated_at || payload.date || '').trim(),
-    revision: String(payload.revision || fallbackVersion || '').trim(),
+    revision: normalizeVersionField(payload.revision, fallbackVersion),
     items,
   };
 }
@@ -225,8 +229,8 @@ async function readLatestRelease(net) {
   const notes = notesFromReleaseBody(release.body || '', version);
   return {
     id: release.id,
-    name: String(release.name || tagName || version),
-    tagName,
+    name: String(release.name || version),
+    tagName: version,
     version,
     publishedAt: String(release.published_at || release.created_at || ''),
     htmlUrl: String(release.html_url || REPO_URL),
@@ -707,7 +711,7 @@ function registerConfigIpc({ ipcMain, dialog, configStore, app, rootDir, dataRoo
           ...latestRelease.notes,
           version: latestRelease.version,
           updatedAt: latestRelease.publishedAt || latestRelease.notes.updatedAt,
-          revision: latestRelease.tagName,
+          revision: latestRelease.version,
           source: 'github-release',
         },
       };

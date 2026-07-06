@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Copy, Download, MoreHorizontal, Pencil, Plus, Star, Trash2, Upload, X } from "lucide-react";
+import { Copy, Download, Eye, MoreHorizontal, Pencil, Plus, Star, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Fragment } from "react";
 import { LazyImage } from "../../components/LazyImage";
@@ -643,6 +643,7 @@ function ModelInlineEditor({
   function openImageViewer(src: string, alt: string) {
     if (!src) return;
     setOpenImageMenuState({ imageId: "", x: 0, y: 0 });
+    setDeleteConfirmImageId("");
     setOpenImageViewerState({ src, alt });
   }
 
@@ -650,7 +651,7 @@ function ModelInlineEditor({
     event.stopPropagation();
     const rect = event.currentTarget.getBoundingClientRect();
     const menuWidth = 176;
-    const menuHeight = 188;
+    const menuHeight = 232;
     const pad = 8;
     const preferredX = rect.right + 8;
     const preferredY = rect.top;
@@ -851,6 +852,15 @@ function ModelInlineEditor({
                             >
                               <Star size={15} aria-hidden="true" />
                               <span>{t("modelLibrary:setAsCover")}</span>
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              disabled={!src}
+                              onClick={() => openImageViewer(src, altText)}
+                            >
+                              <Eye size={15} aria-hidden="true" />
+                              <span>{t("common:actions.viewImage")}</span>
                             </button>
                             <button
                               type="button"
