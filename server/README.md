@@ -30,13 +30,13 @@ From this directory:
 Build:
 
 ```powershell
-docker build -t forart-server .
+docker build -t liwbee/forart-server:0.1.21 -t liwbee/forart-server:latest .
 ```
 
 Run:
 
 ```powershell
-docker run --rm -p 6980:6980 -v forart-library:/library -v forart-database:/database forart-server
+docker run --rm -p 6980:6980 -v forart-library:/library -v forart-database:/database liwbee/forart-server:latest
 ```
 
 The container uses these paths by default:
@@ -60,7 +60,27 @@ Mount `/database` to persistent storage to keep the SQLite database:
 Set `FORART_LANGUAGE=en-US` if you want newly-created library folders and default records to use English names:
 
 ```powershell
-docker run --rm -p 6980:6980 -v forart-library:/library -v forart-database:/database -e FORART_LANGUAGE=en-US forart-server
+docker run --rm -p 6980:6980 -v forart-library:/library -v forart-database:/database -e FORART_LANGUAGE=en-US liwbee/forart-server:latest
+```
+
+## Docker Hub Release
+
+The published Docker Hub image name is fixed as:
+
+```text
+liwbee/forart-server
+```
+
+From the repository root, publish the current `VERSION` as both the version tag and `latest`:
+
+```powershell
+.\scripts\publish-dockerhub.ps1
+```
+
+To publish a specific version manually:
+
+```powershell
+.\scripts\publish-dockerhub.ps1 -Version 0.1.21
 ```
 
 ## API Contract
