@@ -298,8 +298,7 @@
 .library-tag-filter-menu__tag--include,
 .outfit-tag-menu button.selected,
 .library-modal-tags button.selected,
-.library-bulk-tag-list button.selected,
-.action-folder-import-row__tags button.selected {
+.library-bulk-tag-list button.selected {
   border-color: var(--state-active-border) !important;
   background: var(--state-active-bg) !important;
   color: var(--state-active-text) !important;
@@ -309,8 +308,7 @@
 .library-tag-filter-menu__tag--exclude,
 .outfit-tag-menu button.excluded,
 .library-modal-tags button.excluded,
-.library-bulk-tag-list button.excluded,
-.action-folder-import-row__tags button.excluded {
+.library-bulk-tag-list button.excluded {
   border-color: color-mix(in srgb, var(--danger) 42%, transparent) !important;
   background: var(--danger-soft) !important;
   color: var(--danger) !important;

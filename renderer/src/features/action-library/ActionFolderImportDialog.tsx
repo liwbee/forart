@@ -8,7 +8,7 @@ import type { ActionTag } from "./types";
 import type { ActionFolderImportPreview, ActionFolderImportResult, ActionFolderImportResultRow, ActionFolderImportRow, ActionFolderImportUploadEntry } from "./actionFolderImportTypes";
 
 type ImportStage = "idle" | "discovering" | "building" | "ready" | "importing" | "complete";
-const VIRTUAL_ROW_HEIGHT = 132;
+const VIRTUAL_ROW_HEIGHT = 120;
 const VIRTUAL_OVERSCAN = 6;
 
 type ImportFileRow = ActionFolderImportRow;
@@ -70,13 +70,16 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   const [preview, setPreview] = useState<ActionFolderImportPreview | null>(null);
   const [result, setResult] = useState<ActionFolderImportResult | null>(null);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  const [autoSelectFilteredValidRows, setAutoSelectFilteredValidRows] = useState(false);
   const [stage, setStage] = useState<ImportStage>("idle");
   const [fileRows, setFileRows] = useState<ImportFileRow[]>([]);
   const [scanError, setScanError] = useState("");
   const [importProgress, setImportProgress] = useState({ completed: 0, total: 0 });
   const [rowImportStates, setRowImportStates] = useState<Map<string, LiveImportRow>>(new Map());
   const [rowTagSelections, setRowTagSelections] = useState<Map<string, Set<string>>>(new Map());
+  const [rowSearchQuery, setRowSearchQuery] = useState("");
   const [bulkTagMenuState, setBulkTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
+  const [rowTagMenuState, setRowTagMenuState] = useState<{ rowId: string; x: number; y: number }>({ rowId: "", x: 0, y: 0 });
   const [scanProgress, setScanProgress] = useState({ processedFiles: 0, totalFiles: 0, builtRows: 0, totalRows: 0 });
   const [rowViewport, setRowViewport] = useState({ scrollTop: 0, height: 420 });
 
@@ -91,21 +94,25 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
       setPreview(null);
       setResult(null);
       setSelectedRows(new Set());
+      setAutoSelectFilteredValidRows(false);
       setStage("idle");
       setFileRows([]);
       setScanError("");
       setImportProgress({ completed: 0, total: 0 });
       setRowImportStates(new Map());
       setRowTagSelections(new Map());
+      setRowSearchQuery("");
       setBulkTagMenuState({ open: false, x: 0, y: 0 });
+      setRowTagMenuState({ rowId: "", x: 0, y: 0 });
       setScanProgress({ processedFiles: 0, totalFiles: 0, builtRows: 0, totalRows: 0 });
     }
   }, [isOpen]);
 
   useEffect(() => {
-    if (!bulkTagMenuState.open) return undefined;
+    if (!bulkTagMenuState.open && !rowTagMenuState.rowId) return undefined;
     function closeMenu() {
       setBulkTagMenuState({ open: false, x: 0, y: 0 });
+      setRowTagMenuState({ rowId: "", x: 0, y: 0 });
     }
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") closeMenu();
@@ -116,7 +123,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
       window.removeEventListener("pointerdown", closeMenu);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [bulkTagMenuState.open]);
+  }, [bulkTagMenuState.open, rowTagMenuState.rowId]);
 
   useEffect(() => {
     if (!isOpen || !window.forartActionImport?.onScanProgress || !window.forartActionImport?.onScanComplete || !window.forartActionImport?.onScanError) return undefined;
@@ -199,7 +206,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   const importMutation = useMutation({
     mutationFn: async () => {
       if (!preview) throw new Error(t("actionLibrary:bulkImportNoPreview"));
-      const selected = fileRows.filter((row) => selectedRows.has(row.id));
+      const selected = fileRows.filter((row) => selectedRowsForBulkActions.has(row.id));
       const imported: ActionFolderImportResult["imported"] = [];
       const failed: ActionFolderImportResult["failed"] = [];
       const resultRows: ActionFolderImportResult["rows"] = [];
@@ -209,8 +216,8 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
         row.id,
         {
           ...row,
-          selected: selectedRows.has(row.id),
-          final_status: selectedRows.has(row.id) ? "pending" : "not_selected",
+          selected: selectedRowsForBulkActions.has(row.id),
+          final_status: selectedRowsForBulkActions.has(row.id) ? "pending" : "not_selected",
         } as LiveImportRow,
       ])));
 
@@ -316,23 +323,39 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
 
   const rows = preview?.rows || [];
   const displayRows = fileRows.length ? fileRows : rows;
-  const selectedRowList = displayRows.filter((row) => selectedRows.has(row.id));
+  const rowSearchText = rowSearchQuery.trim().toLocaleLowerCase();
+  const filteredDisplayRows = useMemo(() => {
+    if (!rowSearchText) return displayRows;
+    return displayRows.filter((row) => {
+      const searchableName = `${row.proposed_name || ""} ${row.filename || ""} ${row.stem || ""}`.toLocaleLowerCase();
+      return searchableName.includes(rowSearchText);
+    });
+  }, [displayRows, rowSearchText]);
+  const selectedRowsForBulkActions = autoSelectFilteredValidRows
+    ? new Set(filteredDisplayRows.filter(rowIsValid).map((row) => row.id))
+    : selectedRows;
+  const selectedRowList = displayRows.filter((row) => selectedRowsForBulkActions.has(row.id));
   const selectedInvalidCount = selectedRowList.filter((row) => !rowIsValid(row)).length;
   const selectedWarningCount = selectedRowList.filter((row) => row.warnings?.length).length;
   const scanActive = stage === "discovering" || stage === "building";
-  const canImport = Boolean(stage === "ready" && preview && selectedRows.size && !selectedInvalidCount && !importMutation.isPending);
+  const canImport = Boolean(stage === "ready" && preview && selectedRowsForBulkActions.size && !selectedInvalidCount && !importMutation.isPending);
   const importStarted = stage === "importing" || stage === "complete";
   const errorMessage = scanError || importMutation.error;
   const errorText = errorMessage instanceof Error ? errorMessage.message : errorMessage ? String(errorMessage) : "";
   const virtualRows = useMemo(() => {
     const startIndex = Math.max(0, Math.floor(rowViewport.scrollTop / VIRTUAL_ROW_HEIGHT) - VIRTUAL_OVERSCAN);
     const visibleCount = Math.ceil(rowViewport.height / VIRTUAL_ROW_HEIGHT) + VIRTUAL_OVERSCAN * 2;
-    return displayRows.slice(startIndex, startIndex + visibleCount).map((row, offset) => ({
+    return filteredDisplayRows.slice(startIndex, startIndex + visibleCount).map((row, offset) => ({
       row,
       index: startIndex + offset,
     }));
-  }, [displayRows, rowViewport]);
-  const virtualHeight = displayRows.length * VIRTUAL_ROW_HEIGHT;
+  }, [filteredDisplayRows, rowViewport]);
+  const virtualHeight = filteredDisplayRows.length * VIRTUAL_ROW_HEIGHT;
+
+  useEffect(() => {
+    if (!autoSelectFilteredValidRows || importStarted) return;
+    setSelectedRows(new Set(filteredDisplayRows.filter(rowIsValid).map((row) => row.id)));
+  }, [autoSelectFilteredValidRows, filteredDisplayRows, importStarted]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -341,7 +364,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
       if (element) setRowViewport({ scrollTop: element.scrollTop, height: element.clientHeight || 420 });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [displayRows.length, isOpen]);
+  }, [filteredDisplayRows.length, isOpen]);
 
   const resultTotals = useMemo(() => {
     const resultRows = result?.rows || [];
@@ -388,9 +411,12 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
     setResult(null);
     setFileRows([]);
     setSelectedRows(new Set());
+    setAutoSelectFilteredValidRows(false);
+    setRowSearchQuery("");
     setImportProgress({ completed: 0, total: 0 });
     setRowImportStates(new Map());
     setBulkTagMenuState({ open: false, x: 0, y: 0 });
+    setRowTagMenuState({ rowId: "", x: 0, y: 0 });
     setScanProgress({ processedFiles: 0, totalFiles: 0, builtRows: 0, totalRows: 0 });
     if (rowsViewportRef.current) rowsViewportRef.current.scrollTop = 0;
     const started = await window.forartActionImport.startScan({
@@ -426,6 +452,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   }
 
   function toggleRow(row: ActionFolderImportRow) {
+    setAutoSelectFilteredValidRows(false);
     setSelectedRows((current) => {
       if (importStarted) return current;
       const next = new Set(current);
@@ -435,11 +462,13 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
     });
   }
 
-  function selectValidRows() {
-    setSelectedRows(new Set(displayRows.filter(rowIsValid).map((row) => row.id)));
+  function selectFilteredValidRows() {
+    setAutoSelectFilteredValidRows(true);
+    setSelectedRows(new Set(filteredDisplayRows.filter(rowIsValid).map((row) => row.id)));
   }
 
   function clearSelection() {
+    setAutoSelectFilteredValidRows(false);
     setSelectedRows(new Set());
   }
 
@@ -456,13 +485,12 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   }
 
   function applyTagToSelectedRows(tagName: string) {
-    if (importStarted || !selectedRows.size) return;
+    if (importStarted || !selectedRowsForBulkActions.size) return;
     setRowTagSelections((current) => {
       const next = new Map(current);
-      for (const rowId of selectedRows) {
+      for (const rowId of selectedRowsForBulkActions) {
         const tagsForRow = new Set(next.get(rowId) || []);
-        if (tagsForRow.has(tagName)) tagsForRow.delete(tagName);
-        else tagsForRow.add(tagName);
+        tagsForRow.add(tagName);
         next.set(rowId, tagsForRow);
       }
       return next;
@@ -470,12 +498,32 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   }
 
   function clearSelectedRowTags() {
-    if (importStarted || !selectedRows.size) return;
+    if (importStarted || !selectedRowsForBulkActions.size) return;
     setRowTagSelections((current) => {
       const next = new Map(current);
-      for (const rowId of selectedRows) next.set(rowId, new Set());
+      for (const rowId of selectedRowsForBulkActions) next.set(rowId, new Set());
       return next;
     });
+  }
+
+  function clearRowTags(rowId: string) {
+    if (importStarted) return;
+    setRowTagSelections((current) => {
+      const next = new Map(current);
+      next.set(rowId, new Set());
+      return next;
+    });
+  }
+
+  function tagMenuPositionFromButton(button: HTMLButtonElement) {
+    const rect = button.getBoundingClientRect();
+    const menuWidth = 184;
+    const menuMaxHeight = 280;
+    const pad = 8;
+    return {
+      x: Math.max(pad, Math.min(rect.left, window.innerWidth - menuWidth - pad)),
+      y: Math.max(pad, Math.min(rect.bottom + 8, window.innerHeight - menuMaxHeight - pad)),
+    };
   }
 
   function openBulkTagMenu(event: MouseEvent<HTMLButtonElement>) {
@@ -484,15 +532,20 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
       setBulkTagMenuState({ open: false, x: 0, y: 0 });
       return;
     }
-    const rect = event.currentTarget.getBoundingClientRect();
-    const menuWidth = 184;
-    const menuMaxHeight = 280;
-    const pad = 8;
-    setBulkTagMenuState({
-      open: true,
-      x: Math.max(pad, Math.min(rect.left, window.innerWidth - menuWidth - pad)),
-      y: Math.max(pad, Math.min(rect.bottom + 8, window.innerHeight - menuMaxHeight - pad)),
-    });
+    const position = tagMenuPositionFromButton(event.currentTarget);
+    setRowTagMenuState({ rowId: "", x: 0, y: 0 });
+    setBulkTagMenuState({ open: true, ...position });
+  }
+
+  function openRowTagMenu(rowId: string, event: MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    if (rowTagMenuState.rowId === rowId) {
+      setRowTagMenuState({ rowId: "", x: 0, y: 0 });
+      return;
+    }
+    const position = tagMenuPositionFromButton(event.currentTarget);
+    setBulkTagMenuState({ open: false, x: 0, y: 0 });
+    setRowTagMenuState({ rowId, ...position });
   }
 
   return (
@@ -535,7 +588,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
                 <>
                   <span>{t("actionLibrary:bulkImportImages", { count: preview?.total_images || 0 })}</span>
                   <span>{t("actionLibrary:bulkImportTexts", { count: preview?.total_text_files || 0 })}</span>
-                  <span>{t("actionLibrary:bulkImportSelected", { count: selectedRows.size })}</span>
+                  <span>{t("actionLibrary:bulkImportSelected", { count: selectedRowsForBulkActions.size })}</span>
                   <span className={preview?.blocking_error_count ? "is-error" : ""}>{t("actionLibrary:bulkImportErrors", { count: preview?.blocking_error_count || 0 })}</span>
                   <span className={selectedWarningCount ? "is-warning" : ""}>{t("actionLibrary:bulkImportWarnings", { count: selectedWarningCount })}</span>
                 </>
@@ -543,19 +596,32 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
             </div>
 
             <div className="action-folder-import__actions">
-              <button
-                className={`model-lib-button action-folder-import__tag-trigger${bulkTagMenuState.open ? " active" : ""}`}
-                type="button"
-                disabled={!selectedRows.size || scanActive || importStarted}
-                aria-haspopup="menu"
-                aria-expanded={bulkTagMenuState.open}
-                onClick={openBulkTagMenu}
-              >
-                <Tags size={16} aria-hidden="true" />
-                <span>{t("actionLibrary:bulkImportApplyTags")}</span>
-              </button>
+              <input
+                className="action-folder-import__search"
+                type="search"
+                value={rowSearchQuery}
+                disabled={scanActive || importStarted}
+                placeholder={t("actionLibrary:bulkImportSearchPlaceholder")}
+                aria-label={t("actionLibrary:bulkImportSearchPlaceholder")}
+                onChange={(event) => {
+                  setRowSearchQuery(event.currentTarget.value);
+                  if (rowsViewportRef.current) rowsViewportRef.current.scrollTop = 0;
+                  setRowViewport((current) => ({ ...current, scrollTop: 0 }));
+                }}
+              />
               <div className="action-folder-import__selection-actions">
-                <button className="model-lib-button" type="button" disabled={!displayRows.length || scanActive || importStarted} onClick={selectValidRows}>
+                <button
+                  className="model-lib-button action-folder-import__tag-trigger"
+                  type="button"
+                  disabled={!selectedRowsForBulkActions.size || scanActive || importStarted}
+                  aria-haspopup="menu"
+                  aria-expanded={bulkTagMenuState.open}
+                  onClick={openBulkTagMenu}
+                >
+                  <Tags size={16} aria-hidden="true" />
+                  <span>{t("actionLibrary:bulkImportApplyTags")}</span>
+                </button>
+                <button className="model-lib-button" type="button" disabled={!filteredDisplayRows.length || scanActive || importStarted} onClick={selectFilteredValidRows}>
                   {t("actionLibrary:bulkImportSelectValid")}
                 </button>
                 <button className="model-lib-button" type="button" disabled={!displayRows.length || scanActive || importStarted} onClick={clearSelection}>
@@ -585,6 +651,43 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
                           </button>
                         ))}
                         <button type="button" role="menuitem" onClick={clearSelectedRowTags}>
+                          {t("actionLibrary:bulkImportClearTags")}
+                        </button>
+                      </>
+                    ) : (
+                      <div className="outfit-tag-menu__empty">{t("actionLibrary:noTags")}</div>
+                    )}
+                  </div>,
+                  document.body,
+                )
+              : null}
+            {rowTagMenuState.rowId
+              ? createPortal(
+                  <div
+                    className="outfit-tag-menu outfit-tag-menu--submenu action-folder-import__tag-menu"
+                    role="menu"
+                    aria-label={t("actionLibrary:chooseTags")}
+                    style={{ left: rowTagMenuState.x, top: rowTagMenuState.y }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                  >
+                    {tags.length ? (
+                      <>
+                        {tags.map((tag) => {
+                          const active = rowTagSelections.get(rowTagMenuState.rowId)?.has(tag.name) || false;
+                          return (
+                            <button
+                              key={tag.id}
+                              className={active ? "selected" : ""}
+                              type="button"
+                              role="menuitemcheckbox"
+                              aria-checked={active}
+                              onClick={() => toggleRowTag(rowTagMenuState.rowId, tag.name)}
+                            >
+                              {tag.name}
+                            </button>
+                          );
+                        })}
+                        <button type="button" role="menuitem" onClick={() => clearRowTags(rowTagMenuState.rowId)}>
                           {t("actionLibrary:bulkImportClearTags")}
                         </button>
                       </>
@@ -630,30 +733,35 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
                     </div>
                     <div className="action-folder-import-row__main">
                       <div className="action-folder-import-row__name" title={displayRow.proposed_name || displayRow.filename}>{displayRow.proposed_name || displayRow.filename}</div>
-                      <div className="action-folder-import-row__meta" title={displayRow.relative_path}>{displayRow.relative_path}</div>
-                      {message ? (
-                        <div className="action-folder-import-row__message">
-                          {displayRow.errors?.length ? <AlertTriangle size={14} aria-hidden="true" /> : <CheckCircle2 size={14} aria-hidden="true" />}
-                          <span>{message}</span>
-                        </div>
-                      ) : null}
                       <div className="action-folder-import-row__tags" aria-label={t("actionLibrary:bulkImportRowTags", { name: displayRow.proposed_name || displayRow.filename })}>
-                        {tags.map((tag) => {
-                          const active = selectedTagNames.has(tag.name);
-                          return (
-                            <button
-                              key={tag.id}
-                              className={active ? "selected" : ""}
-                              type="button"
-                              disabled={importStarted}
-                              aria-pressed={active}
-                              onClick={() => toggleRowTag(row.id, tag.name)}
-                            >
-                              {tag.name}
-                            </button>
-                          );
-                        })}
-                        {!tags.length ? <span>{t("actionLibrary:noTags")}</span> : null}
+                        <button
+                          className="action-folder-import-row__tag-trigger"
+                          type="button"
+                          disabled={importStarted}
+                          aria-label={t("actionLibrary:chooseTags")}
+                          aria-haspopup="menu"
+                          aria-expanded={rowTagMenuState.rowId === row.id}
+                          onClick={(event) => openRowTagMenu(row.id, event)}
+                        >
+                          <Tags size={15} aria-hidden="true" />
+                        </button>
+                        <div className="action-folder-import-row__tag-summary">
+                          {selectedTagNames.size ? (
+                            Array.from(selectedTagNames).map((tagName) => <span key={tagName}>{tagName}</span>)
+                          ) : (
+                            <span className="action-folder-import-row__tag-empty">{t("actionLibrary:noTags")}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="action-folder-import-row__message" title={message || undefined}>
+                        {message ? (
+                          <>
+                            {displayRow.errors?.length ? <AlertTriangle size={14} aria-hidden="true" /> : <CheckCircle2 size={14} aria-hidden="true" />}
+                            <span>{message}</span>
+                          </>
+                        ) : (
+                          <span />
+                        )}
                       </div>
                     </div>
                     <span className="action-folder-import-row__status">{liveStatus ? finalStatusLabel(liveStatus, t) : row.errors?.length ? t("actionLibrary:bulkImportStatusInvalid") : row.warnings?.length ? t("actionLibrary:bulkImportStatusWarning") : t("actionLibrary:bulkImportStatusReady")}</span>
@@ -663,6 +771,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
               </div>
               {!preview ? <div className="action-folder-import__empty">{t("actionLibrary:bulkImportPickFolderFirst")}</div> : null}
               {preview && !displayRows.length ? <div className="action-folder-import__empty">{t("actionLibrary:bulkImportPickFolderFirst")}</div> : null}
+              {preview && displayRows.length && !filteredDisplayRows.length ? <div className="action-folder-import__empty">{t("actionLibrary:bulkImportNoSearchResults")}</div> : null}
             </div>
 
             <footer className="action-folder-import__footer">

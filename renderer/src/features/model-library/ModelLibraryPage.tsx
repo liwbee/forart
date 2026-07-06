@@ -274,6 +274,7 @@ function ModelToolbar({
   onGenderToggle,
   selectionMode,
   onEnterSelectionMode,
+  onExitSelectionMode,
 }: {
   tags: ModelTag[];
   tagFilter: LibraryTagFilter;
@@ -286,6 +287,7 @@ function ModelToolbar({
   onGenderToggle: (gender: "female" | "male") => void;
   selectionMode: boolean;
   onEnterSelectionMode: () => void;
+  onExitSelectionMode: () => void;
 }) {
   const { t } = useTranslation();
   const includeTagSet = useMemo(() => new Set(tagFilter.includeTagIds), [tagFilter.includeTagIds]);
@@ -318,7 +320,7 @@ function ModelToolbar({
       <div className="library-filter-divider" aria-hidden="true" />
 
       <div className="library-tag-section">
-        <LibraryBulkManageButton disabled={selectionMode} onClick={onEnterSelectionMode} />
+        <LibraryBulkManageButton disabled={false} onClick={selectionMode ? onExitSelectionMode : onEnterSelectionMode} />
         <span className="library-filter-label">{t("common:labels.tags")}</span>
         <div className="library-tag-controls">
           <CollapsibleTagFilterRow expandLabel="展开标签" collapseLabel="收起标签">
@@ -1775,6 +1777,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
               onGenderToggle={toggleGender}
               selectionMode={bulkSelection.selectionMode}
               onEnterSelectionMode={bulkSelection.enterSelectionMode}
+              onExitSelectionMode={bulkSelection.exitSelectionMode}
             />
           </div>
 

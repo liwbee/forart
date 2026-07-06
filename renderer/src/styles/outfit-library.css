@@ -333,6 +333,11 @@
   transform: translateY(0);
 }
 
+.action-library-page .outfit-card.selecting .outfit-card__name {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .action-card--flipped .outfit-card__name {
   opacity: 0;
 }
@@ -371,6 +376,11 @@
 .outfit-card:hover .outfit-card__menu-button,
 .outfit-card__menu-button:focus-visible,
 .outfit-card__menu-button[aria-expanded="true"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.action-library-page .outfit-card.selecting .outfit-card__menu-button {
   opacity: 1;
   transform: translateY(0);
 }

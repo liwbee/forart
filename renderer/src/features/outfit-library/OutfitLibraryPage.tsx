@@ -292,6 +292,7 @@ function OutfitToolbar({
   onUntaggedToggle,
   selectionMode,
   onEnterSelectionMode,
+  onExitSelectionMode,
 }: {
   tags: OutfitTag[];
   tagFilter: LibraryTagFilter;
@@ -302,6 +303,7 @@ function OutfitToolbar({
   onUntaggedToggle: () => void;
   selectionMode: boolean;
   onEnterSelectionMode: () => void;
+  onExitSelectionMode: () => void;
 }) {
   const { t } = useTranslation();
   const includeTagSet = useMemo(() => new Set(tagFilter.includeTagIds), [tagFilter.includeTagIds]);
@@ -309,7 +311,7 @@ function OutfitToolbar({
   return (
     <div className="model-toolbar outfit-toolbar">
       <div className="library-tag-section">
-        <LibraryBulkManageButton disabled={selectionMode} onClick={onEnterSelectionMode} />
+        <LibraryBulkManageButton disabled={false} onClick={selectionMode ? onExitSelectionMode : onEnterSelectionMode} />
         <span className="library-filter-label">{t("common:labels.tags")}</span>
         <div className="library-tag-controls">
           <CollapsibleTagFilterRow expandLabel="展开标签" collapseLabel="收起标签">
@@ -1213,6 +1215,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
               onUntaggedToggle={handleToggleUntaggedFilter}
               selectionMode={bulkSelection.selectionMode}
               onEnterSelectionMode={bulkSelection.enterSelectionMode}
+              onExitSelectionMode={bulkSelection.exitSelectionMode}
             />
           </div>
 
