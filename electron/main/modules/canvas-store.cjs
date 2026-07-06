@@ -58,10 +58,13 @@ function normalizeCanvasRecord(input, fallback = {}) {
 function normalizeProjectRecord(input, fallback = {}) {
   const timestamp = nowMs();
   const id = normalizeProjectId(input?.id || fallback.id || newProjectId());
+  const fallbackSortOrder = Number.isFinite(Number(fallback.sortOrder)) ? Number(fallback.sortOrder) : 0;
+  const sortOrder = Number.isFinite(Number(input?.sortOrder)) ? Number(input.sortOrder) : fallbackSortOrder;
   return {
     id,
     title: String(input?.title || fallback.title || 'New project').trim().slice(0, 80) || 'New project',
     color: String(input?.color || fallback.color || ''),
+    sortOrder,
     createdAt: Number(input?.createdAt || fallback.createdAt || timestamp),
     updatedAt: Number(input?.updatedAt || fallback.updatedAt || fallback.createdAt || timestamp),
   };
@@ -77,9 +80,9 @@ function defaultProjectRecord(timestamp = nowMs()) {
 }
 
 function ensureDefaultProject(projects) {
-  const normalizedProjects = (projects || []).map((project) => normalizeProjectRecord(project)).filter((project) => project.id);
+  const normalizedProjects = (projects || []).map((project, index) => normalizeProjectRecord(project, { sortOrder: index + 1 })).filter((project) => project.id);
   if (normalizedProjects.length) return normalizedProjects;
-  return [defaultProjectRecord()];
+  return [normalizeProjectRecord(defaultProjectRecord(), { sortOrder: 1 })];
 }
 
 function sortCanvasRecords(canvases) {
@@ -90,7 +93,12 @@ function sortCanvasRecords(canvases) {
 }
 
 function sortProjectRecords(projects) {
-  return projects.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), undefined, { numeric: true, sensitivity: 'base' }));
+  return projects.sort((a, b) => {
+    const leftOrder = Number.isFinite(Number(a.sortOrder)) ? Number(a.sortOrder) : 0;
+    const rightOrder = Number.isFinite(Number(b.sortOrder)) ? Number(b.sortOrder) : 0;
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    return Number(a.createdAt || 0) - Number(b.createdAt || 0);
+  });
 }
 
 function normalizeCanvasDocument(input, fallback = {}) {
@@ -316,10 +324,14 @@ function createCanvasStore({ rootDir }) {
 
   function createProject(payload = {}) {
     const timestamp = nowMs();
+    const sortOrder = Number.isFinite(Number(payload?.sortOrder))
+      ? Number(payload.sortOrder)
+      : Math.min(0, ...listProjects().map((project) => Number(project.sortOrder || 0))) - 1;
     const project = normalizeProjectRecord({
       id: newProjectId(),
       title: payload?.title,
       color: payload?.color,
+      sortOrder,
       createdAt: timestamp,
       updatedAt: timestamp,
     });
@@ -336,6 +348,7 @@ function createCanvasStore({ rootDir }) {
       ...existing,
       title: patch?.title !== undefined ? patch.title : existing.title,
       color: patch?.color !== undefined ? patch.color : existing.color,
+      sortOrder: patch?.sortOrder !== undefined ? Number(patch.sortOrder || 0) : existing.sortOrder,
       updatedAt: nowMs(),
     });
     const nextProjects = payload.projects.map((item) => (item.id === safeId ? project : item));

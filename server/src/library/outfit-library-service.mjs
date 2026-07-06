@@ -381,12 +381,12 @@ export function createOutfitLibraryService(runtime, options = {}) {
     if (row) return;
     const timestamp = nowIso();
     const name = validateFileNamePart(labels.defaultOutfitProject, "project name");
-    db.prepare("INSERT INTO outfit_projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
-      .run(newId("outfit_project"), name, timestamp, timestamp);
+    db.prepare("INSERT INTO outfit_projects (id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .run(newId("outfit_project"), name, 0, timestamp, timestamp);
   }
 
   function listProjects() {
-    return { projects: db.prepare("SELECT * FROM outfit_projects ORDER BY updated_at DESC, created_at DESC").all().map(projectWithCover) };
+    return { projects: db.prepare("SELECT * FROM outfit_projects ORDER BY sort_order ASC, created_at DESC").all().map(projectWithCover) };
   }
 
   function createProject(payload = {}) {
@@ -394,8 +394,9 @@ export function createOutfitLibraryService(runtime, options = {}) {
     const id = newId("outfit_project");
     const name = validateFileNamePart(payload.name || labels.defaultOutfitProject, "project name");
     if (projectNameExists(name)) throw new Error("Project name must be unique");
-    db.prepare("INSERT INTO outfit_projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
-      .run(id, name, timestamp, timestamp);
+    const sortOrder = db.prepare("SELECT COALESCE(MIN(sort_order), 0) - 1 AS next FROM outfit_projects").get()?.next || 0;
+    db.prepare("INSERT INTO outfit_projects (id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .run(id, name, sortOrder, timestamp, timestamp);
     return projectWithCover(loadProject(id));
   }
 
@@ -415,6 +416,9 @@ export function createOutfitLibraryService(runtime, options = {}) {
         const coverAssetId = payload.cover_asset_id ? String(payload.cover_asset_id) : null;
         if (coverAssetId && !loadAsset(coverAssetId)) throw new Error("Asset not found");
         db.prepare("UPDATE outfit_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(coverAssetId, nowIso(), projectId);
+      }
+      if (payload.sort_order !== undefined) {
+        db.prepare("UPDATE outfit_projects SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(payload.sort_order || 0), nowIso(), projectId);
       }
       return projectWithCover(loadProject(projectId));
     });

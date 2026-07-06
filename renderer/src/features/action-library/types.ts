@@ -5,6 +5,7 @@ export interface ActionProject {
   name: string;
   cover_asset_id: string | null;
   cover_url: string | null;
+  sort_order: number;
   created_at: string;
   updated_at: string;
 }

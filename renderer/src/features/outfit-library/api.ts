@@ -40,7 +40,7 @@ export function createOutfitProject(name: string) {
   });
 }
 
-export function updateOutfitProject(projectId: string, payload: Partial<Pick<OutfitProject, "name" | "cover_asset_id">>) {
+export function updateOutfitProject(projectId: string, payload: Partial<Pick<OutfitProject, "name" | "cover_asset_id" | "sort_order">>) {
   return apiRequest<OutfitProject>(`/api/outfit-projects/${encodeURIComponent(projectId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),

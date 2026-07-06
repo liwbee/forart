@@ -244,6 +244,7 @@
 }
 
 .model-project-list {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
@@ -252,10 +253,14 @@
   overflow: auto;
 }
 
+.model-project-list.sorting {
+  user-select: none;
+}
+
 .model-project-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px;
+  grid-template-columns: 26px minmax(0, 1fr) 44px;
   gap: var(--space-1);
   padding: 0;
   overflow: hidden;
@@ -263,6 +268,10 @@
 
 .model-project-row:has(.model-project-list-item:only-child) {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.model-project-row.dragging {
+  opacity: 0.42;
 }
 
 .model-project-row.active {
@@ -283,6 +292,34 @@
   background: transparent;
   color: inherit;
   text-align: left;
+}
+
+.model-project-drag-handle {
+  min-height: 42px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-muted);
+  cursor: grab;
+  opacity: 0.68;
+  touch-action: none;
+}
+
+.model-project-drag-handle:active {
+  cursor: grabbing;
+}
+
+.model-project-row.active .model-project-drag-handle {
+  color: var(--state-active-text);
+}
+
+.model-project-insert-indicator {
+  position: absolute;
+  z-index: 2;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--state-active-border);
+  transform: translateY(-1px);
+  pointer-events: none;
 }
 
 .model-project-list-item span {
@@ -751,38 +788,88 @@
 }
 
 .library-card-sort-control {
-  display: grid;
-  grid-template-columns: repeat(4, 32px);
+  position: relative;
+  display: flex;
   align-items: center;
-  gap: 4px;
   padding-right: 8px;
   border-right: 1px solid var(--border-subtle);
 }
 
-.library-card-sort-control button {
-  width: 32px;
+.library-card-sort-trigger {
+  max-width: 132px;
   height: 32px;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
+  padding: 0 10px;
   background: var(--surface-card);
   color: var(--text-primary);
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 
-.library-card-sort-control button:focus-visible {
+.library-card-sort-trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+}
+
+.library-card-sort-trigger:focus-visible,
+.library-card-sort-menu button:focus-visible {
   outline: var(--state-focus-outline-strong);
   outline-offset: 3px;
 }
 
-.library-card-sort-control button:hover {
+.library-card-sort-trigger:hover,
+.library-card-sort-trigger.active {
   border-color: var(--state-hover-border);
   color: var(--state-hover-text);
 }
 
-.library-card-sort-control button.active {
+.library-card-sort-menu {
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 8px);
+  z-index: 60;
+  min-width: 166px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 6px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-popover);
+}
+
+.library-card-sort-menu button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  text-align: left;
+  cursor: pointer;
+}
+
+.library-card-sort-menu button:hover {
+  border-color: var(--state-hover-border);
+  background: var(--state-hover-bg);
+  color: var(--state-hover-text);
+}
+
+.library-card-sort-menu button.active {
   border-color: var(--state-active-border);
   background: var(--state-active-bg);
   color: var(--state-active-text);

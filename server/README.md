@@ -30,7 +30,7 @@ From this directory:
 Build:
 
 ```powershell
-docker build -t liwbee/forart-server:0.1.21 -t liwbee/forart-server:latest .
+docker build -t liwbee/forart-server:0.1.24 -t liwbee/forart-server:latest .
 ```
 
 Run:
@@ -80,7 +80,7 @@ From the repository root, publish the current `VERSION` as both the version tag 
 To publish a specific version manually:
 
 ```powershell
-.\scripts\publish-dockerhub.ps1 -Version 0.1.21
+.\scripts\publish-dockerhub.ps1 -Version 0.1.24
 ```
 
 ## API Contract

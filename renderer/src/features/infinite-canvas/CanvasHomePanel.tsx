@@ -1,5 +1,5 @@
-import { Check, Cloud, Copy, Download, FileJson, FolderInput, HardDrive, Layers, MoreHorizontal, Pencil, Plus, RefreshCw, Server, Trash2, Upload, UploadCloud } from "lucide-react";
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { Check, Cloud, Copy, Download, FileJson, FolderInput, GripVertical, HardDrive, Layers, MoreHorizontal, Pencil, Plus, RefreshCw, Server, Trash2, Upload, UploadCloud } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { CanvasDocumentRecord, CanvasProjectRecord } from "./types";
@@ -29,6 +29,21 @@ interface CanvasMoveMenuState {
   action: "move" | "upload" | "copy";
   x: number;
   y: number;
+}
+
+interface ProjectDragState {
+  project: CanvasProjectRecord;
+  pointerId: number;
+  startY: number;
+  insertIndex: number;
+  indicatorStyle: CSSProperties;
+  hasMoved: boolean;
+}
+
+interface ProjectRect {
+  index: number;
+  top: number;
+  bottom: number;
 }
 
 interface CanvasHomePanelProps {
@@ -71,6 +86,7 @@ interface CanvasHomePanelProps {
   onConfirmDeleteProject: (projectId: string) => void;
   onDeleteDocument: (canvasId: string) => void;
   onDeleteProject: (projectId: string) => void;
+  onReorderProjects?: (projects: CanvasProjectRecord[]) => void;
   onSortModeChange: (mode: CanvasSortMode) => void;
   onHomeModeChange?: (mode: CanvasHomeMode) => void;
   onSearchTextChange?: (value: string) => void;
@@ -80,6 +96,65 @@ function formatProjectDate(timestamp: number) {
   if (!timestamp) return "--";
   const date = new Date(timestamp);
   return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function reorderProjects(projects: CanvasProjectRecord[], draggedIndex: number, insertIndex: number) {
+  if (draggedIndex < 0) return projects;
+  const next = [...projects];
+  const [dragged] = next.splice(draggedIndex, 1);
+  const adjustedIndex = Math.max(0, Math.min(insertIndex > draggedIndex ? insertIndex - 1 : insertIndex, next.length));
+  next.splice(adjustedIndex, 0, dragged);
+  return next;
+}
+
+function collectProjectRects(listElement: HTMLDivElement, draggedId: string) {
+  return Array.from(listElement.querySelectorAll<HTMLElement>("[data-project-id]"))
+    .map((element) => {
+      const id = element.dataset.projectId || "";
+      if (!id || id === draggedId) return null;
+      const rect = element.getBoundingClientRect();
+      return {
+        index: Number(element.dataset.projectIndex || 0),
+        top: rect.top,
+        bottom: rect.bottom,
+      } satisfies ProjectRect;
+    })
+    .filter((rect): rect is ProjectRect => Boolean(rect));
+}
+
+function insertionIndexFromPointer(rects: ProjectRect[], pointerY: number) {
+  if (!rects.length) return 0;
+  const sortedRects = [...rects].sort((left, right) => left.index - right.index);
+  for (const rect of sortedRects) {
+    if (pointerY < rect.top + (rect.bottom - rect.top) / 2) return rect.index;
+  }
+  return sortedRects[sortedRects.length - 1].index + 1;
+}
+
+function createProjectInsertIndicatorStyle(listElement: HTMLDivElement, insertIndex: number): CSSProperties {
+  const listRect = listElement.getBoundingClientRect();
+  const elements = Array.from(listElement.querySelectorAll<HTMLElement>("[data-project-id]"));
+  const sortedElements = elements.sort((left, right) => Number(left.dataset.projectIndex || 0) - Number(right.dataset.projectIndex || 0));
+  const targetElement = sortedElements.find((element) => Number(element.dataset.projectIndex || 0) >= insertIndex);
+  const previousElement = [...sortedElements].reverse().find((element) => Number(element.dataset.projectIndex || 0) < insertIndex);
+  const anchorElement = targetElement || previousElement;
+  if (!anchorElement) return { display: "none" };
+
+  let indicatorTop = 0;
+  if (previousElement && targetElement) {
+    const previousRect = previousElement.getBoundingClientRect();
+    const targetRect = targetElement.getBoundingClientRect();
+    indicatorTop = previousRect.bottom + (targetRect.top - previousRect.bottom) / 2;
+  } else {
+    const anchorRect = anchorElement.getBoundingClientRect();
+    indicatorTop = targetElement ? anchorRect.top : anchorRect.bottom;
+  }
+
+  return {
+    top: indicatorTop - listRect.top + listElement.scrollTop,
+    left: 6,
+    right: 6,
+  };
 }
 
 export function CanvasHomePanel({
@@ -122,6 +197,7 @@ export function CanvasHomePanel({
   onConfirmDeleteProject,
   onDeleteDocument,
   onDeleteProject,
+  onReorderProjects,
   onSortModeChange,
   onHomeModeChange,
   onSearchTextChange,
@@ -133,11 +209,18 @@ export function CanvasHomePanel({
   const cardMenuRef = useRef<HTMLDivElement | null>(null);
   const projectMenuRef = useRef<HTMLDivElement | null>(null);
   const moveMenuRef = useRef<HTMLDivElement | null>(null);
+  const projectListRef = useRef<HTMLDivElement | null>(null);
+  const projectDragStateRef = useRef<ProjectDragState | null>(null);
+  const [projectDragState, setProjectDragState] = useState<ProjectDragState | null>(null);
   const selectedDocument = documents.find((document) => document.id === selectedDocumentId) || documents[0] || null;
 
   useEffect(() => {
+    projectDragStateRef.current = projectDragState;
+  }, [projectDragState]);
+
+  useEffect(() => {
     if (!cardMenu.target && !projectMenu.target && !moveMenu.canvasId) return undefined;
-    const onPointerDown = (event: PointerEvent) => {
+    const onPointerDown = (event: globalThis.PointerEvent) => {
       const target = event.target as Node;
       if (cardMenuRef.current?.contains(target) || projectMenuRef.current?.contains(target) || moveMenuRef.current?.contains(target)) return;
       closeMenus();
@@ -152,6 +235,56 @@ export function CanvasHomePanel({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [cardMenu.target, projectMenu.target, moveMenu.canvasId]);
+
+  useEffect(() => {
+    if (!projectDragState) return undefined;
+    const activeDrag = projectDragState;
+    function handlePointerMove(event: globalThis.PointerEvent) {
+      if (event.pointerId !== activeDrag.pointerId) return;
+      event.preventDefault();
+      const listElement = projectListRef.current;
+      const rects = listElement ? collectProjectRects(listElement, activeDrag.project.id) : [];
+      setProjectDragState((current) => {
+        if (!current) return current;
+        const insertIndex = insertionIndexFromPointer(rects, event.clientY);
+        const next = {
+          ...current,
+          insertIndex,
+          indicatorStyle: listElement ? createProjectInsertIndicatorStyle(listElement, insertIndex) : current.indicatorStyle,
+          hasMoved: current.hasMoved || Math.abs(event.clientY - current.startY) > 3,
+        };
+        projectDragStateRef.current = next;
+        return next;
+      });
+    }
+    function finishDrag(event: globalThis.PointerEvent) {
+      if (event.pointerId !== activeDrag.pointerId) return;
+      event.preventDefault();
+      const current = projectDragStateRef.current;
+      setProjectDragState(null);
+      projectDragStateRef.current = null;
+      if (!current || !current.hasMoved || !onReorderProjects) return;
+      const draggedIndex = projects.findIndex((project) => project.id === current.project.id);
+      const nextProjects = reorderProjects(projects, draggedIndex, current.insertIndex);
+      if (nextProjects.some((project, index) => project.id !== projects[index]?.id)) onReorderProjects(nextProjects);
+    }
+    function cancelDrag(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setProjectDragState(null);
+        projectDragStateRef.current = null;
+      }
+    }
+    window.addEventListener("pointermove", handlePointerMove, { passive: false });
+    window.addEventListener("pointerup", finishDrag);
+    window.addEventListener("pointercancel", finishDrag);
+    window.addEventListener("keydown", cancelDrag);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", finishDrag);
+      window.removeEventListener("pointercancel", finishDrag);
+      window.removeEventListener("keydown", cancelDrag);
+    };
+  }, [onReorderProjects, projectDragState, projects]);
 
   const projectMoveTargets = projects.map((project) => ({ id: project.id, title: project.title || t("infiniteCanvas:untitledProject") }));
   const remoteUploadTargets = remoteProjectsForUpload.map((project) => ({ id: project.id, title: project.title || t("infiniteCanvas:untitledProject") }));
@@ -212,6 +345,22 @@ export function CanvasHomePanel({
     setCardMenu({ target: null, x: 0, y: 0 });
     setProjectMenu({ target: null, x: 0, y: 0 });
     setMoveMenu({ canvasId: "", action: "move", x: 0, y: 0 });
+  };
+
+  const startProjectDrag = (event: PointerEvent<HTMLButtonElement>, project: CanvasProjectRecord, index: number) => {
+    if (event.button !== 0 || renamingProjectId || !onReorderProjects) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const listElement = projectListRef.current;
+    closeMenus();
+    setProjectDragState({
+      project,
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      insertIndex: index,
+      indicatorStyle: listElement ? createProjectInsertIndicatorStyle(listElement, index) : { display: "none" },
+      hasMoved: false,
+    });
   };
 
   const renderCardMenu = () => {
@@ -509,11 +658,17 @@ export function CanvasHomePanel({
             <Plus size={16} aria-hidden="true" />
           </button>
         </div>
-        <div className="ic-project-sidebar__list">
-          {projects.map((project) => {
+        <div ref={projectListRef} className={`ic-project-sidebar__list${projectDragState ? " is-sorting" : ""}`}>
+          {projects.map((project, index) => {
             const isRenaming = project.id === renamingProjectId;
+            const isDragging = projectDragState?.project.id === project.id;
             return (
-              <div key={project.id} className={`ic-project-sidebar__row${project.id === activeProjectId ? " active" : ""}${isRenaming ? " is-renaming" : ""}`}>
+              <div
+                key={project.id}
+                data-project-id={project.id}
+                data-project-index={index}
+                className={`ic-project-sidebar__row${project.id === activeProjectId ? " active" : ""}${isRenaming ? " is-renaming" : ""}${isDragging ? " is-dragging" : ""}`}
+              >
                 {isRenaming ? (
                   <form
                     className="ic-project-sidebar__rename"
@@ -538,6 +693,16 @@ export function CanvasHomePanel({
                   </form>
                 ) : (
                   <>
+                    {onReorderProjects ? (
+                      <button
+                        type="button"
+                        className="ic-project-sidebar__drag"
+                        aria-label={t("common:labels.sort")}
+                        onPointerDown={(event) => startProjectDrag(event, project, index)}
+                      >
+                        <GripVertical size={13} aria-hidden="true" />
+                      </button>
+                    ) : null}
                     <button type="button" className="ic-project-sidebar__item" onClick={() => onSelectProject(project.id)}>
                       <span>{project.title || t("infiniteCanvas:untitledProject")}</span>
                     </button>
@@ -557,6 +722,7 @@ export function CanvasHomePanel({
               </div>
             );
           })}
+          {projectDragState ? <div className="ic-project-sidebar__insert-indicator" style={projectDragState.indicatorStyle} /> : null}
         </div>
       </aside>
       <div className="ic-project-home__panel">

@@ -60,7 +60,7 @@ export const zhCN = {
   },
   labels: {
     ascending: "升序",
-    createdAt: "创建时间",
+    createdAt: "时间",
     descending: "降序",
     libraryViewOptions: "资源库视图选项",
     sort: "排序",
@@ -146,7 +146,7 @@ export const enUS = {
   },
   labels: {
     ascending: "Asc",
-    createdAt: "Created",
+    createdAt: "Time",
     descending: "Desc",
     libraryViewOptions: "Library view options",
     sort: "Sort",

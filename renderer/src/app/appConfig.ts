@@ -181,14 +181,14 @@ export interface EasyToolApi {
   saveResult: (payload: { dataUrl?: string; url?: string; defaultName?: string; directory?: string }) => Promise<{ canceled: boolean; filePath?: string }>;
   listCanvases: () => Promise<{
     canvases: Array<{ id: string; title: string; icon?: string; canvasType?: string; source?: string; projectId?: string; color?: string; pinned?: boolean; createdAt: number; updatedAt: number; nodeCount: number }>;
-    projects: Array<{ id: string; title: string; color?: string; createdAt: number; updatedAt: number }>;
+    projects: Array<{ id: string; title: string; color?: string; sortOrder: number; createdAt: number; updatedAt: number }>;
   }>;
   createCanvas: (payload: { title?: string; icon?: string; canvasType?: string; source?: string; projectId?: string; nodes?: unknown[]; connections?: unknown[]; groups?: unknown[]; viewport?: unknown }) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
-  createCanvasProject: (payload: { title?: string; color?: string }) => Promise<{ ok: true; project: unknown }>;
+  createCanvasProject: (payload: { title?: string; color?: string; sortOrder?: number }) => Promise<{ ok: true; project: unknown }>;
   loadCanvas: (canvasId: string) => Promise<unknown | null>;
   saveCanvas: (canvasId: string, payload: unknown) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
   updateCanvasMeta: (canvasId: string, patch: { title?: string; icon?: string; projectId?: string; color?: string; pinned?: boolean }) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
-  updateCanvasProject: (projectId: string, patch: { title?: string; color?: string }) => Promise<{ ok: true; project: unknown }>;
+  updateCanvasProject: (projectId: string, patch: { title?: string; color?: string; sortOrder?: number }) => Promise<{ ok: true; project: unknown }>;
   deleteCanvas: (canvasId: string) => Promise<{ ok: true; filePath?: string }>;
   deleteCanvasProject: (projectId: string) => Promise<{ ok: true; deletedCanvasIds?: string[] }>;
   moveCanvasToProject: (canvasId: string, projectId: string) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;

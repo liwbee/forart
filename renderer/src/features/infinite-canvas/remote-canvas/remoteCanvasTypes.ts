@@ -10,6 +10,7 @@ export interface RemoteCanvasProject {
   id: string;
   title: string;
   color?: string;
+  sortOrder: number;
   updatedAt: number | string;
   createdAt: number | string;
 }

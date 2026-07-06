@@ -43,6 +43,7 @@ export function createCanvasExchangeStore({ paths, index, packages }) {
       id: DEFAULT_PROJECT_ID,
       title: DEFAULT_PROJECT_TITLE,
       color: "",
+      sortOrder: 1,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -57,10 +58,14 @@ export function createCanvasExchangeStore({ paths, index, packages }) {
 
   function createProject(payload = {}) {
     const timestamp = nowIso();
+    const sortOrder = Number.isFinite(Number(payload.sortOrder))
+      ? Number(payload.sortOrder)
+      : Math.min(0, ...listProjects().map((project) => Number(project.sortOrder || 0))) - 1;
     const project = {
       id: newId("project"),
       title: validateName(payload.title || DEFAULT_PROJECT_TITLE, "project name"),
       color: String(payload.color || ""),
+      sortOrder,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -76,6 +81,7 @@ export function createCanvasExchangeStore({ paths, index, packages }) {
       ...existing,
       title: patch.title !== undefined ? validateName(patch.title, "project name") : existing.title,
       color: patch.color !== undefined ? String(patch.color || "") : existing.color,
+      sortOrder: patch.sortOrder !== undefined ? Number(patch.sortOrder || 0) : existing.sortOrder,
       updatedAt: nowIso(),
     };
     writeJson(paths.projectPath(project.id), project);

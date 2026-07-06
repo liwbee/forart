@@ -247,6 +247,7 @@ function initDatabase() {
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     cover_asset_id TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -278,6 +279,7 @@ function initDatabase() {
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     cover_asset_id TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -296,6 +298,7 @@ function initDatabase() {
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     cover_asset_id TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -354,6 +357,14 @@ function initDatabase() {
   CREATE INDEX IF NOT EXISTS idx_library_entry_tags_kind_entry ON library_entry_tags(kind, entry_id);
   CREATE INDEX IF NOT EXISTS idx_library_entry_tags_tag ON library_entry_tags(tag_id);
 `);
+  ensureProjectSortOrder("model_projects");
+  ensureProjectSortOrder("outfit_projects");
+  ensureProjectSortOrder("action_projects");
+  db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_model_projects_sort ON model_projects(sort_order ASC, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_outfit_projects_sort ON outfit_projects(sort_order ASC, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_action_projects_sort ON action_projects(sort_order ASC, created_at DESC);
+`);
   ensureDefaultProject();
   ensureDefaultOutfitProject();
   ensureDefaultActionProject();
@@ -370,6 +381,16 @@ function runDbTransaction(work) {
       db.exec("ROLLBACK");
     } catch {}
     throw error;
+  }
+}
+
+function ensureProjectSortOrder(tableName) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  if (!columns.some((column) => column.name === "sort_order")) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`);
+    const rows = db.prepare(`SELECT id FROM ${tableName} ORDER BY updated_at DESC, created_at DESC`).all();
+    const update = db.prepare(`UPDATE ${tableName} SET sort_order = ? WHERE id = ?`);
+    rows.forEach((row, index) => update.run(index + 1, row.id));
   }
 }
 
@@ -398,8 +419,8 @@ function ensureDefaultProject() {
   const timestamp = nowIso();
   const name = validateFileNamePart(DEFAULT_PROJECT_NAME, "project name");
   db.prepare(
-    "INSERT INTO model_projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)"
-  ).run(newId("project"), name, timestamp, timestamp);
+    "INSERT INTO model_projects (id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+  ).run(newId("project"), name, 0, timestamp, timestamp);
 }
 
 function ensureDefaultOutfitProject() {
@@ -408,8 +429,8 @@ function ensureDefaultOutfitProject() {
   const timestamp = nowIso();
   const name = validateFileNamePart(DEFAULT_OUTFIT_PROJECT_NAME, "project name");
   db.prepare(
-    "INSERT INTO outfit_projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)"
-  ).run(newId("outfit_project"), name, timestamp, timestamp);
+    "INSERT INTO outfit_projects (id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+  ).run(newId("outfit_project"), name, 0, timestamp, timestamp);
 }
 
 function ensureDefaultActionProject() {
@@ -418,8 +439,8 @@ function ensureDefaultActionProject() {
   const timestamp = nowIso();
   const name = validateFileNamePart(DEFAULT_ACTION_PROJECT_NAME, "project name");
   db.prepare(
-    "INSERT INTO action_projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)"
-  ).run(newId("action_project"), name, timestamp, timestamp);
+    "INSERT INTO action_projects (id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+  ).run(newId("action_project"), name, 0, timestamp, timestamp);
 }
 
 switchDataDir(LIBRARY_DIR);
@@ -1204,7 +1225,7 @@ function handleModelLibraryApi(req, res, url) {
   if (!ensureStorageConfigured(res)) return true;
 
   if (method === "GET" && pathname === "/api/outfit-projects") {
-    const projects = db.prepare("SELECT * FROM outfit_projects ORDER BY updated_at DESC, created_at DESC").all().map(projectWithCover);
+    const projects = db.prepare("SELECT * FROM outfit_projects ORDER BY sort_order ASC, created_at DESC").all().map(projectWithCover);
     sendJson(res, 200, { projects });
     return true;
   }
@@ -1216,9 +1237,10 @@ function handleModelLibraryApi(req, res, url) {
         const id = newId("outfit_project");
         const name = validateFileNamePart(payload?.name || DEFAULT_OUTFIT_PROJECT_NAME, "project name");
         if (outfitProjectNameExists(name)) return sendJson(res, 400, { detail: "Project name must be unique" });
+        const sortOrder = db.prepare("SELECT COALESCE(MIN(sort_order), 0) - 1 AS next FROM outfit_projects").get()?.next || 0;
         db.prepare(
-          "INSERT INTO outfit_projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)"
-        ).run(id, name, timestamp, timestamp);
+          "INSERT INTO outfit_projects (id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+        ).run(id, name, sortOrder, timestamp, timestamp);
         sendJson(res, 200, projectWithCover(loadOutfitProject(id)));
       })
       .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
@@ -1261,6 +1283,9 @@ function handleModelLibraryApi(req, res, url) {
               const coverAssetId = data.cover_asset_id ? String(data.cover_asset_id) : null;
               if (coverAssetId && !loadAsset(coverAssetId)) throw new Error("Asset not found");
               db.prepare("UPDATE outfit_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(coverAssetId, nowIso(), projectId);
+            }
+            if (data.sort_order !== undefined) {
+              db.prepare("UPDATE outfit_projects SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(data.sort_order || 0), nowIso(), projectId);
             }
             return projectWithCover(loadOutfitProject(projectId));
           });
@@ -1431,7 +1456,7 @@ function handleModelLibraryApi(req, res, url) {
   }
 
   if (method === "GET" && pathname === "/api/action-projects") {
-    const projects = db.prepare("SELECT * FROM action_projects ORDER BY updated_at DESC, created_at DESC").all().map(projectWithCover);
+    const projects = db.prepare("SELECT * FROM action_projects ORDER BY sort_order ASC, created_at DESC").all().map(projectWithCover);
     sendJson(res, 200, { projects });
     return true;
   }
@@ -1443,9 +1468,10 @@ function handleModelLibraryApi(req, res, url) {
         const id = newId("action_project");
         const name = validateFileNamePart(payload?.name || DEFAULT_ACTION_PROJECT_NAME, "project name");
         if (actionProjectNameExists(name)) return sendJson(res, 400, { detail: "Project name must be unique" });
+        const sortOrder = db.prepare("SELECT COALESCE(MIN(sort_order), 0) - 1 AS next FROM action_projects").get()?.next || 0;
         db.prepare(
-          "INSERT INTO action_projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)"
-        ).run(id, name, timestamp, timestamp);
+          "INSERT INTO action_projects (id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+        ).run(id, name, sortOrder, timestamp, timestamp);
         sendJson(res, 200, projectWithCover(loadActionProject(id)));
       })
       .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
@@ -1475,6 +1501,9 @@ function handleModelLibraryApi(req, res, url) {
               const coverAssetId = data.cover_asset_id ? String(data.cover_asset_id) : null;
               if (coverAssetId && !loadAsset(coverAssetId)) throw new Error("Asset not found");
               db.prepare("UPDATE action_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(coverAssetId, nowIso(), projectId);
+            }
+            if (data.sort_order !== undefined) {
+              db.prepare("UPDATE action_projects SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(data.sort_order || 0), nowIso(), projectId);
             }
             return projectWithCover(loadActionProject(projectId));
           });
@@ -1661,7 +1690,7 @@ function handleModelLibraryApi(req, res, url) {
   }
 
   if (method === "GET" && pathname === "/api/model-projects") {
-    const projects = db.prepare("SELECT * FROM model_projects ORDER BY updated_at DESC, created_at DESC").all().map(projectWithCover);
+    const projects = db.prepare("SELECT * FROM model_projects ORDER BY sort_order ASC, created_at DESC").all().map(projectWithCover);
     sendJson(res, 200, { projects });
     return true;
   }
@@ -1673,9 +1702,10 @@ function handleModelLibraryApi(req, res, url) {
         const id = newId("project");
         const name = validateFileNamePart(payload?.name || DEFAULT_PROJECT_NAME, "project name");
         if (projectNameExists(name)) return sendJson(res, 400, { detail: "Project name must be unique" });
+        const sortOrder = db.prepare("SELECT COALESCE(MIN(sort_order), 0) - 1 AS next FROM model_projects").get()?.next || 0;
         db.prepare(
-          "INSERT INTO model_projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)"
-        ).run(id, name, timestamp, timestamp);
+          "INSERT INTO model_projects (id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+        ).run(id, name, sortOrder, timestamp, timestamp);
         const project = projectWithCover(loadProject(id));
         sendJson(res, 200, project);
       })
@@ -1719,6 +1749,9 @@ function handleModelLibraryApi(req, res, url) {
               const coverAssetId = data.cover_asset_id ? String(data.cover_asset_id) : null;
               if (coverAssetId && !loadAsset(coverAssetId)) throw new Error("Asset not found");
               db.prepare("UPDATE model_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(coverAssetId, nowIso(), projectId);
+            }
+            if (data.sort_order !== undefined) {
+              db.prepare("UPDATE model_projects SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(data.sort_order || 0), nowIso(), projectId);
             }
             return projectWithCover(loadProject(projectId));
           });

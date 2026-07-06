@@ -203,6 +203,15 @@ function getViewportForBounds(bounds: BoundsRect, width: number, height: number,
   };
 }
 
+function moveNodesToFront(nodes: CanvasNode[], nodeIds: Set<string>) {
+  if (!nodeIds.size) return nodes;
+  const backNodes = nodes.filter((node) => !nodeIds.has(node.id));
+  if (backNodes.length === nodes.length) return nodes;
+  const frontNodes = nodes.filter((node) => nodeIds.has(node.id));
+  const nextNodes = [...backNodes, ...frontNodes];
+  return nextNodes.every((node, index) => node.id === nodes[index]?.id) ? nodes : nextNodes;
+}
+
 function isEditingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
@@ -595,6 +604,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     createCanvasDocumentFromDraft,
     createCanvasProject,
     selectCanvasProject,
+    reorderCanvasProjects,
     submitRenameCanvasDocument,
     submitRenameCanvasProject,
     duplicateCanvasDocument,
@@ -1767,7 +1777,9 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     event.stopPropagation();
     if (node.id !== editingPromptId) setEditingPromptId("");
     const dragSelectionIds = selectedIds.has(node.id) ? new Set(selectedIds) : new Set([node.id]);
-    const draggedNodes = nodes
+    const orderedNodes = moveNodesToFront(nodes, dragSelectionIds);
+    if (orderedNodes !== nodes) setNodesWithoutHistory(orderedNodes);
+    const draggedNodes = orderedNodes
       .filter((currentNode) => dragSelectionIds.has(currentNode.id))
       .map((currentNode) => ({
         id: currentNode.id,
@@ -2303,6 +2315,10 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             void remoteCanvas.deleteProject(projectId);
           }
           else void deleteCanvasProject(projectId);
+        }}
+        onReorderProjects={(projects) => {
+          if (homeIsServer) remoteCanvas.reorderProjects(projects);
+          else reorderCanvasProjects(projects);
         }}
         onSortModeChange={(mode) => {
           if (homeIsServer) remoteCanvas.setSortMode(mode === "name" ? "name" : "uploadedAt");

@@ -207,9 +207,17 @@ function normalizeCanvasProjectRecord(input: unknown): CanvasProjectRecord | nul
     id: String(parsed.id),
     title: String(parsed.title || "New project"),
     color: parsed.color || "",
+    sortOrder: Number.isFinite(Number(parsed.sortOrder)) ? Number(parsed.sortOrder) : 0,
     createdAt: Number(parsed.createdAt || timestamp),
     updatedAt: Number(parsed.updatedAt || parsed.createdAt || timestamp),
   };
+}
+
+function sortCanvasProjects(projects: CanvasProjectRecord[]) {
+  return [...projects].sort((left, right) => {
+    if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
+    return Number(left.createdAt || 0) - Number(right.createdAt || 0);
+  });
 }
 
 function cloneCanvasPayload<T>(value: T): T {
@@ -403,7 +411,7 @@ export function useCanvasProjects({
     const projects = (result.canvases || []).map(normalizeCanvasRecord).filter(Boolean) as CanvasDocumentRecord[];
     const projectRecords = (result.projects || []).map(normalizeCanvasProjectRecord).filter(Boolean) as CanvasProjectRecord[];
     setCanvasDocuments(projects);
-    setCanvasProjects(projectRecords);
+    setCanvasProjects(sortCanvasProjects(projectRecords));
     const nextActiveProjectId = projectRecords.some((project) => project.id === activeProjectId)
       ? activeProjectId
       : projectRecords[0]?.id || "";
@@ -511,7 +519,7 @@ export function useCanvasProjects({
     const result = await window.easyTool.createCanvasProject({ title });
     const project = normalizeCanvasProjectRecord(result.project);
     if (project) {
-      setCanvasProjects((current) => [...current.filter((item) => item.id !== project.id), project]);
+      setCanvasProjects((current) => sortCanvasProjects([...current.filter((item) => item.id !== project.id), project]));
       setActiveProjectId(project.id);
       setSelectedHomeCanvasId("");
       setRenamingProjectId(project.id);
@@ -540,12 +548,32 @@ export function useCanvasProjects({
     try {
       const result = await window.easyTool.updateCanvasProject(projectId, { title });
       const project = normalizeCanvasProjectRecord(result.project);
-      if (project) setCanvasProjects((current) => current.map((item) => (item.id === project.id ? { ...item, ...project } : item)));
+      if (project) setCanvasProjects((current) => sortCanvasProjects(current.map((item) => (item.id === project.id ? { ...item, ...project } : item))));
     } finally {
       setRenamingProjectId("");
       setRenamingTitle("");
     }
   }, [renamingTitle]);
+
+  const reorderCanvasProjects = useCallback((nextProjects: CanvasProjectRecord[]) => {
+    if (!window.easyTool?.updateCanvasProject) return;
+    const orderedProjects = nextProjects.map((project, index) => ({ ...project, sortOrder: index + 1 }));
+    setCanvasProjects(orderedProjects);
+    orderedProjects.forEach((project) => {
+      const previous = canvasProjects.find((item) => item.id === project.id);
+      if (previous?.sortOrder !== project.sortOrder) {
+        void window.easyTool?.updateCanvasProject(project.id, { sortOrder: project.sortOrder }).then((result) => {
+          const savedProject = normalizeCanvasProjectRecord(result.project);
+          if (savedProject) {
+            setCanvasProjects((current) => sortCanvasProjects(current.map((item) => (item.id === savedProject.id ? { ...item, ...savedProject } : item))));
+          }
+        }).catch((error) => {
+          showProjectStatus(error instanceof Error ? error.message : String(error), "error", CANVAS_TOAST_AUTO_HIDE_MS);
+          void refreshCanvasWorkspace();
+        });
+      }
+    });
+  }, [canvasProjects, refreshCanvasWorkspace, showProjectStatus]);
 
   const deleteCanvasProject = useCallback(async (projectId: string) => {
     if (!projectId || !window.easyTool?.deleteCanvasProject) return;
@@ -792,6 +820,7 @@ export function useCanvasProjects({
     createCanvasDocumentFromDraft,
     createCanvasProject,
     selectCanvasProject,
+    reorderCanvasProjects,
     submitRenameCanvasDocument,
     submitRenameCanvasProject,
     duplicateCanvasDocument,

@@ -104,8 +104,8 @@ function ensureDefaultProject(db, labels) {
   if (row) return;
   const timestamp = nowIso();
   const name = validateFileNamePart(labels.defaultProject, "project name");
-  db.prepare("INSERT INTO model_projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
-    .run(newId("project"), name, timestamp, timestamp);
+  db.prepare("INSERT INTO model_projects (id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+    .run(newId("project"), name, 0, timestamp, timestamp);
 }
 
 function ensureDefaultOutfitProject(db, labels) {
@@ -113,8 +113,8 @@ function ensureDefaultOutfitProject(db, labels) {
   if (row) return;
   const timestamp = nowIso();
   const name = validateFileNamePart(labels.defaultOutfitProject, "project name");
-  db.prepare("INSERT INTO outfit_projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
-    .run(newId("outfit_project"), name, timestamp, timestamp);
+  db.prepare("INSERT INTO outfit_projects (id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+    .run(newId("outfit_project"), name, 0, timestamp, timestamp);
 }
 
 function ensureDefaultActionProject(db, labels) {
@@ -122,8 +122,18 @@ function ensureDefaultActionProject(db, labels) {
   if (row) return;
   const timestamp = nowIso();
   const name = validateFileNamePart(labels.defaultActionProject, "project name");
-  db.prepare("INSERT INTO action_projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
-    .run(newId("action_project"), name, timestamp, timestamp);
+  db.prepare("INSERT INTO action_projects (id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+    .run(newId("action_project"), name, 0, timestamp, timestamp);
+}
+
+function ensureProjectSortOrder(db, tableName) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  if (!columns.some((column) => column.name === "sort_order")) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`);
+    const rows = db.prepare(`SELECT id FROM ${tableName} ORDER BY updated_at DESC, created_at DESC`).all();
+    const update = db.prepare(`UPDATE ${tableName} SET sort_order = ? WHERE id = ?`);
+    rows.forEach((row, index) => update.run(index + 1, row.id));
+  }
 }
 
 function initDatabase(db, labels) {
@@ -135,6 +145,7 @@ function initDatabase(db, labels) {
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     cover_asset_id TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -166,6 +177,7 @@ function initDatabase(db, labels) {
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     cover_asset_id TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -184,6 +196,7 @@ function initDatabase(db, labels) {
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     cover_asset_id TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -241,6 +254,14 @@ function initDatabase(db, labels) {
   CREATE INDEX IF NOT EXISTS idx_library_tags_kind_project_sort ON library_tags(kind, project_id, sort_order ASC, name ASC);
   CREATE INDEX IF NOT EXISTS idx_library_entry_tags_kind_entry ON library_entry_tags(kind, entry_id);
   CREATE INDEX IF NOT EXISTS idx_library_entry_tags_tag ON library_entry_tags(tag_id);
+`);
+  ensureProjectSortOrder(db, "model_projects");
+  ensureProjectSortOrder(db, "outfit_projects");
+  ensureProjectSortOrder(db, "action_projects");
+  db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_model_projects_sort ON model_projects(sort_order ASC, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_outfit_projects_sort ON outfit_projects(sort_order ASC, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_action_projects_sort ON action_projects(sort_order ASC, created_at DESC);
 `);
   ensureDefaultProject(db, labels);
   ensureDefaultOutfitProject(db, labels);

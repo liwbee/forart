@@ -385,6 +385,7 @@
 }
 
 .model-tag-manager__list {
+  position: relative;
   min-width: 0;
   align-self: start;
   display: flex;
@@ -405,7 +406,7 @@
   max-width: 100%;
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  padding: 0 12px;
+  padding: 0 10px 0 7px;
   background: var(--surface-control);
   color: var(--text-secondary);
   font-size: 12px;
@@ -413,6 +414,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.model-tag-manager__list.sorting {
+  user-select: none;
 }
 
 .model-tag-manager__list button:hover {
@@ -425,6 +430,62 @@
   border-color: var(--state-active-border);
   background: var(--state-active-bg);
   color: var(--state-active-text);
+}
+
+.model-tag-manager__list button.dragging {
+  opacity: 0.42;
+}
+
+.model-tag-manager__drag-handle {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  color: currentColor;
+  cursor: grab;
+  opacity: 0.62;
+  touch-action: none;
+}
+
+.model-tag-manager__drag-handle:active {
+  cursor: grabbing;
+}
+
+.model-tag-manager__tag-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-tag-manager__floating-tag {
+  position: fixed;
+  z-index: 1500;
+  pointer-events: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--state-active-border);
+  border-radius: 999px;
+  padding: 0 10px 0 7px;
+  background: var(--surface-card);
+  color: var(--state-hover-text);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  box-shadow: var(--shadow-popover);
+  white-space: nowrap;
+}
+
+.model-tag-manager__insert-indicator {
+  position: absolute;
+  z-index: 2;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--state-active-border);
+  transform: translateX(-1px);
+  pointer-events: none;
 }
 
 .model-tag-manager__empty {

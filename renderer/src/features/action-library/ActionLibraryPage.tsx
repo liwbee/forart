@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, ChevronRight, Copy, Download, Eye, FolderPlus, ImagePlus, MoreHorizontal, Pencil, Plus, Tags, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronRight, Copy, Download, Eye, FolderPlus, ImagePlus, MoreHorizontal, Tags, Trash2 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { LazyImage } from "../../components/LazyImage";
 import { CollapsibleTagFilterRow } from "../library-tags";
@@ -12,6 +12,8 @@ import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalIm
 import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
 import { LibraryImageDropZone } from "../resource-library/LibraryImageDropZone";
 import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
+import { LibraryProjectSidebar } from "../resource-library/LibraryProjectSidebar";
+import { LibraryTagManagerDialog } from "../resource-library/LibraryTagManagerDialog";
 import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
 import { normalizeTags, toggleTag } from "../model-library/tagUtils";
 import { EMPTY_LIBRARY_TAG_FILTER, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
@@ -70,194 +72,6 @@ function fileToUploadPayload(file: File): Promise<AssetUploadPayload> {
     };
     reader.readAsDataURL(file);
   });
-}
-
-function ActionProjectSidebar({
-  projects,
-  activeProjectId,
-  renamingProjectId,
-  deleteConfirmProjectId,
-  onSelect,
-  onCreateProject,
-  onRenameStart,
-  onRenameCancel,
-  onRenameSubmit,
-  onDeleteProject,
-  closeMenuToken,
-}: {
-  projects: Pick<ActionProject, "id" | "name">[];
-  activeProjectId: string;
-  renamingProjectId: string;
-  deleteConfirmProjectId: string;
-  onSelect: (projectId: string) => void;
-  onCreateProject: () => void;
-  onRenameStart: (projectId: string) => void;
-  onRenameCancel: () => void;
-  onRenameSubmit: (projectId: string, name: string) => void;
-  onDeleteProject: (projectId: string, isConfirming: boolean) => void;
-  closeMenuToken: number;
-}) {
-  const { t } = useTranslation();
-  const [menuState, setMenuState] = useState<{ projectId: string; x: number; y: number }>({ projectId: "", x: 0, y: 0 });
-  const [draftName, setDraftName] = useState("");
-  const menuProjectId = menuState.projectId;
-
-  useEffect(() => {
-    const project = projects.find((item) => item.id === renamingProjectId);
-    setDraftName(project?.name || "");
-  }, [projects, renamingProjectId]);
-
-  useEffect(() => {
-    setMenuState({ projectId: "", x: 0, y: 0 });
-  }, [closeMenuToken]);
-
-  useEffect(() => {
-    if (!menuProjectId) return;
-    function closeMenu() {
-      setMenuState({ projectId: "", x: 0, y: 0 });
-    }
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") closeMenu();
-    }
-    window.addEventListener("pointerdown", closeMenu);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", closeMenu);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [menuProjectId]);
-
-  function submitRename(projectId: string) {
-    onRenameSubmit(projectId, draftName);
-  }
-
-  function handleRenameKeyDown(event: KeyboardEvent<HTMLInputElement>, projectId: string) {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      submitRename(projectId);
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onRenameCancel();
-    }
-  }
-
-  function openMenuAt(projectId: string, x: number, y: number) {
-    const menuWidth = 168;
-    const menuHeight = 92;
-    const pad = 8;
-    setMenuState({
-      projectId,
-      x: Math.max(pad, Math.min(x, window.innerWidth - menuWidth - pad)),
-      y: Math.max(pad, Math.min(y, window.innerHeight - menuHeight - pad)),
-    });
-  }
-
-  function toggleMenu(event: MouseEvent<HTMLButtonElement>, projectId: string) {
-    event.stopPropagation();
-    if (menuProjectId === projectId) {
-      setMenuState({ projectId: "", x: 0, y: 0 });
-      return;
-    }
-    const rect = event.currentTarget.getBoundingClientRect();
-    openMenuAt(projectId, rect.right + 6, rect.top);
-  }
-
-  return (
-    <aside className="model-project-rail" aria-label={t("actionLibrary:projectRail")}>
-      <button className="model-project-add" type="button" onClick={onCreateProject}>
-        <Plus size={18} aria-hidden="true" />
-        <span>{t("common:labels.newProject")}</span>
-      </button>
-
-      <div className="model-project-list scrollbar-thin-stable">
-        {projects.length ? (
-          projects.map((project) => {
-            const isActive = project.id === activeProjectId;
-            const isRenaming = project.id === renamingProjectId;
-
-            return (
-              <div key={project.id} className={`model-project-row${isActive ? " active" : ""}${isRenaming ? " renaming" : ""}`}>
-                {isRenaming ? (
-                  <input
-                    className="model-project-rename-input"
-                    value={draftName}
-                    onChange={(event) => setDraftName(event.target.value)}
-                    onBlur={() => submitRename(project.id)}
-                    onKeyDown={(event) => handleRenameKeyDown(event, project.id)}
-                    autoFocus
-                    maxLength={120}
-                    aria-label={t("common:labels.projectName")}
-                  />
-                ) : (
-                  <button
-                    className="model-project-list-item"
-                    type="button"
-                    aria-current={isActive ? "true" : undefined}
-                    onClick={() => onSelect(project.id)}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      openMenuAt(project.id, event.clientX, event.clientY);
-                    }}
-                  >
-                    <span>{project.name || "Untitled Project"}</span>
-                  </button>
-                )}
-
-                <button
-                  className="model-project-menu-button"
-                  type="button"
-                  aria-label={t("actionLibrary:projectActions", { name: project.name || "Untitled Project" })}
-                  aria-expanded={menuProjectId === project.id}
-                  onClick={(event) => toggleMenu(event, project.id)}
-                >
-                  <MoreHorizontal size={18} aria-hidden="true" />
-                </button>
-              </div>
-            );
-          })
-        ) : (
-          <div className="model-project-list-empty">{t("common:empty.noProjects")}</div>
-        )}
-      </div>
-
-      {menuProjectId ? createPortal(
-        <div
-          className="project-row-menu"
-          role="menu"
-          style={{ left: menuState.x, top: menuState.y }}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              const projectId = menuProjectId;
-              setMenuState({ projectId: "", x: 0, y: 0 });
-              onRenameStart(projectId);
-            }}
-          >
-            <Pencil size={16} aria-hidden="true" />
-            <span>{t("common:actions.rename")}</span>
-          </button>
-          <button
-            className={deleteConfirmProjectId === menuProjectId ? "danger confirming" : "danger"}
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              const projectId = menuProjectId;
-              const isConfirming = deleteConfirmProjectId === projectId;
-              onDeleteProject(projectId, isConfirming);
-            }}
-          >
-            <Trash2 size={16} aria-hidden="true" />
-            <span>{deleteConfirmProjectId === menuProjectId ? t("common:confirm.delete") : t("common:actions.delete")}</span>
-          </button>
-        </div>,
-        document.body,
-      ) : null}
-    </aside>
-  );
 }
 
 function ActionToolbar({
@@ -820,140 +634,6 @@ function CreateProjectDialog({
   );
 }
 
-function ActionTagManager({
-  isOpen,
-  tags,
-  isCreating,
-  deleteConfirmTagId,
-  onClose,
-  onCreateTag,
-  onRenameTag,
-  onDeleteTag,
-}: {
-  isOpen: boolean;
-  tags: ActionTag[];
-  isCreating: boolean;
-  deleteConfirmTagId: string;
-  onClose: () => void;
-  onCreateTag: (name: string) => void;
-  onRenameTag: (tagId: string, name: string) => void;
-  onDeleteTag: (tagId: string, isConfirming: boolean) => void;
-}) {
-  const { t } = useTranslation();
-  const [selectedTagId, setSelectedTagId] = useState("");
-  const [newTagName, setNewTagName] = useState("");
-  const [draftTagName, setDraftTagName] = useState("");
-  const selectedTag = tags.find((tag) => tag.id === selectedTagId) || null;
-
-  useEffect(() => {
-    if (!isOpen) {
-      setSelectedTagId("");
-      setNewTagName("");
-      setDraftTagName("");
-      return;
-    }
-    if (!selectedTagId && tags.length) {
-      setSelectedTagId(tags[0].id);
-      return;
-    }
-    if (selectedTagId && !tags.some((tag) => tag.id === selectedTagId)) {
-      setSelectedTagId(tags[0]?.id || "");
-    }
-  }, [isOpen, selectedTagId, tags]);
-
-  useEffect(() => {
-    setDraftTagName(selectedTag?.name || "");
-  }, [selectedTag?.id, selectedTag?.name]);
-
-  if (!isOpen) return null;
-
-  function submitActiveTagRename() {
-    if (!selectedTag) return;
-    const nextName = normalizeTags([draftTagName])[0] || "";
-    if (!nextName || nextName === selectedTag.name) {
-      setDraftTagName(selectedTag.name);
-      return;
-    }
-    onRenameTag(selectedTag.id, nextName);
-  }
-
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="model-tag-manager" role="dialog" aria-modal="true" aria-labelledby="action-tag-manager-title" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dialog__head">
-          <h2 id="action-tag-manager-title">{t("common:labels.manageTags")}</h2>
-          <p>{t("actionLibrary:tagManagerDescription")}</p>
-        </div>
-
-        <div className="dialog-field">
-          <span>{t("common:labels.newTag")}</span>
-          <div className="tag-create-row">
-            <input value={newTagName} onChange={(event) => setNewTagName(event.target.value)} maxLength={24} placeholder={t("common:labels.tagNamePlaceholder")} />
-            <button
-              className="button primary"
-              type="button"
-              disabled={isCreating}
-              onClick={() => {
-                onCreateTag(newTagName);
-                setNewTagName("");
-              }}
-            >
-              {t("common:actions.add")}
-            </button>
-          </div>
-        </div>
-
-        <div className="model-tag-manager__body">
-          <div className="model-tag-manager__list" aria-label={t("common:labels.tagList")}>
-            {tags.map((tag) => {
-              const selected = selectedTagId === tag.id;
-              return (
-                <button key={tag.id} className={selected ? "active" : ""} type="button" onClick={() => setSelectedTagId(tag.id)}>
-                  {tag.name}
-                </button>
-              );
-            })}
-            {!tags.length ? <div className="model-tag-manager__empty">{t("actionLibrary:noTags")}</div> : null}
-          </div>
-
-          {selectedTag ? (
-            <div className="model-tag-manager__editor">
-              <label className="dialog-field">
-                <span>{t("common:labels.editTag")}</span>
-                <input
-                  value={draftTagName}
-                  onChange={(event) => setDraftTagName(event.target.value)}
-                  onBlur={submitActiveTagRename}
-                  maxLength={24}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      submitActiveTagRename();
-                    }
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      setDraftTagName(selectedTag.name);
-                    }
-                  }}
-                />
-              </label>
-              <button
-                className={`button danger${deleteConfirmTagId === selectedTag.id ? " confirming" : ""}`}
-                type="button"
-                onClick={() => onDeleteTag(selectedTag.id, deleteConfirmTagId === selectedTag.id)}
-              >
-                {deleteConfirmTagId === selectedTag.id ? t("common:confirm.delete") : t("common:actions.delete")}
-              </button>
-            </div>
-          ) : (
-            <div className="model-tag-manager__editor model-tag-manager__editor--empty">{t("common:labels.emptyTagEditor")}</div>
-          )}
-        </div>
-      </section>
-    </div>
-  );
-}
-
 export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -1118,7 +798,10 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   });
 
   const renameProjectMutation = useMutation({
-    mutationFn: ({ projectId, name }: { projectId: string; name: string }) => updateActionProject(projectId, { name }),
+    mutationFn: ({ projectId, name, sort_order }: { projectId: string; name?: string; sort_order?: number }) => updateActionProject(projectId, {
+      ...(name !== undefined ? { name } : {}),
+      ...(sort_order !== undefined ? { sort_order } : {}),
+    }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.projects });
       await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
@@ -1150,9 +833,12 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   });
 
   const updateTagMutation = useMutation({
-    mutationFn: ({ tagId, name }: { tagId: string; name?: string }) => {
+    mutationFn: ({ tagId, name, sort_order }: { tagId: string; name?: string; sort_order?: number }) => {
       if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
-      return updateActionTag(activeProjectId, tagId, { ...(name !== undefined ? { name } : {}) });
+      return updateActionTag(activeProjectId, tagId, {
+        ...(name !== undefined ? { name } : {}),
+        ...(sort_order !== undefined ? { sort_order } : {}),
+      });
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
@@ -1185,6 +871,15 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
       return;
     }
     renameProjectMutation.mutate({ projectId, name: nextName });
+  }
+
+  function handleReorderProjects(nextProjects: ActionProject[]) {
+    nextProjects.forEach((project, index) => {
+      const nextSortOrder = index + 1;
+      if (project.sort_order !== nextSortOrder) {
+        renameProjectMutation.mutate({ projectId: project.id, sort_order: nextSortOrder });
+      }
+    });
   }
 
   function handleProjectDelete(projectId: string, isConfirming: boolean) {
@@ -1248,6 +943,15 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     const next = normalizeTags([name])[0];
     if (!next) return;
     updateTagMutation.mutate({ tagId, name: next });
+  }
+
+  function handleReorderTags(nextTags: ActionTag[]) {
+    nextTags.forEach((tag, index) => {
+      const nextSortOrder = index + 1;
+      if (tag.sort_order !== nextSortOrder) {
+        updateTagMutation.mutate({ tagId: tag.id, sort_order: nextSortOrder });
+      }
+    });
   }
 
   function handleToggleTagFilter(tagId: string) {
@@ -1334,11 +1038,13 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   return (
     <section className="model-library-page action-library-page" aria-label={t("actionLibrary:title")}>
       <div className="model-library">
-        <ActionProjectSidebar
+        <LibraryProjectSidebar<ActionProject>
           projects={projects}
           activeProjectId={activeProjectId}
           renamingProjectId={renamingProjectId}
           deleteConfirmProjectId={deleteConfirmProjectId}
+          ariaLabel={t("actionLibrary:projectRail")}
+          projectActionsLabel={(name) => t("actionLibrary:projectActions", { name })}
           onSelect={(projectId) => {
             setDeleteConfirmProjectId("");
             setRenamingProjectId("");
@@ -1352,6 +1058,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
           onRenameCancel={() => setRenamingProjectId("")}
           onRenameSubmit={submitProjectRename}
           onDeleteProject={handleProjectDelete}
+          onReorderProjects={handleReorderProjects}
           closeMenuToken={closeMenuToken}
         />
 
@@ -1412,15 +1119,19 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         onClose={() => setCreateProjectOpen(false)}
         onSubmit={(name) => createProjectMutation.mutate(name)}
       />
-      <ActionTagManager
+      <LibraryTagManagerDialog<ActionTag>
         isOpen={tagManagerOpen}
         tags={tags}
         isCreating={createTagMutation.isPending}
         deleteConfirmTagId={deleteConfirmTagId}
+        titleId="action-tag-manager-title"
+        description={t("actionLibrary:tagManagerDescription")}
+        emptyText={t("actionLibrary:noTags")}
         onClose={() => setTagManagerOpen(false)}
         onCreateTag={handleCreateTag}
         onRenameTag={handleRenameTag}
         onDeleteTag={handleDeleteTag}
+        onReorderTags={handleReorderTags}
       />
       <ActionFolderImportDialog
         isOpen={bulkImportOpen}

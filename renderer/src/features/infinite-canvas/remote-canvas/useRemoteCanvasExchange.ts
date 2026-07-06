@@ -10,6 +10,7 @@ import {
   listRemoteCanvasProjects,
   loadRemoteCanvas,
   renameRemoteCanvasProject,
+  updateRemoteCanvasProject,
   uploadRemoteCanvasPackage,
 } from "./remoteCanvasApi";
 import type { RemoteCanvasManifest, RemoteCanvasProject, RemoteCanvasSortMode } from "./remoteCanvasTypes";
@@ -39,9 +40,17 @@ function remoteProjectToRecord(project: RemoteCanvasProject): CanvasProjectRecor
     id: project.id,
     title: project.title,
     color: project.color || "",
+    sortOrder: Number.isFinite(Number(project.sortOrder)) ? Number(project.sortOrder) : 0,
     createdAt: timestamp(project.createdAt),
     updatedAt: timestamp(project.updatedAt),
   };
+}
+
+function sortProjectRecords(projects: CanvasProjectRecord[]) {
+  return [...projects].sort((left, right) => {
+    if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
+    return Number(left.createdAt || 0) - Number(right.createdAt || 0);
+  });
 }
 
 export function useRemoteCanvasExchange() {
@@ -64,7 +73,7 @@ export function useRemoteCanvasExchange() {
     setLoading(true);
     try {
       const remoteProjects = await listRemoteCanvasProjects();
-      const projectRecords = remoteProjects.map(remoteProjectToRecord);
+      const projectRecords = sortProjectRecords(remoteProjects.map(remoteProjectToRecord));
       const nextProjectId = activeProjectId && projectRecords.some((project) => project.id === activeProjectId)
         ? activeProjectId
         : projectRecords[0]?.id || "";
@@ -92,6 +101,19 @@ export function useRemoteCanvasExchange() {
     await renameRemoteCanvasProject(projectId, title);
     await refresh();
   }, [refresh]);
+
+  const reorderProjects = useCallback((nextProjects: CanvasProjectRecord[]) => {
+    const orderedProjects = nextProjects.map((project, index) => ({ ...project, sortOrder: index + 1 }));
+    setProjects(orderedProjects);
+    orderedProjects.forEach((project) => {
+      const previous = projects.find((item) => item.id === project.id);
+      if (previous?.sortOrder !== project.sortOrder) {
+        void updateRemoteCanvasProject(project.id, { sortOrder: project.sortOrder }).catch(() => {
+          void refresh();
+        });
+      }
+    });
+  }, [projects, refresh]);
 
   const deleteProject = useCallback(async (projectId: string) => {
     await deleteRemoteCanvasProject(projectId);
@@ -135,6 +157,7 @@ export function useRemoteCanvasExchange() {
     records,
     refresh,
     renameProject,
+    reorderProjects,
     search,
     setActiveProjectId,
     setSearch,

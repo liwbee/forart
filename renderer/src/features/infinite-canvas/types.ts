@@ -217,6 +217,7 @@ export interface CanvasProjectRecord {
   id: string;
   title: string;
   color?: string;
+  sortOrder: number;
   createdAt: number;
   updatedAt: number;
 }

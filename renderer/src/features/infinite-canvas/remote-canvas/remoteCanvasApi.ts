@@ -56,13 +56,17 @@ export async function createRemoteCanvasProject(title: string): Promise<RemoteCa
   return result.project;
 }
 
-export async function renameRemoteCanvasProject(projectId: string, title: string): Promise<RemoteCanvasProject> {
+export async function updateRemoteCanvasProject(projectId: string, payload: Partial<Pick<RemoteCanvasProject, "title" | "color" | "sortOrder">>): Promise<RemoteCanvasProject> {
   requireRemoteApiBaseUrl();
   const result = await apiRequest<{ project: RemoteCanvasProject }>(`/api/canvas-exchange/projects/${encodeURIComponent(projectId)}`, {
     method: "PATCH",
-    body: JSON.stringify({ title }),
+    body: JSON.stringify(payload),
   });
   return result.project;
+}
+
+export async function renameRemoteCanvasProject(projectId: string, title: string): Promise<RemoteCanvasProject> {
+  return updateRemoteCanvasProject(projectId, { title });
 }
 
 export async function deleteRemoteCanvasProject(projectId: string): Promise<{ deletedCanvasIds: string[] }> {

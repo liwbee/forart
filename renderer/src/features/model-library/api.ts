@@ -41,7 +41,7 @@ export function createModelProject(name: string) {
   });
 }
 
-export function updateModelProject(projectId: string, payload: Partial<Pick<ModelProject, "name" | "cover_asset_id">>) {
+export function updateModelProject(projectId: string, payload: Partial<Pick<ModelProject, "name" | "cover_asset_id" | "sort_order">>) {
   return apiRequest<ModelProject>(`/api/model-projects/${encodeURIComponent(projectId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),

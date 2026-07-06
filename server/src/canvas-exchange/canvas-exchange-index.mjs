@@ -7,6 +7,7 @@ function defaultProject(timestamp = nowIso()) {
     id: DEFAULT_PROJECT_ID,
     title: DEFAULT_PROJECT_TITLE,
     color: "",
+    sortOrder: 1,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -14,10 +15,13 @@ function defaultProject(timestamp = nowIso()) {
 
 function normalizeProject(project, fallback = {}) {
   const timestamp = nowIso();
+  const fallbackSortOrder = Number.isFinite(Number(fallback.sortOrder)) ? Number(fallback.sortOrder) : 0;
+  const sortOrder = Number.isFinite(Number(project?.sortOrder)) ? Number(project.sortOrder) : fallbackSortOrder;
   return {
     id: String(project?.id || fallback.id || DEFAULT_PROJECT_ID),
     title: String(project?.title || fallback.title || DEFAULT_PROJECT_TITLE).slice(0, 80),
     color: String(project?.color || fallback.color || ""),
+    sortOrder,
     createdAt: String(project?.createdAt || fallback.createdAt || timestamp),
     updatedAt: String(project?.updatedAt || fallback.updatedAt || timestamp),
   };
@@ -43,7 +47,7 @@ function normalizeCanvas(canvas) {
 function normalizePayload(payload) {
   const timestamp = nowIso();
   const projects = Array.isArray(payload?.projects)
-    ? payload.projects.map((project) => normalizeProject(project)).filter((project) => project.id)
+    ? payload.projects.map((project, index) => normalizeProject(project, { sortOrder: index + 1 })).filter((project) => project.id)
     : [];
   const normalizedProjects = projects.length ? projects : [defaultProject(timestamp)];
   const projectIds = new Set(normalizedProjects.map((project) => project.id));
@@ -83,7 +87,10 @@ export function createCanvasExchangeIndex(paths) {
   }
 
   function listProjects() {
-    return readIndex().projects;
+    return readIndex().projects.sort((a, b) => {
+      if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
   }
 
   function listCanvases({ projectId = "", search = "", sort = "uploadedAt" } = {}) {

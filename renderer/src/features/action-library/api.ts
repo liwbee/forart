@@ -41,7 +41,7 @@ export function createActionProject(name: string) {
   });
 }
 
-export function updateActionProject(projectId: string, payload: Partial<Pick<ActionProject, "name" | "cover_asset_id">>) {
+export function updateActionProject(projectId: string, payload: Partial<Pick<ActionProject, "name" | "cover_asset_id" | "sort_order">>) {
   return apiRequest<ActionProject>(`/api/action-projects/${encodeURIComponent(projectId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),

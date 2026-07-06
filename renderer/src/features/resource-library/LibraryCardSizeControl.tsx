@@ -1,4 +1,4 @@
-import { CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
+import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowDownAZ, ArrowUpAZ, CalendarArrowDown, CalendarArrowUp } from "lucide-react";
 
@@ -229,6 +229,8 @@ export function LibraryCardToolbar({
   onSelectSortDirection: (direction: LibrarySortDirection) => void;
 }) {
   const { t } = useTranslation();
+  const sortControlRef = useRef<HTMLDivElement | null>(null);
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const sortOptions: Array<{
     field: LibrarySortField;
     direction: LibrarySortDirection;
@@ -240,31 +242,66 @@ export function LibraryCardToolbar({
     { field: "created_at", direction: "asc", label: `${t("common:labels.createdAt")} ${t("common:labels.ascending")}`, Icon: CalendarArrowUp },
     { field: "created_at", direction: "desc", label: `${t("common:labels.createdAt")} ${t("common:labels.descending")}`, Icon: CalendarArrowDown },
   ];
+  const activeSortOption = sortOptions.find((option) => option.field === sortField && option.direction === sortDirection) || sortOptions[0];
+  const ActiveSortIcon = activeSortOption.Icon;
 
   function selectSort(field: LibrarySortField, direction: LibrarySortDirection) {
     onSelectSortField(field);
     onSelectSortDirection(direction);
+    setSortMenuOpen(false);
   }
+
+  useEffect(() => {
+    if (!sortMenuOpen) return undefined;
+    function closeSortMenu(event: globalThis.PointerEvent) {
+      if (sortControlRef.current?.contains(event.target as Node)) return;
+      setSortMenuOpen(false);
+    }
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setSortMenuOpen(false);
+    }
+    window.addEventListener("pointerdown", closeSortMenu);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", closeSortMenu);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [sortMenuOpen]);
 
   return (
     <div className="library-card-toolbar" role="group" aria-label={t("common:labels.libraryViewOptions")}>
-      <div className="library-card-sort-control" role="group" aria-label={t("common:labels.sort")}>
-        {sortOptions.map(({ field, direction, label, Icon }) => {
-          const active = sortField === field && sortDirection === direction;
-          return (
-            <button
-              key={`${field}-${direction}`}
-              className={active ? "active" : ""}
-              type="button"
-              aria-label={label}
-              aria-pressed={active}
-              title={label}
-              onClick={() => selectSort(field, direction)}
-            >
-              <Icon size={17} aria-hidden="true" />
-            </button>
-          );
-        })}
+      <div ref={sortControlRef} className="library-card-sort-control">
+        <button
+          className={`library-card-sort-trigger${sortMenuOpen ? " active" : ""}`}
+          type="button"
+          aria-label={t("common:labels.sort")}
+          aria-expanded={sortMenuOpen}
+          title={activeSortOption.label}
+          onClick={() => setSortMenuOpen((open) => !open)}
+        >
+          <ActiveSortIcon size={17} aria-hidden="true" />
+          <span>{activeSortOption.label}</span>
+        </button>
+        {sortMenuOpen ? (
+          <div className="library-card-sort-menu" role="menu" aria-label={t("common:labels.sort")}>
+            {sortOptions.map(({ field, direction, label, Icon }) => {
+              const active = sortField === field && sortDirection === direction;
+              return (
+                <button
+                  key={`${field}-${direction}`}
+                  className={active ? "active" : ""}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={active}
+                  onClick={() => selectSort(field, direction)}
+                >
+                  <Icon size={16} aria-hidden="true" />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
       <LibraryCardSizeControl
         activePresetId={activePresetId}
