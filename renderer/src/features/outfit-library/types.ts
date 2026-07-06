@@ -37,6 +37,46 @@ export interface AssetUploadPayload {
   data: string;
 }
 
+export interface OutfitImportEntry {
+  id?: string;
+  stem?: string;
+  name?: string;
+  filename: string;
+  relative_path?: string;
+  mime_type: string;
+  data: string;
+  tags?: string[];
+  warnings?: Array<{ code: string; message: string }>;
+  thumbnail_url?: string;
+}
+
+export interface OutfitImportResultRow {
+  id: string;
+  stem: string;
+  filename: string;
+  relative_path: string;
+  image_path: null;
+  text_path: null;
+  proposed_name: string;
+  thumbnail_url: string;
+  selectable: true;
+  selected: true;
+  status: "ready";
+  errors: Array<{ code: string; message: string }>;
+  warnings: Array<{ code: string; message: string }>;
+  final_status: "imported" | "failed" | "warning";
+  outfit_id?: string;
+}
+
+export interface OutfitImportResult {
+  imported_count: number;
+  failed_count: number;
+  imported: OutfitEntry[];
+  not_selected: [];
+  failed: OutfitImportResultRow[];
+  rows: OutfitImportResultRow[];
+}
+
 export interface OutfitFilters {
   projectId: string;
   tagFilter?: LibraryTagFilter;
@@ -44,4 +84,25 @@ export interface OutfitFilters {
 
 export interface StorageSettings {
   configured: boolean;
+}
+
+export type LibraryBulkOperation = "delete" | "add_tags" | "remove_tags";
+
+export interface LibraryBulkEntriesPayload {
+  project_id: string;
+  entry_ids: string[];
+  operation: LibraryBulkOperation;
+  tags?: string[];
+}
+
+export interface LibraryBulkEntriesResult {
+  ok: true;
+  kind: "outfit";
+  operation: LibraryBulkOperation;
+  project_id: string;
+  requested: number;
+  updated: number;
+  deleted: number;
+  skipped: string[];
+  tags?: OutfitTag[];
 }

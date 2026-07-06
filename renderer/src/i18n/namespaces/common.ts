@@ -16,6 +16,25 @@ export const zhCN = {
   confirm: {
     delete: "确认删除?"
   },
+  bulk: {
+    addTags: "批量添加标签",
+    clearSelection: "清空选择",
+    confirmDelete: "确定？",
+    deleteConfirmBody: "此操作无法撤销。",
+    deleteConfirmTitle: "删除 {{count}} 张已选卡片？",
+    deleteSelected: "删除",
+    deleteSelectedCount: "删除 {{count}} 张",
+    manage: "管理",
+    matchingCount: "匹配 {{count}} 张",
+    operationCompleted: "已处理 {{count}} 张卡片",
+    operationFailed: "批量操作失败：{{message}}",
+    removeTags: "批量移除标签",
+    selectCard: "选择卡片",
+    selectMatching: "选择匹配项",
+    selectedCount: "已选 {{count}} 张",
+    selectionMode: "批量选择",
+    unselectCard: "取消选择卡片"
+  },
   states: {
     adding: "添加中...",
     creating: "创建中...",
@@ -47,6 +66,7 @@ export const zhCN = {
     sortDirection: "排序方向",
     sortField: "排序字段",
     all: "全部",
+    untagged: "未标记",
     cardSize: "卡片尺寸",
     editTag: "编辑标签",
     emptyTagEditor: "创建标签后可在这里编辑。",
@@ -81,6 +101,25 @@ export const enUS = {
   confirm: {
     delete: "Confirm delete?"
   },
+  bulk: {
+    addTags: "Add tags",
+    clearSelection: "Clear selection",
+    confirmDelete: "Confirm?",
+    deleteConfirmBody: "This cannot be undone.",
+    deleteConfirmTitle: "Delete {{count}} selected cards?",
+    deleteSelected: "Delete",
+    deleteSelectedCount: "Delete {{count}}",
+    manage: "Manage",
+    matchingCount: "{{count}} matching",
+    operationCompleted: "Processed {{count}} cards",
+    operationFailed: "Bulk operation failed: {{message}}",
+    removeTags: "Remove tags",
+    selectCard: "Select card",
+    selectMatching: "Select matching",
+    selectedCount: "{{count}} selected",
+    selectionMode: "Bulk select",
+    unselectCard: "Unselect card"
+  },
   states: {
     adding: "Adding...",
     creating: "Creating...",
@@ -112,6 +151,7 @@ export const enUS = {
     sortDirection: "Sort direction",
     sortField: "Sort field",
     all: "All",
+    untagged: "Untagged",
     cardSize: "Card size",
     editTag: "Edit tag",
     emptyTagEditor: "Create a tag, then edit it here.",

@@ -182,6 +182,7 @@ function searchObject(url) {
   return {
     tag_id: searchValues(url, 'tag_id'),
     exclude_tag_id: searchValues(url, 'exclude_tag_id'),
+    untagged: url.searchParams.get('untagged') || '',
     gender: url.searchParams.get('gender') || '',
   };
 }
@@ -210,6 +211,12 @@ async function dispatchModelLibraryRoute({ method, url, body, runtime }) {
     if (pathname === '/api/model-projects') {
       if (method === 'GET' || method === 'HEAD') return success(service.listProjects());
       if (method === 'POST') return success(service.createProject(body || {}));
+    }
+
+    const importEntriesMatch = pathname.match(/^\/api\/model-projects\/([^/]+)\/models\/import-entries$/);
+    if (importEntriesMatch && method === 'POST') {
+      const projectId = decodeURIComponent(importEntriesMatch[1]);
+      return notFoundIfNull(service.importEntries(projectId, body || {}), 'Model project not found');
     }
 
     const projectMatch = pathname.match(/^\/api\/model-projects\/([^/]+)(?:\/(cover\/upload|models))?$/);
@@ -247,6 +254,10 @@ async function dispatchModelLibraryRoute({ method, url, body, runtime }) {
       return dispatchTagRoute({ method, url, tagMatch, service, projectNotFoundDetail: 'Model project not found' });
     }
 
+    if (pathname === '/api/libraries/model/entries/bulk' && method === 'POST') {
+      return notFoundIfNull(service.bulkEntries(body || {}), 'Model project not found');
+    }
+
     return null;
   } catch (error) {
     return failure(400, error instanceof Error ? error.message : String(error));
@@ -263,6 +274,12 @@ async function dispatchOutfitLibraryRoute({ method, url, body, runtime }) {
       if (method === 'POST') return success(service.createProject(body || {}));
     }
 
+    const importEntriesMatch = pathname.match(/^\/api\/outfit-projects\/([^/]+)\/outfits\/import-entries$/);
+    if (importEntriesMatch && method === 'POST') {
+      const projectId = decodeURIComponent(importEntriesMatch[1]);
+      return notFoundIfNull(service.importEntries(projectId, body || {}), 'Outfit project not found');
+    }
+
     const projectMatch = pathname.match(/^\/api\/outfit-projects\/([^/]+)(?:\/(cover\/upload|outfits))?$/);
     if (projectMatch) {
       const projectId = decodeURIComponent(projectMatch[1]);
@@ -273,7 +290,6 @@ async function dispatchOutfitLibraryRoute({ method, url, body, runtime }) {
       if (tail === 'outfits' && (method === 'GET' || method === 'HEAD')) {
         return notFoundIfNull(service.listOutfits(projectId, searchObject(url)), 'Outfit project not found');
       }
-      if (tail === 'outfits' && method === 'POST') return notFoundIfNull(service.createOutfit(projectId, body || {}), 'Outfit project not found');
     }
 
     const outfitMatch = pathname.match(/^\/api\/outfits\/([^/]+)(?:\/image\/upload)?$/);
@@ -289,6 +305,10 @@ async function dispatchOutfitLibraryRoute({ method, url, body, runtime }) {
     if (tagMatch) {
       url.body = body;
       return dispatchTagRoute({ method, url, tagMatch, service, projectNotFoundDetail: 'Outfit project not found' });
+    }
+
+    if (pathname === '/api/libraries/outfit/entries/bulk' && method === 'POST') {
+      return notFoundIfNull(service.bulkEntries(body || {}), 'Outfit project not found');
     }
 
     return null;
@@ -314,14 +334,11 @@ async function dispatchActionLibraryRoute({ method, url, body, runtime }) {
       return notFoundIfNull(importService.importActionEntries(projectId, body || {}), 'Action project not found');
     }
 
-    const importMatch = pathname.match(/^\/api\/action-projects\/([^/]+)\/actions\/import-folder(?:\/(preview))?$/);
-    if (importMatch && method === 'POST') {
-      const projectId = decodeURIComponent(importMatch[1]);
+    const importPreviewMatch = pathname.match(/^\/api\/action-projects\/([^/]+)\/actions\/import-folder\/preview$/);
+    if (importPreviewMatch && method === 'POST') {
+      const projectId = decodeURIComponent(importPreviewMatch[1]);
       const importService = await getActionFolderImportService(runtime);
-      if (importMatch[2] === 'preview') {
-        return notFoundIfNull(registerActionImportPreview(importService.previewActionFolderImport(projectId, body || {})), 'Action project not found');
-      }
-      return notFoundIfNull(importService.importActionFolder(projectId, body || {}), 'Action project not found');
+      return notFoundIfNull(registerActionImportPreview(importService.previewActionFolderImport(projectId, body || {})), 'Action project not found');
     }
 
     const projectMatch = pathname.match(/^\/api\/action-projects\/([^/]+)(?:\/(cover\/upload|actions))?$/);
@@ -334,7 +351,6 @@ async function dispatchActionLibraryRoute({ method, url, body, runtime }) {
       if (tail === 'actions' && (method === 'GET' || method === 'HEAD')) {
         return notFoundIfNull(service.listActions(projectId, searchObject(url)), 'Action project not found');
       }
-      if (tail === 'actions' && method === 'POST') return notFoundIfNull(service.createAction(projectId, body || {}), 'Action project not found');
     }
 
     const actionMatch = pathname.match(/^\/api\/actions\/([^/]+)(?:\/image\/upload)?$/);
@@ -350,6 +366,10 @@ async function dispatchActionLibraryRoute({ method, url, body, runtime }) {
     if (tagMatch) {
       url.body = body;
       return dispatchTagRoute({ method, url, tagMatch, service, projectNotFoundDetail: 'Action project not found' });
+    }
+
+    if (pathname === '/api/libraries/action/entries/bulk' && method === 'POST') {
+      return notFoundIfNull(service.bulkEntries(body || {}), 'Action project not found');
     }
 
     return null;
@@ -408,6 +428,7 @@ function registerLocalApiIpc({ ipcMain, configStore, app, dataRoot }) {
         || pathname.startsWith('/api/model-images/')
         || pathname === '/api/libraries/model/tags'
         || pathname.startsWith('/api/libraries/model/tags/')
+        || pathname === '/api/libraries/model/entries/bulk'
       ) {
         const { runtime } = await getLibraryRuntime({ configStore, app, dataRoot });
         if (!runtime) return failure(409, 'Local library path is not configured.');
@@ -421,6 +442,7 @@ function registerLocalApiIpc({ ipcMain, configStore, app, dataRoot }) {
         || pathname.startsWith('/api/outfits/')
         || pathname === '/api/libraries/outfit/tags'
         || pathname.startsWith('/api/libraries/outfit/tags/')
+        || pathname === '/api/libraries/outfit/entries/bulk'
       ) {
         const { runtime } = await getLibraryRuntime({ configStore, app, dataRoot });
         if (!runtime) return failure(409, 'Local library path is not configured.');
@@ -434,6 +456,7 @@ function registerLocalApiIpc({ ipcMain, configStore, app, dataRoot }) {
         || pathname.startsWith('/api/actions/')
         || pathname === '/api/libraries/action/tags'
         || pathname.startsWith('/api/libraries/action/tags/')
+        || pathname === '/api/libraries/action/entries/bulk'
       ) {
         const { runtime } = await getLibraryRuntime({ configStore, app, dataRoot });
         if (!runtime) return failure(409, 'Local library path is not configured.');

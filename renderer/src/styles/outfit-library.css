@@ -79,6 +79,10 @@
   display: grid;
 }
 
+.action-add-card {
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
 .outfit-add-button {
   display: grid;
   place-items: center;
@@ -104,6 +108,15 @@
 .outfit-add-button strong {
   font-size: 0.92rem;
   font-weight: var(--font-weight-semibold);
+}
+
+.action-add-card__button {
+  min-height: 0;
+  border-radius: 0;
+}
+
+.action-add-card__button + .action-add-card__button {
+  border-top: 1px solid var(--border-subtle);
 }
 
 .outfit-card__image {
@@ -454,28 +467,28 @@
 }
 
 .outfit-tag-menu button {
-  min-height: 30px;
-  min-width: 30px;
+  min-height: 32px;
+  min-width: 32px;
   max-width: 100%;
-  padding: 0 9px;
-  border: 1px solid var(--button-functional-border);
+  padding: 0 12px;
+  border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  background: var(--button-functional-bg);
-  color: var(--button-functional-muted-text);
-  font-size: 0.78rem;
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 12px;
   font-weight: var(--font-weight-medium);
 }
 
 .outfit-tag-menu button:hover {
-  border-color: var(--button-functional-hover-border);
-  background: var(--button-functional-hover-bg);
-  color: var(--button-functional-text);
+  border-color: var(--border-subtle);
+  background: var(--surface-control);
+  color: var(--text-secondary);
 }
 
 .outfit-tag-menu button.selected {
-  border-color: var(--state-selected-border);
-  background: var(--state-selected-bg);
-  color: var(--state-selected-text);
+  border-color: var(--state-active-border);
+  background: var(--state-active-bg);
+  color: var(--state-active-text);
 }
 
 .outfit-tag-menu__empty {

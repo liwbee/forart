@@ -8,6 +8,8 @@ import { AppView, useAppStore } from "./appStore";
 import type { ForartAppConfig, ForartAppInfo, ForartUpdateCheckResult, ForartUpdateConnectivityResult, ForartUpdateNotes, ForartUpdateProgress, ForartUpdateRunResult } from "./appConfig";
 import { getAppTitle } from "./runtimeConfig";
 import { SetupPage } from "./SetupPage";
+import { allowsBrowserDiagnosticRuntime, isElectronRuntime, missingElectronBridgeNames } from "./electronRuntime";
+import { UnsupportedRuntimePage } from "./UnsupportedRuntimePage";
 
 const VIEW_TRANSITION_MS = 500;
 const LIBRARY_QUERY_ROOTS = new Set([
@@ -225,6 +227,7 @@ export function App() {
   }, [appTitle]);
 
   useEffect(() => {
+    if (!isElectronRuntime()) return;
     let canceled = false;
 
     async function loadAppInfo() {
@@ -248,6 +251,7 @@ export function App() {
   }, [appInfo?.currentRevision]);
 
   useEffect(() => {
+    if (!isElectronRuntime()) return;
     return window.forartConfig?.onUpdateProgress?.((progress) => {
       setUpdateProgress(progress);
       const label = updatePhaseLabel(progress.phase, currentLanguage);
@@ -260,6 +264,7 @@ export function App() {
   }, [currentLanguage]);
 
   useEffect(() => {
+    if (!isElectronRuntime()) return;
     let canceled = false;
 
     async function loadConfig() {
@@ -451,7 +456,8 @@ export function App() {
   const updateProgressFile = updateProgress?.currentFile || "";
   const sidebarToggleLabel = sidebarCollapsed ? t("nav:expandSidebar") : t("nav:collapseSidebar");
   const SidebarToggleIcon = sidebarCollapsed ? PanelLeftOpen : PanelLeftClose;
-  const isElectron = Boolean(window.forartWindow);
+  const isElectron = isElectronRuntime();
+  const browserDiagnosticRuntime = !isElectron && allowsBrowserDiagnosticRuntime();
   const themeToggleLabel = theme === "dark" ? t("nav:theme.switchToLight") : t("nav:theme.switchToDark");
   const languageTitle = `${t("settings:language")}: ${nextLanguageLabel}`;
   const titleBar = (
@@ -474,6 +480,14 @@ export function App() {
   const keepAliveViewsToRender = isKeepAliveView(activeView)
     ? new Set([...mountedKeepAliveViews, activeView])
     : mountedKeepAliveViews;
+
+  if (!isElectron && !browserDiagnosticRuntime) {
+    return (
+      <AppFrame electron={false} titleBar={titleBar}>
+        <UnsupportedRuntimePage missingBridges={missingElectronBridgeNames()} />
+      </AppFrame>
+    );
+  }
 
   if (!configLoaded) {
     return (

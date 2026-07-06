@@ -1,6 +1,6 @@
 import { apiRequest } from "../../lib/apiClient";
 import { EMPTY_LIBRARY_TAG_FILTER, libraryTagFilterKey, type LibraryTagFilter } from "../library-tags";
-import { AssetUploadPayload, ModelEntry, ModelFilters, ModelImage, ModelProject, ModelTag, StorageSettings } from "./types";
+import { AssetUploadPayload, LibraryBulkEntriesPayload, LibraryBulkEntriesResult, ModelEntry, ModelFilters, ModelImage, ModelImportEntry, ModelImportResult, ModelProject, ModelTag, StorageSettings } from "./types";
 
 export const modelLibraryKeys = {
   projects: ["modelProjects"] as const,
@@ -63,7 +63,7 @@ export function uploadModelProjectCover(projectId: string, payload: AssetUploadP
 
 export function listModels({ projectId, tagFilter = EMPTY_LIBRARY_TAG_FILTER, gender = "" }: ModelFilters) {
   return apiRequest<{ models: ModelEntry[] }>(
-    `/api/model-projects/${encodeURIComponent(projectId)}/models${queryString({ tag_id: tagFilter.includeTagIds, exclude_tag_id: tagFilter.excludeTagIds, gender })}`
+    `/api/model-projects/${encodeURIComponent(projectId)}/models${queryString({ tag_id: tagFilter.includeTagIds, exclude_tag_id: tagFilter.excludeTagIds, untagged: tagFilter.untaggedOnly ? "1" : "", gender })}`
   );
 }
 
@@ -71,6 +71,13 @@ export function createModel(projectId: string, payload: Pick<ModelEntry, "name" 
   return apiRequest<ModelEntry>(`/api/model-projects/${encodeURIComponent(projectId)}/models`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function importModelEntries(projectId: string, entries: ModelImportEntry[]) {
+  return apiRequest<ModelImportResult>(`/api/model-projects/${encodeURIComponent(projectId)}/models/import-entries`, {
+    method: "POST",
+    body: JSON.stringify({ entries }),
   });
 }
 
@@ -84,6 +91,13 @@ export function updateModel(modelId: string, payload: Partial<Pick<ModelEntry, "
 export function deleteModel(modelId: string) {
   return apiRequest<{ ok: true }>(`/api/models/${encodeURIComponent(modelId)}`, {
     method: "DELETE",
+  });
+}
+
+export function bulkModelEntries(payload: LibraryBulkEntriesPayload) {
+  return apiRequest<LibraryBulkEntriesResult>("/api/libraries/model/entries/bulk", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 

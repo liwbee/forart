@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Copy, Download, ImagePlus, Images, MoreHorizontal, Pencil, Plus, Tags, Trash2, Users } from "lucide-react";
 import { createPortal } from "react-dom";
+import { LazyImage } from "../../components/LazyImage";
 import { CollapsibleTagFilterRow } from "../library-tags";
 import { LibraryTagChoiceButton } from "../library-tags";
 import { ImageViewer } from "../../lib/ImageViewer";
@@ -10,8 +11,10 @@ import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageA
 import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
 import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
 import { LibraryImageDropZone } from "../resource-library/LibraryImageDropZone";
+import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
+import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
 import {
-  createOutfit,
+  bulkOutfitEntries,
   createOutfitProject,
   createOutfitTag,
   deleteOutfit,
@@ -21,6 +24,7 @@ import {
   listOutfitProjects,
   listOutfits,
   listOutfitTags,
+  importOutfitEntries,
   outfitLibraryKeys,
   updateOutfit,
   updateOutfitProject,
@@ -186,7 +190,7 @@ function OutfitProjectSidebar({
         </button>
       )}
 
-      <div className="model-project-list">
+      <div className="model-project-list scrollbar-thin-stable">
         {projects.length ? (
           projects.map((project) => {
             const isActive = project.id === activeProjectId;
@@ -285,7 +289,9 @@ function OutfitToolbar({
   onTagToggle,
   onTagExclude,
   onTagClear,
-  onOpenTagManager,
+  onUntaggedToggle,
+  selectionMode,
+  onEnterSelectionMode,
 }: {
   tags: OutfitTag[];
   tagFilter: LibraryTagFilter;
@@ -293,7 +299,9 @@ function OutfitToolbar({
   onTagToggle: (tagId: string) => void;
   onTagExclude: (tagId: string) => void;
   onTagClear: () => void;
-  onOpenTagManager: () => void;
+  onUntaggedToggle: () => void;
+  selectionMode: boolean;
+  onEnterSelectionMode: () => void;
 }) {
   const { t } = useTranslation();
   const includeTagSet = useMemo(() => new Set(tagFilter.includeTagIds), [tagFilter.includeTagIds]);
@@ -301,15 +309,16 @@ function OutfitToolbar({
   return (
     <div className="model-toolbar outfit-toolbar">
       <div className="library-tag-section">
+        <LibraryBulkManageButton disabled={selectionMode} onClick={onEnterSelectionMode} />
         <span className="library-filter-label">{t("common:labels.tags")}</span>
-        <button className="model-tag-add-button" type="button" aria-label={t("common:labels.manageTags")} title={t("common:labels.manageTags")} onClick={onOpenTagManager}>
-          <Pencil size={18} aria-hidden="true" />
-        </button>
         <div className="library-tag-controls">
           <CollapsibleTagFilterRow expandLabel="展开标签" collapseLabel="收起标签">
             <div className="library-tag-filter">
               <button className={hasLibraryTagFilter(tagFilter) ? "" : "active"} type="button" onClick={onTagClear}>
                 {t("common:labels.all")}
+              </button>
+              <button className={tagFilter.untaggedOnly ? "active" : ""} type="button" onClick={onUntaggedToggle}>
+                {t("common:labels.untagged")}
               </button>
               {tags.map((tag) => (
                 <LibraryTagChoiceButton
@@ -330,7 +339,7 @@ function OutfitToolbar({
   );
 }
 
-function AddOutfitCard({ disabled, onCreate }: { disabled: boolean; onCreate: (file: File) => void }) {
+function AddOutfitCard({ disabled, busy, onCreate }: { disabled: boolean; busy: boolean; onCreate: (file: File) => void }) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -344,7 +353,7 @@ function AddOutfitCard({ disabled, onCreate }: { disabled: boolean; onCreate: (f
     <div className="outfit-add-card">
       <button className="outfit-add-button" type="button" disabled={disabled} onClick={() => inputRef.current?.click()}>
         <ImagePlus size={28} aria-hidden="true" />
-        <strong>{disabled ? t("common:states.uploading") : t("outfitLibrary:addOutfit")}</strong>
+        <strong>{busy ? t("common:states.uploading") : t("outfitLibrary:addOutfit")}</strong>
       </button>
       <input ref={inputRef} type="file" accept="image/*" onChange={handleFileChange} hidden />
     </div>
@@ -356,7 +365,10 @@ function OutfitCard({
   tags,
   deleteConfirmOutfitId,
   isDeleting,
+  selectionMode,
+  selected,
   onToggleTag,
+  onToggleSelected,
   onDelete,
   onImageActionStatus,
 }: {
@@ -364,7 +376,10 @@ function OutfitCard({
   tags: OutfitTag[];
   deleteConfirmOutfitId: string;
   isDeleting: boolean;
+  selectionMode: boolean;
+  selected: boolean;
   onToggleTag: (outfitId: string, tagName: string) => void;
+  onToggleSelected: (outfitId: string) => void;
   onDelete: (outfitId: string, isConfirming: boolean) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
 }) {
@@ -372,7 +387,7 @@ function OutfitCard({
   const [menuState, setMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
   const [tagMenuState, setTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
   const [viewerOpen, setViewerOpen] = useState(false);
-  const assetUrl = cacheBustedLibraryImageUrl(outfit.asset_url || "", outfit.updated_at || outfit.asset_id);
+  const assetUrl = cacheBustedLibraryImageUrl(outfit.asset_url || "", outfit.asset_id);
   const imageAlt = outfit.name || t("outfitLibrary:outfitImage");
 
   useEffect(() => {
@@ -455,16 +470,25 @@ function OutfitCard({
   }
 
   return (
-    <div className="outfit-card">
+    <div className={`outfit-card${selectionMode ? " selecting" : ""}${selected ? " selected" : ""}`}>
       <div
         className="outfit-card__image"
         role={assetUrl ? "button" : undefined}
         tabIndex={assetUrl ? 0 : undefined}
         aria-label={assetUrl ? t("outfitLibrary:imagePreview", { name: imageAlt }) : undefined}
         onClick={() => {
+          if (selectionMode) {
+            onToggleSelected(outfit.id);
+            return;
+          }
           if (assetUrl) setViewerOpen(true);
         }}
         onKeyDown={(event) => {
+          if (selectionMode && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            onToggleSelected(outfit.id);
+            return;
+          }
           if (!assetUrl) return;
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
@@ -473,7 +497,7 @@ function OutfitCard({
         }}
       >
         {assetUrl ? (
-          <img src={assetUrl} alt={imageAlt} loading="lazy" draggable={false} onDragStart={(event) => event.preventDefault()} />
+          <LazyImage src={assetUrl} alt={imageAlt} draggable={false} onDragStart={(event) => event.preventDefault()} />
         ) : (
           <div className="placeholder">{t("common:empty.noImage")}</div>
         )}
@@ -488,7 +512,7 @@ function OutfitCard({
           ))}
         </div>
       ) : null}
-      <button className="outfit-card__menu-button" type="button" aria-label={t("outfitLibrary:outfitActions")} aria-expanded={menuState.open} onClick={openMenu}>
+      <button className="outfit-card__menu-button" type="button" aria-label={t("outfitLibrary:outfitActions")} aria-expanded={menuState.open} disabled={selectionMode} onClick={openMenu}>
         <MoreHorizontal size={18} aria-hidden="true" />
       </button>
       {menuState.open
@@ -573,8 +597,11 @@ function OutfitGrid({
   creating,
   deletingOutfitId,
   deleteConfirmOutfitId,
+  selectionMode,
+  selectedIds,
   onCreate,
   onToggleTag,
+  onToggleSelected,
   onDelete,
   onImageActionStatus,
 }: {
@@ -583,8 +610,11 @@ function OutfitGrid({
   creating: boolean;
   deletingOutfitId: string;
   deleteConfirmOutfitId: string;
+  selectionMode: boolean;
+  selectedIds: Set<string>;
   onCreate: (file: File) => void;
   onToggleTag: (outfitId: string, tagName: string) => void;
+  onToggleSelected: (outfitId: string) => void;
   onDelete: (outfitId: string, isConfirming: boolean) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
 }) {
@@ -593,7 +623,7 @@ function OutfitGrid({
   return (
     <div className="library-card-size-scope">
       <div className="outfit-grid" style={cardSize.gridStyle}>
-        <AddOutfitCard disabled={creating} onCreate={onCreate} />
+        {!selectionMode ? <AddOutfitCard disabled={creating} busy={creating} onCreate={onCreate} /> : null}
         {outfits.map((outfit) => (
           <OutfitCard
             key={outfit.id}
@@ -601,7 +631,10 @@ function OutfitGrid({
             tags={tags}
             deleteConfirmOutfitId={deleteConfirmOutfitId}
             isDeleting={deletingOutfitId === outfit.id}
+            selectionMode={selectionMode}
+            selected={selectedIds.has(outfit.id)}
             onToggleTag={onToggleTag}
+            onToggleSelected={onToggleSelected}
             onDelete={onDelete}
             onImageActionStatus={onImageActionStatus}
           />
@@ -827,6 +860,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const activeTagFilter = useOutfitLibraryStore((state) => state.activeTagFilter);
   const setActiveProjectId = useOutfitLibraryStore((state) => state.setActiveProjectId);
   const setActiveTagFilter = useOutfitLibraryStore((state) => state.setActiveTagFilter);
+  const bulkSelection = useLibraryBulkSelection();
 
   const storageSettingsQuery = useQuery({
     queryKey: outfitLibraryKeys.storageSettings,
@@ -862,6 +896,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     if (
       validFilter.includeTagIds.length !== activeTagFilter.includeTagIds.length
       || validFilter.excludeTagIds.length !== activeTagFilter.excludeTagIds.length
+      || validFilter.untaggedOnly !== activeTagFilter.untaggedOnly
     ) {
       setActiveTagFilter(validFilter);
     }
@@ -877,7 +912,15 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     mutationFn: async (file: File) => {
       if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
       const payload = await fileToUploadPayload(file);
-      return createOutfit(activeProjectId, payload);
+      const result = await importOutfitEntries(activeProjectId, [{
+        filename: payload.filename,
+        relative_path: payload.filename,
+        mime_type: payload.mime_type,
+        data: payload.data,
+        warnings: [],
+      }]);
+      if (!result.imported[0]) throw new Error(result.failed[0]?.errors?.[0]?.message || t("outfitLibrary:requestFailed", { message: "Import failed" }));
+      return result.imported[0];
     },
     onSuccess: async () => {
       if (hasLibraryTagFilter(activeTagFilter)) setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER);
@@ -903,6 +946,28 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["outfits", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : outfitLibraryKeys.tagRoot });
+    },
+  });
+
+  const bulkOutfitEntriesMutation = useMutation({
+    mutationFn: ({ operation, tags: tagNames }: { operation: "delete" | "add_tags" | "remove_tags"; tags?: string[] }) => {
+      if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
+      return bulkOutfitEntries({
+        project_id: activeProjectId,
+        entry_ids: bulkSelection.selectedIdList,
+        operation,
+        ...(tagNames ? { tags: tagNames } : {}),
+      });
+    },
+    onSuccess: async (result) => {
+      bulkSelection.clearSelection();
+      showImageActionToast("ready", t("common:bulk.operationCompleted", { count: result.deleted || result.updated }));
+      await queryClient.invalidateQueries({ queryKey: ["outfits", activeProjectId] });
+      await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.projects });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : outfitLibraryKeys.tagRoot });
+    },
+    onError: (error) => {
+      showImageActionToast("error", t("common:bulk.operationFailed", { message: error instanceof Error ? error.message : String(error) }));
     },
   });
 
@@ -1038,6 +1103,10 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     ));
   }
 
+  function handleToggleUntaggedFilter() {
+    setActiveTagFilter(activeTagFilter.untaggedOnly ? EMPTY_LIBRARY_TAG_FILTER : createLibraryTagFilter([], [], true));
+  }
+
   function handleDeleteTag(tagId: string, isConfirming: boolean) {
     if (!isConfirming) {
       setDeleteConfirmTagId(tagId);
@@ -1062,6 +1131,13 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
       return searchableText.includes(normalizedSearchQuery);
     });
   }, [outfits, normalizedSearchQuery]);
+  const filteredOutfitIds = useMemo(() => filteredOutfits.map((outfit) => outfit.id), [filteredOutfits]);
+  useEffect(() => {
+    bulkSelection.pruneSelection(filteredOutfitIds);
+  }, [bulkSelection.pruneSelection, filteredOutfitIds]);
+  useEffect(() => {
+    bulkSelection.exitSelectionMode();
+  }, [activeProjectId]);
   const tags = tagsQuery.data?.tags || [];
   const tagCounts = useMemo(() => countLibraryTags(filteredOutfits, tags), [filteredOutfits, tags]);
   const activeProject = projects.find((project) => project.id === activeProjectId) || null;
@@ -1073,6 +1149,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     createOutfitMutation.error,
     deleteOutfitMutation.error,
     updateOutfitTagsMutation.error,
+    bulkOutfitEntriesMutation.error,
     createProjectMutation.error,
     renameProjectMutation.error,
     deleteProjectMutation.error,
@@ -1122,11 +1199,13 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
               onTagToggle={handleToggleTagFilter}
               onTagExclude={handleExcludeTagFilter}
               onTagClear={() => setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER)}
-              onOpenTagManager={() => setTagManagerOpen(true)}
+              onUntaggedToggle={handleToggleUntaggedFilter}
+              selectionMode={bulkSelection.selectionMode}
+              onEnterSelectionMode={bulkSelection.enterSelectionMode}
             />
           </div>
 
-          <div className="model-lib-body">
+          <div className="model-lib-body scrollbar-thin-stable">
             {errorMessage ? <div className="model-lib-error">{t("outfitLibrary:requestFailed", { message: errorMessage })}</div> : null}
             {storageSettingsQuery.isLoading || projectsQuery.isLoading ? <div className="model-lib-empty">{t("common:states.loadingProjects")}</div> : null}
             {!storageConfigured ? <div className="model-lib-empty">{t("outfitLibrary:storageUnavailable")}</div> : null}
@@ -1143,8 +1222,11 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
                   creating={createOutfitMutation.isPending}
                   deletingOutfitId={deleteOutfitMutation.isPending ? deleteOutfitMutation.variables || "" : ""}
                   deleteConfirmOutfitId={deleteConfirmOutfitId}
+                  selectionMode={bulkSelection.selectionMode}
+                  selectedIds={bulkSelection.selectedIds}
                   onCreate={(file) => createOutfitMutation.mutate(file)}
                   onToggleTag={handleToggleOutfitTag}
+                  onToggleSelected={bulkSelection.toggleSelected}
                   onDelete={handleOutfitDelete}
                   onImageActionStatus={showImageActionToast}
                 />
@@ -1171,6 +1253,22 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         onDeleteTag={handleDeleteTag}
       />
       <LibraryImageActionToast toast={imageActionToast} />
+      {activeProject ? (
+        <LibraryBulkActions
+          selectionMode={bulkSelection.selectionMode}
+          selectedCount={bulkSelection.selectedCount}
+          totalMatchingCount={filteredOutfits.length}
+          tags={tags}
+          isBusy={bulkOutfitEntriesMutation.isPending}
+          onExitSelectionMode={bulkSelection.exitSelectionMode}
+          onSelectMatching={() => bulkSelection.selectMatching(filteredOutfitIds)}
+          onClearSelection={bulkSelection.clearSelection}
+          onOpenTagManager={() => setTagManagerOpen(true)}
+          onAddTags={(tagNames) => bulkOutfitEntriesMutation.mutate({ operation: "add_tags", tags: tagNames })}
+          onRemoveTags={(tagNames) => bulkOutfitEntriesMutation.mutate({ operation: "remove_tags", tags: tagNames })}
+          onDeleteSelected={() => bulkOutfitEntriesMutation.mutate({ operation: "delete" })}
+        />
+      ) : null}
     </section>
   );
 }

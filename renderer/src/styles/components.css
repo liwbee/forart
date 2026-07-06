@@ -100,6 +100,8 @@
 :root.theme-dark .library-tag-more-button.active,
 :root.theme-dark .library-tag-overflow-menu button.active,
 :root.theme-dark .library-tag-filter-menu button.active,
+:root.theme-dark .outfit-tag-menu button.selected,
+:root.theme-dark .library-bulk-tag-list button.selected,
 :root.theme-dark .model-tag-manager__list button.active,
 :root.theme-dark .library-modal-tags button.selected {
   color: var(--state-active-text);
@@ -123,9 +125,11 @@
 :root.theme-dark .library-tag-more-button.active:hover,
 :root.theme-dark .library-tag-overflow-menu button.active:hover,
 :root.theme-dark .library-tag-filter-menu button.active:hover,
+:root.theme-dark .outfit-tag-menu button.selected:hover,
+:root.theme-dark .library-bulk-tag-list button.selected:hover,
 :root.theme-dark .model-tag-manager__list button.active:hover,
 :root.theme-dark .library-modal-tags button.selected:hover {
-  background: var(--state-active-hover-bg);
+  background: var(--state-active-bg);
 }
 
 :root.theme-dark .side-nav-item.active,
@@ -230,10 +234,10 @@
   max-width: 100%;
   min-height: 32px;
   min-width: 32px;
-  border: 1px solid transparent;
+  border: 1px solid var(--border-subtle);
   border-radius: 999px;
   padding: 0 12px;
-  background: transparent;
+  background: var(--surface-control);
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: var(--font-weight-medium);
@@ -291,14 +295,22 @@
 }
 
 .library-tag-choice--include,
-.library-tag-filter-menu__tag--include {
+.library-tag-filter-menu__tag--include,
+.outfit-tag-menu button.selected,
+.library-modal-tags button.selected,
+.library-bulk-tag-list button.selected,
+.action-folder-import-row__tags button.selected {
   border-color: var(--state-active-border) !important;
   background: var(--state-active-bg) !important;
   color: var(--state-active-text) !important;
 }
 
 .library-tag-choice--exclude,
-.library-tag-filter-menu__tag--exclude {
+.library-tag-filter-menu__tag--exclude,
+.outfit-tag-menu button.excluded,
+.library-modal-tags button.excluded,
+.library-bulk-tag-list button.excluded,
+.action-folder-import-row__tags button.excluded {
   border-color: color-mix(in srgb, var(--danger) 42%, transparent) !important;
   background: var(--danger-soft) !important;
   color: var(--danger) !important;
@@ -348,9 +360,6 @@
 .library-tag-choice__exclude:focus-visible,
 .library-tag-filter-menu__exclude:hover,
 .library-tag-filter-menu__exclude:focus-visible {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-  opacity: 1;
   outline: 0;
 }
 
@@ -393,29 +402,25 @@
 }
 
 .model-tag-manager__list button {
-  min-height: 38px;
-  min-width: 38px;
+  min-height: 32px;
+  min-width: 32px;
   max-width: 100%;
-  border: 1px solid var(--button-functional-border);
-  border-radius: var(--button-functional-radius);
-  padding: 0 var(--space-3);
-  background: var(--button-functional-bg);
-  color: var(--button-functional-muted-text);
-  font-size: 13px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 12px;
   font-weight: var(--font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease;
 }
 
 .model-tag-manager__list button:hover {
-  border-color: var(--button-functional-hover-border);
-  background: var(--button-functional-hover-bg);
-  color: var(--button-functional-text);
+  border-color: var(--border-subtle);
+  background: var(--surface-control);
+  color: var(--text-secondary);
 }
 
 .model-tag-manager__list button.active {

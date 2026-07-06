@@ -46,3 +46,24 @@ export interface ActionFilters {
 export interface StorageSettings {
   configured: boolean;
 }
+
+export type LibraryBulkOperation = "delete" | "add_tags" | "remove_tags";
+
+export interface LibraryBulkEntriesPayload {
+  project_id: string;
+  entry_ids: string[];
+  operation: LibraryBulkOperation;
+  tags?: string[];
+}
+
+export interface LibraryBulkEntriesResult {
+  ok: true;
+  kind: "action";
+  operation: LibraryBulkOperation;
+  project_id: string;
+  requested: number;
+  updated: number;
+  deleted: number;
+  skipped: string[];
+  tags?: ActionTag[];
+}

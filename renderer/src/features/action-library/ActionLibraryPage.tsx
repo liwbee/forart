@@ -3,17 +3,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, ChevronRight, Copy, Download, FolderPlus, ImagePlus, MoreHorizontal, Pencil, Plus, Tags, Trash2 } from "lucide-react";
 import { createPortal } from "react-dom";
+import { LazyImage } from "../../components/LazyImage";
 import { CollapsibleTagFilterRow } from "../library-tags";
 import { LibraryTagChoiceButton } from "../library-tags";
 import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
 import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalImage } from "../../lib/libraryImageActions";
 import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
 import { LibraryImageDropZone } from "../resource-library/LibraryImageDropZone";
+import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
+import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
 import { normalizeTags, toggleTag } from "../model-library/tagUtils";
 import { EMPTY_LIBRARY_TAG_FILTER, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
 import {
   actionLibraryKeys,
-  createAction,
+  bulkActionEntries,
   createActionProject,
   createActionTag,
   deleteAction,
@@ -23,6 +26,7 @@ import {
   listActionProjects,
   listActions,
   listActionTags,
+  importActionEntries,
   updateAction,
   updateActionProject,
   updateActionTag,
@@ -165,7 +169,7 @@ function ActionProjectSidebar({
         <span>{t("common:labels.newProject")}</span>
       </button>
 
-      <div className="model-project-list">
+      <div className="model-project-list scrollbar-thin-stable">
         {projects.length ? (
           projects.map((project) => {
             const isActive = project.id === activeProjectId;
@@ -262,9 +266,9 @@ function ActionToolbar({
   onTagToggle,
   onTagExclude,
   onTagClear,
-  onOpenTagManager,
-  onOpenBulkImport,
-  bulkImportDisabled,
+  onUntaggedToggle,
+  selectionMode,
+  onEnterSelectionMode,
 }: {
   tags: ActionTag[];
   tagFilter: LibraryTagFilter;
@@ -272,29 +276,26 @@ function ActionToolbar({
   onTagToggle: (tagId: string) => void;
   onTagExclude: (tagId: string) => void;
   onTagClear: () => void;
-  onOpenTagManager: () => void;
-  onOpenBulkImport: () => void;
-  bulkImportDisabled: boolean;
+  onUntaggedToggle: () => void;
+  selectionMode: boolean;
+  onEnterSelectionMode: () => void;
 }) {
   const { t } = useTranslation();
   const includeTagSet = useMemo(() => new Set(tagFilter.includeTagIds), [tagFilter.includeTagIds]);
   const excludeTagSet = useMemo(() => new Set(tagFilter.excludeTagIds), [tagFilter.excludeTagIds]);
   return (
     <div className="model-toolbar outfit-toolbar">
-      <button className="model-lib-button action-bulk-import-button" type="button" disabled={bulkImportDisabled} onClick={onOpenBulkImport}>
-        <FolderPlus size={16} aria-hidden="true" />
-        <span>{t("actionLibrary:bulkImportButton")}</span>
-      </button>
       <div className="library-tag-section">
+        <LibraryBulkManageButton disabled={selectionMode} onClick={onEnterSelectionMode} />
         <span className="library-filter-label">{t("common:labels.tags")}</span>
-        <button className="model-tag-add-button" type="button" aria-label={t("common:labels.manageTags")} title={t("common:labels.manageTags")} onClick={onOpenTagManager}>
-          <Pencil size={18} aria-hidden="true" />
-        </button>
         <div className="library-tag-controls">
           <CollapsibleTagFilterRow expandLabel="展开标签" collapseLabel="收起标签">
             <div className="library-tag-filter">
               <button className={hasLibraryTagFilter(tagFilter) ? "" : "active"} type="button" onClick={onTagClear}>
                 {t("common:labels.all")}
+              </button>
+              <button className={tagFilter.untaggedOnly ? "active" : ""} type="button" onClick={onUntaggedToggle}>
+                {t("common:labels.untagged")}
               </button>
               {tags.map((tag) => (
                 <LibraryTagChoiceButton
@@ -315,7 +316,7 @@ function ActionToolbar({
   );
 }
 
-function AddActionCard({ disabled, onCreate }: { disabled: boolean; onCreate: (file: File) => void }) {
+function AddActionCard({ disabled, busy, onCreate, onOpenBulkImport }: { disabled: boolean; busy: boolean; onCreate: (file: File) => void; onOpenBulkImport: () => void }) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -326,10 +327,14 @@ function AddActionCard({ disabled, onCreate }: { disabled: boolean; onCreate: (f
   }
 
   return (
-    <div className="outfit-add-card">
-      <button className="outfit-add-button" type="button" disabled={disabled} onClick={() => inputRef.current?.click()}>
-        <ImagePlus size={28} aria-hidden="true" />
-        <strong>{disabled ? t("common:states.uploading") : t("actionLibrary:addAction")}</strong>
+    <div className="outfit-add-card action-add-card">
+      <button className="outfit-add-button action-add-card__button" type="button" disabled={disabled} onClick={() => inputRef.current?.click()}>
+        <ImagePlus size={24} aria-hidden="true" />
+        <strong>{busy ? t("common:states.uploading") : t("actionLibrary:addAction")}</strong>
+      </button>
+      <button className="outfit-add-button action-add-card__button" type="button" disabled={disabled} onClick={onOpenBulkImport}>
+        <FolderPlus size={24} aria-hidden="true" />
+        <strong>{t("actionLibrary:bulkImportButton")}</strong>
       </button>
       <input ref={inputRef} type="file" accept="image/*" onChange={handleFileChange} hidden />
     </div>
@@ -341,7 +346,10 @@ function ActionCard({
   tags,
   deleteConfirmActionId,
   isDeleting,
+  selectionMode,
+  selected,
   onToggleTag,
+  onToggleSelected,
   onUpdateDetails,
   onDelete,
   onImageActionStatus,
@@ -352,7 +360,10 @@ function ActionCard({
   tags: ActionTag[];
   deleteConfirmActionId: string;
   isDeleting: boolean;
+  selectionMode: boolean;
+  selected: boolean;
   onToggleTag: (actionId: string, tagName: string) => void;
+  onToggleSelected: (actionId: string) => void;
   onUpdateDetails: (actionId: string, patch: Partial<Pick<ActionEntry, "name" | "prompt">>) => boolean;
   onDelete: (actionId: string, isConfirming: boolean) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
@@ -369,7 +380,7 @@ function ActionCard({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const committedNameRef = useRef(action.name || "");
   const committedPromptRef = useRef(action.prompt || "");
-  const assetUrl = cacheBustedLibraryImageUrl(action.asset_url || "", action.updated_at || action.asset_id);
+  const assetUrl = cacheBustedLibraryImageUrl(action.asset_url || "", action.asset_id);
   const imageAlt = action.name || t("actionLibrary:actionImage");
 
   useEffect(() => {
@@ -383,6 +394,10 @@ function ActionCard({
   useEffect(() => {
     if (promptOpen) nameInputRef.current?.focus();
   }, [promptOpen]);
+
+  useEffect(() => {
+    if (selectionMode) setPromptOpen(false);
+  }, [selectionMode]);
 
   useEffect(() => {
     if (!menuState.open && !tagMenuState.open) return;
@@ -484,7 +499,7 @@ function ActionCard({
   }
 
   return (
-    <div className={`outfit-card action-card${promptOpen ? " action-card--flipped" : ""}`}>
+    <div className={`outfit-card action-card${promptOpen ? " action-card--flipped" : ""}${selectionMode ? " selecting" : ""}${selected ? " selected" : ""}`}>
       <div className="action-card__flipper">
         <div className="action-card__face action-card__face--front">
           <div
@@ -494,16 +509,26 @@ function ActionCard({
             aria-label={t("actionLibrary:promptLabel", { name: imageAlt })}
             aria-hidden={promptOpen}
             aria-pressed={promptOpen}
-            onClick={() => setPromptOpen(true)}
+            onClick={() => {
+              if (selectionMode) {
+                onToggleSelected(action.id);
+                return;
+              }
+              setPromptOpen(true);
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
+                if (selectionMode) {
+                  onToggleSelected(action.id);
+                  return;
+                }
                 setPromptOpen(true);
               }
             }}
           >
             {assetUrl ? (
-              <img src={assetUrl} alt={imageAlt} loading="lazy" draggable={false} onDragStart={(event) => event.preventDefault()} />
+              <LazyImage src={assetUrl} alt={imageAlt} draggable={false} onDragStart={(event) => event.preventDefault()} />
             ) : (
               <div className="placeholder">{t("common:empty.noImage")}</div>
             )}
@@ -570,7 +595,7 @@ function ActionCard({
           </label>
         </div>
       </div>
-      <button className="outfit-card__menu-button" type="button" aria-label={t("actionLibrary:actionActions")} aria-expanded={menuState.open} onClick={openMenu}>
+      <button className="outfit-card__menu-button" type="button" aria-label={t("actionLibrary:actionActions")} aria-expanded={menuState.open} disabled={selectionMode} onClick={openMenu}>
         <MoreHorizontal size={18} aria-hidden="true" />
       </button>
       {menuState.open
@@ -654,8 +679,12 @@ function ActionGrid({
   creating,
   deletingActionId,
   deleteConfirmActionId,
+  selectionMode,
+  selectedIds,
   onCreate,
+  onOpenBulkImport,
   onToggleTag,
+  onToggleSelected,
   onUpdateDetails,
   onDelete,
   onImageActionStatus,
@@ -667,8 +696,12 @@ function ActionGrid({
   creating: boolean;
   deletingActionId: string;
   deleteConfirmActionId: string;
+  selectionMode: boolean;
+  selectedIds: Set<string>;
   onCreate: (file: File) => void;
+  onOpenBulkImport: () => void;
   onToggleTag: (actionId: string, tagName: string) => void;
+  onToggleSelected: (actionId: string) => void;
   onUpdateDetails: (actionId: string, patch: Partial<Pick<ActionEntry, "name" | "prompt">>) => boolean;
   onDelete: (actionId: string, isConfirming: boolean) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
@@ -680,7 +713,7 @@ function ActionGrid({
   return (
     <div className="library-card-size-scope">
       <div className="outfit-grid" style={cardSize.gridStyle}>
-        <AddActionCard disabled={creating} onCreate={onCreate} />
+        {!selectionMode ? <AddActionCard disabled={creating} busy={creating} onCreate={onCreate} onOpenBulkImport={onOpenBulkImport} /> : null}
         {actions.map((action) => (
           <ActionCard
             key={action.id}
@@ -688,7 +721,10 @@ function ActionGrid({
             tags={tags}
             deleteConfirmActionId={deleteConfirmActionId}
             isDeleting={deletingActionId === action.id}
+            selectionMode={selectionMode}
+            selected={selectedIds.has(action.id)}
             onToggleTag={onToggleTag}
+            onToggleSelected={onToggleSelected}
             onUpdateDetails={onUpdateDetails}
             onDelete={onDelete}
             onImageActionStatus={onImageActionStatus}
@@ -919,6 +955,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const activeTagFilter = useActionLibraryStore((state) => state.activeTagFilter);
   const setActiveProjectId = useActionLibraryStore((state) => state.setActiveProjectId);
   const setActiveTagFilter = useActionLibraryStore((state) => state.setActiveTagFilter);
+  const bulkSelection = useLibraryBulkSelection();
 
   const storageSettingsQuery = useQuery({
     queryKey: actionLibraryKeys.storageSettings,
@@ -954,6 +991,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     if (
       validFilter.includeTagIds.length !== activeTagFilter.includeTagIds.length
       || validFilter.excludeTagIds.length !== activeTagFilter.excludeTagIds.length
+      || validFilter.untaggedOnly !== activeTagFilter.untaggedOnly
     ) {
       setActiveTagFilter(validFilter);
     }
@@ -975,7 +1013,16 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     mutationFn: async (file: File) => {
       if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
       const payload = await fileToUploadPayload(file);
-      return createAction(activeProjectId, payload);
+      const result = await importActionEntries(activeProjectId, [{
+        filename: payload.filename,
+        relative_path: payload.filename,
+        mime_type: payload.mime_type,
+        data: payload.data,
+        prompt: "",
+        warnings: [],
+      }]);
+      if (!result.imported[0]) throw new Error(result.failed[0]?.errors?.[0]?.message || t("actionLibrary:requestFailed", { message: "Import failed" }));
+      return result.imported[0];
     },
     onSuccess: async () => {
       if (hasLibraryTagFilter(activeTagFilter)) setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER);
@@ -1020,6 +1067,28 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         ...errors,
         [variables.actionId]: error instanceof Error ? error.message : String(error),
       }));
+    },
+  });
+
+  const bulkActionEntriesMutation = useMutation({
+    mutationFn: ({ operation, tags: tagNames }: { operation: "delete" | "add_tags" | "remove_tags"; tags?: string[] }) => {
+      if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
+      return bulkActionEntries({
+        project_id: activeProjectId,
+        entry_ids: bulkSelection.selectedIdList,
+        operation,
+        ...(tagNames ? { tags: tagNames } : {}),
+      });
+    },
+    onSuccess: async (result) => {
+      bulkSelection.clearSelection();
+      showImageActionToast("ready", t("common:bulk.operationCompleted", { count: result.deleted || result.updated }));
+      await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
+      await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.projects });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
+    },
+    onError: (error) => {
+      showImageActionToast("error", t("common:bulk.operationFailed", { message: error instanceof Error ? error.message : String(error) }));
     },
   });
 
@@ -1183,6 +1252,10 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     ));
   }
 
+  function handleToggleUntaggedFilter() {
+    setActiveTagFilter(activeTagFilter.untaggedOnly ? EMPTY_LIBRARY_TAG_FILTER : createLibraryTagFilter([], [], true));
+  }
+
   function handleDeleteTag(tagId: string, isConfirming: boolean) {
     if (!isConfirming) {
       setDeleteConfirmTagId(tagId);
@@ -1214,6 +1287,13 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
       return searchableText.includes(normalizedSearchQuery);
     });
   }, [actions, normalizedSearchQuery]);
+  const filteredActionIds = useMemo(() => filteredActions.map((action) => action.id), [filteredActions]);
+  useEffect(() => {
+    bulkSelection.pruneSelection(filteredActionIds);
+  }, [bulkSelection.pruneSelection, filteredActionIds]);
+  useEffect(() => {
+    bulkSelection.exitSelectionMode();
+  }, [activeProjectId]);
   const tags = tagsQuery.data?.tags || [];
   const tagCounts = useMemo(() => countLibraryTags(filteredActions, tags), [filteredActions, tags]);
   const activeProject = projects.find((project) => project.id === activeProjectId) || null;
@@ -1226,6 +1306,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     createActionMutation.error,
     deleteActionMutation.error,
     updateActionTagsMutation.error,
+    bulkActionEntriesMutation.error,
     createProjectMutation.error,
     renameProjectMutation.error,
     deleteProjectMutation.error,
@@ -1267,13 +1348,13 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
               onTagToggle={handleToggleTagFilter}
               onTagExclude={handleExcludeTagFilter}
               onTagClear={() => setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER)}
-              onOpenTagManager={() => setTagManagerOpen(true)}
-              onOpenBulkImport={() => setBulkImportOpen(true)}
-              bulkImportDisabled={!storageConfigured || !activeProjectId}
+              onUntaggedToggle={handleToggleUntaggedFilter}
+              selectionMode={bulkSelection.selectionMode}
+              onEnterSelectionMode={bulkSelection.enterSelectionMode}
             />
           </div>
 
-          <div className="model-lib-body">
+          <div className="model-lib-body scrollbar-thin-stable">
             {errorMessage ? <div className="model-lib-error">{t("actionLibrary:requestFailed", { message: errorMessage })}</div> : null}
             {storageSettingsQuery.isLoading || projectsQuery.isLoading ? <div className="model-lib-empty">{t("common:states.loadingProjects")}</div> : null}
             {!storageConfigured ? <div className="model-lib-empty">{t("actionLibrary:storageUnavailable")}</div> : null}
@@ -1290,8 +1371,12 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
                   creating={createActionMutation.isPending}
                   deletingActionId={deleteActionMutation.isPending ? deleteActionMutation.variables || "" : ""}
                   deleteConfirmActionId={deleteConfirmActionId}
+                  selectionMode={bulkSelection.selectionMode}
+                  selectedIds={bulkSelection.selectedIds}
                   onCreate={(file) => createActionMutation.mutate(file)}
+                  onOpenBulkImport={() => setBulkImportOpen(true)}
                   onToggleTag={handleToggleActionTag}
+                  onToggleSelected={bulkSelection.toggleSelected}
                   onUpdateDetails={handleUpdateActionDetails}
                   onDelete={handleActionDelete}
                   onImageActionStatus={showImageActionToast}
@@ -1325,10 +1410,27 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         projectId={activeProjectId}
         projectName={activeProject?.name || ""}
         existingActionNames={(allActionsQuery.data?.actions || actions).map((action) => action.name)}
+        tags={tags}
         onClose={() => setBulkImportOpen(false)}
         onImported={refreshActionLibraryAfterBulkImport}
       />
       <LibraryImageActionToast toast={imageActionToast} />
+      {activeProject ? (
+        <LibraryBulkActions
+          selectionMode={bulkSelection.selectionMode}
+          selectedCount={bulkSelection.selectedCount}
+          totalMatchingCount={filteredActions.length}
+          tags={tags}
+          isBusy={bulkActionEntriesMutation.isPending}
+          onExitSelectionMode={bulkSelection.exitSelectionMode}
+          onSelectMatching={() => bulkSelection.selectMatching(filteredActionIds)}
+          onClearSelection={bulkSelection.clearSelection}
+          onOpenTagManager={() => setTagManagerOpen(true)}
+          onAddTags={(tagNames) => bulkActionEntriesMutation.mutate({ operation: "add_tags", tags: tagNames })}
+          onRemoveTags={(tagNames) => bulkActionEntriesMutation.mutate({ operation: "remove_tags", tags: tagNames })}
+          onDeleteSelected={() => bulkActionEntriesMutation.mutate({ operation: "delete" })}
+        />
+      ) : null}
     </section>
   );
 }

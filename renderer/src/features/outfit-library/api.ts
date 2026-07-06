@@ -1,6 +1,6 @@
 import { apiRequest } from "../../lib/apiClient";
 import { EMPTY_LIBRARY_TAG_FILTER, libraryTagFilterKey, type LibraryTagFilter } from "../library-tags";
-import { AssetUploadPayload, OutfitEntry, OutfitFilters, OutfitProject, OutfitTag, StorageSettings } from "./types";
+import { AssetUploadPayload, LibraryBulkEntriesPayload, LibraryBulkEntriesResult, OutfitEntry, OutfitFilters, OutfitImportEntry, OutfitImportResult, OutfitProject, OutfitTag, StorageSettings } from "./types";
 
 export const outfitLibraryKeys = {
   projects: ["outfitProjects"] as const,
@@ -62,14 +62,14 @@ export function uploadOutfitProjectCover(projectId: string, payload: AssetUpload
 
 export function listOutfits({ projectId, tagFilter = EMPTY_LIBRARY_TAG_FILTER }: OutfitFilters) {
   return apiRequest<{ outfits: OutfitEntry[] }>(
-    `/api/outfit-projects/${encodeURIComponent(projectId)}/outfits${queryString({ tag_id: tagFilter.includeTagIds, exclude_tag_id: tagFilter.excludeTagIds })}`
+    `/api/outfit-projects/${encodeURIComponent(projectId)}/outfits${queryString({ tag_id: tagFilter.includeTagIds, exclude_tag_id: tagFilter.excludeTagIds, untagged: tagFilter.untaggedOnly ? "1" : "" })}`
   );
 }
 
-export function createOutfit(projectId: string, payload: AssetUploadPayload) {
-  return apiRequest<OutfitEntry>(`/api/outfit-projects/${encodeURIComponent(projectId)}/outfits`, {
+export function importOutfitEntries(projectId: string, entries: OutfitImportEntry[]) {
+  return apiRequest<OutfitImportResult>(`/api/outfit-projects/${encodeURIComponent(projectId)}/outfits/import-entries`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ entries }),
   });
 }
 
@@ -83,6 +83,13 @@ export function updateOutfit(outfitId: string, payload: Partial<Pick<OutfitEntry
 export function deleteOutfit(outfitId: string) {
   return apiRequest<{ ok: true }>(`/api/outfits/${encodeURIComponent(outfitId)}`, {
     method: "DELETE",
+  });
+}
+
+export function bulkOutfitEntries(payload: LibraryBulkEntriesPayload) {
+  return apiRequest<LibraryBulkEntriesResult>("/api/libraries/outfit/entries/bulk", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 

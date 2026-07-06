@@ -737,7 +737,6 @@
   .free-canvas-editor__stage-settings {
     align-items: center;
     overflow-x: auto;
-    scrollbar-width: none;
   }
 
   .free-canvas-editor__stage-settings .free-canvas-editor__icon-button {

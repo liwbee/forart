@@ -4,15 +4,18 @@ import { useTranslation } from "react-i18next";
 import { Copy, Download, MoreHorizontal, Pencil, Plus, Star, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Fragment } from "react";
+import { LazyImage } from "../../components/LazyImage";
 import { ImageViewer } from "../../lib/ImageViewer";
 import { CollapsibleTagFilterRow } from "../library-tags";
 import { LibraryTagChoiceButton } from "../library-tags";
 import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageActionToastTone } from "../../lib/LibraryImageActionToast";
 import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalImage, resolveLibraryImageUrl } from "../../lib/libraryImageActions";
 import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
+import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
+import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
 import { EMPTY_LIBRARY_TAG_FILTER, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
 import {
-  createModel,
+  bulkModelEntries,
   createModelTag,
   createModelProject,
   deleteModel,
@@ -25,6 +28,7 @@ import {
   listModelTags,
   modelLibraryKeys,
   getStorageSettings,
+  importModelEntries,
   uploadModelImage,
   updateModel,
   updateModelTag,
@@ -33,21 +37,6 @@ import {
 import { useModelLibraryStore } from "./modelLibraryStore";
 import { normalizeTags, toggleTag } from "./tagUtils";
 import { AssetUploadPayload, ModelEntry, ModelGender, ModelImage, ModelProject, ModelTag } from "./types";
-
-const defaultModelNames: Record<Exclude<ModelGender, "unknown">, string> = {
-  female: "New Female Model",
-  male: "New Male Model",
-};
-
-function nextDefaultModelName(models: ModelEntry[], gender: "female" | "male") {
-  const base = defaultModelNames[gender];
-  const existing = new Set(models.map((model) => model.name));
-  for (let index = 1; index < 1000; index += 1) {
-    const name = `${base}${String(index).padStart(3, "0")}`;
-    if (!existing.has(name)) return name;
-  }
-  return `${base}${Date.now()}`;
-}
 
 function getRequestError(errors: unknown[]) {
   const first = errors.find(Boolean);
@@ -183,7 +172,7 @@ function ModelProjectSidebar({
         <span>{t("common:labels.newProject")}</span>
       </button>
 
-      <div className="model-project-list">
+      <div className="model-project-list scrollbar-thin-stable">
         {projects.length ? (
           projects.map((project) => {
             const isActive = project.id === activeProjectId;
@@ -281,8 +270,10 @@ function ModelToolbar({
   onTagToggle,
   onTagExclude,
   onTagClear,
+  onUntaggedToggle,
   onGenderToggle,
-  onOpenTagManager,
+  selectionMode,
+  onEnterSelectionMode,
 }: {
   tags: ModelTag[];
   tagFilter: LibraryTagFilter;
@@ -291,8 +282,10 @@ function ModelToolbar({
   onTagToggle: (tagId: string) => void;
   onTagExclude: (tagId: string) => void;
   onTagClear: () => void;
+  onUntaggedToggle: () => void;
   onGenderToggle: (gender: "female" | "male") => void;
-  onOpenTagManager: () => void;
+  selectionMode: boolean;
+  onEnterSelectionMode: () => void;
 }) {
   const { t } = useTranslation();
   const includeTagSet = useMemo(() => new Set(tagFilter.includeTagIds), [tagFilter.includeTagIds]);
@@ -325,15 +318,16 @@ function ModelToolbar({
       <div className="library-filter-divider" aria-hidden="true" />
 
       <div className="library-tag-section">
+        <LibraryBulkManageButton disabled={selectionMode} onClick={onEnterSelectionMode} />
         <span className="library-filter-label">{t("common:labels.tags")}</span>
-        <button className="model-tag-add-button" type="button" aria-label={t("common:labels.manageTags")} title={t("common:labels.manageTags")} onClick={onOpenTagManager}>
-          <Pencil size={18} aria-hidden="true" />
-        </button>
         <div className="library-tag-controls">
           <CollapsibleTagFilterRow expandLabel="展开标签" collapseLabel="收起标签">
             <div className="library-tag-filter">
               <button className={hasLibraryTagFilter(tagFilter) ? "" : "active"} type="button" onClick={onTagClear}>
                 {t("common:labels.all")}
+              </button>
+              <button className={tagFilter.untaggedOnly ? "active" : ""} type="button" onClick={onUntaggedToggle}>
+                {t("common:labels.untagged")}
               </button>
               {tags.map((tag) => (
                 <LibraryTagChoiceButton
@@ -374,17 +368,17 @@ function GenderSymbol({ gender, className }: { gender: "female" | "male"; classN
   );
 }
 
-function AddModelCard({ disabled, onCreate }: { disabled: boolean; onCreate: (gender: "female" | "male") => void }) {
+function AddModelCard({ disabled, busy, onCreate }: { disabled: boolean; busy: boolean; onCreate: (gender: "female" | "male") => void }) {
   const { t } = useTranslation();
   return (
     <div className="model-add-card model-add-gender-card">
       <button className="model-add-gender-option female" type="button" disabled={disabled} onClick={() => onCreate("female")}>
         <GenderSymbol gender="female" className="model-add-gender-icon" />
-        <strong>{disabled ? t("common:states.adding") : t("modelLibrary:addFemaleModel")}</strong>
+        <strong>{busy ? t("common:states.adding") : t("modelLibrary:addFemaleModel")}</strong>
       </button>
       <button className="model-add-gender-option male" type="button" disabled={disabled} onClick={() => onCreate("male")}>
         <GenderSymbol gender="male" className="model-add-gender-icon" />
-        <strong>{disabled ? t("common:states.adding") : t("modelLibrary:addMaleModel")}</strong>
+        <strong>{busy ? t("common:states.adding") : t("modelLibrary:addMaleModel")}</strong>
       </button>
     </div>
   );
@@ -394,23 +388,33 @@ function ModelCard({
   model,
   isOpen,
   onOpen,
+  selectionMode,
+  selected,
+  onToggleSelected,
 }: {
   model: ModelEntry;
   isOpen: boolean;
   onOpen: () => void;
+  selectionMode: boolean;
+  selected: boolean;
+  onToggleSelected: () => void;
 }) {
   const { t } = useTranslation();
   const coverCacheKey = model.cover_image_id || model.cover_asset_id || "";
   const coverUrl = cacheBustedLibraryImageUrl(model.cover_url || "", coverCacheKey);
 
   return (
-    <button className={`model-card${isOpen ? " active" : ""}`} type="button" onClick={onOpen}>
+    <button
+      className={`model-card${isOpen ? " active" : ""}${selectionMode ? " selecting" : ""}${selected ? " selected" : ""}`}
+      type="button"
+      aria-pressed={selectionMode ? selected : undefined}
+      onClick={selectionMode ? onToggleSelected : onOpen}
+    >
       <div className="model-card__cover">
         {coverUrl ? (
-          <img
+          <LazyImage
             src={coverUrl}
             alt={t("modelLibrary:coverAlt", { name: model.name })}
-            loading="lazy"
             draggable={false}
             onDragStart={(event) => event.preventDefault()}
           />
@@ -798,10 +802,9 @@ function ModelInlineEditor({
                         }}
                       >
                         {src ? (
-                          <img
+                          <LazyImage
                             src={src}
                             alt={altText}
-                            loading="lazy"
                             draggable={false}
                             onDragStart={(event) => event.preventDefault()}
                           />
@@ -928,6 +931,9 @@ function ModelGrid({
   onImageActionStatus,
   renameErrors,
   onClearRenameError,
+  selectionMode,
+  selectedIds,
+  onToggleSelected,
 }: {
   models: ModelEntry[];
   openModelId: string;
@@ -949,6 +955,9 @@ function ModelGrid({
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
   renameErrors: Record<string, string>;
   onClearRenameError: (modelId: string) => void;
+  selectionMode: boolean;
+  selectedIds: Set<string>;
+  onToggleSelected: (modelId: string) => void;
 }) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const cardSize = useLibraryCardSize("model");
@@ -988,7 +997,7 @@ function ModelGrid({
   return (
     <div className="library-card-size-scope">
       <div ref={gridRef} className="model-grid" style={cardSize.gridStyle}>
-        <AddModelCard disabled={creating} onCreate={onCreate} />
+        {!selectionMode ? <AddModelCard disabled={creating} busy={creating} onCreate={onCreate} /> : null}
         {models.map((model, index) => (
           <FragmentWithEditor
             key={model.id}
@@ -1012,6 +1021,9 @@ function ModelGrid({
             onImageActionStatus={onImageActionStatus}
             renameErrors={renameErrors}
             onClearRenameError={onClearRenameError}
+            selectionMode={selectionMode}
+            selectedIds={selectedIds}
+            onToggleSelected={onToggleSelected}
           />
         ))}
       </div>
@@ -1051,6 +1063,9 @@ function FragmentWithEditor({
   onImageActionStatus,
   renameErrors,
   onClearRenameError,
+  selectionMode,
+  selectedIds,
+  onToggleSelected,
 }: {
   model: ModelEntry;
   isOpen: boolean;
@@ -1072,10 +1087,20 @@ function FragmentWithEditor({
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
   renameErrors: Record<string, string>;
   onClearRenameError: (modelId: string) => void;
+  selectionMode: boolean;
+  selectedIds: Set<string>;
+  onToggleSelected: (modelId: string) => void;
 }) {
   return (
     <>
-      <ModelCard model={model} isOpen={isOpen} onOpen={() => onOpenModel(model.id)} />
+      <ModelCard
+        model={model}
+        isOpen={isOpen}
+        selectionMode={selectionMode}
+        selected={selectedIds.has(model.id)}
+        onToggleSelected={() => onToggleSelected(model.id)}
+        onOpen={() => onOpenModel(model.id)}
+      />
       {shouldRenderEditor && openModel ? (
         <ModelInlineEditor
           model={openModel}
@@ -1316,6 +1341,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   const toggleGender = useModelLibraryStore((state) => state.toggleGender);
   const openEditor = useModelLibraryStore((state) => state.openEditor);
   const closeEditor = useModelLibraryStore((state) => state.closeEditor);
+  const bulkSelection = useLibraryBulkSelection();
 
   const storageSettingsQuery = useQuery({
     queryKey: modelLibraryKeys.storageSettings,
@@ -1351,6 +1377,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     if (
       validFilter.includeTagIds.length !== activeTagFilter.includeTagIds.length
       || validFilter.excludeTagIds.length !== activeTagFilter.excludeTagIds.length
+      || validFilter.untaggedOnly !== activeTagFilter.untaggedOnly
     ) {
       setActiveTagFilter(validFilter);
     }
@@ -1371,13 +1398,9 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   const createModelMutation = useMutation({
     mutationFn: async (gender: "female" | "male") => {
       if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
-      const allModels = allModelsQuery.data ?? await queryClient.ensureQueryData({
-        queryKey: modelLibraryKeys.models(activeProjectId),
-        queryFn: () => listModels({ projectId: activeProjectId }),
-      });
-      if (!allModels) throw new Error(t("modelLibrary:fetchModelsFailed"));
-      const name = nextDefaultModelName(allModels.models, gender);
-      const model = await createModel(activeProjectId, { name, gender });
+      const result = await importModelEntries(activeProjectId, [{ gender }]);
+      const model = result.imported[0];
+      if (!model) throw new Error(result.failed[0]?.errors[0]?.message || t("modelLibrary:fetchModelsFailed"));
       return { model, gender };
     },
     onSuccess: async ({ model, gender }) => {
@@ -1423,6 +1446,29 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["models", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
+    },
+  });
+
+  const bulkModelEntriesMutation = useMutation({
+    mutationFn: ({ operation, tags: tagNames }: { operation: "delete" | "add_tags" | "remove_tags"; tags?: string[] }) => {
+      if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
+      return bulkModelEntries({
+        project_id: activeProjectId,
+        entry_ids: bulkSelection.selectedIdList,
+        operation,
+        ...(tagNames ? { tags: tagNames } : {}),
+      });
+    },
+    onSuccess: async (result) => {
+      bulkSelection.clearSelection();
+      closeEditor();
+      showImageActionToast("ready", t("common:bulk.operationCompleted", { count: result.deleted || result.updated }));
+      await queryClient.invalidateQueries({ queryKey: ["models", activeProjectId] });
+      await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
+      await queryClient.invalidateQueries({ queryKey: modelLibraryKeys.projects });
+    },
+    onError: (error) => {
+      showImageActionToast("error", t("common:bulk.operationFailed", { message: error instanceof Error ? error.message : String(error) }));
     },
   });
 
@@ -1607,6 +1653,10 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     ));
   }
 
+  function handleToggleUntaggedFilter() {
+    setActiveTagFilter(activeTagFilter.untaggedOnly ? EMPTY_LIBRARY_TAG_FILTER : createLibraryTagFilter([], [], true));
+  }
+
   function handleDeleteTag(tagId: string, isConfirming: boolean) {
     if (!isConfirming) {
       setDeleteConfirmTagId(tagId);
@@ -1638,6 +1688,16 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
       return searchableText.includes(normalizedSearchQuery);
     });
   }, [models, normalizedSearchQuery]);
+  const filteredModelIds = useMemo(() => filteredModels.map((model) => model.id), [filteredModels]);
+  useEffect(() => {
+    bulkSelection.pruneSelection(filteredModelIds);
+  }, [bulkSelection.pruneSelection, filteredModelIds]);
+  useEffect(() => {
+    bulkSelection.exitSelectionMode();
+  }, [activeProjectId]);
+  useEffect(() => {
+    if (bulkSelection.selectionMode) closeEditor();
+  }, [bulkSelection.selectionMode, closeEditor]);
   const tags = tagsQuery.data?.tags || [];
   const tagCounts = useMemo(() => countLibraryTags(filteredModels, tags), [filteredModels, tags]);
   const activeProject = projects.find((project) => project.id === activeProjectId) || null;
@@ -1658,6 +1718,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     deleteProjectMutation.error,
     deleteModelMutation.error,
     updateModelTagsMutation.error,
+    bulkModelEntriesMutation.error,
     uploadModelImageMutation.error,
     deleteModelImageMutation.error,
     setModelCoverMutation.error,
@@ -1700,12 +1761,14 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
               onTagToggle={handleToggleTagFilter}
               onTagExclude={handleExcludeTagFilter}
               onTagClear={() => setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER)}
+              onUntaggedToggle={handleToggleUntaggedFilter}
               onGenderToggle={toggleGender}
-              onOpenTagManager={() => setTagManagerOpen(true)}
+              selectionMode={bulkSelection.selectionMode}
+              onEnterSelectionMode={bulkSelection.enterSelectionMode}
             />
           </div>
 
-          <div className="model-lib-body">
+          <div className="model-lib-body scrollbar-thin-stable">
             {errorMessage ? <div className="model-lib-error">{t("modelLibrary:requestFailed", { message: errorMessage })}</div> : null}
             {projectsQuery.isLoading ? <div className="model-lib-empty">{t("common:states.loadingProjects")}</div> : null}
             {!projectsQuery.isLoading && !projects.length ? <div className="model-lib-empty">{t("common:empty.noProjects")}</div> : null}
@@ -1735,6 +1798,9 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
                   onImageActionStatus={showImageActionToast}
                   renameErrors={modelRenameErrors}
                   onClearRenameError={clearModelRenameError}
+                  selectionMode={bulkSelection.selectionMode}
+                  selectedIds={bulkSelection.selectedIds}
+                  onToggleSelected={bulkSelection.toggleSelected}
                 />
               </>
             ) : null}
@@ -1759,6 +1825,22 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
         onDeleteTag={handleDeleteTag}
       />
       <LibraryImageActionToast toast={imageActionToast} />
+      {activeProject ? (
+        <LibraryBulkActions
+          selectionMode={bulkSelection.selectionMode}
+          selectedCount={bulkSelection.selectedCount}
+          totalMatchingCount={filteredModels.length}
+          tags={tags}
+          isBusy={bulkModelEntriesMutation.isPending}
+          onExitSelectionMode={bulkSelection.exitSelectionMode}
+          onSelectMatching={() => bulkSelection.selectMatching(filteredModelIds)}
+          onClearSelection={bulkSelection.clearSelection}
+          onOpenTagManager={() => setTagManagerOpen(true)}
+          onAddTags={(tagNames) => bulkModelEntriesMutation.mutate({ operation: "add_tags", tags: tagNames })}
+          onRemoveTags={(tagNames) => bulkModelEntriesMutation.mutate({ operation: "remove_tags", tags: tagNames })}
+          onDeleteSelected={() => bulkModelEntriesMutation.mutate({ operation: "delete" })}
+        />
+      ) : null}
     </section>
   );
 }

@@ -71,6 +71,33 @@ contextBridge.exposeInMainWorld('forartReview', {
   saveIssue: (payload) => ipcRenderer.invoke('image-review:save-issue', payload),
 });
 
+contextBridge.exposeInMainWorld('forartActionImport', {
+  chooseFolder: (payload) => ipcRenderer.invoke('action-import:choose-folder', payload),
+  scan: (payload) => ipcRenderer.invoke('action-import:scan', payload),
+  startScan: (payload) => ipcRenderer.invoke('action-import:start-scan', payload),
+  cancelScan: (payload) => ipcRenderer.invoke('action-import:cancel-scan', payload),
+  readEntry: (payload) => ipcRenderer.invoke('action-import:read-entry', payload),
+  clearPreview: () => ipcRenderer.invoke('action-import:clear-preview'),
+  onScanProgress: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('action-import:scan-progress', listener);
+    return () => ipcRenderer.removeListener('action-import:scan-progress', listener);
+  },
+  onScanComplete: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('action-import:scan-complete', listener);
+    return () => ipcRenderer.removeListener('action-import:scan-complete', listener);
+  },
+  onScanError: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('action-import:scan-error', listener);
+    return () => ipcRenderer.removeListener('action-import:scan-error', listener);
+  },
+});
+
 contextBridge.exposeInMainWorld('forartLocalApi', {
   request: (payload) => ipcRenderer.invoke('local-api:request', payload),
 });

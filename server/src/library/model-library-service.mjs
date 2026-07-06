@@ -20,14 +20,26 @@ function sanitizeGender(value) {
   return value === "female" || value === "male" ? value : "unknown";
 }
 
+const defaultModelNames = {
+  female: "New Female Model",
+  male: "New Male Model",
+  unknown: "Untitled Model",
+};
+
 function normalizeTags(values) {
   const tags = [];
   for (const value of values || []) {
     const tag = String(value || "").trim().replace(/\s+/g, " ");
     if (tag && !tags.includes(tag)) tags.push(tag.slice(0, 24));
-    if (tags.length >= 12) break;
   }
   return tags;
+}
+
+function normalizeBulkEntryIds(values) {
+  const ids = Array.from(new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean)));
+  if (!ids.length) throw new Error("No entries selected");
+  if (ids.length > 500) throw new Error("Bulk operation is limited to 500 entries");
+  return ids;
 }
 
 function parseDataUrl(dataUrl) {
@@ -235,6 +247,14 @@ export function createModelLibraryService(runtime, options = {}) {
     }
   }
 
+  function existingProjectTagNames(projectId, names) {
+    const nextTags = normalizeTags(names);
+    if (!nextTags.length) throw new Error("At least one tag is required");
+    const missing = nextTags.filter((name) => !db.prepare("SELECT id FROM library_tags WHERE kind = 'model' AND project_id = ? AND name = ?").get(projectId, name));
+    if (missing.length) throw new Error(`Tag not found: ${missing[0]}`);
+    return nextTags;
+  }
+
   function resolveTagNames(projectId, tagIds) {
     const uniqueTagIds = Array.from(new Set((tagIds || []).map((tagId) => String(tagId || "").trim()).filter(Boolean)));
     if (!uniqueTagIds.length) return [];
@@ -264,6 +284,16 @@ export function createModelLibraryService(runtime, options = {}) {
       if (match) max = Math.max(max, Number.parseInt(match[1], 10) || 0);
     }
     return `${prefix}${String(max + 1).padStart(3, "0")}`;
+  }
+
+  function nextModelName(projectId, gender) {
+    const normalizedGender = sanitizeGender(gender);
+    const base = defaultModelNames[normalizedGender] || labels.defaultModel;
+    for (let index = 1; index < 1000; index += 1) {
+      const name = `${base}${String(index).padStart(3, "0")}`;
+      if (!modelNameExists(projectId, name)) return name;
+    }
+    return `${base}${Date.now()}`;
   }
 
   function renameProjectFolder(project, nextName) {
@@ -473,11 +503,14 @@ export function createModelLibraryService(runtime, options = {}) {
     if (!project) return null;
     const includeTagNames = resolveTagNames(projectId, query.tag_id || []);
     const excludeTagNames = resolveTagNames(projectId, query.exclude_tag_id || []);
+    const untaggedOnly = query.untagged === "1" || query.untagged === "true";
     const gender = Array.isArray(query.gender) ? query.gender[0] || "" : query.gender || "";
     const models = db.prepare("SELECT * FROM model_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
       .map(modelWithCoverAndTags)
       .filter((model) => (gender ? model.gender === gender : true));
-    const filtered = includeTagNames.length || excludeTagNames.length
+    const filtered = untaggedOnly
+      ? models.filter((model) => !model.tags.length)
+      : includeTagNames.length || excludeTagNames.length
       ? models.filter((model) => entryMatchesTagFilter(model, includeTagNames, excludeTagNames))
       : models;
     return { models: filtered };
@@ -497,6 +530,128 @@ export function createModelLibraryService(runtime, options = {}) {
       db.prepare("UPDATE model_projects SET updated_at = ? WHERE id = ?").run(timestamp, projectId);
       return modelWithCoverAndTags(loadModel(id));
     });
+  }
+
+  function importEntryImages(entry) {
+    if (Array.isArray(entry.images)) return entry.images;
+    if (entry.data) {
+      return [{
+        filename: entry.filename,
+        mime_type: entry.mime_type,
+        data: entry.data,
+        caption: entry.caption,
+      }];
+    }
+    return [];
+  }
+
+  function createModelFromImportEntry(projectId, entry = {}, tagNames = []) {
+    const project = loadProject(projectId);
+    if (!project) return null;
+    const gender = sanitizeGender(entry.gender);
+    const name = entry.name
+      ? validateFileNamePart(entry.name, "model name")
+      : nextModelName(projectId, gender);
+    if (modelNameExists(projectId, name)) throw new Error("Model name must be unique within the project");
+
+    const images = importEntryImages(entry);
+    const timestamp = nowIso();
+    const modelId = newId("model");
+    const code = nextCode(projectId, project.name);
+    const writtenAssets = [];
+
+    try {
+      return runDbTransaction(db, () => {
+        db.prepare("INSERT INTO model_entries (id, project_id, name, code, gender, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+          .run(modelId, projectId, name, code, gender, timestamp, timestamp);
+        db.prepare("UPDATE model_projects SET updated_at = ? WHERE id = ?").run(timestamp, projectId);
+
+        const modelName = folderName(name, "model name");
+        const relDir = path.relative(storageRoot, modelDirForNames(project.name, name));
+        const imageIds = [];
+        images.forEach((image, index) => {
+          const decoded = parseDataUrl(image?.data ? `data:${image.mime_type || "image/png"};base64,${image.data}` : "");
+          if (!decoded) throw new Error("Invalid image data");
+          const sortOrder = Number.isFinite(Number(image.sort_order)) ? Number(image.sort_order) : index;
+          const asset = writeAsset(decoded.buffer, decoded.mimeType, image.filename || "image", {
+            source: "model-library",
+            subdir: relDir,
+            filenameStem: `${modelName}_${String(index + 1).padStart(3, "0")}`,
+          });
+          writtenAssets.push(asset);
+          const imageId = newId("image");
+          db.prepare("INSERT INTO model_images (id, model_id, asset_id, caption, sort_order, created_at, mime_type, filename) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+            .run(imageId, modelId, asset.id, String(image.caption || ""), sortOrder, timestamp, asset.mime_type, asset.filename);
+          imageIds.push(imageId);
+        });
+
+        if (imageIds.length) {
+          const coverIndex = Math.max(0, Math.min(Number(entry.cover_index || 0), imageIds.length - 1));
+          db.prepare("UPDATE model_entries SET cover_image_id = ?, updated_at = ? WHERE id = ?").run(imageIds[coverIndex], timestamp, modelId);
+        }
+        if (tagNames.length) updateEntryTags(modelId, projectId, tagNames);
+
+        return modelWithCoverAndTags(loadModel(modelId));
+      });
+    } catch (error) {
+      for (const asset of writtenAssets) {
+        if (asset?.path) {
+          try {
+            unlinkSync(assetAbsolutePath(asset.path));
+          } catch {}
+        }
+      }
+      throw error;
+    }
+  }
+
+  function importEntries(projectId, payload = {}) {
+    if (!loadProject(projectId)) return null;
+    const entries = Array.isArray(payload.entries) ? payload.entries : [];
+    if (!entries.length) throw new Error("No rows selected for import");
+    const imported = [];
+    const failed = [];
+    const rows = [];
+    for (const entry of entries) {
+      const images = importEntryImages(entry);
+      const rowBase = {
+        id: String(entry.id || newId("model-import-entry")),
+        stem: String(entry.stem || entry.name || ""),
+        filename: String(entry.filename || images[0]?.filename || entry.name || "image"),
+        relative_path: String(entry.relative_path || entry.filename || images[0]?.relative_path || images[0]?.filename || entry.name || ""),
+        proposed_name: String(entry.name || ""),
+        gender: sanitizeGender(entry.gender),
+        thumbnail_url: String(entry.thumbnail_url || ""),
+        selectable: true,
+        selected: true,
+        status: "ready",
+        errors: [],
+        warnings: Array.isArray(entry.warnings) ? entry.warnings : [],
+      };
+      try {
+        const name = entry.name ? validateFileNamePart(entry.name, "model name") : "";
+        if (name && modelNameExists(projectId, name)) throw new Error("Model name must be unique within the project");
+        const tagNames = Array.isArray(entry.tags) && entry.tags.length
+          ? existingProjectTagNames(projectId, entry.tags)
+          : [];
+        const model = createModelFromImportEntry(projectId, { ...entry, ...(name ? { name } : {}) }, tagNames);
+        imported.push(model);
+        rows.push({ ...rowBase, model_id: model.id, final_status: rowBase.warnings.length ? "warning" : "imported" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const failedRow = { ...rowBase, final_status: "failed", errors: [{ code: "import_failed", message }] };
+        failed.push(failedRow);
+        rows.push(failedRow);
+      }
+    }
+    return {
+      imported_count: imported.length,
+      failed_count: failed.length,
+      imported,
+      not_selected: [],
+      failed,
+      rows,
+    };
   }
 
   function updateModel(modelId, payload = {}) {
@@ -529,14 +684,81 @@ export function createModelLibraryService(runtime, options = {}) {
     if (!model) return null;
     const project = loadProject(model.project_id);
     const modelDir = project ? modelDirForNames(project.name, model.name) : "";
-    const imageRows = db.prepare("SELECT asset_id FROM model_images WHERE model_id = ?").all(modelId);
-    runDbTransaction(db, () => {
-      db.prepare("DELETE FROM library_entry_tags WHERE kind = 'model' AND entry_id = ?").run(modelId);
-      db.prepare("DELETE FROM model_entries WHERE id = ?").run(modelId);
-      for (const row of imageRows) removeAssetIfUnused(row.asset_id);
-    });
+    runDbTransaction(db, () => deleteModelInsideTransaction(model));
     if (modelDir) removeDirectoryInsideLibrary(modelDir);
     return { ok: true };
+  }
+
+  function deleteModelInsideTransaction(model) {
+    const imageRows = db.prepare("SELECT asset_id FROM model_images WHERE model_id = ?").all(model.id);
+    db.prepare("DELETE FROM library_entry_tags WHERE kind = 'model' AND entry_id = ?").run(model.id);
+    db.prepare("DELETE FROM model_entries WHERE id = ?").run(model.id);
+    for (const row of imageRows) removeAssetIfUnused(row.asset_id);
+  }
+
+  function loadBulkModels(projectId, entryIds) {
+    if (!loadProject(projectId)) return null;
+    const ids = normalizeBulkEntryIds(entryIds);
+    const models = ids.map((id) => loadModel(id));
+    const missingIndex = models.findIndex((model) => !model);
+    if (missingIndex >= 0) throw new Error(`Model not found: ${ids[missingIndex]}`);
+    const wrongProject = models.find((model) => model.project_id !== projectId);
+    if (wrongProject) throw new Error("Selected models must belong to the current project");
+    return { ids, models };
+  }
+
+  function bulkEntries(payload = {}) {
+    const projectId = String(payload.project_id || "").trim();
+    if (!projectId) throw new Error("project_id is required");
+    const operation = String(payload.operation || "").trim();
+    const loaded = loadBulkModels(projectId, payload.entry_ids || []);
+    if (!loaded) return null;
+    const timestamp = nowIso();
+    if (operation === "add_tags" || operation === "remove_tags") {
+      const tagNames = existingProjectTagNames(projectId, payload.tags || []);
+      return runDbTransaction(db, () => {
+        for (const model of loaded.models) {
+          const current = tagsForModel(model.id);
+          const nextTags = operation === "add_tags"
+            ? normalizeTags([...current, ...tagNames])
+            : current.filter((name) => !tagNames.includes(name));
+          updateEntryTags(model.id, projectId, nextTags);
+          db.prepare("UPDATE model_entries SET updated_at = ? WHERE id = ?").run(timestamp, model.id);
+        }
+        return {
+          ok: true,
+          kind: "model",
+          operation,
+          project_id: projectId,
+          requested: loaded.ids.length,
+          updated: loaded.ids.length,
+          deleted: 0,
+          skipped: [],
+          tags: listTags(projectId).filter((tag) => tagNames.includes(tag.name)),
+        };
+      });
+    }
+    if (operation === "delete") {
+      const directories = loaded.models.map((model) => {
+        const project = loadProject(model.project_id);
+        return project ? modelDirForNames(project.name, model.name) : "";
+      }).filter(Boolean);
+      runDbTransaction(db, () => {
+        for (const model of loaded.models) deleteModelInsideTransaction(model);
+      });
+      for (const directory of directories) removeDirectoryInsideLibrary(directory);
+      return {
+        ok: true,
+        kind: "model",
+        operation,
+        project_id: projectId,
+        requested: loaded.ids.length,
+        updated: 0,
+        deleted: loaded.ids.length,
+        skipped: [],
+      };
+    }
+    throw new Error("Unsupported bulk operation");
   }
 
   function listImages(modelId) {
@@ -682,8 +904,10 @@ export function createModelLibraryService(runtime, options = {}) {
     uploadProjectCover,
     listModels,
     createModel,
+    importEntries,
     updateModel,
     deleteModel,
+    bulkEntries,
     listImages,
     addImage,
     uploadImage,

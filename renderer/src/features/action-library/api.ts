@@ -1,6 +1,7 @@
 import { apiRequest } from "../../lib/apiClient";
 import { EMPTY_LIBRARY_TAG_FILTER, libraryTagFilterKey, type LibraryTagFilter } from "../library-tags";
-import { ActionEntry, ActionFilters, ActionProject, ActionTag, AssetUploadPayload, StorageSettings } from "./types";
+import { ActionEntry, ActionFilters, ActionProject, ActionTag, AssetUploadPayload, LibraryBulkEntriesPayload, LibraryBulkEntriesResult, StorageSettings } from "./types";
+import type { ActionFolderImportResult, ActionFolderImportUploadEntry } from "./actionFolderImportTypes";
 
 export const actionLibraryKeys = {
   projects: ["actionProjects"] as const,
@@ -62,14 +63,14 @@ export function uploadActionProjectCover(projectId: string, payload: AssetUpload
 
 export function listActions({ projectId, tagFilter = EMPTY_LIBRARY_TAG_FILTER }: ActionFilters) {
   return apiRequest<{ actions: ActionEntry[] }>(
-    `/api/action-projects/${encodeURIComponent(projectId)}/actions${queryString({ tag_id: tagFilter.includeTagIds, exclude_tag_id: tagFilter.excludeTagIds })}`
+    `/api/action-projects/${encodeURIComponent(projectId)}/actions${queryString({ tag_id: tagFilter.includeTagIds, exclude_tag_id: tagFilter.excludeTagIds, untagged: tagFilter.untaggedOnly ? "1" : "" })}`
   );
 }
 
-export function createAction(projectId: string, payload: AssetUploadPayload) {
-  return apiRequest<ActionEntry>(`/api/action-projects/${encodeURIComponent(projectId)}/actions`, {
+export function importActionEntries(projectId: string, entries: ActionFolderImportUploadEntry[]) {
+  return apiRequest<ActionFolderImportResult>(`/api/action-projects/${encodeURIComponent(projectId)}/actions/import-entries`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ entries }),
   });
 }
 
@@ -83,6 +84,13 @@ export function updateAction(actionId: string, payload: Partial<Pick<ActionEntry
 export function deleteAction(actionId: string) {
   return apiRequest<{ ok: true }>(`/api/actions/${encodeURIComponent(actionId)}`, {
     method: "DELETE",
+  });
+}
+
+export function bulkActionEntries(payload: LibraryBulkEntriesPayload) {
+  return apiRequest<LibraryBulkEntriesResult>("/api/libraries/action/entries/bulk", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 

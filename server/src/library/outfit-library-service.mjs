@@ -20,9 +20,15 @@ function normalizeTags(values) {
   for (const value of values || []) {
     const tag = String(value || "").trim().replace(/\s+/g, " ");
     if (tag && !tags.includes(tag)) tags.push(tag.slice(0, 24));
-    if (tags.length >= 12) break;
   }
   return tags;
+}
+
+function normalizeBulkEntryIds(values) {
+  const ids = Array.from(new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean)));
+  if (!ids.length) throw new Error("No entries selected");
+  if (ids.length > 500) throw new Error("Bulk operation is limited to 500 entries");
+  return ids;
 }
 
 function parseDataUrl(dataUrl) {
@@ -219,6 +225,14 @@ export function createOutfitLibraryService(runtime, options = {}) {
       db.prepare("INSERT OR IGNORE INTO library_entry_tags (id, kind, entry_id, tag_id, created_at) VALUES (?, ?, ?, ?, ?)")
         .run(newId("entrytag"), "outfit", entryId, tag.id, nowIso());
     }
+  }
+
+  function existingProjectTagNames(projectId, names) {
+    const nextTags = normalizeTags(names);
+    if (!nextTags.length) throw new Error("At least one tag is required");
+    const missing = nextTags.filter((name) => !db.prepare("SELECT id FROM library_tags WHERE kind = 'outfit' AND project_id = ? AND name = ?").get(projectId, name));
+    if (missing.length) throw new Error(`Tag not found: ${missing[0]}`);
+    return nextTags;
   }
 
   function resolveTagNames(projectId, tagIds) {
@@ -444,25 +458,30 @@ export function createOutfitLibraryService(runtime, options = {}) {
     if (!project) return null;
     const includeTagNames = resolveTagNames(projectId, query.tag_id || []);
     const excludeTagNames = resolveTagNames(projectId, query.exclude_tag_id || []);
+    const untaggedOnly = query.untagged === "1" || query.untagged === "true";
     const outfits = db.prepare("SELECT * FROM outfit_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
       .map(outfitWithAssetAndTags);
-    const filtered = includeTagNames.length || excludeTagNames.length
+    const filtered = untaggedOnly
+      ? outfits.filter((outfit) => !outfit.tags.length)
+      : includeTagNames.length || excludeTagNames.length
       ? outfits.filter((outfit) => entryMatchesTagFilter(outfit, includeTagNames, excludeTagNames))
       : outfits;
     return { outfits: filtered };
   }
 
-  function createOutfit(projectId, payload = {}) {
+  function createOutfitFromFile(projectId, payload = {}) {
     const project = loadProject(projectId);
     if (!project) return null;
-    const decoded = parseDataUrl(payload.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
-    if (!decoded) throw new Error("Invalid upload data");
+    const content = Buffer.isBuffer(payload.buffer) ? payload.buffer : Buffer.from(payload.buffer || "");
+    if (!content.length) throw new Error("Invalid image data");
     const timestamp = nowIso();
     const id = newId("outfit");
-    const name = nextOutfitName(projectId, project.name);
+    const name = payload.name
+      ? validateFileNamePart(payload.name, "outfit name")
+      : nextOutfitName(projectId, project.name);
     if (outfitNameExists(projectId, name)) throw new Error("Outfit name must be unique");
     const relDir = path.relative(storageRoot, projectDirForName(project.name));
-    return writeAssetInTransaction(decoded.buffer, decoded.mimeType, payload.filename || "image", {
+    return writeAssetInTransaction(content, String(payload.mime_type || "image/png"), payload.filename || "image", {
       source: "outfit-library",
       subdir: relDir,
       filenameStem: name,
@@ -472,6 +491,64 @@ export function createOutfitLibraryService(runtime, options = {}) {
       db.prepare("UPDATE outfit_projects SET cover_asset_id = COALESCE(cover_asset_id, ?), updated_at = ? WHERE id = ?").run(asset.id, timestamp, projectId);
       return outfitWithAssetAndTags(loadOutfit(id));
     });
+  }
+
+  function importEntries(projectId, payload = {}) {
+    if (!loadProject(projectId)) return null;
+    const entries = Array.isArray(payload.entries) ? payload.entries : [];
+    if (!entries.length) throw new Error("No rows selected for import");
+    const imported = [];
+    const failed = [];
+    const rows = [];
+    for (const entry of entries) {
+      const rowBase = {
+        id: String(entry.id || newId("outfit-import-entry")),
+        stem: String(entry.stem || entry.name || ""),
+        filename: String(entry.filename || entry.name || "image"),
+        relative_path: String(entry.relative_path || entry.filename || entry.name || ""),
+        image_path: null,
+        text_path: null,
+        proposed_name: String(entry.name || ""),
+        thumbnail_url: String(entry.thumbnail_url || ""),
+        selectable: true,
+        selected: true,
+        status: "ready",
+        errors: [],
+        warnings: Array.isArray(entry.warnings) ? entry.warnings : [],
+      };
+      try {
+        const name = entry.name ? validateFileNamePart(entry.name, "outfit name") : "";
+        if (name && outfitNameExists(projectId, name)) throw new Error("Outfit name must be unique");
+        const tagNames = Array.isArray(entry.tags) && entry.tags.length
+          ? existingProjectTagNames(projectId, entry.tags)
+          : [];
+        const imageData = String(entry.data || "");
+        if (!imageData) throw new Error("Invalid image data");
+        const outfit = createOutfitFromFile(projectId, {
+          ...(name ? { name } : {}),
+          filename: entry.filename || "image",
+          mime_type: entry.mime_type || "image/png",
+          buffer: Buffer.from(imageData, "base64"),
+        });
+        if (tagNames.length) updateOutfit(outfit.id, { tags: tagNames });
+        const importedOutfit = tagNames.length ? outfitWithAssetAndTags(loadOutfit(outfit.id)) : outfit;
+        imported.push(importedOutfit);
+        rows.push({ ...rowBase, outfit_id: outfit.id, final_status: rowBase.warnings.length ? "warning" : "imported" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const failedRow = { ...rowBase, final_status: "failed", errors: [{ code: "import_failed", message }] };
+        failed.push(failedRow);
+        rows.push(failedRow);
+      }
+    }
+    return {
+      imported_count: imported.length,
+      failed_count: failed.length,
+      imported,
+      not_selected: [],
+      failed,
+      rows,
+    };
   }
 
   function updateOutfit(outfitId, payload = {}) {
@@ -513,13 +590,75 @@ export function createOutfitLibraryService(runtime, options = {}) {
   function deleteOutfit(outfitId) {
     const outfit = loadOutfit(outfitId);
     if (!outfit) return null;
-    runDbTransaction(db, () => {
-      db.prepare("DELETE FROM library_entry_tags WHERE kind = 'outfit' AND entry_id = ?").run(outfitId);
-      db.prepare("UPDATE outfit_projects SET cover_asset_id = NULL WHERE cover_asset_id = ?").run(outfit.asset_id);
-      db.prepare("DELETE FROM outfit_entries WHERE id = ?").run(outfitId);
-      removeAssetIfUnused(outfit.asset_id);
-    });
+    runDbTransaction(db, () => deleteOutfitInsideTransaction(outfit));
     return { ok: true };
+  }
+
+  function deleteOutfitInsideTransaction(outfit) {
+    db.prepare("DELETE FROM library_entry_tags WHERE kind = 'outfit' AND entry_id = ?").run(outfit.id);
+    db.prepare("UPDATE outfit_projects SET cover_asset_id = NULL WHERE cover_asset_id = ?").run(outfit.asset_id);
+    db.prepare("DELETE FROM outfit_entries WHERE id = ?").run(outfit.id);
+    removeAssetIfUnused(outfit.asset_id);
+  }
+
+  function loadBulkOutfits(projectId, entryIds) {
+    if (!loadProject(projectId)) return null;
+    const ids = normalizeBulkEntryIds(entryIds);
+    const outfits = ids.map((id) => loadOutfit(id));
+    const missingIndex = outfits.findIndex((outfit) => !outfit);
+    if (missingIndex >= 0) throw new Error(`Outfit not found: ${ids[missingIndex]}`);
+    const wrongProject = outfits.find((outfit) => outfit.project_id !== projectId);
+    if (wrongProject) throw new Error("Selected outfits must belong to the current project");
+    return { ids, outfits };
+  }
+
+  function bulkEntries(payload = {}) {
+    const projectId = String(payload.project_id || "").trim();
+    if (!projectId) throw new Error("project_id is required");
+    const operation = String(payload.operation || "").trim();
+    const loaded = loadBulkOutfits(projectId, payload.entry_ids || []);
+    if (!loaded) return null;
+    const timestamp = nowIso();
+    if (operation === "add_tags" || operation === "remove_tags") {
+      const tagNames = existingProjectTagNames(projectId, payload.tags || []);
+      return runDbTransaction(db, () => {
+        for (const outfit of loaded.outfits) {
+          const current = tagsForOutfit(outfit.id);
+          const nextTags = operation === "add_tags"
+            ? normalizeTags([...current, ...tagNames])
+            : current.filter((name) => !tagNames.includes(name));
+          updateEntryTags(outfit.id, projectId, nextTags);
+          db.prepare("UPDATE outfit_entries SET updated_at = ? WHERE id = ?").run(timestamp, outfit.id);
+        }
+        return {
+          ok: true,
+          kind: "outfit",
+          operation,
+          project_id: projectId,
+          requested: loaded.ids.length,
+          updated: loaded.ids.length,
+          deleted: 0,
+          skipped: [],
+          tags: listTags(projectId).filter((tag) => tagNames.includes(tag.name)),
+        };
+      });
+    }
+    if (operation === "delete") {
+      runDbTransaction(db, () => {
+        for (const outfit of loaded.outfits) deleteOutfitInsideTransaction(outfit);
+      });
+      return {
+        ok: true,
+        kind: "outfit",
+        operation,
+        project_id: projectId,
+        requested: loaded.ids.length,
+        updated: 0,
+        deleted: loaded.ids.length,
+        skipped: [],
+      };
+    }
+    throw new Error("Unsupported bulk operation");
   }
 
   function replaceOutfitImage(outfitId, payload = {}) {
@@ -590,9 +729,11 @@ export function createOutfitLibraryService(runtime, options = {}) {
     deleteProject,
     uploadProjectCover,
     listOutfits,
-    createOutfit,
+    createOutfitFromFile,
+    importEntries,
     updateOutfit,
     deleteOutfit,
+    bulkEntries,
     replaceOutfitImage,
     projectExists,
     listTags,

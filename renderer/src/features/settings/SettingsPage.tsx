@@ -1,5 +1,5 @@
 import { ChevronDown, Download, FolderOpen, GripVertical, HardDrive, KeyRound, LogIn, LogOut, Plus, RefreshCw, Settings, TestTube2, Trash2 } from "lucide-react";
-import { PointerEvent, UIEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { PointerEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { ForartAppConfig, ForartMode, normalizeConfig, type CanvasCacheAsset, type CanvasCacheDeleteResult, type CanvasCacheScanResult, type LibtvAccountRecord } from "../../app/appConfig";
 import { Select } from "../../components/Select";
@@ -221,11 +221,6 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   const [cacheCanvasFilter, setCacheCanvasFilter] = useState("all");
   const [selectedCacheAssetIds, setSelectedCacheAssetIds] = useState<Set<string>>(new Set());
   const [apiSettingsLoaded, setApiSettingsLoaded] = useState(false);
-  const [modelScrollbars, setModelScrollbars] = useState<Record<ApiModelKind, { top: number; height: number; visible: boolean }>>({
-    image: { top: 0, height: 0, visible: false },
-    chat: { top: 0, height: 0, visible: false },
-    video: { top: 0, height: 0, visible: false },
-  });
   const selectedProvider = apiProviders.find((provider) => provider.id === selectedProviderId) || apiProviders[0] || null;
   const cacheAssets = useMemo(() => {
     if (!cacheScan) return [];
@@ -322,15 +317,6 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     setModelPickerFilter("");
     setModelPickerTab("all");
   }, [selectedProviderId, t]);
-
-  useEffect(() => {
-    window.requestAnimationFrame(() => {
-      (["image", "chat", "video"] as ApiModelKind[]).forEach((kind) => {
-        const list = document.querySelector<HTMLElement>(`.settings-api-model-list[data-kind="${kind}"]`);
-        if (list) updateModelScrollbar(kind, list);
-      });
-    });
-  }, [selectedProvider?.imageModels.length, selectedProvider?.chatModels.length, selectedProvider?.videoModels.length]);
 
   useEffect(() => {
     if (activeTab !== "api" || activeApiPane !== "libtv" || !window.libtv?.status) return;
@@ -1037,52 +1023,6 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     });
   }
 
-  function updateModelScrollbar(kind: ApiModelKind, element: HTMLElement) {
-    const maxScroll = element.scrollHeight - element.clientHeight;
-    const visible = maxScroll > 1;
-    const trackHeight = element.clientHeight;
-    const height = visible ? Math.max(36, Math.round((element.clientHeight / element.scrollHeight) * trackHeight)) : 0;
-    const maxTop = Math.max(0, trackHeight - height);
-    const top = visible ? Math.round((element.scrollTop / maxScroll) * maxTop) : 0;
-    setModelScrollbars((current) => {
-      const next = { top, height, visible };
-      const previous = current[kind];
-      if (previous.top === next.top && previous.height === next.height && previous.visible === next.visible) return current;
-      return { ...current, [kind]: next };
-    });
-  }
-
-  function handleModelListScroll(kind: ApiModelKind, event: UIEvent<HTMLDivElement>) {
-    updateModelScrollbar(kind, event.currentTarget);
-  }
-
-  function startModelScrollbarDrag(kind: ApiModelKind, event: PointerEvent<HTMLButtonElement>) {
-    const list = event.currentTarget.closest(".settings-api-model-list-wrap")?.querySelector<HTMLDivElement>(".settings-api-model-list");
-    if (!list) return;
-    const listElement = list;
-    event.preventDefault();
-    event.stopPropagation();
-    const startClientY = event.clientY;
-    const startScrollTop = listElement.scrollTop;
-    const thumb = modelScrollbars[kind];
-    const maxThumbTop = Math.max(1, listElement.clientHeight - thumb.height);
-    const maxScrollTop = Math.max(1, listElement.scrollHeight - listElement.clientHeight);
-
-    function handlePointerMove(moveEvent: globalThis.PointerEvent) {
-      const delta = moveEvent.clientY - startClientY;
-      listElement.scrollTop = startScrollTop + (delta / maxThumbTop) * maxScrollTop;
-      updateModelScrollbar(kind, listElement);
-    }
-
-    function handlePointerUp() {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp, { once: true });
-  }
-
   function renderModelList(kind: ApiModelKind) {
     if (!selectedProvider) return null;
     const key = kind === "image" ? "imageModels" : kind === "chat" ? "chatModels" : "videoModels";
@@ -1100,7 +1040,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
           </button>
         </div>
         <div className="settings-api-model-list-wrap">
-          <div className="settings-api-model-list" data-kind={kind} onScroll={(event) => handleModelListScroll(kind, event)} onMouseEnter={(event) => updateModelScrollbar(kind, event.currentTarget)}>
+          <div className="settings-api-model-list scrollbar-thin-stable" data-kind={kind}>
             {models.length ? models.map((model, index) => {
               const alias = selectedProvider.modelAliases[kind]?.[model];
               const displayName = alias ?? model;
@@ -1143,17 +1083,6 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
               </div>
             );}) : <div className="settings-api-empty-row">{t("settings:noModels")}</div>}
           </div>
-          {modelScrollbars[kind].visible ? (
-            <div className="settings-api-custom-scrollbar" aria-hidden="true">
-              <button
-                type="button"
-                className="settings-api-custom-scrollbar__thumb"
-                style={{ height: modelScrollbars[kind].height, transform: `translateY(${modelScrollbars[kind].top}px)` }}
-                tabIndex={-1}
-                onPointerDown={(event) => startModelScrollbarDrag(kind, event)}
-              />
-            </div>
-          ) : null}
         </div>
       </section>
     );
@@ -1278,7 +1207,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                     <input type="checkbox" checked={selectedCacheAssetIds.has(asset.id)} disabled={!canDelete} onChange={() => toggleCacheAssetSelection(asset)} />
                   </label>
                   <div className="settings-cache-thumb">
-                    {asset.exists ? <img src={asset.url} alt={asset.fileName} loading="lazy" /> : <HardDrive size={20} aria-hidden="true" />}
+                    {asset.exists ? <img src={asset.url} alt={asset.fileName} loading="lazy" decoding="async" /> : <HardDrive size={20} aria-hidden="true" />}
                   </div>
                   <div className="settings-cache-info">
                     <div className="settings-cache-title-line">

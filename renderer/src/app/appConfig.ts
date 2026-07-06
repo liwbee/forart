@@ -126,6 +126,51 @@ export interface ForartConfigApi {
   updateConnectivity: () => Promise<ForartUpdateConnectivityResult>;
 }
 
+export interface ForartActionImportApi {
+  chooseFolder: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
+  scan: (payload: {
+    projectId: string;
+    sourcePath: string;
+    existingActionNames: string[];
+  }) => Promise<import("../features/action-library/actionFolderImportTypes").ActionFolderImportPreview>;
+  startScan: (payload: {
+    projectId: string;
+    scanId?: string;
+    sourcePath: string;
+    existingActionNames: string[];
+  }) => Promise<{ scanId: string }>;
+  cancelScan: (payload: { scanId: string }) => Promise<{ ok: true }>;
+  readEntry: (payload: {
+    previewId: string;
+    rowId: string;
+  }) => Promise<{
+    data: string;
+    filename: string;
+    mime_type: string;
+    prompt: string;
+  }>;
+  clearPreview: () => Promise<{ ok: true }>;
+  onScanProgress: (callback: (payload: {
+    scanId: string;
+    phase: "discovering" | "building";
+    sourcePath: string;
+    processedFiles?: number;
+    totalFiles?: number;
+    builtRows?: number;
+    totalRows?: number;
+    rows: import("../features/action-library/actionFolderImportTypes").ActionFolderImportRow[];
+    summary: import("../features/action-library/actionFolderImportTypes").ActionFolderImportPreview;
+  }) => void) => () => void;
+  onScanComplete: (callback: (payload: {
+    scanId: string;
+    preview: import("../features/action-library/actionFolderImportTypes").ActionFolderImportPreview;
+  }) => void) => () => void;
+  onScanError: (callback: (payload: {
+    scanId: string;
+    message: string;
+  }) => void) => () => void;
+}
+
 export interface ForartWindowApi {
   minimize: () => Promise<{ ok: boolean }>;
   toggleMaximize: () => Promise<{ ok: boolean; maximized?: boolean }>;
@@ -401,6 +446,7 @@ declare global {
     forartConfig?: ForartConfigApi;
     easyTool?: EasyToolApi;
     forartReview?: ImageReviewApi;
+    forartActionImport?: ForartActionImportApi;
     forartLocalApi?: ForartLocalApi;
     libtv?: LibtvApi;
   }

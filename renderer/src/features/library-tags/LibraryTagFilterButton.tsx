@@ -1,7 +1,7 @@
 import { Ban, ListFilter } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { LibraryTagFilter } from "./filter";
+import { createLibraryTagFilter, type LibraryTagFilter } from "./filter";
 
 export interface LibraryFilterTag {
   id: string;
@@ -37,17 +37,17 @@ export function LibraryTagFilterButton({ tags, tagFilter, tagCounts = {}, allLab
   ];
 
   function toggleIncludeTag(tagId: string) {
-    onChange({
-      includeTagIds: includeTagSet.has(tagId) ? tagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId) : [...tagFilter.includeTagIds, tagId],
-      excludeTagIds: tagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId),
-    });
+    onChange(createLibraryTagFilter(
+      includeTagSet.has(tagId) ? tagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId) : [...tagFilter.includeTagIds, tagId],
+      tagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId),
+    ));
   }
 
   function toggleExcludeTag(tagId: string) {
-    onChange({
-      includeTagIds: tagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId),
-      excludeTagIds: excludeTagSet.has(tagId) ? tagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId) : [...tagFilter.excludeTagIds, tagId],
-    });
+    onChange(createLibraryTagFilter(
+      tagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId),
+      excludeTagSet.has(tagId) ? tagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId) : [...tagFilter.excludeTagIds, tagId],
+    ));
   }
 
   function updateMenuPosition() {
@@ -108,10 +108,10 @@ export function LibraryTagFilterButton({ tags, tagFilter, tagCounts = {}, allLab
       <button
         type="button"
         role="menuitemcheckbox"
-        aria-checked={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length}
-        className={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length ? "active" : ""}
+        aria-checked={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length && !tagFilter.untaggedOnly}
+        className={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length && !tagFilter.untaggedOnly ? "active" : ""}
         onClick={() => {
-          onChange({ includeTagIds: [], excludeTagIds: [] });
+          onChange(createLibraryTagFilter());
         }}
       >
         {allLabel}
@@ -165,12 +165,12 @@ export function LibraryTagFilterButton({ tags, tagFilter, tagCounts = {}, allLab
       <button
         ref={triggerRef}
         type="button"
-        className={joinClassNames("library-tag-filter-trigger", (active ?? Boolean(tagFilter.includeTagIds.length || tagFilter.excludeTagIds.length)) && "active", className)}
+        className={joinClassNames("library-tag-filter-trigger", (active ?? Boolean(tagFilter.includeTagIds.length || tagFilter.excludeTagIds.length || tagFilter.untaggedOnly)) && "active", className)}
         aria-label={activeTagNames.length ? `${ariaLabel}: ${activeTagNames.join(", ")}` : ariaLabel}
         title={activeTagNames.length ? activeTagNames.join(", ") : ariaLabel}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-pressed={active ?? Boolean(tagFilter.includeTagIds.length || tagFilter.excludeTagIds.length)}
+        aria-pressed={active ?? Boolean(tagFilter.includeTagIds.length || tagFilter.excludeTagIds.length || tagFilter.untaggedOnly)}
         onClick={() => setOpen((current) => !current)}
       >
         <ListFilter size={17} aria-hidden="true" />

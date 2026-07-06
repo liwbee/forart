@@ -59,14 +59,23 @@
 
   .model-project-rail {
     align-self: start;
+    overflow: visible;
+    padding: var(--space-4);
     border-right: 0;
     border-bottom: 1px solid var(--border-subtle);
   }
 
+  .model-project-add,
+  .library-rail-switch {
+    margin-right: 0;
+  }
+
   .model-project-list {
+    flex: 0 0 auto;
     grid-auto-flow: column;
     grid-auto-columns: minmax(150px, 1fr);
     overflow-x: auto;
+    overflow-y: hidden;
   }
 
   .model-toolbar {

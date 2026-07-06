@@ -20,9 +20,15 @@ function normalizeTags(values) {
   for (const value of values || []) {
     const tag = String(value || "").trim().replace(/\s+/g, " ");
     if (tag && !tags.includes(tag)) tags.push(tag.slice(0, 24));
-    if (tags.length >= 12) break;
   }
   return tags;
+}
+
+function normalizeBulkEntryIds(values) {
+  const ids = Array.from(new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean)));
+  if (!ids.length) throw new Error("No entries selected");
+  if (ids.length > 500) throw new Error("Bulk operation is limited to 500 entries");
+  return ids;
 }
 
 function parseDataUrl(dataUrl) {
@@ -219,6 +225,14 @@ export function createActionLibraryService(runtime, options = {}) {
       db.prepare("INSERT OR IGNORE INTO library_entry_tags (id, kind, entry_id, tag_id, created_at) VALUES (?, ?, ?, ?, ?)")
         .run(newId("entrytag"), "action", entryId, tag.id, nowIso());
     }
+  }
+
+  function existingProjectTagNames(projectId, names) {
+    const nextTags = normalizeTags(names);
+    if (!nextTags.length) throw new Error("At least one tag is required");
+    const missing = nextTags.filter((name) => !db.prepare("SELECT id FROM library_tags WHERE kind = 'action' AND project_id = ? AND name = ?").get(projectId, name));
+    if (missing.length) throw new Error(`Tag not found: ${missing[0]}`);
+    return nextTags;
   }
 
   function resolveTagNames(projectId, tagIds) {
@@ -452,34 +466,15 @@ export function createActionLibraryService(runtime, options = {}) {
     if (!project) return null;
     const includeTagNames = resolveTagNames(projectId, query.tag_id || []);
     const excludeTagNames = resolveTagNames(projectId, query.exclude_tag_id || []);
+    const untaggedOnly = query.untagged === "1" || query.untagged === "true";
     const actions = db.prepare("SELECT * FROM action_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
       .map(actionWithAssetAndTags);
-    const filtered = includeTagNames.length || excludeTagNames.length
+    const filtered = untaggedOnly
+      ? actions.filter((action) => !action.tags.length)
+      : includeTagNames.length || excludeTagNames.length
       ? actions.filter((action) => entryMatchesTagFilter(action, includeTagNames, excludeTagNames))
       : actions;
     return { actions: filtered };
-  }
-
-  function createAction(projectId, payload = {}) {
-    const project = loadProject(projectId);
-    if (!project) return null;
-    const decoded = parseDataUrl(payload.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
-    if (!decoded) throw new Error("Invalid upload data");
-    const timestamp = nowIso();
-    const id = newId("action");
-    const name = nextActionName(projectId, project.name);
-    if (actionNameExists(projectId, name)) throw new Error("Action name must be unique");
-    const relDir = path.relative(storageRoot, projectDirForName(project.name));
-    return writeAssetInTransaction(decoded.buffer, decoded.mimeType, payload.filename || "image", {
-      source: "action-library",
-      subdir: relDir,
-      filenameStem: name,
-    }, (asset) => {
-      db.prepare("INSERT INTO action_entries (id, project_id, name, asset_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .run(id, projectId, name, asset.id, timestamp, timestamp);
-      db.prepare("UPDATE action_projects SET cover_asset_id = COALESCE(cover_asset_id, ?), updated_at = ? WHERE id = ?").run(asset.id, timestamp, projectId);
-      return actionWithAssetAndTags(loadAction(id));
-    });
   }
 
   function createActionFromFile(projectId, payload = {}) {
@@ -489,7 +484,9 @@ export function createActionLibraryService(runtime, options = {}) {
     if (!content.length) throw new Error("Invalid image data");
     const timestamp = nowIso();
     const id = newId("action");
-    const name = validateFileNamePart(payload.name || labels.defaultAction, "action name");
+    const name = payload.name
+      ? validateFileNamePart(payload.name, "action name")
+      : nextActionName(projectId, project.name);
     if (actionNameExists(projectId, name)) throw new Error("Action name must be unique");
     const relDir = path.relative(storageRoot, projectDirForName(project.name));
     return writeAssetInTransaction(content, String(payload.mime_type || "image/png"), payload.filename || "image", {
@@ -526,13 +523,75 @@ export function createActionLibraryService(runtime, options = {}) {
   function deleteAction(actionId) {
     const action = loadAction(actionId);
     if (!action) return null;
-    runDbTransaction(db, () => {
-      db.prepare("DELETE FROM library_entry_tags WHERE kind = 'action' AND entry_id = ?").run(actionId);
-      db.prepare("UPDATE action_projects SET cover_asset_id = NULL WHERE cover_asset_id = ?").run(action.asset_id);
-      db.prepare("DELETE FROM action_entries WHERE id = ?").run(actionId);
-      removeAssetIfUnused(action.asset_id);
-    });
+    runDbTransaction(db, () => deleteActionInsideTransaction(action));
     return { ok: true };
+  }
+
+  function deleteActionInsideTransaction(action) {
+    db.prepare("DELETE FROM library_entry_tags WHERE kind = 'action' AND entry_id = ?").run(action.id);
+    db.prepare("UPDATE action_projects SET cover_asset_id = NULL WHERE cover_asset_id = ?").run(action.asset_id);
+    db.prepare("DELETE FROM action_entries WHERE id = ?").run(action.id);
+    removeAssetIfUnused(action.asset_id);
+  }
+
+  function loadBulkActions(projectId, entryIds) {
+    if (!loadProject(projectId)) return null;
+    const ids = normalizeBulkEntryIds(entryIds);
+    const actions = ids.map((id) => loadAction(id));
+    const missingIndex = actions.findIndex((action) => !action);
+    if (missingIndex >= 0) throw new Error(`Action not found: ${ids[missingIndex]}`);
+    const wrongProject = actions.find((action) => action.project_id !== projectId);
+    if (wrongProject) throw new Error("Selected actions must belong to the current project");
+    return { ids, actions };
+  }
+
+  function bulkEntries(payload = {}) {
+    const projectId = String(payload.project_id || "").trim();
+    if (!projectId) throw new Error("project_id is required");
+    const operation = String(payload.operation || "").trim();
+    const loaded = loadBulkActions(projectId, payload.entry_ids || []);
+    if (!loaded) return null;
+    const timestamp = nowIso();
+    if (operation === "add_tags" || operation === "remove_tags") {
+      const tagNames = existingProjectTagNames(projectId, payload.tags || []);
+      return runDbTransaction(db, () => {
+        for (const action of loaded.actions) {
+          const current = tagsForAction(action.id);
+          const nextTags = operation === "add_tags"
+            ? normalizeTags([...current, ...tagNames])
+            : current.filter((name) => !tagNames.includes(name));
+          updateEntryTags(action.id, projectId, nextTags);
+          db.prepare("UPDATE action_entries SET updated_at = ? WHERE id = ?").run(timestamp, action.id);
+        }
+        return {
+          ok: true,
+          kind: "action",
+          operation,
+          project_id: projectId,
+          requested: loaded.ids.length,
+          updated: loaded.ids.length,
+          deleted: 0,
+          skipped: [],
+          tags: listTags(projectId).filter((tag) => tagNames.includes(tag.name)),
+        };
+      });
+    }
+    if (operation === "delete") {
+      runDbTransaction(db, () => {
+        for (const action of loaded.actions) deleteActionInsideTransaction(action);
+      });
+      return {
+        ok: true,
+        kind: "action",
+        operation,
+        project_id: projectId,
+        requested: loaded.ids.length,
+        updated: 0,
+        deleted: loaded.ids.length,
+        skipped: [],
+      };
+    }
+    throw new Error("Unsupported bulk operation");
   }
 
   function replaceActionImage(actionId, payload = {}) {
@@ -603,11 +662,16 @@ export function createActionLibraryService(runtime, options = {}) {
     deleteProject,
     uploadProjectCover,
     listActions,
-    createAction,
     createActionFromFile,
     updateAction,
     deleteAction,
+    bulkEntries,
     replaceActionImage,
+    loadActionEntry: (actionId) => {
+      const action = loadAction(actionId);
+      return action ? actionWithAssetAndTags(action) : null;
+    },
+    existingProjectTagNames,
     projectExists,
     listTags,
     createTag,

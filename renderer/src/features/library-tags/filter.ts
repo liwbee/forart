@@ -1,17 +1,27 @@
 export interface LibraryTagFilter {
   includeTagIds: string[];
   excludeTagIds: string[];
+  untaggedOnly: boolean;
 }
 
 export const EMPTY_LIBRARY_TAG_FILTER: LibraryTagFilter = {
   includeTagIds: [],
   excludeTagIds: [],
+  untaggedOnly: false,
 };
 
-export function createLibraryTagFilter(includeTagIds: string[] = [], excludeTagIds: string[] = []): LibraryTagFilter {
+export function createLibraryTagFilter(includeTagIds: string[] = [], excludeTagIds: string[] = [], untaggedOnly = false): LibraryTagFilter {
+  if (untaggedOnly) {
+    return {
+      includeTagIds: [],
+      excludeTagIds: [],
+      untaggedOnly: true,
+    };
+  }
   return {
     includeTagIds: Array.from(new Set(includeTagIds.filter(Boolean))),
     excludeTagIds: Array.from(new Set(excludeTagIds.filter(Boolean))).filter((tagId) => !includeTagIds.includes(tagId)),
+    untaggedOnly: false,
   };
 }
 
@@ -20,6 +30,7 @@ export function cleanLibraryTagFilter(filter: LibraryTagFilter, validTagIds: rea
   return createLibraryTagFilter(
     filter.includeTagIds.filter((tagId) => valid.has(tagId)),
     filter.excludeTagIds.filter((tagId) => valid.has(tagId)),
+    filter.untaggedOnly,
   );
 }
 
@@ -27,11 +38,12 @@ export function libraryTagFilterKey(filter: LibraryTagFilter) {
   return [
     [...filter.includeTagIds].sort().join(","),
     [...filter.excludeTagIds].sort().join(","),
+    filter.untaggedOnly ? "untagged" : "",
   ].join("|");
 }
 
 export function hasLibraryTagFilter(filter: LibraryTagFilter) {
-  return Boolean(filter.includeTagIds.length || filter.excludeTagIds.length);
+  return Boolean(filter.includeTagIds.length || filter.excludeTagIds.length || filter.untaggedOnly);
 }
 
 export function countLibraryTags<T extends { tags: readonly string[] }>(items: readonly T[], tags: readonly LibraryFilterTagLike[]) {

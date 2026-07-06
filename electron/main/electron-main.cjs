@@ -9,6 +9,7 @@ const { registerConfigIpc } = require('./ipc/config-ipc.cjs');
 const { registerImageReviewIpc } = require('./ipc/image-review-ipc.cjs');
 const { registerLocalApiIpc } = require('./ipc/local-api-ipc.cjs');
 const { registerLibtvIpc } = require('./ipc/libtv-ipc.cjs');
+const { createActionFolderImportStore } = require('./modules/action-folder-import-store.cjs');
 const { createAssetStore } = require('./modules/asset-store.cjs');
 const { createCanvasCacheStore } = require('./modules/canvas-cache-store.cjs');
 const { createCanvasPackageStore } = require('./modules/canvas-package-store.cjs');
@@ -42,6 +43,7 @@ const canvasCacheStore = createCanvasCacheStore({ rootDir: portableRootDir, asse
 const canvasPackageStore = createCanvasPackageStore({ rootDir: appRootDir, dialog, canvasStore, assetStore });
 const configStore = createConfigStore({ app, rootDir: portableRootDir });
 const generationTaskStore = createGenerationTaskStore({ rootDir: portableRootDir });
+const actionFolderImportStore = createActionFolderImportStore();
 const imageGenerationRunner = createImageGenerationRunner({ net, assetStore, generationTaskStore });
 const imageReviewStore = createImageReviewStore();
 const libtv = createLibtvAdapter({ rootDir: appRootDir });
@@ -53,7 +55,8 @@ function registerCanvasAssetProtocol() {
   protocol.handle('forart-asset', async (request) => {
     const target = assetStore.resolveAssetUrl(request.url)
       || await localApi?.resolveAssetUrl?.(request.url)
-      || localApi?.resolveActionImportPreviewUrl?.(request.url);
+      || localApi?.resolveActionImportPreviewUrl?.(request.url)
+      || actionFolderImportStore.resolvePreviewUrl(request.url);
     if (!target || !fs.existsSync(target)) {
       return new Response('Asset not found', { status: 404 });
     }
@@ -80,6 +83,12 @@ registerImageReviewIpc({ ipcMain, imageReviewStore });
 registerLibtvIpc({ ipcMain, libtv, libtvGenerationRunner });
 localApi = registerLocalApiIpc({ ipcMain, configStore, app, dataRoot: portableRootDir });
 registerConfigIpc({ ipcMain, dialog, configStore, app, rootDir: appRootDir, dataRoot: portableRootDir, net });
+ipcMain.handle('action-import:choose-folder', async (_event, payload = {}) => actionFolderImportStore.chooseFolder(payload));
+ipcMain.handle('action-import:scan', async (_event, payload = {}) => actionFolderImportStore.scan(payload));
+ipcMain.handle('action-import:start-scan', async (event, payload = {}) => actionFolderImportStore.startScan(event.sender, payload));
+ipcMain.handle('action-import:cancel-scan', async (_event, payload = {}) => actionFolderImportStore.cancelScan(payload));
+ipcMain.handle('action-import:read-entry', async (_event, payload = {}) => actionFolderImportStore.readEntry(payload));
+ipcMain.handle('action-import:clear-preview', async () => actionFolderImportStore.clearPreview());
 ipcMain.handle('window:minimize', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win) win.minimize();

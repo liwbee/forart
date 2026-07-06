@@ -140,6 +140,34 @@
   gap: var(--space-2);
 }
 
+.review-folder-icon-button {
+  width: 40px;
+  min-height: 40px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--button-functional-border);
+  border-radius: 10px;
+  background: var(--button-functional-bg);
+  color: var(--button-functional-muted-text);
+}
+
+.review-folder-icon-button:hover:not(:disabled),
+.review-folder-icon-button:focus-visible {
+  border-color: var(--button-functional-hover-border);
+  background: var(--button-functional-hover-bg);
+  color: var(--button-functional-text);
+  outline: 0;
+}
+
+.review-folder-icon-button:disabled {
+  opacity: var(--state-disabled-opacity);
+  cursor: default;
+}
+
+.review-folder-icon-button.is-spinning svg {
+  animation: side-version-spin 900ms linear infinite;
+}
+
 .review-folder-guide {
   position: relative;
   flex: 0 0 auto;
@@ -346,6 +374,21 @@
   background: var(--surface-panel);
 }
 
+.review-directory-breadcrumb,
+.review-directory-list,
+.review-product-items,
+.review-thumb-strip,
+.review-pair-list {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--scrollbar-thumb, var(--canvas-node-muted, var(--text-muted))) 46%, transparent) transparent;
+}
+
+.review-directory-list,
+.review-product-items,
+.review-pair-list {
+  scrollbar-gutter: stable;
+}
+
 .review-directory-list button {
   min-width: 0;
   min-height: 42px;
@@ -512,6 +555,13 @@
   min-height: 0;
   position: relative;
   overflow: auto;
+}
+
+.review-product-items.is-empty {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: var(--space-3);
 }
 
 .review-product-items__spacer {

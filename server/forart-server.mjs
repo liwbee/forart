@@ -11,6 +11,8 @@ import { createCanvasExchangeContext } from "./src/canvas-exchange/canvas-exchan
 import { createCanvasExchangeRouter } from "./src/http/canvas-exchange-router.mjs";
 import { createActionFolderImportService } from "./src/library/action-folder-import-service.mjs";
 import { createActionLibraryService } from "./src/library/action-library-service.mjs";
+import { createModelLibraryService } from "./src/library/model-library-service.mjs";
+import { createOutfitLibraryService } from "./src/library/outfit-library-service.mjs";
 
 const SERVER_PORT = Number(process.env.PORT || 6980);
 const SERVER_HOST = process.env.HOST || "0.0.0.0";
@@ -143,9 +145,15 @@ function normalizeTags(values) {
   for (const value of values || []) {
     const tag = String(value || "").trim().replace(/\s+/g, " ");
     if (tag && !tags.includes(tag)) tags.push(tag.slice(0, 24));
-    if (tags.length >= 12) break;
   }
   return tags;
+}
+
+function normalizeBulkEntryIds(values) {
+  const ids = Array.from(new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean)));
+  if (!ids.length) throw new Error("No entries selected");
+  if (ids.length > 500) throw new Error("Bulk operation is limited to 500 entries");
+  return ids;
 }
 
 function sanitizeGender(value) {
@@ -464,6 +472,14 @@ function getActionImportService() {
   const actionService = createActionLibraryService(activeActionImportRuntime);
   activeActionImportService = createActionFolderImportService(activeActionImportRuntime, actionService);
   return activeActionImportService;
+}
+
+function getOutfitLibraryService() {
+  return createOutfitLibraryService(actionImportRuntime());
+}
+
+function getModelLibraryService() {
+  return createModelLibraryService(actionImportRuntime());
 }
 
 function assetUrl(assetId) {
@@ -870,6 +886,135 @@ function entryMatchesTagFilter(entry, includeTagNames, excludeTagNames) {
     && excludeTagNames.every((tagName) => !entry.tags.includes(tagName));
 }
 
+function existingProjectTagNames(kind, projectId, names) {
+  const nextTags = normalizeTags(names);
+  if (!nextTags.length) throw new Error("At least one tag is required");
+  const missing = nextTags.filter((name) => !db.prepare("SELECT id FROM library_tags WHERE kind = ? AND project_id = ? AND name = ?").get(kind, projectId, name));
+  if (missing.length) throw new Error(`Tag not found: ${missing[0]}`);
+  return nextTags;
+}
+
+function loadBulkEntries(kind, projectId, entryIds) {
+  if (!projectExistsForKind(kind, projectId)) return null;
+  const ids = normalizeBulkEntryIds(entryIds);
+  const loadEntry = kind === "model" ? loadModel : kind === "outfit" ? loadOutfit : loadAction;
+  const entries = ids.map((id) => loadEntry(id));
+  const missingIndex = entries.findIndex((entry) => !entry);
+  if (missingIndex >= 0) throw new Error(`${kind} entry not found: ${ids[missingIndex]}`);
+  const wrongProject = entries.find((entry) => entry.project_id !== projectId);
+  if (wrongProject) throw new Error("Selected entries must belong to the current project");
+  return { ids, entries };
+}
+
+function tagsForEntryKind(kind, entryId) {
+  if (kind === "model") return tagsForModel(entryId);
+  if (kind === "outfit") return tagsForOutfit(entryId);
+  if (kind === "action") return tagsForAction(entryId);
+  return [];
+}
+
+function updateEntryTimestamp(kind, entryId, timestamp) {
+  if (kind === "model") db.prepare("UPDATE model_entries SET updated_at = ? WHERE id = ?").run(timestamp, entryId);
+  if (kind === "outfit") db.prepare("UPDATE outfit_entries SET updated_at = ? WHERE id = ?").run(timestamp, entryId);
+  if (kind === "action") db.prepare("UPDATE action_entries SET updated_at = ? WHERE id = ?").run(timestamp, entryId);
+}
+
+function deleteEntryInsideTransaction(kind, entry) {
+  if (kind === "model") {
+    const imageRows = db.prepare("SELECT asset_id FROM model_images WHERE model_id = ?").all(entry.id);
+    db.prepare("DELETE FROM library_entry_tags WHERE kind = 'model' AND entry_id = ?").run(entry.id);
+    db.prepare("DELETE FROM model_entries WHERE id = ?").run(entry.id);
+    for (const row of imageRows) removeAssetIfUnused(row.asset_id);
+    return;
+  }
+  if (kind === "outfit") {
+    db.prepare("DELETE FROM library_entry_tags WHERE kind = 'outfit' AND entry_id = ?").run(entry.id);
+    db.prepare("UPDATE outfit_projects SET cover_asset_id = NULL WHERE cover_asset_id = ?").run(entry.asset_id);
+    db.prepare("DELETE FROM outfit_entries WHERE id = ?").run(entry.id);
+    removeAssetIfUnused(entry.asset_id);
+    return;
+  }
+  if (kind === "action") {
+    db.prepare("DELETE FROM library_entry_tags WHERE kind = 'action' AND entry_id = ?").run(entry.id);
+    db.prepare("UPDATE action_projects SET cover_asset_id = NULL WHERE cover_asset_id = ?").run(entry.asset_id);
+    db.prepare("DELETE FROM action_entries WHERE id = ?").run(entry.id);
+    removeAssetIfUnused(entry.asset_id);
+  }
+}
+
+function directoryForEntry(kind, entry) {
+  if (kind !== "model") return "";
+  const project = loadProject(entry.project_id);
+  return project ? modelDirForNames(project.name, entry.name) : "";
+}
+
+function removeEntryDirectory(kind, directory) {
+  if (!directory) return;
+  if (kind === "model") removeDirectoryInside(modelLibraryRoot(), directory, "model library");
+}
+
+function bulkLibraryEntries(kind, payload = {}) {
+  const projectId = String(payload.project_id || "").trim();
+  if (!projectId) throw new Error("project_id is required");
+  const operation = String(payload.operation || "").trim();
+  const loaded = loadBulkEntries(kind, projectId, payload.entry_ids || []);
+  if (!loaded) return null;
+  const timestamp = nowIso();
+  if (operation === "add_tags" || operation === "remove_tags") {
+    const tagNames = existingProjectTagNames(kind, projectId, payload.tags || []);
+    return runDbTransaction(() => {
+      for (const entry of loaded.entries) {
+        const current = tagsForEntryKind(kind, entry.id);
+        const nextTags = operation === "add_tags"
+          ? normalizeTags([...current, ...tagNames])
+          : current.filter((name) => !tagNames.includes(name));
+        updateEntryTags(kind, entry.id, projectId, nextTags);
+        updateEntryTimestamp(kind, entry.id, timestamp);
+      }
+      return {
+        ok: true,
+        kind,
+        operation,
+        project_id: projectId,
+        requested: loaded.ids.length,
+        updated: loaded.ids.length,
+        deleted: 0,
+        skipped: [],
+        tags: listTags(kind, projectId).filter((tag) => tagNames.includes(tag.name)),
+      };
+    });
+  }
+  if (operation === "delete") {
+    const directories = loaded.entries.map((entry) => directoryForEntry(kind, entry)).filter(Boolean);
+    runDbTransaction(() => {
+      for (const entry of loaded.entries) deleteEntryInsideTransaction(kind, entry);
+    });
+    for (const directory of directories) removeEntryDirectory(kind, directory);
+    return {
+      ok: true,
+      kind,
+      operation,
+      project_id: projectId,
+      requested: loaded.ids.length,
+      updated: 0,
+      deleted: loaded.ids.length,
+      skipped: [],
+    };
+  }
+  throw new Error("Unsupported bulk operation");
+}
+
+function handleBulkLibraryEntriesApi(req, res, kind) {
+  parseJsonBody(req)
+    .then((payload) => {
+      const result = bulkLibraryEntries(kind, payload || {});
+      if (!result) return sendJson(res, 404, { detail: "Project not found" });
+      sendJson(res, 200, result);
+    })
+    .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
+  return true;
+}
+
 function handleProjectTagApi(req, res, { kind, projectId, tagId }) {
   if (!projectId) {
     sendJson(res, 400, { detail: "project_id is required" });
@@ -937,56 +1082,6 @@ function handleProjectTagApi(req, res, { kind, projectId, tagId }) {
 
 function nextOutfitNameForIndex(projectName, index) {
   return `${folderName(projectName, "project name")}_${String(index).padStart(3, "0")}`;
-}
-
-function nextActionNameForIndex(projectName, index) {
-  return `${folderName(projectName, "project name")}_${String(index).padStart(3, "0")}`;
-}
-
-function nextOutfitName(projectId, projectName) {
-  const prefix = `${folderName(projectName, "project name")}_`;
-  const rows = db.prepare("SELECT name FROM outfit_entries WHERE project_id = ?").all(projectId);
-  const pattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\d+)$`);
-  let max = 0;
-  for (const row of rows) {
-    const match = pattern.exec(String(row.name || ""));
-    if (match) max = Math.max(max, Number.parseInt(match[1], 10) || 0);
-  }
-  return `${prefix}${String(max + 1).padStart(3, "0")}`;
-}
-
-function nextActionName(projectId, projectName) {
-  const prefix = `${folderName(projectName, "project name")}_`;
-  const rows = db.prepare("SELECT name FROM action_entries WHERE project_id = ?").all(projectId);
-  const pattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\d+)$`);
-  let max = 0;
-  for (const row of rows) {
-    const match = pattern.exec(String(row.name || ""));
-    if (match) max = Math.max(max, Number.parseInt(match[1], 10) || 0);
-  }
-  return `${prefix}${String(max + 1).padStart(3, "0")}`;
-}
-
-function createActionFromFile(projectId, payload = {}) {
-  const project = loadActionProject(projectId);
-  if (!project) return null;
-  const content = Buffer.isBuffer(payload.buffer) ? payload.buffer : Buffer.from(payload.buffer || "");
-  if (!content.length) throw new Error("Invalid image data");
-  const timestamp = nowIso();
-  const id = newId("action");
-  const name = validateFileNamePart(payload.name || DEFAULT_ACTION_NAME, "action name");
-  if (actionNameExists(projectId, name)) throw new Error("Action name must be unique");
-  const relDir = path.relative(STORAGE_ROOT, actionProjectDirForName(project.name));
-  return writeAssetInTransaction(content, String(payload.mime_type || "image/png"), payload.filename || "image", {
-    source: "action-library",
-    subdir: relDir,
-    filenameStem: name,
-  }, (asset) => {
-    db.prepare("INSERT INTO action_entries (id, project_id, name, asset_id, prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run(id, projectId, name, asset.id, String(payload.prompt || "").slice(0, 4000), timestamp, timestamp);
-    db.prepare("UPDATE action_projects SET cover_asset_id = COALESCE(cover_asset_id, ?), updated_at = ? WHERE id = ?").run(asset.id, timestamp, projectId);
-    return actionWithAssetAndTags(loadAction(id));
-  });
 }
 
 function nextCode(projectId, projectName) {
@@ -1130,6 +1225,19 @@ function handleModelLibraryApi(req, res, url) {
     return true;
   }
 
+  const outfitImportEntriesMatch = pathname.match(/^\/api\/outfit-projects\/([^/]+)\/outfits\/import-entries$/);
+  if (outfitImportEntriesMatch && method === "POST") {
+    parseJsonBody(req)
+      .then((payload) => {
+        const projectId = decodeURIComponent(outfitImportEntriesMatch[1]);
+        const result = getOutfitLibraryService().importEntries(projectId, payload || {});
+        if (!result) return sendJson(res, 404, { detail: "Outfit project not found" });
+        sendJson(res, 200, result);
+      })
+      .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+
   const outfitProjectMatch = pathname.match(/^\/api\/outfit-projects\/([^/]+)(?:\/(cover\/upload|outfits))?$/);
   if (outfitProjectMatch) {
     const projectId = decodeURIComponent(outfitProjectMatch[1]);
@@ -1211,6 +1319,7 @@ function handleModelLibraryApi(req, res, url) {
     if (tail === "outfits" && method === "GET") {
       const includeTagNames = resolveTagNames("outfit", projectId, url.searchParams.getAll("tag_id"));
       const excludeTagNames = resolveTagNames("outfit", projectId, url.searchParams.getAll("exclude_tag_id"));
+      const untaggedOnly = url.searchParams.get("untagged") === "1" || url.searchParams.get("untagged") === "true";
       const project = loadOutfitProject(projectId);
       if (!project) {
         sendJson(res, 404, { detail: "Outfit project not found" });
@@ -1218,44 +1327,12 @@ function handleModelLibraryApi(req, res, url) {
       }
       const outfits = db.prepare("SELECT * FROM outfit_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
         .map(outfitWithAssetAndTags);
-      const filtered = includeTagNames.length || excludeTagNames.length
+      const filtered = untaggedOnly
+        ? outfits.filter((outfit) => !outfit.tags.length)
+        : includeTagNames.length || excludeTagNames.length
         ? outfits.filter((outfit) => entryMatchesTagFilter(outfit, includeTagNames, excludeTagNames))
         : outfits;
       sendJson(res, 200, { outfits: filtered });
-      return true;
-    }
-    if (tail === "outfits" && method === "POST") {
-      parseJsonBody(req)
-        .then((payload) => {
-          const project = loadOutfitProject(projectId);
-          if (!project) return sendJson(res, 404, { detail: "Outfit project not found" });
-          const decoded = parseDataUrl(payload?.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
-          if (!decoded) return sendJson(res, 400, { detail: "Invalid upload data" });
-          const timestamp = nowIso();
-          const id = newId("outfit");
-          const name = nextOutfitName(projectId, project.name);
-          if (outfitNameExists(projectId, name)) return sendJson(res, 400, { detail: "Outfit name must be unique" });
-          const relDir = path.relative(STORAGE_ROOT, outfitProjectDirForName(project.name));
-          const outfit = writeAssetInTransaction(
-            decoded.buffer,
-            decoded.mimeType,
-            payload?.filename || "image",
-            {
-              source: "outfit-library",
-              subdir: relDir,
-              filenameStem: name,
-            },
-            (asset) => {
-              db.prepare(
-                "INSERT INTO outfit_entries (id, project_id, name, asset_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-              ).run(id, projectId, name, asset.id, timestamp, timestamp);
-              db.prepare("UPDATE outfit_projects SET cover_asset_id = COALESCE(cover_asset_id, ?), updated_at = ? WHERE id = ?").run(asset.id, timestamp, projectId);
-              return outfitWithAssetAndTags(loadOutfit(id));
-            }
-          );
-          sendJson(res, 200, outfit);
-        })
-        .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
     }
   }
@@ -1347,6 +1424,10 @@ function handleModelLibraryApi(req, res, url) {
     const tagId = outfitTagMatch[1] ? decodeURIComponent(outfitTagMatch[1]) : "";
     const projectId = url.searchParams.get("project_id") || "";
     if (handleProjectTagApi(req, res, { kind: "outfit", projectId, tagId })) return true;
+  }
+
+  if (pathname === "/api/libraries/outfit/entries/bulk" && method === "POST") {
+    return handleBulkLibraryEntriesApi(req, res, "outfit");
   }
 
   if (method === "GET" && pathname === "/api/action-projects") {
@@ -1452,6 +1533,7 @@ function handleModelLibraryApi(req, res, url) {
     if (tail === "actions" && method === "GET") {
       const includeTagNames = resolveTagNames("action", projectId, url.searchParams.getAll("tag_id"));
       const excludeTagNames = resolveTagNames("action", projectId, url.searchParams.getAll("exclude_tag_id"));
+      const untaggedOnly = url.searchParams.get("untagged") === "1" || url.searchParams.get("untagged") === "true";
       const project = loadActionProject(projectId);
       if (!project) {
         sendJson(res, 404, { detail: "Action project not found" });
@@ -1459,44 +1541,12 @@ function handleModelLibraryApi(req, res, url) {
       }
       const actions = db.prepare("SELECT * FROM action_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
         .map(actionWithAssetAndTags);
-      const filtered = includeTagNames.length || excludeTagNames.length
+      const filtered = untaggedOnly
+        ? actions.filter((action) => !action.tags.length)
+        : includeTagNames.length || excludeTagNames.length
         ? actions.filter((action) => entryMatchesTagFilter(action, includeTagNames, excludeTagNames))
         : actions;
       sendJson(res, 200, { actions: filtered });
-      return true;
-    }
-    if (tail === "actions" && method === "POST") {
-      parseJsonBody(req)
-        .then((payload) => {
-          const project = loadActionProject(projectId);
-          if (!project) return sendJson(res, 404, { detail: "Action project not found" });
-          const decoded = parseDataUrl(payload?.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
-          if (!decoded) return sendJson(res, 400, { detail: "Invalid upload data" });
-          const timestamp = nowIso();
-          const id = newId("action");
-          const name = nextActionName(projectId, project.name);
-          if (actionNameExists(projectId, name)) return sendJson(res, 400, { detail: "Action name must be unique" });
-          const relDir = path.relative(STORAGE_ROOT, actionProjectDirForName(project.name));
-          const action = writeAssetInTransaction(
-            decoded.buffer,
-            decoded.mimeType,
-            payload?.filename || "image",
-            {
-              source: "action-library",
-              subdir: relDir,
-              filenameStem: name,
-            },
-            (asset) => {
-              db.prepare(
-                "INSERT INTO action_entries (id, project_id, name, asset_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-              ).run(id, projectId, name, asset.id, timestamp, timestamp);
-              db.prepare("UPDATE action_projects SET cover_asset_id = COALESCE(cover_asset_id, ?), updated_at = ? WHERE id = ?").run(asset.id, timestamp, projectId);
-              return actionWithAssetAndTags(loadAction(id));
-            }
-          );
-          sendJson(res, 200, action);
-        })
-        .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
       return true;
     }
   }
@@ -1606,6 +1656,10 @@ function handleModelLibraryApi(req, res, url) {
     if (handleProjectTagApi(req, res, { kind: "action", projectId, tagId })) return true;
   }
 
+  if (pathname === "/api/libraries/action/entries/bulk" && method === "POST") {
+    return handleBulkLibraryEntriesApi(req, res, "action");
+  }
+
   if (method === "GET" && pathname === "/api/model-projects") {
     const projects = db.prepare("SELECT * FROM model_projects ORDER BY updated_at DESC, created_at DESC").all().map(projectWithCover);
     sendJson(res, 200, { projects });
@@ -1624,6 +1678,19 @@ function handleModelLibraryApi(req, res, url) {
         ).run(id, name, timestamp, timestamp);
         const project = projectWithCover(loadProject(id));
         sendJson(res, 200, project);
+      })
+      .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+
+  const modelImportEntriesMatch = pathname.match(/^\/api\/model-projects\/([^/]+)\/models\/import-entries$/);
+  if (modelImportEntriesMatch && method === "POST") {
+    parseJsonBody(req)
+      .then((payload) => {
+        const projectId = decodeURIComponent(modelImportEntriesMatch[1]);
+        const result = getModelLibraryService().importEntries(projectId, payload || {});
+        if (!result) return sendJson(res, 404, { detail: "Model project not found" });
+        sendJson(res, 200, result);
       })
       .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
     return true;
@@ -1718,6 +1785,7 @@ function handleModelLibraryApi(req, res, url) {
     if (tail === "models" && method === "GET") {
       const includeTagNames = resolveTagNames("model", projectId, url.searchParams.getAll("tag_id"));
       const excludeTagNames = resolveTagNames("model", projectId, url.searchParams.getAll("exclude_tag_id"));
+      const untaggedOnly = url.searchParams.get("untagged") === "1" || url.searchParams.get("untagged") === "true";
       const gender = url.searchParams.get("gender") || "";
       const project = loadProject(projectId);
       if (!project) {
@@ -1727,7 +1795,9 @@ function handleModelLibraryApi(req, res, url) {
       const models = db.prepare("SELECT * FROM model_entries WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC").all(projectId)
         .map(modelWithCoverAndTags)
         .filter((model) => (gender ? model.gender === gender : true));
-      const filtered = includeTagNames.length || excludeTagNames.length
+      const filtered = untaggedOnly
+        ? models.filter((model) => !model.tags.length)
+        : includeTagNames.length || excludeTagNames.length
         ? models.filter((model) => entryMatchesTagFilter(model, includeTagNames, excludeTagNames))
         : models;
       sendJson(res, 200, { models: filtered });
@@ -1936,6 +2006,10 @@ function handleModelLibraryApi(req, res, url) {
     const tagId = tagMatch[1] ? decodeURIComponent(tagMatch[1]) : "";
     const projectId = url.searchParams.get("project_id") || "";
     if (handleProjectTagApi(req, res, { kind: "model", projectId, tagId })) return true;
+  }
+
+  if (pathname === "/api/libraries/model/entries/bulk" && method === "POST") {
+    return handleBulkLibraryEntriesApi(req, res, "model");
   }
 
   const assetMatch = pathname.match(/^\/api\/assets\/([^/]+)\/(file|download)$/);

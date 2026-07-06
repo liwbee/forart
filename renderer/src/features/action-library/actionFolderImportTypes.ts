@@ -61,14 +61,15 @@ export interface ActionFolderImportResult {
 }
 
 export interface ActionFolderImportUploadEntry {
-  id: string;
-  stem: string;
-  name: string;
+  id?: string;
+  stem?: string;
+  name?: string;
   filename: string;
   relative_path: string;
   mime_type: string;
   data: string;
   prompt: string;
+  tags?: string[];
   warnings: ActionFolderImportIssue[];
   thumbnail_url?: string;
 }

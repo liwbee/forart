@@ -1,17 +1,22 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, FolderOpen, RefreshCw, XCircle } from "lucide-react";
+import { MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { AlertTriangle, CheckCircle2, FolderOpen, Loader2, RefreshCw, Tags, XCircle } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { importActionEntries } from "./actionFolderImportApi";
-import type { ActionFolderImportIssue, ActionFolderImportPreview, ActionFolderImportResult, ActionFolderImportResultRow, ActionFolderImportRow, ActionFolderImportUploadEntry } from "./actionFolderImportTypes";
+import type { ActionTag } from "./types";
+import type { ActionFolderImportPreview, ActionFolderImportResult, ActionFolderImportResultRow, ActionFolderImportRow, ActionFolderImportUploadEntry } from "./actionFolderImportTypes";
 
-type ImportStage = "preview" | "result";
-const SUPPORTED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
-const PROMPT_LIMIT = 4000;
+type ImportStage = "idle" | "discovering" | "building" | "ready" | "importing" | "complete";
+const VIRTUAL_ROW_HEIGHT = 132;
+const VIRTUAL_OVERSCAN = 6;
 
-type ImportFileRow = ActionFolderImportRow & {
-  imageFile?: File;
-  textFile?: File;
+type ImportFileRow = ActionFolderImportRow;
+
+type LiveImportStatus = ActionFolderImportResultRow["final_status"] | "pending" | "importing";
+
+type LiveImportRow = Omit<ActionFolderImportResultRow, "final_status"> & {
+  final_status: LiveImportStatus;
 };
 
 function issueText(row: Pick<ActionFolderImportRow, "errors" | "warnings">) {
@@ -24,124 +29,172 @@ function statusClass(row: Pick<ActionFolderImportRow, "errors" | "warnings">) {
   return "is-ready";
 }
 
+function liveStatusClass(status: LiveImportStatus | "") {
+  if (status === "failed") return "is-error";
+  if (status === "warning") return "is-warning";
+  if (status === "not_selected") return "is-muted";
+  if (status === "imported") return "is-imported";
+  if (status === "importing") return "is-importing";
+  return "is-ready";
+}
+
 function rowIsValid(row: ActionFolderImportRow) {
   return !row.errors?.length;
-}
-
-function fileRelativePath(file: File) {
-  return String((file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name || "");
-}
-
-function fileStem(fileName: string) {
-  return fileName.replace(/\.[^.]+$/, "");
-}
-
-function fileExt(fileName: string) {
-  const match = /\.[^.]+$/.exec(fileName);
-  return match ? match[0].toLowerCase() : "";
-}
-
-function rowIdFor(value: string) {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
-  }
-  return `row_${Math.abs(hash).toString(36)}_${value.length.toString(36)}`;
-}
-
-function normalizeName(value: string) {
-  return value.trim().replace(/\s+/g, " ");
-}
-
-function validateActionName(name: string, existingNames: Set<string>): ActionFolderImportIssue[] {
-  const errors: ActionFolderImportIssue[] = [];
-  if (!name) errors.push({ code: "invalid_name", message: "Action name is required" });
-  if (name.length > 80) errors.push({ code: "invalid_name", message: "Action name must be 80 characters or fewer" });
-  if (/[<>:"/\\|?*\x00-\x1f]/.test(name)) errors.push({ code: "invalid_name", message: "Action name contains invalid filename characters" });
-  if (name === "." || name === ".." || /[ .]$/.test(name)) errors.push({ code: "invalid_name", message: "Action name cannot end with a space or period" });
-  if (existingNames.has(name)) errors.push({ code: "duplicate_name", message: "Action name already exists in this project" });
-  return errors;
-}
-
-function readFileAsTextWithFallback(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error("Failed to read text"));
-    reader.onload = () => {
-      const buffer = reader.result instanceof ArrayBuffer ? reader.result : new ArrayBuffer(0);
-      try {
-        resolve(new TextDecoder("utf-8", { fatal: true }).decode(buffer).replace(/^\uFEFF/, ""));
-      } catch {
-        try {
-          resolve(new TextDecoder("gb18030").decode(buffer).replace(/^\uFEFF/, ""));
-        } catch {
-          resolve(new TextDecoder("utf-8").decode(buffer).replace(/^\uFEFF/, ""));
-        }
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error("Failed to read image"));
-    reader.onload = () => {
-      const text = String(reader.result || "");
-      resolve(text.includes(",") ? text.split(",")[1] || "" : text);
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 function finalStatusLabel(status: string, t: ReturnType<typeof useTranslation>["t"]) {
   if (status === "imported") return t("actionLibrary:bulkImportStatusImported");
   if (status === "warning") return t("actionLibrary:bulkImportStatusWarning");
   if (status === "failed") return t("actionLibrary:bulkImportStatusFailed");
+  if (status === "importing") return t("actionLibrary:bulkImportImporting");
+  if (status === "pending") return t("actionLibrary:bulkImportStatusReady");
   return t("actionLibrary:bulkImportStatusNotSelected");
-}
-
-function revokeRowObjectUrls(rows: Array<Pick<ActionFolderImportRow, "thumbnail_url">>) {
-  for (const row of rows) {
-    if (row.thumbnail_url?.startsWith("blob:")) URL.revokeObjectURL(row.thumbnail_url);
-  }
 }
 
 interface ActionFolderImportDialogProps {
   projectId: string;
   projectName: string;
   existingActionNames: string[];
+  tags: ActionTag[];
   isOpen: boolean;
   onClose: () => void;
   onImported: () => Promise<void> | void;
 }
 
-export function ActionFolderImportDialog({ projectId, projectName, existingActionNames, isOpen, onClose, onImported }: ActionFolderImportDialogProps) {
+export function ActionFolderImportDialog({ projectId, projectName, existingActionNames, tags, isOpen, onClose, onImported }: ActionFolderImportDialogProps) {
   const { t } = useTranslation();
-  const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const rowsViewportRef = useRef<HTMLDivElement | null>(null);
+  const activeScanIdRef = useRef("");
+  const previousSelectionRef = useRef<Set<string> | null>(null);
   const [sourcePath, setSourcePath] = useState("");
   const [preview, setPreview] = useState<ActionFolderImportPreview | null>(null);
   const [result, setResult] = useState<ActionFolderImportResult | null>(null);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
-  const [stage, setStage] = useState<ImportStage>("preview");
+  const [stage, setStage] = useState<ImportStage>("idle");
   const [fileRows, setFileRows] = useState<ImportFileRow[]>([]);
   const [scanError, setScanError] = useState("");
   const [importProgress, setImportProgress] = useState({ completed: 0, total: 0 });
+  const [rowImportStates, setRowImportStates] = useState<Map<string, LiveImportRow>>(new Map());
+  const [rowTagSelections, setRowTagSelections] = useState<Map<string, Set<string>>>(new Map());
+  const [bulkTagMenuState, setBulkTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
+  const [scanProgress, setScanProgress] = useState({ processedFiles: 0, totalFiles: 0, builtRows: 0, totalRows: 0 });
+  const [rowViewport, setRowViewport] = useState({ scrollTop: 0, height: 420 });
 
   useEffect(() => {
     if (!isOpen) {
-      revokeRowObjectUrls(fileRows);
+      const scanId = activeScanIdRef.current;
+      if (scanId) void window.forartActionImport?.cancelScan?.({ scanId });
+      activeScanIdRef.current = "";
+      previousSelectionRef.current = null;
+      void window.forartActionImport?.clearPreview?.();
       setSourcePath("");
       setPreview(null);
       setResult(null);
       setSelectedRows(new Set());
-      setStage("preview");
+      setStage("idle");
       setFileRows([]);
       setScanError("");
       setImportProgress({ completed: 0, total: 0 });
+      setRowImportStates(new Map());
+      setRowTagSelections(new Map());
+      setBulkTagMenuState({ open: false, x: 0, y: 0 });
+      setScanProgress({ processedFiles: 0, totalFiles: 0, builtRows: 0, totalRows: 0 });
     }
-  }, [fileRows, isOpen]);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!bulkTagMenuState.open) return undefined;
+    function closeMenu() {
+      setBulkTagMenuState({ open: false, x: 0, y: 0 });
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") closeMenu();
+    }
+    window.addEventListener("pointerdown", closeMenu);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", closeMenu);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [bulkTagMenuState.open]);
+
+  useEffect(() => {
+    if (!isOpen || !window.forartActionImport?.onScanProgress || !window.forartActionImport?.onScanComplete || !window.forartActionImport?.onScanError) return undefined;
+    const removeProgress = window.forartActionImport.onScanProgress((payload) => {
+      if (payload.scanId !== activeScanIdRef.current) return;
+      setStage(payload.phase === "building" ? "building" : "discovering");
+      setSourcePath(payload.sourcePath);
+      setPreview((current) => ({
+        ...(payload.summary || current),
+        preview_id: current?.preview_id || payload.summary?.preview_id || "",
+        rows: current?.rows || [],
+      } as ActionFolderImportPreview));
+      setScanProgress({
+        processedFiles: payload.processedFiles || 0,
+        totalFiles: payload.totalFiles || 0,
+        builtRows: payload.builtRows || payload.rows?.length || 0,
+        totalRows: payload.totalRows || 0,
+      });
+      if (payload.rows?.length) {
+        setFileRows((current) => {
+          const seen = new Set(current.map((row) => row.id));
+          const nextRows = payload.rows.filter((row) => !seen.has(row.id)) as ImportFileRow[];
+          if (!nextRows.length) return current;
+          setSelectedRows((selected) => {
+            const next = new Set(selected);
+            for (const row of nextRows) {
+              const shouldSelect = rowIsValid(row) && (previousSelectionRef.current ? previousSelectionRef.current.has(row.id) : row.selected);
+              if (shouldSelect) next.add(row.id);
+            }
+            return next;
+          });
+          setRowTagSelections((current) => {
+            const next = new Map(current);
+            for (const row of nextRows) {
+              if (!next.has(row.id)) next.set(row.id, new Set());
+            }
+            return next;
+          });
+          return [...current, ...nextRows];
+        });
+      }
+    });
+    const removeComplete = window.forartActionImport.onScanComplete((payload) => {
+      if (payload.scanId !== activeScanIdRef.current) return;
+      activeScanIdRef.current = "";
+      setPreview(payload.preview);
+      setFileRows(payload.preview.rows as ImportFileRow[]);
+      setRowTagSelections((current) => {
+        const next = new Map<string, Set<string>>();
+        for (const row of payload.preview.rows) {
+          next.set(row.id, new Set(current.get(row.id) || []));
+        }
+        return next;
+      });
+      setStage("ready");
+      setScanProgress((current) => ({
+        ...current,
+        builtRows: payload.preview.rows.length,
+        totalRows: payload.preview.rows.length,
+      }));
+      setSelectedRows((current) => new Set(payload.preview.rows
+        .filter((row) => rowIsValid(row) && (previousSelectionRef.current ? previousSelectionRef.current.has(row.id) : current.has(row.id) || row.selected))
+        .map((row) => row.id)));
+      previousSelectionRef.current = null;
+    });
+    const removeError = window.forartActionImport.onScanError((payload) => {
+      if (payload.scanId !== activeScanIdRef.current) return;
+      activeScanIdRef.current = "";
+      previousSelectionRef.current = null;
+      setStage("idle");
+      setScanError(payload.message);
+    });
+    return () => {
+      removeProgress();
+      removeComplete();
+      removeError();
+    };
+  }, [isOpen]);
 
   const importMutation = useMutation({
     mutationFn: async () => {
@@ -151,27 +204,52 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
       const failed: ActionFolderImportResult["failed"] = [];
       const resultRows: ActionFolderImportResult["rows"] = [];
       setImportProgress({ completed: 0, total: selected.length });
+      setStage("importing");
+      setRowImportStates(new Map(fileRows.map((row) => [
+        row.id,
+        {
+          ...row,
+          selected: selectedRows.has(row.id),
+          final_status: selectedRows.has(row.id) ? "pending" : "not_selected",
+        } as LiveImportRow,
+      ])));
 
       for (const [index, row] of selected.entries()) {
         try {
-          if (!row.imageFile || !row.textFile) throw new Error(`Selected row is not importable: ${row.filename}`);
-          const promptRaw = await readFileAsTextWithFallback(row.textFile);
-          const prompt = promptRaw.length > PROMPT_LIMIT ? promptRaw.slice(0, PROMPT_LIMIT) : promptRaw;
+          setRowImportStates((current) => {
+            const next = new Map(current);
+            next.set(row.id, { ...(next.get(row.id) || row), final_status: "importing" } as LiveImportRow);
+            return next;
+          });
+          if (!preview.preview_id) throw new Error(t("actionLibrary:bulkImportNoPreview"));
+          if (!window.forartActionImport?.readEntry) throw new Error("Action import bridge is unavailable.");
+          const entryData = await window.forartActionImport.readEntry({ previewId: preview.preview_id, rowId: row.id });
           const entry: ActionFolderImportUploadEntry = {
             id: row.id,
             stem: row.stem,
             name: row.proposed_name,
-            filename: row.imageFile.name,
+            filename: entryData.filename,
             relative_path: row.relative_path,
-            mime_type: row.imageFile.type || `image/${fileExt(row.imageFile.name).replace(".", "") || "png"}`,
-            data: await fileToBase64(row.imageFile),
-            prompt,
+            mime_type: entryData.mime_type,
+            data: entryData.data,
+            prompt: entryData.prompt,
+            tags: Array.from(rowTagSelections.get(row.id) || []),
             warnings: row.warnings,
           };
           const rowResult = await importActionEntries(projectId, [entry]);
           imported.push(...rowResult.imported);
           failed.push(...rowResult.failed);
           resultRows.push(...rowResult.rows);
+          setRowImportStates((current) => {
+            const next = new Map(current);
+            for (const resultRow of rowResult.rows) {
+              next.set(resultRow.id, {
+                ...resultRow,
+                thumbnail_url: row.thumbnail_url || resultRow.thumbnail_url || "",
+              } as LiveImportRow);
+            }
+            return next;
+          });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const failedRow: ActionFolderImportResultRow = {
@@ -181,6 +259,11 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
           };
           failed.push(failedRow);
           resultRows.push(failedRow);
+          setRowImportStates((current) => {
+            const next = new Map(current);
+            next.set(row.id, failedRow as LiveImportRow);
+            return next;
+          });
         } finally {
           setImportProgress({ completed: index + 1, total: selected.length });
         }
@@ -196,7 +279,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
       };
     },
     onSuccess: async (nextResult) => {
-      const previewRows = preview?.rows || [];
+      const previewRows = fileRows.length ? fileRows : preview?.rows || [];
       const previewRowsById = new Map(previewRows.map((row) => [row.id, row]));
       const returnedRowsById = new Map(nextResult.rows.map((row) => [row.id, row]));
       const resultRows = previewRows.map((row) => {
@@ -218,24 +301,47 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
           resultRows.push({ ...row, thumbnail_url: row.thumbnail_url || "" });
         }
       }
-      setResult({
+      const finalResult = {
         ...nextResult,
         rows: resultRows,
         failed: resultRows.filter((row) => row.final_status === "failed"),
         not_selected: resultRows.filter((row) => row.final_status === "not_selected"),
-      });
-      setStage("result");
+      };
+      setResult(finalResult);
+      setRowImportStates(new Map(resultRows.map((row) => [row.id, row as LiveImportRow])));
+      setStage("complete");
       await onImported();
     },
   });
 
   const rows = preview?.rows || [];
-  const selectedRowList = rows.filter((row) => selectedRows.has(row.id));
+  const displayRows = fileRows.length ? fileRows : rows;
+  const selectedRowList = displayRows.filter((row) => selectedRows.has(row.id));
   const selectedInvalidCount = selectedRowList.filter((row) => !rowIsValid(row)).length;
   const selectedWarningCount = selectedRowList.filter((row) => row.warnings?.length).length;
-  const canImport = Boolean(preview && selectedRows.size && !selectedInvalidCount && !importMutation.isPending);
+  const scanActive = stage === "discovering" || stage === "building";
+  const canImport = Boolean(stage === "ready" && preview && selectedRows.size && !selectedInvalidCount && !importMutation.isPending);
+  const importStarted = stage === "importing" || stage === "complete";
   const errorMessage = scanError || importMutation.error;
   const errorText = errorMessage instanceof Error ? errorMessage.message : errorMessage ? String(errorMessage) : "";
+  const virtualRows = useMemo(() => {
+    const startIndex = Math.max(0, Math.floor(rowViewport.scrollTop / VIRTUAL_ROW_HEIGHT) - VIRTUAL_OVERSCAN);
+    const visibleCount = Math.ceil(rowViewport.height / VIRTUAL_ROW_HEIGHT) + VIRTUAL_OVERSCAN * 2;
+    return displayRows.slice(startIndex, startIndex + visibleCount).map((row, offset) => ({
+      row,
+      index: startIndex + offset,
+    }));
+  }, [displayRows, rowViewport]);
+  const virtualHeight = displayRows.length * VIRTUAL_ROW_HEIGHT;
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      const element = rowsViewportRef.current;
+      if (element) setRowViewport({ scrollTop: element.scrollTop, height: element.clientHeight || 420 });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [displayRows.length, isOpen]);
 
   const resultTotals = useMemo(() => {
     const resultRows = result?.rows || [];
@@ -249,125 +355,79 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
 
   if (!isOpen) return null;
 
-  async function buildPreviewFromFiles(files: File[], previousSelection: Set<string> | null = null) {
-    setScanError("");
-    const imageByStem = new Map<string, File[]>();
-    const textByStem = new Map<string, File>();
-    const existingNames = new Set(existingActionNames.map(normalizeName));
-    const folderLabel = fileRelativePath(files[0] || new File([], "")).split(/[\\/]/)[0] || t("actionLibrary:bulkImportNoFolder");
-
-    for (const file of files) {
-      const relative = fileRelativePath(file);
-      const parts = relative.split(/[\\/]/).filter(Boolean);
-      if (parts.length > 2) continue;
-      const ext = fileExt(file.name);
-      const stem = fileStem(file.name);
-      if (SUPPORTED_IMAGE_EXTENSIONS.has(ext)) {
-        const list = imageByStem.get(stem) || [];
-        list.push(file);
-        imageByStem.set(stem, list);
-      } else if (ext === ".txt") {
-        textByStem.set(stem, file);
-      }
-    }
-
-    const stems = Array.from(new Set([...imageByStem.keys(), ...textByStem.keys()])).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
-    const duplicateInBatch = new Set<string>();
-    const seenNames = new Set<string>();
-    const rows: ImportFileRow[] = [];
-
-    for (const stem of stems) {
-      const images = imageByStem.get(stem) || [];
-      const textFile = textByStem.get(stem);
-      const imageFile = images.length === 1 ? images[0] : undefined;
-      const proposedName = normalizeName(stem);
-      if (seenNames.has(proposedName)) duplicateInBatch.add(proposedName);
-      seenNames.add(proposedName);
-      const errors: ActionFolderImportIssue[] = [];
-      const warnings: ActionFolderImportIssue[] = [];
-      if (!images.length) errors.push({ code: "missing_image", message: "Missing matching image file" });
-      if (images.length > 1) errors.push({ code: "ambiguous_image", message: "Multiple image files share the same filename stem" });
-      if (!textFile) errors.push({ code: "missing_text", message: "Missing matching .txt file" });
-      errors.push(...validateActionName(proposedName, existingNames));
-      if (textFile) {
-        try {
-          const promptText = await readFileAsTextWithFallback(textFile);
-          if (promptText.length > PROMPT_LIMIT) warnings.push({ code: "prompt_truncated", message: `Prompt is ${promptText.length} characters and will be truncated to ${PROMPT_LIMIT}` });
-        } catch (error) {
-          errors.push({ code: "unreadable_text", message: error instanceof Error ? error.message : String(error) });
-        }
-      }
-      const id = rowIdFor(fileRelativePath(imageFile || textFile || new File([], stem)) || stem);
-      rows.push({
-        id,
-        stem,
-        filename: imageFile?.name || textFile?.name || stem,
-        relative_path: fileRelativePath(imageFile || textFile || new File([], stem)) || stem,
-        image_path: null,
-        text_path: null,
-        proposed_name: proposedName,
-        thumbnail_url: imageFile ? URL.createObjectURL(imageFile) : "",
-        selectable: true,
-        selected: errors.length === 0,
-        status: errors.length ? errors[0].code === "missing_image" ? "missing_image" : errors[0].code === "missing_text" ? "missing_text" : errors[0].code === "duplicate_name" ? "duplicate_name" : "invalid_name" : warnings.length ? "warning" : "ready",
-        errors,
-        warnings,
-        imageFile,
-        textFile,
-      });
-    }
-
-    for (const row of rows) {
-      if (duplicateInBatch.has(row.proposed_name)) {
-        row.errors.push({ code: "duplicate_name", message: "Duplicate action name in selected folder" });
-        row.status = "duplicate_name";
-        row.selected = false;
-      }
-    }
-
-    const nextPreview: ActionFolderImportPreview = {
-      preview_id: `browser_${Date.now()}`,
-      source_path: folderLabel,
-      project_id: projectId,
-      total_images: Array.from(imageByStem.values()).reduce((total, images) => total + images.length, 0),
-      total_text_files: textByStem.size,
-      ready_count: rows.filter(rowIsValid).length,
-      selected_count: rows.filter((row) => row.selected).length,
-      blocking_error_count: rows.filter((row) => row.errors.length).length,
-      warning_count: rows.filter((row) => row.warnings.length).length,
-      rows,
-    };
-    revokeRowObjectUrls(fileRows);
-    setFileRows(rows);
-    setPreview(nextPreview);
-    setSourcePath(folderLabel);
-    setStage("preview");
-    setResult(null);
-    setImportProgress({ completed: 0, total: 0 });
-    setSelectedRows(new Set(rows.filter((row) => rowIsValid(row) && (previousSelection ? previousSelection.has(row.id) : row.selected)).map((row) => row.id)));
+  async function cancelActiveScan() {
+    const scanId = activeScanIdRef.current;
+    if (!scanId) return;
+    activeScanIdRef.current = "";
+    previousSelectionRef.current = null;
+    await window.forartActionImport?.cancelScan?.({ scanId });
+    setStage("idle");
   }
 
-  async function handleFolderInputChange(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files || []);
-    event.target.value = "";
-    if (!files.length) return;
+  async function scanFolder(nextSourcePath = sourcePath, previousSelection: Set<string> | null = null) {
+    setScanError("");
+    if (!window.forartActionImport?.startScan) throw new Error("Action import bridge is unavailable.");
+    if (activeScanIdRef.current) await window.forartActionImport.cancelScan?.({ scanId: activeScanIdRef.current });
+    const scanId = `scan_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+    activeScanIdRef.current = scanId;
+    previousSelectionRef.current = previousSelection;
+    setSourcePath(nextSourcePath);
+    setPreview({
+      preview_id: "",
+      source_path: nextSourcePath,
+      project_id: projectId,
+      total_images: 0,
+      total_text_files: 0,
+      ready_count: 0,
+      selected_count: 0,
+      blocking_error_count: 0,
+      warning_count: 0,
+      rows: [],
+    });
+    setStage("discovering");
+    setResult(null);
+    setFileRows([]);
+    setSelectedRows(new Set());
+    setImportProgress({ completed: 0, total: 0 });
+    setRowImportStates(new Map());
+    setBulkTagMenuState({ open: false, x: 0, y: 0 });
+    setScanProgress({ processedFiles: 0, totalFiles: 0, builtRows: 0, totalRows: 0 });
+    if (rowsViewportRef.current) rowsViewportRef.current.scrollTop = 0;
+    const started = await window.forartActionImport.startScan({
+      projectId,
+      scanId,
+      sourcePath: nextSourcePath,
+      existingActionNames,
+    });
+    activeScanIdRef.current = started.scanId;
+  }
+
+  async function chooseFolder() {
+    if (!window.forartActionImport?.chooseFolder) {
+      setScanError("Action import bridge is unavailable.");
+      return;
+    }
     try {
-      await buildPreviewFromFiles(files, preview ? selectedRows : null);
+      const result = await window.forartActionImport.chooseFolder({ title: t("actionLibrary:bulkImportChooseFolder") });
+      if (result.canceled || !result.path) return;
+      await scanFolder(result.path, null);
     } catch (error) {
       setScanError(error instanceof Error ? error.message : String(error));
     }
   }
 
-  function chooseFolder() {
-    folderInputRef.current?.click();
-  }
-
-  function rescan() {
-    folderInputRef.current?.click();
+  async function rescan() {
+    if (!sourcePath) return;
+    try {
+      await scanFolder(sourcePath, preview ? selectedRows : null);
+    } catch (error) {
+      setScanError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   function toggleRow(row: ActionFolderImportRow) {
     setSelectedRows((current) => {
+      if (importStarted) return current;
       const next = new Set(current);
       if (next.has(row.id)) next.delete(row.id);
       else next.add(row.id);
@@ -376,11 +436,63 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   }
 
   function selectValidRows() {
-    setSelectedRows(new Set(rows.filter(rowIsValid).map((row) => row.id)));
+    setSelectedRows(new Set(displayRows.filter(rowIsValid).map((row) => row.id)));
   }
 
   function clearSelection() {
     setSelectedRows(new Set());
+  }
+
+  function toggleRowTag(rowId: string, tagName: string) {
+    if (importStarted) return;
+    setRowTagSelections((current) => {
+      const next = new Map(current);
+      const tagsForRow = new Set(next.get(rowId) || []);
+      if (tagsForRow.has(tagName)) tagsForRow.delete(tagName);
+      else tagsForRow.add(tagName);
+      next.set(rowId, tagsForRow);
+      return next;
+    });
+  }
+
+  function applyTagToSelectedRows(tagName: string) {
+    if (importStarted || !selectedRows.size) return;
+    setRowTagSelections((current) => {
+      const next = new Map(current);
+      for (const rowId of selectedRows) {
+        const tagsForRow = new Set(next.get(rowId) || []);
+        if (tagsForRow.has(tagName)) tagsForRow.delete(tagName);
+        else tagsForRow.add(tagName);
+        next.set(rowId, tagsForRow);
+      }
+      return next;
+    });
+  }
+
+  function clearSelectedRowTags() {
+    if (importStarted || !selectedRows.size) return;
+    setRowTagSelections((current) => {
+      const next = new Map(current);
+      for (const rowId of selectedRows) next.set(rowId, new Set());
+      return next;
+    });
+  }
+
+  function openBulkTagMenu(event: MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    if (bulkTagMenuState.open) {
+      setBulkTagMenuState({ open: false, x: 0, y: 0 });
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 184;
+    const menuMaxHeight = 280;
+    const pad = 8;
+    setBulkTagMenuState({
+      open: true,
+      x: Math.max(pad, Math.min(rect.left, window.innerWidth - menuWidth - pad)),
+      y: Math.max(pad, Math.min(rect.bottom + 8, window.innerHeight - menuMaxHeight - pad)),
+    });
   }
 
   return (
@@ -396,16 +508,12 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
           </button>
         </header>
 
-        <input ref={folderInputRef} type="file" multiple hidden onChange={handleFolderInputChange} {...{ webkitdirectory: "", directory: "" }} />
-
         <div className="action-folder-import__toolbar">
-          <button className="model-lib-button" type="button" onClick={chooseFolder} disabled={importMutation.isPending}>
-            <FolderOpen size={16} aria-hidden="true" />
-            <span>{sourcePath ? t("actionLibrary:bulkImportChangeFolder") : t("actionLibrary:bulkImportChooseFolder")}</span>
+          <button className="action-folder-import__icon-button" type="button" onClick={chooseFolder} disabled={scanActive || importStarted} aria-label={sourcePath ? t("actionLibrary:bulkImportChangeFolder") : t("actionLibrary:bulkImportChooseFolder")} title={sourcePath ? t("actionLibrary:bulkImportChangeFolder") : t("actionLibrary:bulkImportChooseFolder")}>
+            <FolderOpen size={18} aria-hidden="true" />
           </button>
-          <button className="model-lib-button" type="button" onClick={rescan} disabled={!sourcePath || importMutation.isPending}>
-            <RefreshCw size={16} aria-hidden="true" />
-            <span>{t("actionLibrary:bulkImportRescan")}</span>
+          <button className={`action-folder-import__icon-button${scanActive ? " is-spinning" : ""}`} type="button" onClick={rescan} disabled={!sourcePath || scanActive || importStarted} aria-label={t("actionLibrary:bulkImportRescan")} title={t("actionLibrary:bulkImportRescan")}>
+            <RefreshCw size={18} aria-hidden="true" />
           </button>
           <div className="action-folder-import__path" title={preview?.source_path || sourcePath}>
             {preview?.source_path || sourcePath || t("actionLibrary:bulkImportNoFolder")}
@@ -414,97 +522,173 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
 
         {errorText ? <div className="model-lib-error">{t("actionLibrary:requestFailed", { message: errorText })}</div> : null}
 
-        {stage === "preview" ? (
-          <>
+        <>
             <div className="action-folder-import__summary">
-              <span>{t("actionLibrary:bulkImportImages", { count: preview?.total_images || 0 })}</span>
-              <span>{t("actionLibrary:bulkImportTexts", { count: preview?.total_text_files || 0 })}</span>
-              <span>{t("actionLibrary:bulkImportSelected", { count: selectedRows.size })}</span>
-              <span className={preview?.blocking_error_count ? "is-error" : ""}>{t("actionLibrary:bulkImportErrors", { count: preview?.blocking_error_count || 0 })}</span>
-              <span className={selectedWarningCount ? "is-warning" : ""}>{t("actionLibrary:bulkImportWarnings", { count: selectedWarningCount })}</span>
+              {result ? (
+                <>
+                  <span>{t("actionLibrary:bulkImportResultImported", { count: resultTotals.imported })}</span>
+                  <span className={resultTotals.warning ? "is-warning" : ""}>{t("actionLibrary:bulkImportWarnings", { count: resultTotals.warning })}</span>
+                  <span className={resultTotals.failed ? "is-error" : ""}>{t("actionLibrary:bulkImportResultFailed", { count: resultTotals.failed })}</span>
+                  <span>{t("actionLibrary:bulkImportStatusNotSelected")} {resultTotals.notSelected}</span>
+                </>
+              ) : (
+                <>
+                  <span>{t("actionLibrary:bulkImportImages", { count: preview?.total_images || 0 })}</span>
+                  <span>{t("actionLibrary:bulkImportTexts", { count: preview?.total_text_files || 0 })}</span>
+                  <span>{t("actionLibrary:bulkImportSelected", { count: selectedRows.size })}</span>
+                  <span className={preview?.blocking_error_count ? "is-error" : ""}>{t("actionLibrary:bulkImportErrors", { count: preview?.blocking_error_count || 0 })}</span>
+                  <span className={selectedWarningCount ? "is-warning" : ""}>{t("actionLibrary:bulkImportWarnings", { count: selectedWarningCount })}</span>
+                </>
+              )}
             </div>
 
             <div className="action-folder-import__actions">
-              <button className="model-lib-button" type="button" disabled={!rows.length} onClick={selectValidRows}>
-                {t("actionLibrary:bulkImportSelectValid")}
+              <button
+                className={`model-lib-button action-folder-import__tag-trigger${bulkTagMenuState.open ? " active" : ""}`}
+                type="button"
+                disabled={!selectedRows.size || scanActive || importStarted}
+                aria-haspopup="menu"
+                aria-expanded={bulkTagMenuState.open}
+                onClick={openBulkTagMenu}
+              >
+                <Tags size={16} aria-hidden="true" />
+                <span>{t("actionLibrary:bulkImportApplyTags")}</span>
               </button>
-              <button className="model-lib-button" type="button" disabled={!rows.length} onClick={clearSelection}>
-                {t("actionLibrary:bulkImportClearSelection")}
-              </button>
+              <div className="action-folder-import__selection-actions">
+                <button className="model-lib-button" type="button" disabled={!displayRows.length || scanActive || importStarted} onClick={selectValidRows}>
+                  {t("actionLibrary:bulkImportSelectValid")}
+                </button>
+                <button className="model-lib-button" type="button" disabled={!displayRows.length || scanActive || importStarted} onClick={clearSelection}>
+                  {t("actionLibrary:bulkImportClearSelection")}
+                </button>
+              </div>
             </div>
+            {bulkTagMenuState.open
+              ? createPortal(
+                  <div
+                    className="outfit-tag-menu outfit-tag-menu--submenu action-folder-import__tag-menu"
+                    role="menu"
+                    aria-label={t("actionLibrary:chooseTags")}
+                    style={{ left: bulkTagMenuState.x, top: bulkTagMenuState.y }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                  >
+                    {tags.length ? (
+                      <>
+                        {tags.map((tag) => (
+                          <button
+                            key={tag.id}
+                            type="button"
+                            role="menuitemcheckbox"
+                            onClick={() => applyTagToSelectedRows(tag.name)}
+                          >
+                            {tag.name}
+                          </button>
+                        ))}
+                        <button type="button" role="menuitem" onClick={clearSelectedRowTags}>
+                          {t("actionLibrary:bulkImportClearTags")}
+                        </button>
+                      </>
+                    ) : (
+                      <div className="outfit-tag-menu__empty">{t("actionLibrary:noTags")}</div>
+                    )}
+                  </div>,
+                  document.body,
+                )
+              : null}
 
-            <div className="action-folder-import__rows" role="list" aria-label={t("actionLibrary:bulkImportRows")}>
-              {rows.map((row) => {
+            <div
+              ref={rowsViewportRef}
+              className="action-folder-import__rows scrollbar-thin-stable"
+              role="list"
+              aria-label={t("actionLibrary:bulkImportRows")}
+              onScroll={(event) => {
+                const target = event.currentTarget;
+                setRowViewport({ scrollTop: target.scrollTop, height: target.clientHeight });
+              }}
+            >
+              <div className="action-folder-import__virtual" style={{ height: virtualHeight || undefined }}>
+              {virtualRows.map(({ row, index }) => {
                 const checked = selectedRows.has(row.id);
-                const message = issueText(row);
+                const liveRow = rowImportStates.get(row.id);
+                const displayRow = liveRow || row;
+                const liveStatus = liveRow?.final_status || "";
+                const message = issueText(displayRow);
+                const selectedTagNames = rowTagSelections.get(row.id) || new Set<string>();
                 return (
-                  <div key={row.id} className={`action-folder-import-row ${statusClass(row)}${checked ? " is-selected" : ""}`} role="listitem">
-                    <label className="action-folder-import-row__check">
-                      <input type="checkbox" checked={checked} onChange={() => toggleRow(row)} aria-label={t("actionLibrary:bulkImportToggleRow", { name: row.proposed_name || row.filename })} />
-                    </label>
+                  <div key={row.id} className={`action-folder-import-row ${liveStatus ? liveStatusClass(liveStatus) : statusClass(row)}${checked ? " is-selected" : ""}`} role="listitem" style={{ transform: `translateY(${index * VIRTUAL_ROW_HEIGHT}px)` }}>
+                    {importStarted ? (
+                      <div className="action-folder-import-row__check action-folder-import-row__result-icon" aria-hidden="true">
+                        {liveStatus === "importing" ? <Loader2 size={18} /> : liveStatus === "failed" ? <XCircle size={18} /> : liveStatus === "not_selected" ? <span /> : <CheckCircle2 size={18} />}
+                      </div>
+                    ) : (
+                      <label className="action-folder-import-row__check">
+                        <input type="checkbox" checked={checked} onChange={() => toggleRow(row)} aria-label={t("actionLibrary:bulkImportToggleRow", { name: row.proposed_name || row.filename })} />
+                      </label>
+                    )}
                     <div className="action-folder-import-row__thumb">
-                      {row.thumbnail_url ? <img src={row.thumbnail_url} alt={row.proposed_name || row.filename} loading="lazy" /> : <span>{t("common:empty.noImage")}</span>}
+                      {displayRow.thumbnail_url ? <img src={displayRow.thumbnail_url} alt={displayRow.proposed_name || displayRow.filename} loading="lazy" decoding="async" /> : <span>{t("common:empty.noImage")}</span>}
                     </div>
                     <div className="action-folder-import-row__main">
-                      <div className="action-folder-import-row__name" title={row.proposed_name || row.filename}>{row.proposed_name || row.filename}</div>
-                      <div className="action-folder-import-row__meta" title={row.relative_path}>{row.relative_path}</div>
+                      <div className="action-folder-import-row__name" title={displayRow.proposed_name || displayRow.filename}>{displayRow.proposed_name || displayRow.filename}</div>
+                      <div className="action-folder-import-row__meta" title={displayRow.relative_path}>{displayRow.relative_path}</div>
                       {message ? (
                         <div className="action-folder-import-row__message">
-                          {row.errors?.length ? <AlertTriangle size={14} aria-hidden="true" /> : <CheckCircle2 size={14} aria-hidden="true" />}
+                          {displayRow.errors?.length ? <AlertTriangle size={14} aria-hidden="true" /> : <CheckCircle2 size={14} aria-hidden="true" />}
                           <span>{message}</span>
                         </div>
                       ) : null}
+                      <div className="action-folder-import-row__tags" aria-label={t("actionLibrary:bulkImportRowTags", { name: displayRow.proposed_name || displayRow.filename })}>
+                        {tags.map((tag) => {
+                          const active = selectedTagNames.has(tag.name);
+                          return (
+                            <button
+                              key={tag.id}
+                              className={active ? "selected" : ""}
+                              type="button"
+                              disabled={importStarted}
+                              aria-pressed={active}
+                              onClick={() => toggleRowTag(row.id, tag.name)}
+                            >
+                              {tag.name}
+                            </button>
+                          );
+                        })}
+                        {!tags.length ? <span>{t("actionLibrary:noTags")}</span> : null}
+                      </div>
                     </div>
-                    <span className="action-folder-import-row__status">{row.errors?.length ? t("actionLibrary:bulkImportStatusInvalid") : row.warnings?.length ? t("actionLibrary:bulkImportStatusWarning") : t("actionLibrary:bulkImportStatusReady")}</span>
+                    <span className="action-folder-import-row__status">{liveStatus ? finalStatusLabel(liveStatus, t) : row.errors?.length ? t("actionLibrary:bulkImportStatusInvalid") : row.warnings?.length ? t("actionLibrary:bulkImportStatusWarning") : t("actionLibrary:bulkImportStatusReady")}</span>
                   </div>
                 );
               })}
+              </div>
               {!preview ? <div className="action-folder-import__empty">{t("actionLibrary:bulkImportPickFolderFirst")}</div> : null}
+              {preview && !displayRows.length ? <div className="action-folder-import__empty">{t("actionLibrary:bulkImportPickFolderFirst")}</div> : null}
             </div>
 
             <footer className="action-folder-import__footer">
-              <span>{selectedInvalidCount ? t("actionLibrary:bulkImportSelectedInvalid", { count: selectedInvalidCount }) : t("actionLibrary:bulkImportReadyHint")}</span>
+              <span>
+                {stage === "complete"
+                  ? t("actionLibrary:bulkImportResultDone")
+                  : selectedInvalidCount
+                    ? t("actionLibrary:bulkImportSelectedInvalid", { count: selectedInvalidCount })
+                    : t("actionLibrary:bulkImportReadyHint")}
+              </span>
               <div>
-                <button className="button secondary" type="button" onClick={onClose} disabled={importMutation.isPending}>{t("common:actions.cancel")}</button>
-                <button className="button primary" type="button" disabled={!canImport} onClick={() => importMutation.mutate()}>
-                  {importMutation.isPending
-                    ? `${t("actionLibrary:bulkImportImporting")} ${importProgress.completed}/${importProgress.total}`
-                    : t("actionLibrary:bulkImportStart")}
-                </button>
+                {stage === "complete" ? (
+                  <button className="button primary" type="button" onClick={onClose}>{t("common:actions.close")}</button>
+                ) : (
+                  <>
+                    <button className="button secondary" type="button" onClick={onClose} disabled={importMutation.isPending}>{t("common:actions.cancel")}</button>
+                    <button className="button primary" type="button" disabled={!canImport} onClick={() => importMutation.mutate()}>
+                      {importMutation.isPending
+                        ? `${t("actionLibrary:bulkImportImporting")} ${importProgress.completed}/${importProgress.total}`
+                        : t("actionLibrary:bulkImportStart")}
+                    </button>
+                  </>
+                )}
               </div>
             </footer>
           </>
-        ) : (
-          <>
-            <div className="action-folder-import__summary">
-              <span>{t("actionLibrary:bulkImportResultImported", { count: resultTotals.imported })}</span>
-              <span className={resultTotals.warning ? "is-warning" : ""}>{t("actionLibrary:bulkImportWarnings", { count: resultTotals.warning })}</span>
-              <span className={resultTotals.failed ? "is-error" : ""}>{t("actionLibrary:bulkImportResultFailed", { count: resultTotals.failed })}</span>
-              <span>{t("actionLibrary:bulkImportStatusNotSelected")} {resultTotals.notSelected}</span>
-            </div>
-            <div className="action-folder-import__rows" role="list" aria-label={t("actionLibrary:bulkImportResultRows")}>
-              {(result?.rows || []).map((row) => (
-                <div key={row.id} className={`action-folder-import-row ${row.final_status === "failed" ? "is-error" : row.final_status === "warning" ? "is-warning" : row.final_status === "not_selected" ? "is-muted" : "is-ready"}`} role="listitem">
-                  <div className="action-folder-import-row__thumb">
-                    {row.thumbnail_url ? <img src={row.thumbnail_url} alt={row.proposed_name || row.filename} loading="lazy" /> : <span>{t("common:empty.noImage")}</span>}
-                  </div>
-                  <div className="action-folder-import-row__main">
-                    <div className="action-folder-import-row__name" title={row.proposed_name || row.filename}>{row.proposed_name || row.filename}</div>
-                    <div className="action-folder-import-row__meta" title={row.relative_path}>{row.relative_path}</div>
-                    {issueText(row) ? <div className="action-folder-import-row__message"><span>{issueText(row)}</span></div> : null}
-                  </div>
-                  <span className="action-folder-import-row__status">{finalStatusLabel(row.final_status, t)}</span>
-                </div>
-              ))}
-            </div>
-            <footer className="action-folder-import__footer">
-              <span>{t("actionLibrary:bulkImportResultDone")}</span>
-              <div>
-                <button className="button primary" type="button" onClick={onClose}>{t("common:actions.close")}</button>
-              </div>
-            </footer>
-          </>
-        )}
       </section>
     </div>
   );

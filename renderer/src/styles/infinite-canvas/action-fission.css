@@ -43,7 +43,7 @@
   flex-direction: column;
   gap: 14px;
   overflow-x: hidden;
-  overflow-y: scroll;
+  overflow-y: auto;
   overscroll-behavior: contain;
   padding: 2px 8px 2px 0;
 }

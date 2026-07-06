@@ -2,7 +2,7 @@
 
 ## Background
 
-The action library currently supports adding one action image at a time. The renderer uploads a single image through `POST /api/action-projects/:projectId/actions`, and the backend creates one `action_entries` row with an auto-generated name. Prompt text and card name are updated afterward through `PATCH /api/actions/:actionId`.
+The action library now writes both single-entry and multi-entry imports through `POST /api/action-projects/:projectId/actions/import-entries`. The backend creates `action_entries` rows, auto-generates names when an entry name is blank, and accepts only existing tag ids/names when tags are supplied.
 
 The target import source can be a local folder such as a downloaded action-prompt folder. One current real example is the user's `Downloads` folder named for the natural-standing action set.
 
@@ -32,7 +32,7 @@ For the first implementation, each image should be paired with a same-stem `.txt
 
 ## Non-Goals
 
-- Do not import or infer tags in the first version.
+- Do not auto-create tags during import; import entries may only reference existing tags.
 - Do not send local folder paths to the remote server. Remote mode must upload selected entries from the renderer.
 - Do not add CSV, JSON, or manifest-based import in the first version.
 - Do not overwrite existing action cards automatically.
@@ -74,9 +74,9 @@ For the first implementation, each image should be paired with a same-stem `.txt
 
 Add a "Batch Import" action in the action library page, near the existing image upload/drop area.
 
-Clicking it opens a dedicated batch import interface in both local desktop mode and remote mode. The interface lets the user choose a folder with a browser/Electron directory file picker. The renderer reads the selected files, builds the preview rows locally, and later uploads only selected valid import entries.
+Clicking it opens a dedicated batch import interface in both local desktop mode and remote mode. The interface uses an Electron folder picker, and Electron main scans the selected local folder through IPC. The renderer receives preview rows and thumbnail URLs, then uploads only selected valid import entries.
 
-The remote server never reads a local Windows path like `C:\Users\Rocco\Downloads\<action-folder>`. It receives explicit entry data instead: action name, prompt text, original filename, mime type, and image bytes.
+The remote server never reads a local Windows path like `C:\Users\Rocco\Downloads\<action-folder>`. Electron main reads the local files and returns explicit entry data to the renderer; the server receives action name, prompt text, original filename, mime type, and image bytes.
 
 ### Preview Dialog
 
@@ -116,12 +116,15 @@ Valid rows are checked by default. Rows with blocking errors are unchecked by de
 
 The user confirms the import from the preview dialog. The import should only process selected rows marked as ready.
 
-After import, show a summary:
+After import, keep the same row list visible and update each row as it progresses:
 
-- Imported count.
-- Failed count.
-- Full row list with final statuses: imported, not selected, failed, warning.
-- Failure and warning reasons on the related rows.
+- Pending before the row is processed.
+- Importing while the row is being uploaded.
+- Imported in green after success.
+- Failed with the row-level error.
+- Not selected for unchecked rows.
+
+The summary counters above the list should show imported, warning, failed, and not-selected counts after completion.
 
 ## Import Matching Rules
 
@@ -229,7 +232,7 @@ interface ActionFolderImportUploadEntry {
 }
 ```
 
-The renderer owns the preview response shape because preview scanning happens before upload:
+Electron main owns the preview scan in the product UI path. The renderer owns the TypeScript contract for the preview response:
 
 ```ts
 interface ActionFolderImportPreview {
@@ -278,16 +281,32 @@ Extend `electron/main/ipc/local-api-ipc.cjs` action library dispatch:
 ```text
 POST /api/action-projects/:projectId/actions/import-entries
 POST /api/action-projects/:projectId/actions/import-folder/preview
-POST /api/action-projects/:projectId/actions/import-folder
 ```
 
-The first UI version should call `import-entries` so local and remote imports share the same payload shape and backend import service. The path-based `import-folder` routes can remain as local-only compatibility/internal routes, because Electron main has filesystem access, but they should not be required by the visible UI flow.
+The UI calls `import-entries` for both single-entry and multi-entry imports so local and remote imports share the same payload shape and backend import service. The local `import-folder/preview` route is only for Electron folder preview scanning; the old one-shot `import-folder` write route has been removed.
 
-### Preview Thumbnails
+### Electron Folder Scan And Preview
 
-The preview UI needs thumbnails before files are imported into managed library storage.
+The visible UI path uses a narrow Electron bridge:
 
-The first implementation should generate thumbnails directly from the selected `File` objects with browser object URLs. This works in both local and remote modes and avoids exposing arbitrary `file://` paths or requiring server-side preview sessions.
+```ts
+window.forartActionImport.chooseFolder()
+window.forartActionImport.scan({ projectId, sourcePath, existingActionNames })
+window.forartActionImport.readEntry({ previewId, rowId })
+window.forartActionImport.clearPreview()
+```
+
+Electron main is responsible for:
+
+- Non-recursive folder scanning.
+- Pairing same-stem image and `.txt` files.
+- UTF-8 text decoding with GB18030 fallback.
+- Prompt truncation warnings.
+- Row validation for missing files, duplicate names, ambiguous image matches, and invalid names.
+- Serving row thumbnails through `forart-asset://action-folder-import-preview/{previewId}/{rowId}`.
+- Reading a selected row's image bytes and prompt text during import.
+
+This matches the image-review architecture: the renderer keeps UI state, while Electron main owns filesystem access and repeatable rescans.
 
 ### Remote HTTP Route
 
@@ -297,7 +316,7 @@ Remote mode uses the same explicit action-entry import payload as local mode:
 POST /api/action-projects/:projectId/actions/import-entries
 ```
 
-The renderer reads local files, builds preview rows, and uploads only selected valid entries. This keeps remote import from depending on server-side access to a local folder path.
+Electron main reads local files, the renderer builds the upload entry from IPC data, and the renderer uploads only selected valid entries. This keeps remote import from depending on server-side access to a local folder path.
 
 The current implementation uploads selected rows one at a time and merges the returned row results in the renderer. This avoids constructing one very large JSON/base64 request for folders with many images.
 
@@ -323,6 +342,7 @@ server/src/library/action-folder-import-service.mjs
 server/src/library/action-library-service.mjs
 server/forart-server.mjs
 electron/main/ipc/local-api-ipc.cjs
+electron/main/modules/action-folder-import-store.cjs
 renderer/src/features/action-library/actionFolderImportTypes.ts
 renderer/src/features/action-library/actionFolderImportApi.ts
 renderer/src/features/action-library/ActionFolderImportDialog.tsx
@@ -349,9 +369,11 @@ Keep route dispatch in `electron/main/ipc/local-api-ipc.cjs`, but limit it to ro
 
 - Parse project id.
 - Call `importActionEntries`.
-- Keep any local-only `import-folder` route as a compatibility/internal route.
+- Keep only the local `import-folder/preview` route for folder preview scanning.
 
 Do not put scan, validation, or import logic directly in the IPC router.
+
+Keep filesystem preview scanning in `electron/main/modules/action-folder-import-store.cjs` instead of the local API router. This module should expose the import bridge methods and preview URL resolver used by the `forart-asset` protocol.
 
 ### Renderer Module
 
@@ -364,7 +386,8 @@ Create `ActionFolderImportDialog.tsx` as the UI boundary for the feature:
 - Row checkbox controls.
 - Import button disabled until every selected row is valid.
 - Result view with full row list and final statuses.
-- Local folder scanning, same-stem pairing, prompt decoding, prompt truncation warning, and object URL thumbnails.
+- Calling the Electron action-import bridge for folder selection, scan, preview thumbnails, and per-row file reads.
+- Sequential one-row-at-a-time upload through `import-entries`, with live row status updates.
 
 Keep `ActionLibraryPage.tsx` responsible only for opening the dialog and refreshing queries after successful import.
 
@@ -400,13 +423,14 @@ Expected files:
 Frontend responsibilities:
 
 - Open folder picker through the existing Electron config/dialog bridge or a new narrowly named bridge if needed.
-- Request preview.
+- Request Electron IPC preview.
 - Render a dedicated batch import interface with row thumbnails and per-row statuses.
 - Allow users to uncheck valid rows before import.
 - Allow users to uncheck invalid rows so those rows no longer block import.
 - Disable import until every selected row is valid.
 - Provide a re-scan button for the currently selected folder.
 - Submit import.
+- Keep the same row list visible during import and turn successful rows green.
 - Invalidate action, project, and tag queries after import.
 
 Even though tags are ignored in the first version, invalidating tag queries is harmless and keeps the page consistent if later versions add tag import.

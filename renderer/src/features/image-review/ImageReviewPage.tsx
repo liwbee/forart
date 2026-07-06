@@ -1,6 +1,6 @@
 import { PointerEvent, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type WheelEvent as ReactWheelEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleHelp, Flag, FolderOpen, ImageOff, Save, Search, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleHelp, Flag, FolderOpen, ImageOff, RefreshCw, Save, Search, X } from "lucide-react";
 
 type ImageGroupKey = "model" | "detail";
 
@@ -186,12 +186,11 @@ function RootFolderPicker({
         {displayName || t("imageReview:choosePathFirst")}
       </span>
       <div className="review-folder-actions">
-        <button className="button secondary review-folder-button" type="button" disabled={loading} onClick={onChoose}>
+        <button className="review-folder-icon-button" type="button" disabled={loading} onClick={onChoose} aria-label={t("imageReview:choose")} title={t("imageReview:choose")}>
           <FolderOpen size={18} aria-hidden="true" />
-          <span>{t("imageReview:choose")}</span>
         </button>
-        <button className="button secondary review-folder-button" type="button" disabled={loading || !selectedRoot} onClick={onScan}>
-          <span>{loading ? t("imageReview:scanning") : t("imageReview:refresh")}</span>
+        <button className={`review-folder-icon-button${loading ? " is-spinning" : ""}`} type="button" disabled={loading || !selectedRoot} onClick={onScan} aria-label={t("imageReview:refresh")} title={t("imageReview:refresh")}>
+          <RefreshCw size={18} aria-hidden="true" />
         </button>
         <div className="review-folder-guide">
           <button className="button secondary review-folder-guide-button" type="button" aria-label={t("imageReview:pathGuideTitle")}>
@@ -285,37 +284,39 @@ const ProductList = memo(function ProductList({
         <span>{filteredProducts.length} / {products.length}</span>
       </div>
 
-      <div className="review-product-items" ref={listRef} onScroll={virtual.onScroll}>
-        <div
-          className="review-product-items__spacer"
-          style={virtualAxis === "vertical" ? { height: virtual.totalSize } : { width: virtual.totalSize }}
-        >
+      <div className={`review-product-items scrollbar-thin-stable${filteredProducts.length ? "" : " is-empty"}`} ref={listRef} onScroll={virtual.onScroll}>
+        {filteredProducts.length ? (
           <div
-            className="review-product-items__virtual"
-            style={virtualAxis === "vertical"
-              ? { transform: `translateY(${virtual.start * itemSize}px)` }
-              : { transform: `translateX(${virtual.start * itemSize}px)` }}
+            className="review-product-items__spacer"
+            style={virtualAxis === "vertical" ? { height: virtual.totalSize } : { width: virtual.totalSize }}
           >
-        {visibleProducts.map((product) => {
-          const isActive = product.id === activeProductId;
-          const missingModel = !product.hasModelImages;
-          return (
-            <button
-              key={product.id}
-              className={isActive ? "active" : ""}
-              type="button"
-              aria-current={isActive ? "true" : undefined}
-              onClick={() => onSelectProduct(product.id)}
+            <div
+              className="review-product-items__virtual"
+              style={virtualAxis === "vertical"
+                ? { transform: `translateY(${virtual.start * itemSize}px)` }
+                : { transform: `translateX(${virtual.start * itemSize}px)` }}
             >
-              <strong>{product.id}</strong>
-              {missingModel ? <em>{t("imageReview:missingModelImage")}</em> : null}
-            </button>
-          );
-        })}
+          {visibleProducts.map((product) => {
+            const isActive = product.id === activeProductId;
+            const missingModel = !product.hasModelImages;
+            return (
+              <button
+                key={product.id}
+                className={isActive ? "active" : ""}
+                type="button"
+                aria-current={isActive ? "true" : undefined}
+                onClick={() => onSelectProduct(product.id)}
+              >
+                <strong>{product.id}</strong>
+                {missingModel ? <em>{t("imageReview:missingModelImage")}</em> : null}
+              </button>
+            );
+          })}
+            </div>
           </div>
-        </div>
-        {!products.length ? <div className="review-pair-empty">{t("imageReview:mountReviewFolders")}</div> : null}
-        {products.length && !filteredProducts.length ? <div className="review-pair-empty">{t("imageReview:noMatchingProductIds")}</div> : null}
+        ) : (
+          <div className="review-pair-empty">{products.length ? t("imageReview:noMatchingProductIds") : t("imageReview:mountReviewFolders")}</div>
+        )}
       </div>
     </aside>
   );
@@ -367,7 +368,7 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
         <ChevronLeft size={24} aria-hidden="true" />
       </button>
       <div
-        className="review-thumb-strip"
+        className="review-thumb-strip scrollbar-thin"
         ref={(node) => { thumbStripRef.current = node; }}
         aria-label={t("imageReview:thumbsLabel", { title })}
         onScroll={virtual.onScroll}

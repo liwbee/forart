@@ -211,55 +211,6 @@ export function createActionFolderImportService(runtime, actionService) {
     };
   }
 
-  function importActionFolder(projectId, payload = {}) {
-    if (!projectExists(db, projectId)) return null;
-    const preview = previewActionFolderImport(projectId, payload);
-    const selectedIds = new Set((payload.selected_rows || []).map((id) => String(id || "").trim()).filter(Boolean));
-    const selectedRows = preview.rows.filter((row) => selectedIds.has(row.id));
-    if (!selectedRows.length) throw new Error("No rows selected for import");
-    const invalid = selectedRows.find((row) => row.errors.length);
-    if (invalid) throw new Error(`Selected row is not importable: ${invalid.filename}`);
-
-    const imported = [];
-    const failed = [];
-    const rows = [];
-
-    for (const row of preview.rows) {
-      if (!selectedIds.has(row.id)) {
-        rows.push({ ...row, final_status: "not_selected" });
-        continue;
-      }
-
-      try {
-        const promptInfo = readPromptFile(row.text_path);
-        const imageBuffer = readFileSync(row.image_path);
-        const action = actionService.createActionFromFile(projectId, {
-          name: row.proposed_name,
-          prompt: promptInfo.prompt,
-          filename: path.basename(row.image_path),
-          mime_type: mimeTypeForImage(row.image_path),
-          buffer: imageBuffer,
-        });
-        imported.push(action);
-        rows.push({ ...row, action_id: action.id, final_status: row.warnings.length ? "warning" : "imported" });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const failedRow = { ...row, final_status: "failed", errors: [...(row.errors || []), { code: "import_failed", message }] };
-        failed.push(failedRow);
-        rows.push(failedRow);
-      }
-    }
-
-    return {
-      imported_count: imported.length,
-      failed_count: failed.length,
-      imported,
-      not_selected: rows.filter((row) => row.final_status === "not_selected"),
-      failed,
-      rows,
-    };
-  }
-
   function importActionEntries(projectId, payload = {}) {
     if (!projectExists(db, projectId)) return null;
     const entries = Array.isArray(payload.entries) ? payload.entries : [];
@@ -287,18 +238,23 @@ export function createActionFolderImportService(runtime, actionService) {
       };
 
       try {
-        const name = validateFileNamePart(entry.name || "", "action name");
-        if (actionNameExists(db, projectId, name)) throw new Error("Action name must be unique");
+        const name = entry.name ? validateFileNamePart(entry.name, "action name") : "";
+        if (name && actionNameExists(db, projectId, name)) throw new Error("Action name must be unique");
+        const tagNames = Array.isArray(entry.tags) && entry.tags.length
+          ? actionService.existingProjectTagNames(projectId, entry.tags)
+          : [];
         const imageData = String(entry.data || "");
         if (!imageData) throw new Error("Invalid image data");
         const action = actionService.createActionFromFile(projectId, {
-          name,
+          ...(name ? { name } : {}),
           prompt: String(entry.prompt || "").slice(0, PROMPT_LIMIT),
           filename: entry.filename || "image",
           mime_type: entry.mime_type || "image/png",
           buffer: Buffer.from(imageData, "base64"),
         });
-        imported.push(action);
+        if (tagNames.length) actionService.updateAction(action.id, { tags: tagNames });
+        const importedAction = tagNames.length ? actionService.loadActionEntry(action.id) || action : action;
+        imported.push(importedAction);
         rows.push({ ...rowBase, action_id: action.id, final_status: rowBase.warnings.length ? "warning" : "imported" });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -320,7 +276,6 @@ export function createActionFolderImportService(runtime, actionService) {
 
   return {
     previewActionFolderImport,
-    importActionFolder,
     importActionEntries,
   };
 }

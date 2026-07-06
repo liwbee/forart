@@ -1,6 +1,7 @@
 import { Images, PersonStanding, Users, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
+import { LazyImage } from "../../components/LazyImage";
 import { LibraryTagFilterButton } from "../library-tags";
 import { Select } from "../../components/Select";
 import { cacheBustedLibraryAssetUrl, useLibraryAssetPickerData } from "./useLibraryAssetPickerData";
@@ -170,7 +171,7 @@ export function LibraryAssetPickerContent({
               const src = item.url ? cacheBustedLibraryAssetUrl(item.url, item.updatedAt || item.assetId || item.id) : "";
               return (
                 <button key={item.id} type="button" data-kind={item.kind} disabled={!src} onClick={(event) => selectItem(item, event.currentTarget)}>
-                  {src ? <img src={src} alt={item.name} loading="lazy" draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
+                  {src ? <LazyImage src={src} alt={item.name} draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
                   <strong>{item.name || t("infiniteCanvas:untitledCanvas")}</strong>
                 </button>
               );
@@ -221,7 +222,7 @@ export function LibraryAssetPickerContent({
                     });
                   }}
                 >
-                  {src ? <img src={src} alt={image.caption || image.filename || modelChoiceFor.name} loading="lazy" draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
+                  {src ? <LazyImage src={src} alt={image.caption || image.filename || modelChoiceFor.name} draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
                 </button>
               );
             })}
