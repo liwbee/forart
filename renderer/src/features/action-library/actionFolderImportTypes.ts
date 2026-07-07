@@ -72,4 +72,5 @@ export interface ActionFolderImportUploadEntry {
   tags?: string[];
   warnings: ActionFolderImportIssue[];
   thumbnail_url?: string;
+  thumbnail_data_url?: string;
 }

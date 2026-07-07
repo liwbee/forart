@@ -55,6 +55,7 @@ function registerCanvasAssetProtocol() {
   protocol.handle('forart-asset', async (request) => {
     const target = assetStore.resolveAssetUrl(request.url)
       || await localApi?.resolveAssetUrl?.(request.url)
+      || await localApi?.resolveAssetThumbnailUrl?.(request.url)
       || localApi?.resolveActionImportPreviewUrl?.(request.url)
       || actionFolderImportStore.resolvePreviewUrl(request.url);
     if (!target || !fs.existsSync(target)) {

@@ -5,6 +5,7 @@ export interface OutfitProject {
   name: string;
   cover_asset_id: string | null;
   cover_url: string | null;
+  cover_thumbnail_url?: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -16,6 +17,7 @@ export interface OutfitEntry {
   name: string;
   asset_id: string;
   asset_url: string | null;
+  thumbnail_url?: string | null;
   tags: string[];
   created_at: string;
   updated_at: string;
@@ -37,6 +39,7 @@ export interface AssetUploadPayload {
   filename: string;
   mime_type: string;
   data: string;
+  thumbnail_data_url?: string;
 }
 
 export interface OutfitImportEntry {
@@ -47,6 +50,7 @@ export interface OutfitImportEntry {
   relative_path?: string;
   mime_type: string;
   data: string;
+  thumbnail_data_url?: string;
   tags?: string[];
   warnings?: Array<{ code: string; message: string }>;
   thumbnail_url?: string;

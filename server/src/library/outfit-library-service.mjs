@@ -6,6 +6,10 @@ import {
   nowIso,
   validateFileNamePart,
 } from "./library-runtime.mjs";
+import {
+  deleteLibraryAssetThumbnail,
+  saveUploadedLibraryAssetThumbnail,
+} from "./library-asset-thumbnails.mjs";
 
 function safePathPart(value, fallback) {
   const name = String(value || "").trim() || fallback;
@@ -80,11 +84,18 @@ export function createOutfitLibraryService(runtime, options = {}) {
   const labels = runtime.labels;
   const storageRoot = runtime.storageRoot;
   const localAssetUrl = typeof options.localAssetUrl === "function" ? options.localAssetUrl : null;
+  const localAssetThumbnailUrl = typeof options.localAssetThumbnailUrl === "function" ? options.localAssetThumbnailUrl : null;
 
   function assetUrl(assetId) {
     if (!assetId) return null;
     if (localAssetUrl) return localAssetUrl(assetId);
     return `/api/assets/${assetId}/file`;
+  }
+
+  function assetThumbnailUrl(assetId) {
+    if (!assetId) return null;
+    if (localAssetThumbnailUrl) return localAssetThumbnailUrl(assetId);
+    return `/api/assets/${assetId}/thumb`;
   }
 
   function assetRelativePath(value) {
@@ -178,6 +189,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
       ...outfit,
       tags: tagsForOutfit(outfit.id),
       asset_url: assetUrl(outfit.asset_id || null),
+      thumbnail_url: assetThumbnailUrl(outfit.asset_id || null),
     };
   }
 
@@ -185,6 +197,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
     return {
       ...project,
       cover_url: assetUrl(project.cover_asset_id || null),
+      cover_thumbnail_url: assetThumbnailUrl(project.cover_asset_id || null),
     };
   }
 
@@ -342,6 +355,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
     try {
       return runDbTransaction(db, () => {
         asset = writeAsset(content, mimeType, originalFilename, options);
+        if (options?.thumbnailDataUrl) saveUploadedLibraryAssetThumbnail(runtime, asset.id, options.thumbnailDataUrl);
         return work(asset);
       });
     } catch (error) {
@@ -349,6 +363,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
         try {
           unlinkSync(assetAbsolutePath(asset.path));
         } catch {}
+        deleteLibraryAssetThumbnail(runtime, asset.id);
       }
       throw error;
     }
@@ -375,6 +390,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
         unlinkSync(assetAbsolutePath(asset.path));
       } catch {}
     }
+    deleteLibraryAssetThumbnail(runtime, assetId);
     db.prepare("DELETE FROM assets WHERE id = ?").run(assetId);
   }
 
@@ -453,6 +469,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
       source: "outfit-project-cover",
       subdir: relDir,
       filenameStem: "cover",
+      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("UPDATE outfit_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
       return projectWithCover(loadProject(projectId));
@@ -491,6 +508,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
       source: "outfit-library",
       subdir: relDir,
       filenameStem: name,
+      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("INSERT INTO outfit_entries (id, project_id, name, asset_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
         .run(id, projectId, name, asset.id, timestamp, timestamp);
@@ -535,6 +553,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
           filename: entry.filename || "image",
           mime_type: entry.mime_type || "image/png",
           buffer: Buffer.from(imageData, "base64"),
+          thumbnail_data_url: entry.thumbnail_data_url,
         });
         if (tagNames.length) updateOutfit(outfit.id, { tags: tagNames });
         const importedOutfit = tagNames.length ? outfitWithAssetAndTags(loadOutfit(outfit.id)) : outfit;
@@ -681,6 +700,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
       source: "outfit-library",
       subdir: relDir,
       filenameStem: outfit.name || labels.defaultOutfit,
+      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("UPDATE outfit_entries SET asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, timestamp, outfitId);
       db.prepare("UPDATE outfit_projects SET cover_asset_id = CASE WHEN cover_asset_id = ? THEN ? ELSE cover_asset_id END, updated_at = ? WHERE id = ?")

@@ -30,6 +30,7 @@ let modelLibraryModulePromise = null;
 let outfitLibraryModulePromise = null;
 let actionLibraryModulePromise = null;
 let actionFolderImportModulePromise = null;
+let libraryAssetThumbnailModulePromise = null;
 let activeRuntime = null;
 let activeRuntimeKey = '';
 let activeModelService = null;
@@ -77,6 +78,13 @@ function actionFolderImportModule() {
   return actionFolderImportModulePromise;
 }
 
+function libraryAssetThumbnailModule() {
+  if (!libraryAssetThumbnailModulePromise) {
+    libraryAssetThumbnailModulePromise = import('../../../server/src/library/library-asset-thumbnails.mjs');
+  }
+  return libraryAssetThumbnailModulePromise;
+}
+
 async function getLibraryRuntime({ configStore, app, dataRoot }) {
   const config = configStore.load();
   const localLibraryPath = String(config?.localLibraryPath || '').trim();
@@ -112,10 +120,17 @@ function localLibraryAssetUrl(assetId) {
   return `forart-asset://library/${encodeURIComponent(assetId)}`;
 }
 
+function localLibraryAssetThumbnailUrl(assetId) {
+  return `forart-asset://library-thumb/${encodeURIComponent(assetId)}`;
+}
+
 async function getModelLibraryService(runtime) {
   if (activeModelService && activeModelServiceKey === activeRuntimeKey) return activeModelService;
   const { createModelLibraryService } = await modelLibraryModule();
-  activeModelService = createModelLibraryService(runtime, { localAssetUrl: localLibraryAssetUrl });
+  activeModelService = createModelLibraryService(runtime, {
+    localAssetUrl: localLibraryAssetUrl,
+    localAssetThumbnailUrl: localLibraryAssetThumbnailUrl,
+  });
   activeModelServiceKey = activeRuntimeKey;
   return activeModelService;
 }
@@ -123,7 +138,10 @@ async function getModelLibraryService(runtime) {
 async function getOutfitLibraryService(runtime) {
   if (activeOutfitService && activeOutfitServiceKey === activeRuntimeKey) return activeOutfitService;
   const { createOutfitLibraryService } = await outfitLibraryModule();
-  activeOutfitService = createOutfitLibraryService(runtime, { localAssetUrl: localLibraryAssetUrl });
+  activeOutfitService = createOutfitLibraryService(runtime, {
+    localAssetUrl: localLibraryAssetUrl,
+    localAssetThumbnailUrl: localLibraryAssetThumbnailUrl,
+  });
   activeOutfitServiceKey = activeRuntimeKey;
   return activeOutfitService;
 }
@@ -131,7 +149,10 @@ async function getOutfitLibraryService(runtime) {
 async function getActionLibraryService(runtime) {
   if (activeActionService && activeActionServiceKey === activeRuntimeKey) return activeActionService;
   const { createActionLibraryService } = await actionLibraryModule();
-  activeActionService = createActionLibraryService(runtime, { localAssetUrl: localLibraryAssetUrl });
+  activeActionService = createActionLibraryService(runtime, {
+    localAssetUrl: localLibraryAssetUrl,
+    localAssetThumbnailUrl: localLibraryAssetThumbnailUrl,
+  });
   activeActionServiceKey = activeRuntimeKey;
   return activeActionService;
 }
@@ -503,6 +524,27 @@ function registerLocalApiIpc({ ipcMain, configStore, app, dataRoot }) {
       if (!previewId || !rowId || previewId !== activeActionImportPreview?.id) return '';
       const target = activeActionImportPreview.rows.get(rowId) || '';
       if (!target || !fs.existsSync(target)) return '';
+      return target;
+    },
+    async resolveAssetThumbnailUrl(source) {
+      let parsed;
+      try {
+        parsed = new URL(String(source || ''));
+      } catch {
+        return '';
+      }
+      if (parsed.protocol !== 'forart-asset:' || parsed.host !== 'library-thumb') return '';
+      const assetId = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''));
+      if (!assetId) return '';
+      const { runtime } = await getLibraryRuntime({ configStore, app, dataRoot });
+      if (!runtime) return '';
+      const asset = runtime.db.prepare('SELECT * FROM assets WHERE id = ?').get(assetId);
+      if (!asset?.path) return '';
+      const target = nodePath.isAbsolute(asset.path) ? asset.path : nodePath.join(runtime.storageRoot, asset.path);
+      if (!isInside(runtime.storageRoot, target) || !fs.existsSync(target)) return '';
+      const { ensureLibraryAssetThumbnail } = await libraryAssetThumbnailModule();
+      const generated = await ensureLibraryAssetThumbnail(runtime, asset, target);
+      if (generated?.filePath && fs.existsSync(generated.filePath)) return generated.filePath;
       return target;
     },
   };

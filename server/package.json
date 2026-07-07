@@ -1,7 +1,7 @@
 {
   "name": "forart-server",
   "private": true,
-  "version": "0.1.25",
+  "version": "0.1.26",
   "type": "module",
   "scripts": {
     "start": "node forart-server.mjs",
@@ -11,6 +11,7 @@
     "node": ">=24"
   },
   "dependencies": {
-    "adm-zip": "^0.5.18"
+    "adm-zip": "^0.5.18",
+    "sharp": "^0.35.3"
   }
 }

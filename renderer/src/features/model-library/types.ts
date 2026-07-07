@@ -7,6 +7,7 @@ export interface ModelProject {
   name: string;
   cover_asset_id: string | null;
   cover_url: string | null;
+  cover_thumbnail_url?: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -22,6 +23,7 @@ export interface ModelEntry {
   cover_image_id: string | null;
   cover_asset_id: string | null;
   cover_url: string | null;
+  cover_thumbnail_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -31,6 +33,7 @@ export interface ModelImage {
   model_id: string;
   asset_id: string;
   asset_url: string | null;
+  thumbnail_url?: string | null;
   caption: string;
   sort_order: number;
   created_at: string;
@@ -54,12 +57,14 @@ export interface AssetUploadPayload {
   filename: string;
   mime_type: string;
   data: string;
+  thumbnail_data_url?: string;
 }
 
 export interface ModelImportImage {
   filename: string;
   mime_type: string;
   data: string;
+  thumbnail_data_url?: string;
   caption?: string;
   sort_order?: number;
 }

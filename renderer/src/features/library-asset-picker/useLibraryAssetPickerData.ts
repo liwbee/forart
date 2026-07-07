@@ -224,6 +224,7 @@ export function useLibraryAssetPickerData({
         tags: model.tags,
         assetId: model.cover_asset_id,
         url: model.cover_url || "",
+        thumbnailUrl: model.cover_thumbnail_url || "",
         updatedAt: model.updated_at,
         kind: "model",
         needsChoices: true,
@@ -236,6 +237,7 @@ export function useLibraryAssetPickerData({
         tags: action.tags,
         assetId: action.asset_id,
         url: action.asset_url || "",
+        thumbnailUrl: action.thumbnail_url || "",
         updatedAt: action.updated_at,
         kind: "action",
       }));
@@ -246,6 +248,7 @@ export function useLibraryAssetPickerData({
       tags: outfit.tags,
       assetId: outfit.asset_id,
       url: outfit.asset_url || "",
+      thumbnailUrl: outfit.thumbnail_url || "",
       updatedAt: outfit.updated_at,
       kind: "outfit",
     }));

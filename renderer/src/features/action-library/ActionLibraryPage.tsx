@@ -15,6 +15,7 @@ import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library
 import { LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
 import { LibraryTagManagerDialog } from "../library-tags/LibraryTagManagerDialog";
 import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
+import { createLibraryAssetUploadPayload } from "../resource-library/createLibraryAssetUploadPayload";
 import { normalizeTags, toggleTag } from "../library-tags/tagUtils";
 import { EMPTY_LIBRARY_TAG_FILTER, applySameColorSingleIncludeFilter, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, createLibraryTagsByName, hasLibraryTagFilter, normalizeLibraryTagColor, toggleLibraryTagFilterInclude, useLibraryTagSettingsStore, type LibraryTagColor, type LibraryTagFilter, type LibraryTagNameColorLike } from "../library-tags";
 import {
@@ -36,7 +37,7 @@ import {
 } from "./api";
 import { ActionFolderImportDialog } from "./ActionFolderImportDialog";
 import { useActionLibraryStore } from "./actionLibraryStore";
-import { ActionEntry, ActionProject, ActionTag, AssetUploadPayload } from "./types";
+import { ActionEntry, ActionProject, ActionTag } from "./types";
 
 function getRequestError(errors: unknown[]) {
   const first = errors.find(Boolean);
@@ -55,23 +56,6 @@ function isSafeLibraryFileName(value: string) {
     && value !== "."
     && value !== ".."
     && !/[ .]$/.test(value);
-}
-
-function fileToUploadPayload(file: File): Promise<AssetUploadPayload> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.onload = () => {
-      const result = String(reader.result || "");
-      const base64 = result.includes(",") ? result.split(",")[1] || "" : "";
-      resolve({
-        filename: file.name,
-        mime_type: file.type || "image/png",
-        data: base64,
-      });
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 function ActionToolbar({
@@ -202,6 +186,7 @@ function ActionCard({
   const committedNameRef = useRef(action.name || "");
   const committedPromptRef = useRef(action.prompt || "");
   const assetUrl = cacheBustedLibraryImageUrl(action.asset_url || "", action.asset_id);
+  const displayUrl = cacheBustedLibraryImageUrl(action.thumbnail_url || action.asset_url || "", action.asset_id);
   const imageAlt = action.name || t("actionLibrary:actionImage");
 
   useEffect(() => {
@@ -355,8 +340,8 @@ function ActionCard({
               }
             }}
           >
-            {assetUrl ? (
-              <LazyImage src={assetUrl} alt={imageAlt} draggable={false} onDragStart={(event) => event.preventDefault()} />
+            {displayUrl ? (
+              <LazyImage src={displayUrl} alt={imageAlt} draggable={false} onDragStart={(event) => event.preventDefault()} />
             ) : (
               <div className="placeholder">{t("common:empty.noImage")}</div>
             )}
@@ -723,7 +708,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const createActionMutation = useMutation({
     mutationFn: async (file: File) => {
       if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
-      const payload = await fileToUploadPayload(file);
+      const payload = await createLibraryAssetUploadPayload(file);
       const result = await importActionEntries(activeProjectId, [{
         filename: payload.filename,
         relative_path: payload.filename,

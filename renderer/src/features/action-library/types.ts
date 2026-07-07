@@ -5,6 +5,7 @@ export interface ActionProject {
   name: string;
   cover_asset_id: string | null;
   cover_url: string | null;
+  cover_thumbnail_url?: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -16,6 +17,7 @@ export interface ActionEntry {
   name: string;
   asset_id: string;
   asset_url: string | null;
+  thumbnail_url?: string | null;
   prompt: string;
   tags: string[];
   created_at: string;
@@ -38,6 +40,7 @@ export interface AssetUploadPayload {
   filename: string;
   mime_type: string;
   data: string;
+  thumbnail_data_url?: string;
 }
 
 export interface ActionFilters {

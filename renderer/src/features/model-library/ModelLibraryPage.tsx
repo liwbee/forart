@@ -15,6 +15,7 @@ import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library
 import { LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
 import { LibraryTagManagerDialog } from "../library-tags/LibraryTagManagerDialog";
 import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
+import { createLibraryAssetUploadPayload } from "../resource-library/createLibraryAssetUploadPayload";
 import { EMPTY_LIBRARY_TAG_FILTER, applySameColorSingleIncludeFilter, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, createLibraryTagsByName, hasLibraryTagFilter, normalizeLibraryTagColor, toggleLibraryTagFilterInclude, useLibraryTagSettingsStore, type LibraryTagColor, type LibraryTagFilter, type LibraryTagNameColorLike } from "../library-tags";
 import {
   bulkModelEntries,
@@ -38,7 +39,7 @@ import {
 } from "./api";
 import { useModelLibraryStore } from "./modelLibraryStore";
 import { normalizeTags, toggleTag } from "../library-tags/tagUtils";
-import { AssetUploadPayload, ModelEntry, ModelGender, ModelImage, ModelProject, ModelTag } from "./types";
+import { ModelEntry, ModelGender, ModelImage, ModelProject, ModelTag } from "./types";
 
 function getRequestError(errors: unknown[]) {
   const first = errors.find(Boolean);
@@ -57,23 +58,6 @@ function isSafeLibraryFileName(value: string) {
     && value !== "."
     && value !== ".."
     && !/[ .]$/.test(value);
-}
-
-function fileToUploadPayload(file: File): Promise<AssetUploadPayload> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.onload = () => {
-      const result = String(reader.result || "");
-      const base64 = result.includes(",") ? result.split(",")[1] || "" : "";
-      resolve({
-        filename: file.name,
-        mime_type: file.type || "image/png",
-        data: base64,
-      });
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 function ModelToolbar({
@@ -220,7 +204,7 @@ function ModelCard({
 }) {
   const { t } = useTranslation();
   const coverCacheKey = model.cover_image_id || model.cover_asset_id || "";
-  const coverUrl = cacheBustedLibraryImageUrl(model.cover_url || "", coverCacheKey);
+  const coverUrl = cacheBustedLibraryImageUrl(model.cover_thumbnail_url || model.cover_url || "", coverCacheKey);
 
   return (
     <button
@@ -602,7 +586,8 @@ function ModelInlineEditor({
             {images.length ? (
               images.map((image) => {
                 const isCover = model.cover_image_id === image.id;
-                const src = resolveLibraryImageUrl(image.asset_url || "");
+                const originalSrc = resolveLibraryImageUrl(image.asset_url || "");
+                const displaySrc = resolveLibraryImageUrl(image.thumbnail_url || image.asset_url || "");
                 const menuOpen = openImageMenuState.imageId === image.id;
                 const altText = image.caption || model.name || image.filename || t("modelLibrary:imagePreview");
                 return (
@@ -614,20 +599,20 @@ function ModelInlineEditor({
                         tabIndex={0}
                         aria-label={altText}
                         onClick={() => {
-                          if (!src) return;
-                          openImageViewer(src, altText);
+                          if (!originalSrc) return;
+                          openImageViewer(originalSrc, altText);
                         }}
                         onKeyDown={(event) => {
-                          if (!src) return;
+                          if (!originalSrc) return;
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
-                            openImageViewer(src, altText);
+                            openImageViewer(originalSrc, altText);
                           }
                         }}
                       >
-                        {src ? (
+                        {displaySrc ? (
                           <LazyImage
-                            src={src}
+                            src={displaySrc}
                             alt={altText}
                             draggable={false}
                             onDragStart={(event) => event.preventDefault()}
@@ -679,8 +664,8 @@ function ModelInlineEditor({
                             <button
                               type="button"
                               role="menuitem"
-                              disabled={!src}
-                              onClick={() => openImageViewer(src, altText)}
+                              disabled={!originalSrc}
+                              onClick={() => openImageViewer(originalSrc, altText)}
                             >
                               <Eye size={15} aria-hidden="true" />
                               <span>{t("common:actions.viewImage")}</span>
@@ -688,8 +673,8 @@ function ModelInlineEditor({
                             <button
                               type="button"
                               role="menuitem"
-                              disabled={!src}
-                              onClick={() => void handleDownloadOriginalImage(src, image.filename || image.caption || `${model.name}-${image.id}`)}
+                              disabled={!originalSrc}
+                              onClick={() => void handleDownloadOriginalImage(originalSrc, image.filename || image.caption || `${model.name}-${image.id}`)}
                             >
                               <Download size={15} aria-hidden="true" />
                               <span>{t("common:actions.downloadOriginalImage")}</span>
@@ -697,8 +682,8 @@ function ModelInlineEditor({
                             <button
                               type="button"
                               role="menuitem"
-                              disabled={!src}
-                              onClick={() => void handleCopyImage(src)}
+                              disabled={!originalSrc}
+                              onClick={() => void handleCopyImage(originalSrc)}
                             >
                               <Copy size={15} aria-hidden="true" />
                               <span>{t("common:actions.copyImage")}</span>
@@ -1179,7 +1164,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
 
   const uploadModelImageMutation = useMutation({
     mutationFn: async ({ modelId, file }: { modelId: string; file: File }) => {
-      const payload = await fileToUploadPayload(file);
+      const payload = await createLibraryAssetUploadPayload(file);
       return uploadModelImage(modelId, payload);
     },
     onSuccess: async (_result, variables) => {

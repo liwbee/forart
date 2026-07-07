@@ -251,6 +251,7 @@ export function createActionFolderImportService(runtime, actionService) {
           filename: entry.filename || "image",
           mime_type: entry.mime_type || "image/png",
           buffer: Buffer.from(imageData, "base64"),
+          thumbnail_data_url: entry.thumbnail_data_url,
         });
         if (tagNames.length) actionService.updateAction(action.id, { tags: tagNames });
         const importedAction = tagNames.length ? actionService.loadActionEntry(action.id) || action : action;

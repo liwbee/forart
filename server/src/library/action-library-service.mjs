@@ -6,6 +6,10 @@ import {
   nowIso,
   validateFileNamePart,
 } from "./library-runtime.mjs";
+import {
+  deleteLibraryAssetThumbnail,
+  saveUploadedLibraryAssetThumbnail,
+} from "./library-asset-thumbnails.mjs";
 
 function safePathPart(value, fallback) {
   const name = String(value || "").trim() || fallback;
@@ -80,11 +84,18 @@ export function createActionLibraryService(runtime, options = {}) {
   const labels = runtime.labels;
   const storageRoot = runtime.storageRoot;
   const localAssetUrl = typeof options.localAssetUrl === "function" ? options.localAssetUrl : null;
+  const localAssetThumbnailUrl = typeof options.localAssetThumbnailUrl === "function" ? options.localAssetThumbnailUrl : null;
 
   function assetUrl(assetId) {
     if (!assetId) return null;
     if (localAssetUrl) return localAssetUrl(assetId);
     return `/api/assets/${assetId}/file`;
+  }
+
+  function assetThumbnailUrl(assetId) {
+    if (!assetId) return null;
+    if (localAssetThumbnailUrl) return localAssetThumbnailUrl(assetId);
+    return `/api/assets/${assetId}/thumb`;
   }
 
   function assetRelativePath(value) {
@@ -178,6 +189,7 @@ export function createActionLibraryService(runtime, options = {}) {
       ...action,
       tags: tagsForAction(action.id),
       asset_url: assetUrl(action.asset_id || null),
+      thumbnail_url: assetThumbnailUrl(action.asset_id || null),
     };
   }
 
@@ -185,6 +197,7 @@ export function createActionLibraryService(runtime, options = {}) {
     return {
       ...project,
       cover_url: assetUrl(project.cover_asset_id || null),
+      cover_thumbnail_url: assetThumbnailUrl(project.cover_asset_id || null),
     };
   }
 
@@ -350,6 +363,7 @@ export function createActionLibraryService(runtime, options = {}) {
     try {
       return runDbTransaction(db, () => {
         asset = writeAsset(content, mimeType, originalFilename, options);
+        if (options?.thumbnailDataUrl) saveUploadedLibraryAssetThumbnail(runtime, asset.id, options.thumbnailDataUrl);
         return work(asset);
       });
     } catch (error) {
@@ -357,6 +371,7 @@ export function createActionLibraryService(runtime, options = {}) {
         try {
           unlinkSync(assetAbsolutePath(asset.path));
         } catch {}
+        deleteLibraryAssetThumbnail(runtime, asset.id);
       }
       throw error;
     }
@@ -383,6 +398,7 @@ export function createActionLibraryService(runtime, options = {}) {
         unlinkSync(assetAbsolutePath(asset.path));
       } catch {}
     }
+    deleteLibraryAssetThumbnail(runtime, assetId);
     db.prepare("DELETE FROM assets WHERE id = ?").run(assetId);
   }
 
@@ -461,6 +477,7 @@ export function createActionLibraryService(runtime, options = {}) {
       source: "action-project-cover",
       subdir: relDir,
       filenameStem: "cover",
+      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("UPDATE action_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
       return projectWithCover(loadProject(projectId));
@@ -499,6 +516,7 @@ export function createActionLibraryService(runtime, options = {}) {
       source: "action-library",
       subdir: relDir,
       filenameStem: name,
+      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("INSERT INTO action_entries (id, project_id, name, asset_id, prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
         .run(id, projectId, name, asset.id, String(payload.prompt || "").slice(0, 4000), timestamp, timestamp);
@@ -614,6 +632,7 @@ export function createActionLibraryService(runtime, options = {}) {
       source: "action-library",
       subdir: relDir,
       filenameStem: action.name || labels.defaultAction,
+      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("UPDATE action_entries SET asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, timestamp, actionId);
       db.prepare("UPDATE action_projects SET cover_asset_id = CASE WHEN cover_asset_id = ? THEN ? ELSE cover_asset_id END, updated_at = ? WHERE id = ?")

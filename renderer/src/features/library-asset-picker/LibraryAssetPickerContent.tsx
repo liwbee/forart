@@ -170,7 +170,7 @@ export function LibraryAssetPickerContent({
         {!picker.isLoading && picker.activeItems.length ? (
           <div className="library-asset-picker__grid">
             {picker.activeItems.map((item) => {
-              const src = item.url ? cacheBustedLibraryAssetUrl(item.url, item.updatedAt || item.assetId || item.id) : "";
+              const src = item.url ? cacheBustedLibraryAssetUrl(item.thumbnailUrl || item.url, item.updatedAt || item.assetId || item.id) : "";
               return (
                 <button key={item.id} type="button" data-kind={item.kind} disabled={!src} onClick={(event) => selectItem(item, event.currentTarget)}>
                   {src ? <LazyImage src={src} alt={item.name} draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
@@ -206,7 +206,7 @@ export function LibraryAssetPickerContent({
             {picker.modelChoicesQuery.isLoading ? <div className="library-asset-picker__state">{t("freeCanvasEditor:loadingImages")}</div> : null}
             {!picker.modelChoicesQuery.isLoading && !(picker.modelChoicesQuery.data?.images || []).length ? <div className="library-asset-picker__state">{t("freeCanvasEditor:noModelImages")}</div> : null}
             {(picker.modelChoicesQuery.data?.images || []).map((image) => {
-              const src = image.asset_url ? cacheBustedLibraryAssetUrl(image.asset_url, image.created_at || image.asset_id || image.id) : "";
+              const src = image.asset_url ? cacheBustedLibraryAssetUrl(image.thumbnail_url || image.asset_url, image.created_at || image.asset_id || image.id) : "";
               return (
                 <button
                   key={image.id}

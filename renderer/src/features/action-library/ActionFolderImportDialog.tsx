@@ -5,6 +5,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { LibrarySearchInput } from "../library-layout/LibrarySearchInput";
 import { normalizeLibraryTagColor } from "../library-tags";
+import { createLibraryAssetThumbnailDataUrl } from "../resource-library/createLibraryAssetUploadPayload";
 import { importActionEntries } from "./actionFolderImportApi";
 import type { ActionTag } from "./types";
 import type { ActionFolderImportPreview, ActionFolderImportResult, ActionFolderImportResultRow, ActionFolderImportRow, ActionFolderImportUploadEntry } from "./actionFolderImportTypes";
@@ -247,6 +248,13 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
           if (!preview.preview_id) throw new Error(t("actionLibrary:bulkImportNoPreview"));
           if (!window.forartActionImport?.readEntry) throw new Error("Action import bridge is unavailable.");
           const entryData = await window.forartActionImport.readEntry({ previewId: preview.preview_id, rowId: row.id });
+          const thumbnailDataUrl = row.thumbnail_url
+            ? await createLibraryAssetThumbnailDataUrl({
+                url: row.thumbnail_url,
+                name: entryData.filename || row.filename,
+                type: entryData.mime_type || "image/png",
+              })
+            : "";
           const entry: ActionFolderImportUploadEntry = {
             id: row.id,
             stem: row.stem,
@@ -258,6 +266,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
             prompt: entryData.prompt,
             tags: Array.from(rowTagSelections.get(row.id) || []),
             warnings: row.warnings,
+            ...(thumbnailDataUrl ? { thumbnail_data_url: thumbnailDataUrl } : {}),
           };
           const rowResult = await importActionEntries(projectId, [entry]);
           imported.push(...rowResult.imported);

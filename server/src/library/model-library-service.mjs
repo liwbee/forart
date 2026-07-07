@@ -7,6 +7,10 @@ import {
   nowIso,
   validateFileNamePart,
 } from "./library-runtime.mjs";
+import {
+  deleteLibraryAssetThumbnail,
+  saveUploadedLibraryAssetThumbnail,
+} from "./library-asset-thumbnails.mjs";
 
 function safePathPart(value, fallback) {
   const name = String(value || "").trim() || fallback;
@@ -91,11 +95,18 @@ export function createModelLibraryService(runtime, options = {}) {
   const labels = runtime.labels;
   const storageRoot = runtime.storageRoot;
   const localAssetUrl = typeof options.localAssetUrl === "function" ? options.localAssetUrl : null;
+  const localAssetThumbnailUrl = typeof options.localAssetThumbnailUrl === "function" ? options.localAssetThumbnailUrl : null;
 
   function assetUrl(assetId) {
     if (!assetId) return null;
     if (localAssetUrl) return localAssetUrl(assetId);
     return `/api/assets/${assetId}/file`;
+  }
+
+  function assetThumbnailUrl(assetId) {
+    if (!assetId) return null;
+    if (localAssetThumbnailUrl) return localAssetThumbnailUrl(assetId);
+    return `/api/assets/${assetId}/thumb`;
   }
 
   function assetRelativePath(value) {
@@ -198,6 +209,7 @@ export function createModelLibraryService(runtime, options = {}) {
       cover_image_id: cover?.id || null,
       cover_asset_id: cover?.asset_id || null,
       cover_url: assetUrl(cover?.asset_id || null),
+      cover_thumbnail_url: assetThumbnailUrl(cover?.asset_id || null),
     };
   }
 
@@ -205,6 +217,7 @@ export function createModelLibraryService(runtime, options = {}) {
     return {
       ...project,
       cover_url: assetUrl(project.cover_asset_id || null),
+      cover_thumbnail_url: assetThumbnailUrl(project.cover_asset_id || null),
     };
   }
 
@@ -381,6 +394,7 @@ export function createModelLibraryService(runtime, options = {}) {
     try {
       return runDbTransaction(db, () => {
         asset = writeAsset(content, mimeType, originalFilename, options);
+        if (options?.thumbnailDataUrl) saveUploadedLibraryAssetThumbnail(runtime, asset.id, options.thumbnailDataUrl);
         return work(asset);
       });
     } catch (error) {
@@ -388,6 +402,7 @@ export function createModelLibraryService(runtime, options = {}) {
         try {
           unlinkSync(assetAbsolutePath(asset.path));
         } catch {}
+        deleteLibraryAssetThumbnail(runtime, asset.id);
       }
       throw error;
     }
@@ -414,6 +429,7 @@ export function createModelLibraryService(runtime, options = {}) {
         unlinkSync(assetAbsolutePath(asset.path));
       } catch {}
     }
+    deleteLibraryAssetThumbnail(runtime, assetId);
     db.prepare("DELETE FROM assets WHERE id = ?").run(assetId);
   }
 
@@ -498,6 +514,7 @@ export function createModelLibraryService(runtime, options = {}) {
       source: "model-project-cover",
       subdir: relDir,
       filenameStem: "cover",
+      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("UPDATE model_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
       return projectWithCover(loadProject(projectId));
@@ -584,6 +601,7 @@ export function createModelLibraryService(runtime, options = {}) {
             subdir: relDir,
             filenameStem: `${modelName}_${String(index + 1).padStart(3, "0")}`,
           });
+          if (image?.thumbnail_data_url) saveUploadedLibraryAssetThumbnail(runtime, asset.id, image.thumbnail_data_url);
           writtenAssets.push(asset);
           const imageId = newId("image");
           db.prepare("INSERT INTO model_images (id, model_id, asset_id, caption, sort_order, created_at, mime_type, filename) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
@@ -605,6 +623,7 @@ export function createModelLibraryService(runtime, options = {}) {
           try {
             unlinkSync(assetAbsolutePath(asset.path));
           } catch {}
+          deleteLibraryAssetThumbnail(runtime, asset.id);
         }
       }
       throw error;
@@ -779,7 +798,11 @@ export function createModelLibraryService(runtime, options = {}) {
       ORDER BY mi.sort_order ASC, mi.created_at ASC
       `
     ).all(modelId).map((image) => ({ ...image, asset_url: image.asset_id ? assetUrl(image.asset_id) : null }));
-    return { images };
+    const imagesWithThumbnails = images.map((image) => ({
+      ...image,
+      thumbnail_url: image.asset_id ? assetThumbnailUrl(image.asset_id) : null,
+    }));
+    return { images: imagesWithThumbnails };
   }
 
   function addImage(modelId, payload = {}) {
@@ -798,6 +821,7 @@ export function createModelLibraryService(runtime, options = {}) {
         model_id: modelId,
         asset_id: asset.id,
         asset_url: assetUrl(asset.id),
+        thumbnail_url: assetThumbnailUrl(asset.id),
         caption: String(payload.caption || ""),
         sort_order: sortOrder,
         created_at: timestamp,
@@ -823,6 +847,7 @@ export function createModelLibraryService(runtime, options = {}) {
       source: "model-library",
       subdir: relDir,
       filenameStem: `${modelName}_${String(Number(sortOrder) + 1).padStart(3, "0")}`,
+      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("INSERT INTO model_images (id, model_id, asset_id, caption, sort_order, created_at, mime_type, filename) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
         .run(imageId, modelId, asset.id, "", Number(sortOrder), timestamp, asset.mime_type, asset.filename);
@@ -833,6 +858,7 @@ export function createModelLibraryService(runtime, options = {}) {
           model_id: modelId,
           asset_id: asset.id,
           asset_url: assetUrl(asset.id),
+          thumbnail_url: assetThumbnailUrl(asset.id),
           caption: "",
           sort_order: Number(sortOrder),
           created_at: timestamp,

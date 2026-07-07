@@ -13,6 +13,11 @@ import { createActionFolderImportService } from "./src/library/action-folder-imp
 import { createActionLibraryService } from "./src/library/action-library-service.mjs";
 import { createModelLibraryService } from "./src/library/model-library-service.mjs";
 import { createOutfitLibraryService } from "./src/library/outfit-library-service.mjs";
+import {
+  deleteLibraryAssetThumbnail,
+  ensureLibraryAssetThumbnail,
+  saveUploadedLibraryAssetThumbnail,
+} from "./src/library/library-asset-thumbnails.mjs";
 
 const SERVER_PORT = Number(process.env.PORT || 6980);
 const SERVER_HOST = process.env.HOST || "0.0.0.0";
@@ -506,6 +511,8 @@ function actionImportRuntime() {
     db,
     labels: LIBRARY_LABELS,
     storageRoot: STORAGE_ROOT,
+    databaseDir: DATABASE_DIR,
+    databasePath: DATABASE_PATH,
   };
 }
 
@@ -529,6 +536,10 @@ function getModelLibraryService() {
 
 function assetUrl(assetId) {
   return assetId ? `/api/assets/${assetId}/file` : null;
+}
+
+function assetThumbnailUrl(assetId) {
+  return assetId ? `/api/assets/${assetId}/thumb` : null;
 }
 
 function loadProject(projectId) {
@@ -830,6 +841,7 @@ function modelWithCoverAndTags(model) {
     cover_image_id: cover?.id || null,
     cover_asset_id: cover?.asset_id || null,
     cover_url: assetUrl(cover?.asset_id || null),
+    cover_thumbnail_url: assetThumbnailUrl(cover?.asset_id || null),
   };
 }
 
@@ -838,6 +850,7 @@ function outfitWithAssetAndTags(outfit) {
     ...outfit,
     tags: tagsForOutfit(outfit.id),
     asset_url: assetUrl(outfit.asset_id || null),
+    thumbnail_url: assetThumbnailUrl(outfit.asset_id || null),
   };
 }
 
@@ -846,6 +859,7 @@ function actionWithAssetAndTags(action) {
     ...action,
     tags: tagsForAction(action.id),
     asset_url: assetUrl(action.asset_id || null),
+    thumbnail_url: assetThumbnailUrl(action.asset_id || null),
   };
 }
 
@@ -853,6 +867,7 @@ function projectWithCover(project) {
   return {
     ...project,
     cover_url: assetUrl(project.cover_asset_id || null),
+    cover_thumbnail_url: assetThumbnailUrl(project.cover_asset_id || null),
   };
 }
 
@@ -1183,6 +1198,7 @@ function writeAssetInTransaction(content, mimeType, originalFilename, options, w
   try {
     return runDbTransaction(() => {
       asset = writeAsset(content, mimeType, originalFilename, options);
+      if (options?.thumbnailDataUrl) saveUploadedLibraryAssetThumbnail(actionImportRuntime(), asset.id, options.thumbnailDataUrl);
       return work(asset);
     });
   } catch (error) {
@@ -1190,6 +1206,7 @@ function writeAssetInTransaction(content, mimeType, originalFilename, options, w
       try {
         unlinkSync(assetAbsolutePath(asset.path));
       } catch {}
+      deleteLibraryAssetThumbnail(actionImportRuntime(), asset.id);
     }
     throw error;
   }
@@ -1216,6 +1233,7 @@ function removeAssetIfUnused(assetId) {
       unlinkSync(assetAbsolutePath(asset.path));
     } catch {}
   }
+  deleteLibraryAssetThumbnail(actionImportRuntime(), assetId);
   db.prepare("DELETE FROM assets WHERE id = ?").run(assetId);
 }
 
@@ -1358,6 +1376,7 @@ function handleModelLibraryApi(req, res, url) {
               source: "outfit-project-cover",
               subdir: relDir,
               filenameStem: "cover",
+              thumbnailDataUrl: payload?.thumbnail_data_url,
             },
             (asset) => {
               db.prepare("UPDATE outfit_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
@@ -1456,6 +1475,7 @@ function handleModelLibraryApi(req, res, url) {
               source: "outfit-library",
               subdir: relDir,
               filenameStem: outfit.name || DEFAULT_OUTFIT_NAME,
+              thumbnailDataUrl: payload?.thumbnail_data_url,
             },
             (asset) => {
               db.prepare("UPDATE outfit_entries SET asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, timestamp, outfitId);
@@ -1576,6 +1596,7 @@ function handleModelLibraryApi(req, res, url) {
               source: "action-project-cover",
               subdir: relDir,
               filenameStem: "cover",
+              thumbnailDataUrl: payload?.thumbnail_data_url,
             },
             (asset) => {
               db.prepare("UPDATE action_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
@@ -1690,6 +1711,7 @@ function handleModelLibraryApi(req, res, url) {
               source: "action-library",
               subdir: relDir,
               filenameStem: action.name || DEFAULT_ACTION_NAME,
+              thumbnailDataUrl: payload?.thumbnail_data_url,
             },
             (asset) => {
               db.prepare("UPDATE action_entries SET asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, timestamp, actionId);
@@ -1832,6 +1854,7 @@ function handleModelLibraryApi(req, res, url) {
               source: "model-project-cover",
               subdir: relDir,
               filenameStem: "cover",
+              thumbnailDataUrl: payload?.thumbnail_data_url,
             },
             (asset) => {
               db.prepare("UPDATE model_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
@@ -1959,6 +1982,7 @@ function handleModelLibraryApi(req, res, url) {
       ).all(modelId).map((image) => ({
         ...image,
         asset_url: image.asset_id ? assetUrl(image.asset_id) : null,
+        thumbnail_url: image.asset_id ? assetThumbnailUrl(image.asset_id) : null,
       }));
       sendJson(res, 200, { images });
       return true;
@@ -1982,6 +2006,7 @@ function handleModelLibraryApi(req, res, url) {
               model_id: modelId,
               asset_id: asset.id,
               asset_url: assetUrl(asset.id),
+              thumbnail_url: assetThumbnailUrl(asset.id),
               caption: String(payload?.caption || ""),
               sort_order: sortOrder,
               created_at: timestamp,
@@ -2016,6 +2041,7 @@ function handleModelLibraryApi(req, res, url) {
               source: "model-library",
               subdir: relDir,
               filenameStem: `${modelName}_${String(Number(sortOrder) + 1).padStart(3, "0")}`,
+              thumbnailDataUrl: payload?.thumbnail_data_url,
             },
             (asset) => {
               db.prepare(
@@ -2028,6 +2054,7 @@ function handleModelLibraryApi(req, res, url) {
                   model_id: modelId,
                   asset_id: asset.id,
                   asset_url: assetUrl(asset.id),
+                  thumbnail_url: assetThumbnailUrl(asset.id),
                   caption: "",
                   sort_order: Number(sortOrder),
                   created_at: timestamp,
@@ -2092,6 +2119,48 @@ function handleModelLibraryApi(req, res, url) {
     } catch (error) {
       sendText(res, 404, error instanceof Error ? error.message : String(error));
     }
+    return true;
+  }
+
+  const assetThumbMatch = pathname.match(/^\/api\/assets\/([^/]+)\/thumb$/);
+  if (assetThumbMatch && (method === "GET" || method === "HEAD")) {
+    const assetId = decodeURIComponent(assetThumbMatch[1]);
+    const asset = loadAsset(assetId);
+    if (!asset) {
+      sendText(res, 404, "Asset not found");
+      return true;
+    }
+    const sourcePath = assetAbsolutePath(asset.path);
+    ensureLibraryAssetThumbnail(actionImportRuntime(), asset, sourcePath)
+      .then((thumbnail) => {
+        const filePath = thumbnail?.filePath && existsSync(thumbnail.filePath) ? thumbnail.filePath : sourcePath;
+        const contentType = thumbnail?.filePath && existsSync(thumbnail.filePath)
+          ? "image/webp"
+          : asset.mime_type || "application/octet-stream";
+        try {
+          const data = readFileSync(filePath);
+          res.writeHead(200, withCorsHeaders({
+            "content-type": contentType,
+            "content-disposition": `inline; filename="${encodeURIComponent(path.basename(filePath))}"`,
+          }));
+          res.end(method === "HEAD" ? undefined : data);
+        } catch (error) {
+          sendText(res, 404, error instanceof Error ? error.message : String(error));
+        }
+      })
+      .catch((error) => {
+        console.warn(`[library-thumbnail] Failed to serve thumbnail for ${assetId}: ${error instanceof Error ? error.message : String(error)}`);
+        try {
+          const data = readFileSync(sourcePath);
+          res.writeHead(200, withCorsHeaders({
+            "content-type": asset.mime_type || "application/octet-stream",
+            "content-disposition": `inline; filename="${encodeURIComponent(asset.filename)}"`,
+          }));
+          res.end(method === "HEAD" ? undefined : data);
+        } catch (readError) {
+          sendText(res, 404, readError instanceof Error ? readError.message : String(readError));
+        }
+      });
     return true;
   }
 

@@ -17,6 +17,7 @@ export interface LibraryAssetItem {
   tags: string[];
   assetId?: string | null;
   url: string;
+  thumbnailUrl?: string;
   updatedAt?: string;
   kind: LibraryAssetKind;
   needsChoices?: boolean;

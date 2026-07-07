@@ -15,6 +15,7 @@ import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library
 import { LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
 import { LibraryTagManagerDialog } from "../library-tags/LibraryTagManagerDialog";
 import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
+import { createLibraryAssetUploadPayload } from "../resource-library/createLibraryAssetUploadPayload";
 import {
   bulkOutfitEntries,
   createOutfitProject,
@@ -33,7 +34,7 @@ import {
   updateOutfitTag,
 } from "./api";
 import { useOutfitLibraryStore } from "./outfitLibraryStore";
-import { AssetUploadPayload, OutfitEntry, OutfitProject, OutfitTag } from "./types";
+import { OutfitEntry, OutfitProject, OutfitTag } from "./types";
 import { normalizeTags, toggleTag } from "../library-tags/tagUtils";
 import { EMPTY_LIBRARY_TAG_FILTER, applySameColorSingleIncludeFilter, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, createLibraryTagsByName, hasLibraryTagFilter, normalizeLibraryTagColor, toggleLibraryTagFilterInclude, useLibraryTagSettingsStore, type LibraryTagColor, type LibraryTagFilter, type LibraryTagNameColorLike } from "../library-tags";
 
@@ -41,23 +42,6 @@ function getRequestError(errors: unknown[]) {
   const first = errors.find(Boolean);
   if (!first) return "";
   return first instanceof Error ? first.message : String(first);
-}
-
-function fileToUploadPayload(file: File): Promise<AssetUploadPayload> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.onload = () => {
-      const result = String(reader.result || "");
-      const base64 = result.includes(",") ? result.split(",")[1] || "" : "";
-      resolve({
-        filename: file.name,
-        mime_type: file.type || "image/png",
-        data: base64,
-      });
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 function OutfitToolbar({
@@ -171,6 +155,7 @@ function OutfitCard({
   const [tagMenuState, setTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
   const [viewerOpen, setViewerOpen] = useState(false);
   const assetUrl = cacheBustedLibraryImageUrl(outfit.asset_url || "", outfit.asset_id);
+  const displayUrl = cacheBustedLibraryImageUrl(outfit.thumbnail_url || outfit.asset_url || "", outfit.asset_id);
   const imageAlt = outfit.name || t("outfitLibrary:outfitImage");
 
   useEffect(() => {
@@ -286,8 +271,8 @@ function OutfitCard({
           }
         }}
       >
-        {assetUrl ? (
-          <LazyImage src={assetUrl} alt={imageAlt} draggable={false} onDragStart={(event) => event.preventDefault()} />
+        {displayUrl ? (
+          <LazyImage src={displayUrl} alt={imageAlt} draggable={false} onDragStart={(event) => event.preventDefault()} />
         ) : (
           <div className="placeholder">{t("common:empty.noImage")}</div>
         )}
@@ -583,7 +568,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const createOutfitMutation = useMutation({
     mutationFn: async (file: File) => {
       if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
-      const payload = await fileToUploadPayload(file);
+      const payload = await createLibraryAssetUploadPayload(file);
       const result = await importOutfitEntries(activeProjectId, [{
         filename: payload.filename,
         relative_path: payload.filename,
