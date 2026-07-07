@@ -481,6 +481,25 @@
   box-shadow: inset 0 0 0 1px var(--danger) !important;
 }
 
+.library-tag-choice--empty,
+.library-tag-filter-menu__tag--empty {
+  border-color: color-mix(in srgb, var(--border-subtle) 74%, transparent) !important;
+  background: color-mix(in srgb, var(--surface-control) 70%, transparent) !important;
+  color: var(--text-muted) !important;
+  opacity: 0.52;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+}
+
+.library-tag-choice--empty:hover,
+.library-tag-choice--empty:focus-visible,
+.library-tag-filter-menu__tag--empty:hover,
+.library-tag-filter-menu__tag--empty:focus-visible {
+  border-color: color-mix(in srgb, var(--border-subtle) 74%, transparent) !important;
+  background: color-mix(in srgb, var(--surface-control) 70%, transparent) !important;
+  color: var(--text-muted) !important;
+}
+
 .library-tag-choice--exclude > span:first-child,
 .library-tag-filter-menu__tag--exclude > span:first-child,
 .outfit-tag-menu button.excluded,
@@ -535,6 +554,12 @@
 .library-tag-filter-menu__exclude:hover,
 .library-tag-filter-menu__exclude:focus-visible {
   outline: 0;
+}
+
+.library-tag-choice--empty .library-tag-choice__exclude,
+.library-tag-filter-menu__tag--empty .library-tag-filter-menu__exclude {
+  cursor: not-allowed;
+  opacity: 0.38;
 }
 
 .tag-create-row {

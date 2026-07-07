@@ -7,6 +7,7 @@ import { getGroupBounds, WORLD_CENTER } from "../canvasGeometry";
 import type { CanvasGroup } from "../types";
 
 interface GroupLayerProps {
+  visibleGroupIds?: readonly string[];
   editingGroupId: string;
   onEditingGroupChange: (groupId: string) => void;
   onPatchGroup: (groupId: string, patch: Partial<CanvasGroup>) => void;
@@ -122,7 +123,8 @@ const GroupItem = memo(function GroupItem({
 });
 
 export const GroupLayer = memo(function GroupLayer(props: GroupLayerProps) {
-  const groupIds = useCanvasStore((state) => state.groupIds);
+  const storeGroupIds = useCanvasStore((state) => state.groupIds);
+  const groupIds = props.visibleGroupIds || storeGroupIds;
   return (
     <>
       {groupIds.map((groupId) => (

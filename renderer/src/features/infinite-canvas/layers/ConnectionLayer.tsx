@@ -11,6 +11,7 @@ export interface LinkDraftView {
 }
 
 interface ConnectionLayerProps {
+  visibleConnectionIds?: readonly string[];
   showConnections: boolean;
   linkDraft: LinkDraftView | null;
   selectConnectionLabel: string;
@@ -82,6 +83,7 @@ const ConnectionItem = memo(function ConnectionItem({
 });
 
 export const ConnectionLayer = memo(function ConnectionLayer({
+  visibleConnectionIds,
   showConnections,
   linkDraft,
   selectConnectionLabel,
@@ -89,7 +91,8 @@ export const ConnectionLayer = memo(function ConnectionLayer({
   onFocusConnection,
   onMoveSelectedConnection,
 }: ConnectionLayerProps) {
-  const connectionIds = useCanvasStore((state) => state.connectionIds);
+  const storeConnectionIds = useCanvasStore((state) => state.connectionIds);
+  const connectionIds = visibleConnectionIds || storeConnectionIds;
   const draftFrom = useCanvasStore((state) => (linkDraft ? state.nodeLookup.get(linkDraft.from) : undefined));
 
   return (

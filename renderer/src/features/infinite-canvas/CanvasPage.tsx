@@ -67,6 +67,9 @@ const GROUP_PADDING = 32;
 const EMPTY_GROUP_DEFAULT_WIDTH = 360;
 const EMPTY_GROUP_DEFAULT_HEIGHT = 240;
 const CANVAS_LIBRARY_PICKER_TARGET = "__canvas__";
+const VIEWPORT_CULLING_MIN_BUFFER = 400;
+const VIEWPORT_CULLING_MAX_BUFFER = 1600;
+const VIEWPORT_CULLING_SCREEN_BUFFER = 800;
 const LOCAL_CONTEXT_MENU_NODE_TYPES = ["imageGenerator", "imageLoader", "actionFission", "llm", "prompt"] as const satisfies readonly CanvasNodeType[];
 
 interface DragState {
@@ -199,6 +202,61 @@ function getNodesBounds(nodes: CanvasNode[]): BoundsRect | null {
     width: Math.max(1, maxX - minX),
     height: Math.max(1, maxY - minY),
   };
+}
+
+function getNodeRenderBounds(node: CanvasNode): BoundsRect {
+  const width = node.type === "actionFission" ? Math.max(ACTION_FISSION_NODE_MIN_WIDTH, node.w) : node.w;
+  const height = node.type === "actionFission" ? Math.max(ACTION_FISSION_NODE_MIN_HEIGHT, node.h) : node.h;
+  return { x: node.x, y: node.y, width, height };
+}
+
+function expandBounds(bounds: BoundsRect, padding: number): BoundsRect {
+  return {
+    x: bounds.x - padding,
+    y: bounds.y - padding,
+    width: bounds.width + padding * 2,
+    height: bounds.height + padding * 2,
+  };
+}
+
+function boundsIntersect(a: BoundsRect, b: BoundsRect) {
+  return Math.max(a.x, b.x) < Math.min(a.x + a.width, b.x + b.width)
+    && Math.max(a.y, b.y) < Math.min(a.y + a.height, b.y + b.height);
+}
+
+function getBoundsUnion(a: BoundsRect, b: BoundsRect): BoundsRect {
+  const minX = Math.min(a.x, b.x);
+  const minY = Math.min(a.y, b.y);
+  const maxX = Math.max(a.x + a.width, b.x + b.width);
+  const maxY = Math.max(a.y + a.height, b.y + b.height);
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+  };
+}
+
+function getViewportWorldBounds(stageSize: { width: number; height: number }, viewport: Viewport): BoundsRect {
+  return {
+    x: (-stageSize.width / 2 - viewport.x) / viewport.scale,
+    y: (-stageSize.height / 2 - viewport.y) / viewport.scale,
+    width: Math.max(1, stageSize.width / viewport.scale),
+    height: Math.max(1, stageSize.height / viewport.scale),
+  };
+}
+
+function getViewportCullingBounds(stageSize: { width: number; height: number }, viewport: Viewport): BoundsRect {
+  const worldBounds = getViewportWorldBounds(stageSize, viewport);
+  const buffer = clamp(VIEWPORT_CULLING_SCREEN_BUFFER / viewport.scale, VIEWPORT_CULLING_MIN_BUFFER, VIEWPORT_CULLING_MAX_BUFFER);
+  return expandBounds(worldBounds, buffer);
+}
+
+function isNodeActivityVisible(node: CanvasNode) {
+  if (node.running || node.generationTask) return true;
+  if (node.libtvImageGeneration?.running) return true;
+  if (node.type === "actionFission" && node.actionFission?.rows.some((row) => row.libtvQueued || row.libtvRunning || row.generationTask)) return true;
+  return false;
 }
 
 function pointInBounds(point: { x: number; y: number }, bounds: BoundsRect) {
@@ -338,6 +396,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   const selectedIds = useCanvasUiStore((state) => state.selectedIds);
   const selectedGroupId = useCanvasUiStore((state) => state.selectedGroupId);
   const selectedConnectionId = useCanvasUiStore((state) => state.selectedConnectionId);
+  const hoveredId = useCanvasUiStore((state) => state.hoveredId);
   const setSelectedIds = useCanvasUiStore((state) => state.setSelectedIds);
   const setSelectedGroupId = useCanvasUiStore((state) => state.setSelectedGroupId);
   const setSelectedConnectionId = useCanvasUiStore((state) => state.setSelectedConnectionId);
@@ -2145,6 +2204,45 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   const runLibtvImageGeneratorStable = useStableEvent((nodeId: string) => void runLibtvImageGenerator(nodeId));
   const stopLibtvImageGeneratorStable = useStableEvent(stopLibtvImageGenerator);
 
+  const cullingBounds = useMemo(() => getViewportCullingBounds(stageSize, viewport), [stageSize.height, stageSize.width, viewport]);
+  const visibleNodeIds = useMemo(() => {
+    if (!stageSize.width || !stageSize.height) return nodes.map((node) => node.id);
+    const forcedIds = new Set<string>(selectedIds);
+    if (hoveredId) forcedIds.add(hoveredId);
+    if (editingPromptId) forcedIds.add(editingPromptId);
+    if (imageCrop?.nodeId) forcedIds.add(imageCrop.nodeId);
+    if (libraryPickerNodeId && libraryPickerNodeId !== CANVAS_LIBRARY_PICKER_TARGET) forcedIds.add(libraryPickerNodeId);
+    if (linkDraft?.from) forcedIds.add(linkDraft.from);
+    if (dragRef.current) dragRef.current.nodes.forEach((node) => forcedIds.add(node.id));
+    if (groupDragRef.current) groupDragRef.current.nodes.forEach((node) => forcedIds.add(node.id));
+    if (resizeRef.current?.nodeId) forcedIds.add(resizeRef.current.nodeId);
+
+    return nodes.flatMap((node) => {
+      if (forcedIds.has(node.id) || isNodeActivityVisible(node)) return [node.id];
+      return boundsIntersect(getNodeRenderBounds(node), cullingBounds) ? [node.id] : [];
+    });
+  }, [cullingBounds, editingPromptId, hoveredId, imageCrop?.nodeId, libraryPickerNodeId, linkDraft?.from, nodes, selectedIds, stageSize.height, stageSize.width]);
+  const visibleNodeIdSet = useMemo(() => new Set(visibleNodeIds), [visibleNodeIds]);
+  const visibleConnectionIds = useMemo(() => {
+    if (!stageSize.width || !stageSize.height) return connections.map((connection) => connection.id);
+    return connections.flatMap((connection) => {
+      const from = nodeMap.get(connection.from);
+      const to = nodeMap.get(connection.to);
+      if (!from || !to) return [];
+      if (connection.id === selectedConnectionId || connection.from === linkDraft?.from || connection.to === linkDraft?.from) return [connection.id];
+      const edgeBounds = getBoundsUnion(getNodeRenderBounds(from), getNodeRenderBounds(to));
+      return boundsIntersect(edgeBounds, cullingBounds) ? [connection.id] : [];
+    });
+  }, [connections, cullingBounds, linkDraft?.from, nodeMap, selectedConnectionId, stageSize.height, stageSize.width]);
+  const visibleGroupIds = useMemo(() => {
+    if (!stageSize.width || !stageSize.height) return groups.map((group) => group.id);
+    return groups.flatMap((group) => {
+      if (group.id === selectedGroupId || group.nodeIds.some((nodeId) => visibleNodeIdSet.has(nodeId) || selectedIds.has(nodeId))) return [group.id];
+      const bounds = getGroupBounds(group);
+      return bounds && boundsIntersect(bounds, cullingBounds) ? [group.id] : [];
+    });
+  }, [cullingBounds, groups, selectedGroupId, selectedIds, stageSize.height, stageSize.width, visibleNodeIdSet]);
+
   const nodeBodyActions = useMemo<CanvasNodeBodyActions>(() => ({
     openSelectChange: setOpenImageComposerSelect,
     setFileInputRef: setNodeFileInputRefStable,
@@ -2658,6 +2756,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
           }}
         >
           <ConnectionLayer
+            visibleConnectionIds={visibleConnectionIds}
             showConnections={showConnections}
             linkDraft={linkDraft}
             selectConnectionLabel={t("infiniteCanvas:selectConnection")}
@@ -2666,6 +2765,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             onMoveSelectedConnection={updateConnectionAction}
           />
           <GroupLayer
+            visibleGroupIds={visibleGroupIds}
             editingGroupId={editingGroupId}
             onEditingGroupChange={setEditingGroupId}
             onPatchGroup={patchGroup}
@@ -2679,6 +2779,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             isVisible={Boolean(selectionGroupBounds && selectedIds.size >= 2 && !imageCrop)}
           />
           <NodeLayer
+            visibleNodeIds={visibleNodeIds}
             imageCropNodeId={imageCrop?.nodeId || ""}
             imageCropRect={imageCrop?.rect || null}
             downloadNodeId={downloadStatus?.nodeId || ""}

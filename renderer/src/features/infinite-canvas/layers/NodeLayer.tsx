@@ -18,6 +18,7 @@ export interface NodeBodyRenderState {
 }
 
 interface NodeLayerProps {
+  visibleNodeIds?: readonly string[];
   imageCropNodeId: string;
   imageCropRect: CropRect | null;
   downloadNodeId: string;
@@ -141,6 +142,7 @@ const CanvasNodeItem = memo(function CanvasNodeItem({
 });
 
 export const NodeLayer = memo(function NodeLayer({
+  visibleNodeIds,
   imageCropNodeId,
   imageCropRect,
   downloadNodeId,
@@ -160,7 +162,8 @@ export const NodeLayer = memo(function NodeLayer({
   isNodeRunning,
   t,
 }: NodeLayerProps) {
-  const nodeIds = useCanvasStore((state) => state.nodeIds);
+  const storeNodeIds = useCanvasStore((state) => state.nodeIds);
+  const nodeIds = visibleNodeIds || storeNodeIds;
   return (
     <>
       {nodeIds.map((nodeId) => (

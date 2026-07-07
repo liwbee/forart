@@ -171,16 +171,20 @@ export function ActionFissionSelectorDialog({ row, projects, onClose, onApply }:
             <div className="ic-action-fission-dialog__tag-grid scrollbar-thin-stable">
               {projectId && tags.length ? tags.map((tag) => {
                 const mode = modeForTag(tag.id, includeTagIds, excludeTagIds);
+                const count = tagCounts[tag.id] || 0;
+                const disabled = count <= 0 && mode === "any";
                 return (
                   <div
                     key={tag.id}
-                    className={`ic-action-fission-dialog__tag is-${mode}`}
+                    className={`ic-action-fission-dialog__tag is-${mode}${disabled ? " is-empty" : ""}`}
                   >
                     <span className={`ic-action-fission-dialog__tag-color library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
                     <button
                       type="button"
                       className="ic-action-fission-dialog__tag-main"
                       aria-pressed={mode === "include"}
+                      aria-disabled={disabled || undefined}
+                      disabled={disabled}
                       onClick={() => toggleIncludeTag(tag.id)}
                     >
                       <span className="ic-action-fission-dialog__tag-name">{tag.name}</span>
@@ -188,13 +192,15 @@ export function ActionFissionSelectorDialog({ row, projects, onClose, onApply }:
                         <span>{modeLabel(mode)}</span>
                       </span>
                     </button>
-                    <span className="ic-action-fission-dialog__tag-count">{tagCounts[tag.id] || 0}</span>
+                    <span className="ic-action-fission-dialog__tag-count">{count}</span>
                     <button
                       type="button"
                       className="ic-action-fission-dialog__tag-exclude"
                       aria-pressed={mode === "exclude"}
+                      aria-disabled={disabled || undefined}
                       aria-label={`排除 ${tag.name}`}
                       title={`排除 ${tag.name}`}
+                      disabled={disabled}
                       onClick={() => toggleExcludeTag(tag.id)}
                     >
                       <Ban size={12} aria-hidden="true" />

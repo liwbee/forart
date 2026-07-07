@@ -27,7 +27,7 @@ function joinClassNames(...classNames: Array<string | false | undefined>) {
   return classNames.filter(Boolean).join(" ");
 }
 
-export function LibraryTagFilterButton({ tags, tagFilter, tagCounts = {}, allLabel, ariaLabel, onChange, className, active, menuContentBefore, sameColorSingleFilter = false }: LibraryTagFilterButtonProps) {
+export function LibraryTagFilterButton({ tags, tagFilter, tagCounts, allLabel, ariaLabel, onChange, className, active, menuContentBefore, sameColorSingleFilter = false }: LibraryTagFilterButtonProps) {
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState({ left: 0, top: 0, width: 320, maxHeight: 280 });
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -119,35 +119,43 @@ export function LibraryTagFilterButton({ tags, tagFilter, tagCounts = {}, allLab
       {tags.map((tag) => {
         const included = includeTagSet.has(tag.id);
         const excluded = excludeTagSet.has(tag.id);
+        const selected = included || excluded;
+        const count = tagCounts?.[tag.id] || 0;
+        const disabled = tagCounts !== undefined && count <= 0 && !selected;
         return (
           <button
             key={tag.id}
             type="button"
             role="menuitemcheckbox"
-            aria-checked={included || excluded}
-            className={`library-tag-filter-menu__tag${included ? " library-tag-filter-menu__tag--include" : ""}${excluded ? " library-tag-filter-menu__tag--exclude" : ""}`}
+            aria-checked={selected}
+            aria-disabled={disabled || undefined}
+            className={`library-tag-filter-menu__tag${included ? " library-tag-filter-menu__tag--include" : ""}${excluded ? " library-tag-filter-menu__tag--exclude" : ""}${disabled ? " library-tag-filter-menu__tag--empty" : ""}`}
+            disabled={disabled}
             onClick={() => {
               toggleIncludeTag(tag.id);
             }}
           >
             <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
             <span>{tag.name}</span>
-            <span className="library-tag-filter-menu__count">{tagCounts[tag.id] || 0}</span>
+            <span className="library-tag-filter-menu__count">{count}</span>
             <span
               role="button"
-              tabIndex={0}
+              tabIndex={disabled ? -1 : 0}
               className="library-tag-filter-menu__exclude"
               aria-label={`排除 ${tag.name}`}
+              aria-disabled={disabled || undefined}
               title={`排除 ${tag.name}`}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
+                if (disabled) return;
                 toggleExcludeTag(tag.id);
               }}
               onKeyDown={(event) => {
                 if (event.key !== "Enter" && event.key !== " ") return;
                 event.preventDefault();
                 event.stopPropagation();
+                if (disabled) return;
                 toggleExcludeTag(tag.id);
               }}
             >

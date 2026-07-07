@@ -966,6 +966,14 @@
   box-shadow: inset 0 0 0 1px var(--danger);
 }
 
+.ic-action-fission-dialog__tag.is-empty {
+  border-color: color-mix(in srgb, var(--border-subtle) 74%, transparent);
+  background: color-mix(in srgb, var(--surface-control) 70%, transparent);
+  color: var(--text-muted);
+  opacity: 0.52;
+  box-shadow: none;
+}
+
 .ic-action-fission-dialog__tag.is-exclude .ic-action-fission-dialog__tag-name,
 .ic-action-fission-dialog__tag.is-exclude .ic-action-fission-dialog__tag-meta {
   text-decoration-line: line-through;
@@ -1022,6 +1030,16 @@
   background: color-mix(in srgb, var(--danger) 12%, transparent);
   opacity: 1;
   outline: 0;
+}
+
+.ic-action-fission-dialog__tag.is-empty .ic-action-fission-dialog__tag-main,
+.ic-action-fission-dialog__tag.is-empty .ic-action-fission-dialog__tag-exclude {
+  cursor: not-allowed;
+}
+
+.ic-action-fission-dialog__tag.is-empty .ic-action-fission-dialog__tag-exclude {
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  opacity: 0.38;
 }
 
 .ic-action-fission-dialog__tag-name {

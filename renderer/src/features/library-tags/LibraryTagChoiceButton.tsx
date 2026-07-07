@@ -22,13 +22,18 @@ export function LibraryTagChoiceButton({
   onToggleExclude,
   role,
 }: LibraryTagChoiceButtonProps) {
+  const selected = included || excluded;
+  const disabled = count !== undefined && count <= 0 && !selected;
+
   return (
     <button
-      className={`library-tag-choice${included ? " library-tag-choice--include" : ""}${excluded ? " library-tag-choice--exclude" : ""}`}
+      className={`library-tag-choice${included ? " library-tag-choice--include" : ""}${excluded ? " library-tag-choice--exclude" : ""}${disabled ? " library-tag-choice--empty" : ""}`}
       type="button"
       role={role}
-      aria-pressed={role ? undefined : included || excluded}
-      aria-checked={role ? included || excluded : undefined}
+      aria-pressed={role ? undefined : selected}
+      aria-checked={role ? selected : undefined}
+      aria-disabled={disabled || undefined}
+      disabled={disabled}
       onClick={onToggleInclude}
     >
       <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(color)}`} aria-hidden="true" />
@@ -36,19 +41,22 @@ export function LibraryTagChoiceButton({
       {count !== undefined ? <span className="library-tag-choice__count">{count}</span> : null}
       <span
         role="button"
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
         className="library-tag-choice__exclude"
         aria-label={`排除 ${name}`}
+        aria-disabled={disabled || undefined}
         title={`排除 ${name}`}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
+          if (disabled) return;
           onToggleExclude();
         }}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
           event.stopPropagation();
+          if (disabled) return;
           onToggleExclude();
         }}
       >
