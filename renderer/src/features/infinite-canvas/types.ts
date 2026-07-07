@@ -12,6 +12,7 @@ export interface LibtvImageGenerationState {
   quality?: string;
   prompt?: string;
   running?: boolean;
+  startedAt?: number;
   status?: string;
   error?: string;
   latestRun?: {

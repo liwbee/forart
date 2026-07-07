@@ -65,12 +65,14 @@ export function useLibtvGenerationActions({
     abortControllersRef.current[nodeId] = abortController;
     const aspectRatio = normalizeAspectRatio(node.type === "imageGenerator" ? node.imageAspectRatio : state.aspectRatio);
     const quality = normalizeQuality(node.type === "imageGenerator" ? node.imageResolution?.toUpperCase() : state.quality);
+    const startedAt = Date.now();
     patchNode(nodeId, {
       libtvImageGeneration: {
         ...state,
         aspectRatio,
         quality,
         running: true,
+        startedAt,
         status: t("infiniteCanvas:libtvRunning"),
         error: "",
       },
@@ -118,6 +120,7 @@ export function useLibtvGenerationActions({
           projectUuid: result.projectUuid || state.projectUuid,
           projectName: result.projectName || state.projectName,
           running: false,
+          startedAt: undefined,
           status: "",
           error: "",
           latestRun: {
@@ -143,6 +146,7 @@ export function useLibtvGenerationActions({
           aspectRatio,
           quality,
           running: false,
+          startedAt: undefined,
           status: "",
           error: isAbort ? "" : error instanceof Error ? error.message : String(error),
         },
@@ -161,6 +165,7 @@ export function useLibtvGenerationActions({
       libtvImageGeneration: {
         ...node.libtvImageGeneration,
         running: false,
+        startedAt: undefined,
         status: "",
         error: "",
       },

@@ -1,5 +1,6 @@
 import { Check, Crosshair, Crop, Eye, Images, Layers, Map as MapIcon, Play, Ratio, Square, Trash2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
 import { PointerEvent, WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueries } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import { ImageViewer } from "../../lib/ImageViewer";
@@ -16,6 +17,7 @@ import { useLibtvGenerationActions } from "./libtv-generation/useLibtvGeneration
 import { useLibtvAvailability } from "./libtv-generation/useLibtvAvailability";
 import { LibraryAssetPickerRail } from "../library-asset-picker/LibraryAssetPickerRail";
 import type { LibraryAssetSelection } from "../library-asset-picker/types";
+import { actionLibraryKeys, listActions, listActionTags } from "../action-library/api";
 import type { ActionEntry, ActionTag } from "../action-library/types";
 import type { ImageGeneratorInputPreview } from "./composers/composerTypes";
 import { getImageGenerationReadiness } from "./core/imageGenerationReadiness";
@@ -47,6 +49,7 @@ import { stopLocalGenerationTasksForNode, stopLocalGenerationTasksForTarget } fr
 import { getGenerationTaskForNodeTarget, isGenerationTargetActiveFromNodes, isNodeGenerationActiveFromAnchor } from "./generation/nodeGenerationTaskAnchors";
 import { hasClipboardImage, hasDraggedImageFile, useCanvasMediaActions } from "./useCanvasMediaActions";
 import type { ActionFissionRow } from "./action-fission/actionFissionTypes";
+import { normalizeActionFissionState } from "./action-fission/actionFissionState";
 import { detectImageModelRuleId, getImageModelRule } from "../settings/imageModelRules";
 import { countDirectActionFissionImageConnections } from "./action-fission/actionFissionReferences";
 import { BASE_PUBLIC_REFERENCE_LIMIT } from "./action-fission/actionFissionTypes";
@@ -162,6 +165,20 @@ interface SelectionBox {
 interface CopiedCanvasSelection {
   nodes: CanvasNode[];
   connections: CanvasConnection[];
+}
+
+type ActionFissionPreviewMode = "result" | "action";
+
+interface ActionFissionPreviewState {
+  nodeId: string;
+  rowId: string;
+  mode: ActionFissionPreviewMode;
+}
+
+interface ActionFissionPreviewGalleryItem {
+  rowId: string;
+  src: string;
+  alt: string;
 }
 
 const CANVAS_NODES_CLIPBOARD_KIND = "forart.canvas.nodes";
@@ -330,6 +347,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   const setHoveredId = useCanvasUiStore((state) => state.setHoveredId);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
   const [linkDraft, setLinkDraft] = useState<LinkDraft | null>(null);
+  const linkDraftRef = useRef<LinkDraft | null>(null);
   const [cropAspectMenuOpen, setCropAspectMenuOpen] = useState(false);
   const [isMinimapOpen, setIsMinimapOpen] = useState(false);
   const [isZoomMenuOpen, setIsZoomMenuOpen] = useState(false);
@@ -345,7 +363,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   const [editingGroupId, setEditingGroupId] = useState("");
   const [openImageComposerSelect, setOpenImageComposerSelect] = useState("");
   const [libraryPickerNodeId, setLibraryPickerNodeId] = useState("");
-  const [actionFissionPreview, setActionFissionPreview] = useState<{ src: string; alt: string } | null>(null);
+  const [actionFissionPreview, setActionFissionPreview] = useState<ActionFissionPreviewState | null>(null);
 
   const scheduleFrame = useCallback(<T,>(slot: React.MutableRefObject<ScheduledFrame<T>>, value: T, apply: (value: T) => void) => {
     slot.current.value = value;
@@ -371,6 +389,19 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     slot.current.value = null;
     if (latest) apply(latest);
   }, []);
+
+  const applyLinkDraftFrame = useCallback((nextDraft: LinkDraft) => {
+    linkDraftRef.current = nextDraft;
+    setLinkDraft(nextDraft);
+  }, []);
+
+  const clearLinkDraft = useCallback((pointerId?: number) => {
+    const currentDraft = linkDraftRef.current;
+    if (typeof pointerId === "number" && currentDraft?.pointerId !== pointerId) return;
+    cancelScheduledFrame(linkDraftFrameRef);
+    linkDraftRef.current = null;
+    setLinkDraft(null);
+  }, [cancelScheduledFrame]);
 
   const applySelectionFrame = useCallback(({ box, selectedIds: nextIds }: { box: SelectionBox; selectedIds: Set<string> }) => {
     setSelectionBox(box);
@@ -553,7 +584,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setImagePreview(null);
     setImageCrop(null);
     setContextMenu(null);
-    setLinkDraft(null);
+    clearLinkDraft();
     setSelectionBox(null);
     setDraggedInputConnectionId("");
     setInputInsertIndex(null);
@@ -568,7 +599,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     resizeRef.current = null;
     groupResizeRef.current = null;
     dragHistoryRef.current = null;
-  }, []);
+  }, [clearLinkDraft]);
 
   const {
     activeProject,
@@ -832,6 +863,80 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
 
   const toolbarNode = imageCrop?.nodeId ? nodeMap.get(imageCrop.nodeId) || null : selectedId ? nodeMap.get(selectedId) || null : null;
   const previewNode = imagePreview ? nodeMap.get(imagePreview.nodeId) : null;
+  const actionFissionPreviewNode = actionFissionPreview ? nodeMap.get(actionFissionPreview.nodeId) || null : null;
+  const actionFissionPreviewState = actionFissionPreviewNode?.type === "actionFission"
+    ? normalizeActionFissionState(actionFissionPreviewNode.actionFission)
+    : null;
+  const actionFissionPreviewProjectIds = useMemo(
+    () => Array.from(new Set((actionFissionPreviewState?.rows || []).map((row) => row.actionProjectId).filter(Boolean))),
+    [actionFissionPreviewState?.rows],
+  );
+  const actionFissionPreviewLibraryQueries = useQueries({
+    queries: actionFissionPreviewProjectIds.flatMap((projectId) => [
+      {
+        queryKey: actionLibraryKeys.tags(projectId),
+        queryFn: () => listActionTags(projectId),
+        enabled: Boolean(actionFissionPreview),
+      },
+      {
+        queryKey: actionLibraryKeys.actions(projectId),
+        queryFn: () => listActions({ projectId }),
+        enabled: Boolean(actionFissionPreview),
+      },
+    ]),
+  });
+  const actionFissionPreviewLibraryData = useMemo(() => {
+    const tagsByProject = new Map<string, ActionTag[]>();
+    const actionsByProject = new Map<string, ActionEntry[]>();
+    const readyProjects = new Set<string>();
+    actionFissionPreviewProjectIds.forEach((projectId, index) => {
+      const tagsQuery = actionFissionPreviewLibraryQueries[index * 2];
+      const actionsQuery = actionFissionPreviewLibraryQueries[index * 2 + 1];
+      const tagsData = tagsQuery?.data as { tags: ActionTag[] } | undefined;
+      const actionsData = actionsQuery?.data as { actions: ActionEntry[] } | undefined;
+      if (tagsData && actionsData) readyProjects.add(projectId);
+      tagsByProject.set(projectId, tagsData?.tags || []);
+      actionsByProject.set(projectId, actionsData?.actions || []);
+    });
+    return { actionsByProject, readyProjects, tagsByProject };
+  }, [actionFissionPreviewLibraryQueries, actionFissionPreviewProjectIds]);
+  const actionFissionPreviewGallery = useMemo(() => {
+    if (!actionFissionPreview || !actionFissionPreviewState) return null;
+    const items: ActionFissionPreviewGalleryItem[] = actionFissionPreviewState.rows.flatMap((row) => {
+      if (actionFissionPreview.mode === "result") {
+        return row.resultUrl
+          ? [{ rowId: row.id, src: row.resultUrl, alt: row.resultFileName || row.selectedActionName || `${actionFissionPreview.nodeId}-${row.id}` }]
+          : [];
+      }
+      return row.selectedActionAssetUrl
+        ? [{ rowId: row.id, src: resolveLibraryImageUrl(row.selectedActionAssetUrl), alt: row.selectedActionName || `${actionFissionPreview.nodeId}-${row.id}-action` }]
+        : [];
+    });
+    const currentRow = actionFissionPreviewState.rows.find((row) => row.id === actionFissionPreview.rowId) || null;
+    const currentItem = items.find((item) => item.rowId === actionFissionPreview.rowId) || null;
+    const currentIndex = currentItem ? items.findIndex((item) => item.rowId === currentItem.rowId) : -1;
+    const tags = currentRow?.actionProjectId ? actionFissionPreviewLibraryData.tagsByProject.get(currentRow.actionProjectId) || [] : [];
+    const actions = currentRow?.actionProjectId ? actionFissionPreviewLibraryData.actionsByProject.get(currentRow.actionProjectId) || [] : [];
+    const libraryReady = currentRow?.actionProjectId ? actionFissionPreviewLibraryData.readyProjects.has(currentRow.actionProjectId) : false;
+    return { actions, currentIndex, currentItem, currentRow, items, libraryReady, tags };
+  }, [actionFissionPreview, actionFissionPreviewLibraryData, actionFissionPreviewState]);
+
+  useEffect(() => {
+    if (!actionFissionPreview) return;
+    if (!actionFissionPreviewGallery?.currentItem) setActionFissionPreview(null);
+  }, [actionFissionPreview, actionFissionPreviewGallery?.currentItem]);
+
+  const showPreviousActionFissionPreviewImage = useCallback(() => {
+    if (!actionFissionPreview || !actionFissionPreviewGallery || actionFissionPreviewGallery.currentIndex < 0 || actionFissionPreviewGallery.items.length <= 1) return;
+    const nextIndex = (actionFissionPreviewGallery.currentIndex - 1 + actionFissionPreviewGallery.items.length) % actionFissionPreviewGallery.items.length;
+    setActionFissionPreview({ ...actionFissionPreview, rowId: actionFissionPreviewGallery.items[nextIndex].rowId });
+  }, [actionFissionPreview, actionFissionPreviewGallery]);
+
+  const showNextActionFissionPreviewImage = useCallback(() => {
+    if (!actionFissionPreview || !actionFissionPreviewGallery || actionFissionPreviewGallery.currentIndex < 0 || actionFissionPreviewGallery.items.length <= 1) return;
+    const nextIndex = (actionFissionPreviewGallery.currentIndex + 1) % actionFissionPreviewGallery.items.length;
+    setActionFissionPreview({ ...actionFissionPreview, rowId: actionFissionPreviewGallery.items[nextIndex].rowId });
+  }, [actionFissionPreview, actionFissionPreviewGallery]);
 
   useEffect(() => {
     const syncApiProviders = () => {
@@ -863,6 +968,29 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     cancelScheduledFrame(groupResizeFrameRef);
     cancelScheduledFrame(linkDraftFrameRef);
   }, [cancelScheduledFrame]);
+
+  useEffect(() => {
+    let cleanupTimer = 0;
+    const finishPointer = (event: globalThis.PointerEvent) => {
+      const pointerId = event.pointerId;
+      window.clearTimeout(cleanupTimer);
+      cleanupTimer = window.setTimeout(() => {
+        clearLinkDraft(pointerId);
+      }, 0);
+    };
+    const cancelDraft = () => clearLinkDraft();
+    window.addEventListener("pointerup", finishPointer, true);
+    window.addEventListener("pointercancel", finishPointer, true);
+    window.addEventListener("blur", cancelDraft);
+    document.addEventListener("visibilitychange", cancelDraft);
+    return () => {
+      window.clearTimeout(cleanupTimer);
+      window.removeEventListener("pointerup", finishPointer, true);
+      window.removeEventListener("pointercancel", finishPointer, true);
+      window.removeEventListener("blur", cancelDraft);
+      document.removeEventListener("visibilitychange", cancelDraft);
+    };
+  }, [clearLinkDraft]);
 
   useEffect(() => {
     if (!selectedConnectionId) return;
@@ -1597,10 +1725,10 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
       scheduleFrame(groupResizeFrameRef, { groupId: groupResize.groupId, w: nextW, h: nextH }, applyGroupResizeFrame);
       return;
     }
-    const link = linkDraft;
+    const link = linkDraftRef.current;
     if (!readOnlyRef.current && link && link.pointerId === event.pointerId) {
       const point = screenToWorld(event.clientX, event.clientY);
-      scheduleFrame(linkDraftFrameRef, { ...link, x: point.x, y: point.y }, setLinkDraft);
+      scheduleFrame(linkDraftFrameRef, { ...link, x: point.x, y: point.y }, applyLinkDraftFrame);
     }
   }
 
@@ -1722,9 +1850,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
       dragHistoryRef.current = null;
       if (previous) commitCanvasDocumentChange(previous);
     }
-    if (!readOnlyRef.current && linkDraft?.pointerId === event.pointerId) {
-      cancelScheduledFrame(linkDraftFrameRef);
-      setLinkDraft(null);
+    if (!readOnlyRef.current && linkDraftRef.current?.pointerId === event.pointerId) {
+      clearLinkDraft(event.pointerId);
     }
   }
 
@@ -1908,32 +2035,34 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     const point = screenToWorld(event.clientX, event.clientY);
     setSelectedConnectionId("");
     setConnectionAction(null);
-    setLinkDraft({ pointerId: event.pointerId, from: node.id, x: point.x, y: point.y });
+    const nextDraft = { pointerId: event.pointerId, from: node.id, x: point.x, y: point.y };
+    linkDraftRef.current = nextDraft;
+    setLinkDraft(nextDraft);
   }
 
   function finishLink(event: PointerEvent<HTMLElement>, target: CanvasNode) {
     if (readOnlyRef.current) return;
-    const draft = linkDraft;
+    const draft = linkDraftRef.current;
     if (!draft || draft.from === target.id) return;
     event.preventDefault();
     event.stopPropagation();
     const from = nodeMap.get(draft.from);
     if (!from || !canConnect(from, target)) {
-      setLinkDraft(null);
+      clearLinkDraft(draft.pointerId);
       return;
     }
     if (target.type === "actionFission" && isImageLikeNode(from)) {
       const currentCount = countDirectActionFissionImageConnections(target.id, nodes, connections);
       const duplicate = connections.some((connection) => connection.from === draft.from && connection.to === target.id);
       if (!duplicate && currentCount >= BASE_PUBLIC_REFERENCE_LIMIT) {
-        setLinkDraft(null);
+        clearLinkDraft(draft.pointerId);
         return;
       }
     }
     setConnections((current) => current.some((connection) => connection.from === draft.from && connection.to === target.id)
       ? current
       : [...current, { id: uid("link"), from: draft.from, to: target.id }]);
-    setLinkDraft(null);
+    clearLinkDraft(draft.pointerId);
   }
 
   const setNodeFileInputRefStable = useStableEvent((nodeId: string, input: HTMLInputElement | null) => {
@@ -1979,11 +2108,11 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   const stopAllActionFissionRowsStable = useStableEvent(stopAllActionFissionRows);
   const previewActionFissionResultStable = useStableEvent((nodeId: string, row: ActionFissionRow) => {
     if (!row.resultUrl) return;
-    setActionFissionPreview({ src: row.resultUrl, alt: row.resultFileName || row.selectedActionName || `${nodeId}-${row.id}` });
+    setActionFissionPreview({ nodeId, rowId: row.id, mode: "result" });
   });
   const previewActionFissionActionStable = useStableEvent((nodeId: string, row: ActionFissionRow) => {
     if (!row.selectedActionAssetUrl) return;
-    setActionFissionPreview({ src: resolveLibraryImageUrl(row.selectedActionAssetUrl), alt: row.selectedActionName || `${nodeId}-${row.id}-action` });
+    setActionFissionPreview({ nodeId, rowId: row.id, mode: "action" });
   });
   const downloadActionFissionResultStable = useStableEvent((nodeId: string, row: ActionFissionRow) => {
     if (!row.resultUrl) return;
@@ -2736,7 +2865,36 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
           </div>
         ) : null}
         {previewNode && isImageLikeNode(previewNode) && previewNode.url ? <ImageViewer src={previewNode.url} alt={previewNode.fileName || "canvas image preview"} ariaLabel={t("infiniteCanvas:viewLargeImage")} onClose={() => setImagePreview(null)} /> : null}
-        {actionFissionPreview ? <ImageViewer src={actionFissionPreview.src} alt={actionFissionPreview.alt} ariaLabel={t("infiniteCanvas:viewLargeImage")} onClose={() => setActionFissionPreview(null)} /> : null}
+        {actionFissionPreview && actionFissionPreviewGallery?.currentItem ? (
+          <ImageViewer
+            src={actionFissionPreviewGallery.currentItem.src}
+            alt={actionFissionPreviewGallery.currentItem.alt}
+            ariaLabel={t("infiniteCanvas:viewLargeImage")}
+            onClose={() => setActionFissionPreview(null)}
+            navigation={{
+              index: actionFissionPreviewGallery.currentIndex,
+              total: actionFissionPreviewGallery.items.length,
+              previousLabel: t("infiniteCanvas:previousImage"),
+              nextLabel: t("infiniteCanvas:nextImage"),
+              onPrevious: showPreviousActionFissionPreviewImage,
+              onNext: showNextActionFissionPreviewImage,
+            }}
+            actions={actionFissionPreviewGallery.currentRow ? [{
+              id: actionFissionPreview.mode === "result" ? "rerun" : "switch-action",
+              label: actionFissionPreview.mode === "result" ? t("infiniteCanvas:actionFissionRerunImage") : t("infiniteCanvas:actionFissionRefreshAction"),
+              icon: actionFissionPreview.mode === "result" ? "refresh" : "shuffle",
+              disabled: !actionFissionPreviewGallery.currentRow.actionProjectId || !actionFissionPreviewGallery.libraryReady,
+              onClick: () => {
+                if (!actionFissionPreview || !actionFissionPreviewGallery.currentRow) return;
+                if (actionFissionPreview.mode === "result") {
+                  runActionFissionRowStable(actionFissionPreview.nodeId, actionFissionPreviewGallery.currentRow.id, actionFissionPreviewGallery.actions, actionFissionPreviewGallery.tags);
+                  return;
+                }
+                refreshActionFissionRowStable(actionFissionPreview.nodeId, actionFissionPreviewGallery.currentRow.id, actionFissionPreviewGallery.actions, actionFissionPreviewGallery.tags, true);
+              },
+            }] : []}
+          />
+        ) : null}
         {libraryPickerNodeId && !isReadOnlyCanvas ? (
           <div className="ic-library-rail-panel nodrag nopan" onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
             <LibraryAssetPickerRail onSelect={(selection) => void importLibraryImage(selection)} />

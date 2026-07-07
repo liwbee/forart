@@ -4,7 +4,7 @@ import { formatGenerationDuration, getGenerationElapsedMs } from "../generation/
 import type { CanvasGenerationTask } from "../types";
 import type { ActionFissionRow } from "./actionFissionTypes";
 
-export type ActionFissionRowNoticeTone = "running" | "ready" | "completed" | "missing" | "error";
+export type ActionFissionRowNoticeTone = "queued" | "running" | "ready" | "completed" | "missing" | "error";
 
 export type ActionFissionRowNotice =
   | { visible: false }
@@ -56,7 +56,7 @@ export function resolveActionFissionRowNotice({
   if (row.libtvQueued && !row.libtvRunning) {
     return {
       visible: true,
-      tone: "running",
+      tone: "queued",
       text: t("infiniteCanvas:actionFissionQueued", fallback("Waiting")),
     };
   }

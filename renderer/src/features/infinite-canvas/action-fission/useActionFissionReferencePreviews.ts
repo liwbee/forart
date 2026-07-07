@@ -3,53 +3,76 @@ import { useCanvasStore } from "../canvasStore";
 import type { ImageGeneratorInputPreview } from "../composers/composerTypes";
 import { collectPrompt } from "../core/workflow";
 import { isImageLikeNode } from "../nodePredicates";
+import type { CanvasConnection } from "../types";
 
-export function useActionFissionReferencePreviews(nodeId: string): Extract<ImageGeneratorInputPreview, { kind: "image" }>[] {
-  const connections = useCanvasStore((state) => state.connections);
-  const nodeLookup = useCanvasStore((state) => state.nodeLookup);
+type ImagePreviewItem = Extract<ImageGeneratorInputPreview, { kind: "image" }>;
+type PromptPreviewItem = Extract<ImageGeneratorInputPreview, { kind: "prompt" }>;
 
-  return useMemo(() => {
-    const previews: Extract<ImageGeneratorInputPreview, { kind: "image" }>[] = [];
-    connections
-      .filter((connection) => connection.to === nodeId)
-      .forEach((connection) => {
-        const source = nodeLookup.get(connection.from);
-        if (!isImageLikeNode(source) || !source.url) return;
-        previews.push({
-          id: source.id,
-          connectionId: connection.id,
-          kind: "image",
-          order: previews.length + 1,
-          title: source.fileName || source.title || source.type,
-          url: source.thumbUrl || source.url,
-        });
-      });
-    return previews;
-  }, [connections, nodeId, nodeLookup]);
+function connectedInputSignature(connections: CanvasConnection[], nodeId: string) {
+  return JSON.stringify(connections.filter((connection) => connection.to === nodeId).map((connection) => [connection.id, connection.from]));
 }
 
-export function useActionFissionPromptPreviews(nodeId: string): Extract<ImageGeneratorInputPreview, { kind: "prompt" }>[] {
-  const connections = useCanvasStore((state) => state.connections);
-  const nodes = useCanvasStore((state) => state.nodes);
-  const nodeLookup = useCanvasStore((state) => state.nodeLookup);
+function parseConnectedInputs(signature: string): Array<[string, string]> {
+  if (!signature) return [];
+  try {
+    const input = JSON.parse(signature) as unknown;
+    if (!Array.isArray(input)) return [];
+    return input.flatMap((item) => {
+      if (!Array.isArray(item) || item.length < 2) return [];
+      const connectionId = typeof item[0] === "string" ? item[0] : "";
+      const fromId = typeof item[1] === "string" ? item[1] : "";
+      return connectionId && fromId ? [[connectionId, fromId] as [string, string]] : [];
+    });
+  } catch {
+    return [];
+  }
+}
 
-  return useMemo(() => {
-    const previews: Extract<ImageGeneratorInputPreview, { kind: "prompt" }>[] = [];
-    connections
-      .filter((connection) => connection.to === nodeId)
-      .forEach((connection) => {
-        const source = nodeLookup.get(connection.from);
-        if (source?.type !== "prompt") return;
-        const text = collectPrompt(source, nodes, connections).trim();
-        if (!text) return;
-        previews.push({
-          id: source.id,
-          connectionId: connection.id,
-          kind: "prompt",
-          title: source.title || source.type,
-          text,
-        });
-      });
-    return previews;
-  }, [connections, nodeId, nodeLookup, nodes]);
+function parsePreviewItems<T>(signature: string): T[] {
+  if (!signature) return [];
+  try {
+    const input = JSON.parse(signature) as unknown;
+    return Array.isArray(input) ? input as T[] : [];
+  } catch {
+    return [];
+  }
+}
+
+export function useActionFissionReferencePreviews(nodeId: string): ImagePreviewItem[] {
+  const connectionSignature = useCanvasStore((state) => connectedInputSignature(state.connections, nodeId));
+  const connectedInputs = useMemo(() => parseConnectedInputs(connectionSignature), [connectionSignature]);
+  const previewSignature = useCanvasStore((state) => JSON.stringify(connectedInputs.flatMap(([connectionId, fromId]) => {
+    const source = state.nodeLookup.get(fromId);
+    if (!isImageLikeNode(source) || !source.url) return [];
+    return [{
+      id: source.id,
+      connectionId,
+      kind: "image",
+      order: 0,
+      title: source.fileName || source.title || source.type,
+      url: source.thumbUrl || source.url,
+    } satisfies Omit<ImagePreviewItem, "order"> & { order: number }];
+  }).map((item, index) => ({ ...item, order: index + 1 }))));
+
+  return useMemo(() => parsePreviewItems<ImagePreviewItem>(previewSignature), [previewSignature]);
+}
+
+export function useActionFissionPromptPreviews(nodeId: string): PromptPreviewItem[] {
+  const connectionSignature = useCanvasStore((state) => connectedInputSignature(state.connections, nodeId));
+  const connectedInputs = useMemo(() => parseConnectedInputs(connectionSignature), [connectionSignature]);
+  const previewSignature = useCanvasStore((state) => JSON.stringify(connectedInputs.flatMap(([connectionId, fromId]) => {
+    const source = state.nodeLookup.get(fromId);
+    if (source?.type !== "prompt") return [];
+    const text = collectPrompt(source, state.nodes, state.connections).trim();
+    if (!text) return [];
+    return [{
+      id: source.id,
+      connectionId,
+      kind: "prompt",
+      title: source.title || source.type,
+      text,
+    } satisfies PromptPreviewItem];
+  })));
+
+  return useMemo(() => parsePreviewItems<PromptPreviewItem>(previewSignature), [previewSignature]);
 }

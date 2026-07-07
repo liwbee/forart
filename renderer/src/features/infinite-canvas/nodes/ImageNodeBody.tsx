@@ -42,7 +42,8 @@ export function ImageNodeBody({
   const isLibtvImageGenerator = node.type === "libtvImageGenerator";
   const isGeneratorLike = isImageGenerator || isLibtvImageGenerator;
   const activeTask = generationTask || undefined;
-  const isGenerating = isImageGenerator ? isGenerationTaskActive(activeTask) : Boolean(node.libtvImageGeneration?.running);
+  const isLibtvGenerating = Boolean(node.libtvImageGeneration?.running);
+  const isGenerating = Boolean(isGenerationTaskActive(activeTask) || isLibtvGenerating);
   const showGeneratorDownload = hasImage && isGeneratorLike && !isGenerating;
   const isPendingDownload = showGeneratorDownload && node.outputDownloadState === "pending";
   const [loadedSize, setLoadedSize] = useState<{ width: number; height: number } | null>(null);
@@ -50,7 +51,13 @@ export function ImageNodeBody({
   const imageWidth = Math.round(node.imageNaturalWidth || loadedSize?.width || 0);
   const imageHeight = Math.round(node.imageNaturalHeight || loadedSize?.height || 0);
   const imageResolution = imageWidth > 0 && imageHeight > 0 ? `${imageWidth} x ${imageHeight}` : "";
-  const elapsedText = formatGenerationDuration(getGenerationElapsedMs(activeTask, timerNow));
+  const libtvStartedAt = Number(node.libtvImageGeneration?.startedAt || 0);
+  const elapsedText = formatGenerationDuration(
+    isLibtvGenerating && !activeTask
+      ? (libtvStartedAt ? Math.max(0, timerNow - libtvStartedAt) : 0)
+      : getGenerationElapsedMs(activeTask, timerNow),
+  );
+  const generationStatusText = node.libtvImageGeneration?.status || activeTask?.message || t("infiniteCanvas:running");
   const displayUrl = node.thumbUrl || node.url || "";
 
   useEffect(() => {
@@ -208,7 +215,7 @@ export function ImageNodeBody({
               {elapsedText}
             </span>
             <div className="ic-generator-running" role="status" aria-live="polite">
-              <span>{node.libtvImageGeneration?.status || activeTask?.message || t("infiniteCanvas:running")}</span>
+              <span>{generationStatusText}</span>
             </div>
           </>
         ) : null}

@@ -11,6 +11,8 @@ function cloneSerializable<T>(value: T): T {
 function cloneActionFissionRowForNewTarget(row: ActionFissionRow): ActionFissionRow {
   const {
     error: _error,
+    libtvQueued: _libtvQueued,
+    libtvRunning: _libtvRunning,
     generationTask: _generationTask,
     ...durableRow
   } = row;
@@ -22,7 +24,12 @@ function cloneActionFissionRowForNewTarget(row: ActionFissionRow): ActionFission
 
 function cloneActionFissionForNewTarget(state: ActionFissionState | undefined): ActionFissionState | undefined {
   if (!state) return state;
-  const { error: _error, ...durableState } = state;
+  const {
+    error: _error,
+    running: _running,
+    status: _status,
+    ...durableState
+  } = state;
   return {
     ...durableState,
     rows: Array.isArray(state.rows) ? state.rows.map(cloneActionFissionRowForNewTarget) : [],
@@ -36,12 +43,22 @@ export function cloneCanvasNodeForNewTarget(node: CanvasNode, nextId = node.id):
     generationStatus: _generationStatus,
     generationError: _generationError,
     generationTask: _generationTask,
+    libtvImageGeneration,
     ...durableNode
   } = source;
+  const clonedLibtvImageGeneration = libtvImageGeneration
+    ? {
+        ...libtvImageGeneration,
+        running: false,
+        status: "",
+        error: "",
+      }
+    : undefined;
   return {
     ...durableNode,
     id: nextId,
     actionFission: cloneActionFissionForNewTarget(source.actionFission),
+    libtvImageGeneration: clonedLibtvImageGeneration,
   };
 }
 

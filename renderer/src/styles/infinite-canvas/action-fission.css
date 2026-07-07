@@ -1141,6 +1141,12 @@
   background: color-mix(in srgb, #2563eb 10%, var(--canvas-node-bg));
 }
 
+.ic-action-fission-row__message.is-queued {
+  border-color: color-mix(in srgb, #8b5cf6 58%, var(--canvas-node-border));
+  color: #7c3aed;
+  background: color-mix(in srgb, #8b5cf6 12%, var(--canvas-node-bg));
+}
+
 .ic-action-fission-row__message.error-copy-line {
   display: flex;
   align-items: center;

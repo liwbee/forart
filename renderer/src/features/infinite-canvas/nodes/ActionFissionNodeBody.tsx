@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ErrorCopyLine } from "../../../components/ErrorCopyLine";
 import type { ActionEntry, ActionTag } from "../../action-library/types";
@@ -62,7 +62,7 @@ function selectedProviderFor(stateProviderId: string | undefined, defaultImagePr
     || null;
 }
 
-export function ActionFissionNodeBody({
+function ActionFissionNodeBodyComponent({
   node,
   imageProviders,
   imageProviderOrderItems,
@@ -242,3 +242,38 @@ export function ActionFissionNodeBody({
     </div>
   );
 }
+
+export const ActionFissionNodeBody = memo(ActionFissionNodeBodyComponent, (previous, next) => (
+  previous.node.id === next.node.id
+  && previous.node.actionFission === next.node.actionFission
+  && previous.imageProviders === next.imageProviders
+  && previous.imageProviderOrderItems === next.imageProviderOrderItems
+  && previous.defaultImageProvider === next.defaultImageProvider
+  && previous.defaultImageApiType === next.defaultImageApiType
+  && previous.libtvReady === next.libtvReady
+  && previous.libtvUnavailableMessage === next.libtvUnavailableMessage
+  && previous.openSelectId === next.openSelectId
+  && previous.draggedInputConnectionId === next.draggedInputConnectionId
+  && previous.downloadStatusKey === next.downloadStatusKey
+  && previous.onOpenSelectChange === next.onOpenSelectChange
+  && previous.onPatchNode === next.onPatchNode
+  && previous.onRemoveInput === next.onRemoveInput
+  && previous.onReorderInput === next.onReorderInput
+  && previous.onCreateImageReference === next.onCreateImageReference
+  && previous.onDraggedInputConnectionIdChange === next.onDraggedInputConnectionIdChange
+  && previous.onRefreshRow === next.onRefreshRow
+  && previous.onRunRow === next.onRunRow
+  && previous.onStopRow === next.onStopRow
+  && previous.onBeforeRemoveRow === next.onBeforeRemoveRow
+  && previous.onRunAllRows === next.onRunAllRows
+  && previous.onSwitchAllRows === next.onSwitchAllRows
+  && previous.onDownloadAllRows === next.onDownloadAllRows
+  && previous.onStopAllRows === next.onStopAllRows
+  && previous.onPreviewResult === next.onPreviewResult
+  && previous.onPreviewAction === next.onPreviewAction
+  && previous.onDownloadResult === next.onDownloadResult
+  && previous.onMediaStatus === next.onMediaStatus
+  && previous.getGenerationTaskForTarget === next.getGenerationTaskForTarget
+  && previous.isGenerationTargetActive === next.isGenerationTargetActive
+  && previous.saveCanvasImageAsset === next.saveCanvasImageAsset
+));

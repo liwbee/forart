@@ -52,6 +52,14 @@ function taskRuntimeKey(task: CanvasGenerationTask) {
   return task.upstreamTaskId ? `${task.canvasId}:${target}:${task.upstreamTaskId}` : task.id;
 }
 
+function rowRuntimeKey(nodeId: string, rowId: string) {
+  return `${nodeId}:${rowId}`;
+}
+
+function createRunToken(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
 function patchNodeActionFission(
   setNodes: (updater: StateUpdater<CanvasNode[]>) => void,
   nodeId: string,
@@ -105,6 +113,7 @@ export function useActionFissionGenerationActions({
 }: UseActionFissionGenerationActionsOptions) {
   const abortControllersRef = useRef<Record<string, AbortController>>({});
   const activeTaskKeysRef = useRef<Set<string>>(new Set());
+  const activeRowRunTokensRef = useRef<Record<string, string>>({});
   const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
 
   const saveActiveNodes = useCallback(async (nextNodes: CanvasNode[]) => {
@@ -138,6 +147,10 @@ export function useActionFissionGenerationActions({
     rowsData: Array<{ rowId: string; actions: ActionEntry[]; tags: ActionTag[] }>,
     preselectedActions = new Map<string, ActionEntry>(),
   ) => {
+    const runToken = createRunToken("libtv");
+    const runRowKeys = new Set<string>();
+    const isRunCurrent = (rowId: string) => activeRowRunTokensRef.current[rowRuntimeKey(nodeId, rowId)] === runToken;
+    const hasCurrentRows = () => Array.from(runRowKeys).some((key) => activeRowRunTokensRef.current[key] === runToken);
     const node = nodeMap.get(nodeId);
     if (!node) return;
     const sourceState = normalizeActionFissionState(node.actionFission);
@@ -203,6 +216,9 @@ export function useActionFissionGenerationActions({
       };
       nextRows[rowIndex] = runningRow;
       preparedRows.set(row.id, runningRow);
+      const rowKey = rowRuntimeKey(nodeId, row.id);
+      activeRowRunTokensRef.current[rowKey] = runToken;
+      runRowKeys.add(rowKey);
       jobs.push({
         id: row.id,
         prompt,
@@ -234,6 +250,7 @@ export function useActionFissionGenerationActions({
       patch: Partial<ActionFissionRow>,
       projectPatch: Partial<ActionFissionState> = {},
     ) => {
+      if (!isRunCurrent(rowId)) return false;
       let nextNodesForSave: CanvasNode[] = [];
       setNodes((current) => {
         nextNodesForSave = current.map((currentNode) => {
@@ -252,10 +269,12 @@ export function useActionFissionGenerationActions({
         return nextNodesForSave;
       });
       await saveActiveNodes(nextNodesForSave);
+      return true;
     };
 
     try {
       const setPreflightStatus = (status: string) => {
+        if (!hasCurrentRows()) return;
         patchNodeActionFission(setNodes, nodeId, (state) => ({ ...state, status, error: "" }));
       };
 
@@ -264,6 +283,7 @@ export function useActionFissionGenerationActions({
         listLibtvWorkspaces(),
         listLibtvImageModels(),
       ]);
+      if (!hasCurrentRows()) return;
       const workspaceResult = availability[0];
       const modelResult = availability[1];
       const workspace = (workspaceResult.workspaces || []).find((item) => item.id === workspaceId);
@@ -274,6 +294,7 @@ export function useActionFissionGenerationActions({
       setPreflightStatus(t("infiniteCanvas:libtvCheckingModel"));
       setPreflightStatus(t("infiniteCanvas:libtvCheckingProject"));
       const readyProject = await ensureLibtvReadyProject({ workspaceId });
+      if (!hasCurrentRows()) return;
       const readyProjectUuid = readyProject.projectUuid || "";
       if (!readyProjectUuid) throw new Error(t("infiniteCanvas:libtvProjectRequired"));
       patchNodeActionFission(setNodes, nodeId, (state) => ({
@@ -286,7 +307,9 @@ export function useActionFissionGenerationActions({
       }));
 
       for (const job of jobs) {
+        if (!isRunCurrent(job.id)) continue;
         await writeRowResult(job.id, { libtvQueued: false, libtvRunning: true, error: "" });
+        if (!isRunCurrent(job.id)) continue;
         try {
           const batch = await generateLibtvBatch({
             workspaceId,
@@ -297,6 +320,7 @@ export function useActionFissionGenerationActions({
             quality: normalizeLibtvQuality(sourceState.resolution),
             jobs: [job],
           });
+          if (!isRunCurrent(job.id)) continue;
           const result = batch.results[0];
           if (!result) {
             await writeRowResult(job.id, { libtvQueued: false, libtvRunning: false, error: t("infiniteCanvas:generationFailed") }, {
@@ -313,9 +337,11 @@ export function useActionFissionGenerationActions({
             continue;
           }
           const dimensions = result.localUrl ? await readImageDimensions(result.localUrl) : null;
+          if (!isRunCurrent(job.id)) continue;
           const thumb = result.localUrl
             ? await saveThumbnailForExistingCanvasAsset(result.localUrl)
             : {};
+          if (!isRunCurrent(job.id)) continue;
           await writeRowResult(job.id, {
             libtvQueued: false,
             libtvRunning: false,
@@ -332,11 +358,13 @@ export function useActionFissionGenerationActions({
             libtvProjectName: batch.projectName || sourceState.libtvProjectName,
           });
         } catch (error) {
+          if (!isRunCurrent(job.id)) continue;
           const message = error instanceof Error ? error.message : String(error);
           await writeRowResult(job.id, { libtvQueued: false, libtvRunning: false, error: message });
         }
       }
     } catch (error) {
+      if (!hasCurrentRows()) return;
       const message = error instanceof Error ? error.message : String(error);
       let nextNodesForSave: CanvasNode[] = [];
       setNodes((current) => {
@@ -350,6 +378,7 @@ export function useActionFissionGenerationActions({
               status: "",
               error: message,
               rows: state.rows.map((row) => preparedRows.has(row.id)
+                && isRunCurrent(row.id)
                 ? { ...row, libtvQueued: false, libtvRunning: false, error: message }
                 : row),
             },
@@ -359,33 +388,40 @@ export function useActionFissionGenerationActions({
       });
       await saveActiveNodes(nextNodesForSave);
     } finally {
-      let nextNodesForSave: CanvasNode[] = [];
-      setNodes((current) => {
-        nextNodesForSave = current.map((currentNode) => {
-          if (currentNode.id !== nodeId) return currentNode;
-          const state = normalizeActionFissionState(currentNode.actionFission);
-          return {
-            ...currentNode,
-            actionFission: {
-              ...state,
-              running: false,
-              status: "",
-            },
-          };
+      if (hasCurrentRows()) {
+        let nextNodesForSave: CanvasNode[] = [];
+        setNodes((current) => {
+          nextNodesForSave = current.map((currentNode) => {
+            if (currentNode.id !== nodeId) return currentNode;
+            const state = normalizeActionFissionState(currentNode.actionFission);
+            return {
+              ...currentNode,
+              actionFission: {
+                ...state,
+                running: false,
+                status: "",
+              },
+            };
+          });
+          return nextNodesForSave;
         });
-        return nextNodesForSave;
+        await saveActiveNodes(nextNodesForSave);
+      }
+      runRowKeys.forEach((key) => {
+        if (activeRowRunTokensRef.current[key] === runToken) delete activeRowRunTokensRef.current[key];
       });
-      await saveActiveNodes(nextNodesForSave);
     }
   }, [connections, libtvReady, libtvUnavailableMessage, nodeMap, nodes, saveActiveNodes, setNodes, t]);
 
-  const refreshActionFissionRow = useCallback((nodeId: string, rowId: string, actions: ActionEntry[], tags: ActionTag[]) => {
+  const refreshActionFissionRow = useCallback((nodeId: string, rowId: string, actions: ActionEntry[], tags: ActionTag[], preferAssetUrl = false) => {
     const node = nodeMap.get(nodeId);
     if (!node?.actionFission) return;
     const state = normalizeActionFissionState(node.actionFission);
     const row = state.rows.find((item) => item.id === rowId);
     if (!row) return;
-    const selection = selectActionForRow({ row, rows: state.rows, actions, tags });
+    const assetActions = preferAssetUrl ? actions.filter((action) => action.asset_url) : [];
+    const preferredSelection = assetActions.length ? selectActionForRow({ row, rows: state.rows, actions: assetActions, tags }) : null;
+    const selection = preferredSelection?.action ? preferredSelection : selectActionForRow({ row, rows: state.rows, actions, tags });
     const action = selection.action;
     if (!action) {
       patchNodeActionFission(setNodes, nodeId, patchRowInState(rowId, {
@@ -439,9 +475,10 @@ export function useActionFissionGenerationActions({
   }, [nodeMap, setNodes, t]);
 
   const stopActionFissionRow = useCallback((nodeId: string, rowId: string) => {
-    const key = `${nodeId}:${rowId}`;
+    const key = rowRuntimeKey(nodeId, rowId);
     abortControllersRef.current[key]?.abort();
     delete abortControllersRef.current[key];
+    delete activeRowRunTokensRef.current[key];
     const canvasId = activeCanvasId;
     if (canvasId) {
       void (async () => {
@@ -513,7 +550,7 @@ export function useActionFissionGenerationActions({
     }
     const normalizedSize = normalizeImageModelSizeSelection(rule, state.resolution, state.aspectRatio);
 
-    const key = `${nodeId}:${rowId}`;
+    const key = rowRuntimeKey(nodeId, rowId);
     abortControllersRef.current[key]?.abort();
     const abortController = new AbortController();
     abortControllersRef.current[key] = abortController;
@@ -536,6 +573,7 @@ export function useActionFissionGenerationActions({
       provider,
       modelRule: rule,
     } as CanvasGenerationTask & { provider: ApiProvider; modelRule: unknown });
+    activeRowRunTokensRef.current[key] = task.id;
     const initialTaskKey = taskRuntimeKey(task);
     let upstreamTaskKey = "";
     activeTaskKeysRef.current.add(initialTaskKey);
@@ -547,6 +585,7 @@ export function useActionFissionGenerationActions({
     }));
     try {
       const completedTask = await waitForLocalGenerationTask(task.id, (nextTask) => {
+        if (activeRowRunTokensRef.current[key] !== task.id) return;
         patchRowGenerationTaskInNode(setNodes, nodeId, rowId, nextTask);
         if (nextTask.upstreamTaskId && !upstreamTaskKey) {
           upstreamTaskKey = `${activeCanvasId}:${nodeId}:${rowId}:${nextTask.upstreamTaskId}`;
@@ -558,6 +597,7 @@ export function useActionFissionGenerationActions({
       if (abortController.signal.aborted) throw new DOMException("Aborted", "AbortError");
       if (completedTask.status !== "succeeded" || !completedTask.result?.localUrl) throw new Error(completedTask.error || "Image generation failed.");
       if (abortController.signal.aborted) throw new DOMException("Aborted", "AbortError");
+      if (activeRowRunTokensRef.current[key] !== task.id) return;
       await writebackGenerationTask(completedTask);
     } catch (error) {
       const isAbort = isAbortError(error);
@@ -569,11 +609,14 @@ export function useActionFissionGenerationActions({
         updatedAt: Date.now(),
       };
       await updateLocalGenerationTask(task.id, failedTask);
-      await writebackGenerationTask(failedTask);
+      if (activeRowRunTokensRef.current[key] === task.id) {
+        await writebackGenerationTask(failedTask);
+      }
     } finally {
       activeTaskKeysRef.current.delete(initialTaskKey);
       if (upstreamTaskKey) activeTaskKeysRef.current.delete(upstreamTaskKey);
       if (abortControllersRef.current[key] === abortController) delete abortControllersRef.current[key];
+      if (activeRowRunTokensRef.current[key] === task.id) delete activeRowRunTokensRef.current[key];
     }
   }, [activeCanvasId, connections, getApiTypeForState, getProviderForNode, nodeMap, nodes, patchNode, runLibtvActionFissionRows, setNodes, t, writebackGenerationTask]);
 
@@ -671,6 +714,11 @@ export function useActionFissionGenerationActions({
       .forEach((key) => {
         abortControllersRef.current[key]?.abort();
         delete abortControllersRef.current[key];
+      });
+    Object.keys(activeRowRunTokensRef.current)
+      .filter((key) => key.startsWith(`${nodeId}:`))
+      .forEach((key) => {
+        delete activeRowRunTokensRef.current[key];
       });
     if (activeCanvasId) {
       void (async () => {
