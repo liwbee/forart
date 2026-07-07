@@ -331,6 +331,7 @@
 }
 
 .library-asset-picker__state--error {
+  min-width: 0;
   color: #b42318;
 }
 

@@ -647,6 +647,7 @@
 }
 
 .ic-image-composer__error {
+  min-width: 0;
   border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--canvas-node-border));
   border-radius: 12px;
   padding: 7px 9px;

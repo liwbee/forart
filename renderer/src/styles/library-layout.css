@@ -40,6 +40,10 @@
   pointer-events: none;
 }
 
+.library-image-action-toast.error-copy-line {
+  pointer-events: auto;
+}
+
 .library-image-action-toast span {
   min-width: 0;
   overflow: hidden;
@@ -699,6 +703,7 @@
 }
 
 .library-error {
+  min-width: 0;
   margin-bottom: var(--space-4);
   padding: var(--space-3) var(--space-4);
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);

@@ -156,28 +156,13 @@ export function cropRectForAspect(rect: CropRect, node: CanvasNode, aspect: Crop
   return constrainCropRect({ x: centerX - w / 2, y: centerY - h / 2, w, h }, node, aspect);
 }
 
-export function cropImageToRect(url: string, naturalWidth: number, naturalHeight: number, rect: CropRect, contentRect: CropRect) {
-  return new Promise<{ dataUrl: string; width: number; height: number } | null>((resolve) => {
-    const image = new window.Image();
-    image.onload = () => {
-      const scaleX = naturalWidth / Math.max(1, contentRect.w);
-      const scaleY = naturalHeight / Math.max(1, contentRect.h);
-      const sx = Math.round((rect.x - contentRect.x) * scaleX);
-      const sy = Math.round((rect.y - contentRect.y) * scaleY);
-      const sw = Math.round(rect.w * scaleX);
-      const sh = Math.round(rect.h * scaleY);
-      const canvas = document.createElement("canvas");
-      canvas.width = sw;
-      canvas.height = sh;
-      const context = canvas.getContext("2d");
-      if (!context) {
-        resolve(null);
-        return;
-      }
-      context.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
-      resolve({ dataUrl: canvas.toDataURL("image/png"), width: sw, height: sh });
-    };
-    image.onerror = () => resolve(null);
-    image.src = url;
-  });
+export function cropPixelsForRect(naturalWidth: number, naturalHeight: number, rect: CropRect, contentRect: CropRect) {
+  const scaleX = naturalWidth / Math.max(1, contentRect.w);
+  const scaleY = naturalHeight / Math.max(1, contentRect.h);
+  return {
+    x: Math.round((rect.x - contentRect.x) * scaleX),
+    y: Math.round((rect.y - contentRect.y) * scaleY),
+    width: Math.round(rect.w * scaleX),
+    height: Math.round(rect.h * scaleY),
+  };
 }

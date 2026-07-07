@@ -2,6 +2,7 @@ import { ChevronDown, Copy, Download, Play, RefreshCw, Search, Square, X } from 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
+import { ErrorCopyLine } from "../../../../components/ErrorCopyLine";
 import type { ActionEntry, ActionProject, ActionTag } from "../../../action-library/types";
 import type { ApiProvider } from "../../../settings/apiProviders";
 import { resolveLibraryImageUrl } from "../../../../lib/libraryImageActions";
@@ -364,7 +365,9 @@ export function ActionFissionRowItem({
         </button>
       </div>
 
-      {notice.visible ? (
+      {notice.visible && notice.tone === "error" ? (
+        <ErrorCopyLine className="ic-action-fission-row__message is-error" text={notice.text} />
+      ) : notice.visible ? (
         <div className={`ic-action-fission-row__message is-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>
           {notice.text}
         </div>

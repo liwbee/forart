@@ -1,6 +1,7 @@
 import { Play, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { useTranslation } from "react-i18next";
+import { ErrorCopyLine } from "../../../components/ErrorCopyLine";
 import { Select } from "../../../components/Select";
 import { SizePresetPicker } from "../../../components/SizePresetPicker";
 import { getModelDisplayName, type ApiProvider, type ApiProviderOrderItem } from "../../settings/apiProviders";
@@ -350,7 +351,7 @@ export function ImageGeneratorComposer({
       {!isRunning && !isLibtvApi && generationReadinessMessage ? <div className="ic-image-composer__hint">{generationReadinessMessage}</div> : null}
       {isLibtvApi && libtvState.status ? <div className="ic-image-composer__status">{libtvState.status}</div> : null}
       {node.generationError || libtvState.error || libtvLoadError || (isLibtvApi && !libtvReady ? libtvUnavailableMessage : "") ? (
-        <div className="ic-image-composer__error">{node.generationError || libtvState.error || libtvLoadError || libtvUnavailableMessage}</div>
+        <ErrorCopyLine className="ic-image-composer__error" text={node.generationError || libtvState.error || libtvLoadError || libtvUnavailableMessage} />
       ) : null}
     </div>
   );

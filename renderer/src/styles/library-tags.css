@@ -30,8 +30,8 @@
 .library-bulk-tag-list button,
 .library-tag-manager__list button,
 .library-tag-manager__floating-tag,
-.outfit-card__tags span,
-.tag-list span {
+.outfit-card__tags > span,
+.tag-list > span {
   position: relative;
 }
 
@@ -75,6 +75,15 @@
 
 .library-tag-color-dot--purple {
   background: var(--tag-dot-purple);
+}
+
+.tag-list > span > .library-tag-color-dot,
+.outfit-card__tags > span > .library-tag-color-dot {
+  top: 0;
+  left: 0;
+  width: 7px;
+  height: 7px;
+  border-width: 1px;
 }
 
 .library-tag-manager__color-options {

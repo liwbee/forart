@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import {
   ArrowDown,
   ArrowUp,
@@ -881,10 +882,6 @@ export function FreeCanvasEditor() {
   }
 
   async function copyCanvasImage() {
-    if (!("ClipboardItem" in window)) {
-      setExportError(t("freeCanvasEditor:copyUnsupported"));
-      return;
-    }
     setCopying(true);
     setExportError("");
     try {
@@ -1203,7 +1200,7 @@ export function FreeCanvasEditor() {
             </div>
           </aside>
         </div>
-        {exportError ? <div className="free-canvas-editor__error">{t("freeCanvasEditor:exportFailed", { message: exportError })}</div> : null}
+        {exportError ? <ErrorCopyLine className="free-canvas-editor__error" text={t("freeCanvasEditor:exportFailed", { message: exportError })} /> : null}
       </main>
 
     </div>

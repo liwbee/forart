@@ -1,6 +1,7 @@
 import { Check, Crosshair, Crop, Eye, Images, Layers, Map as MapIcon, Play, Ratio, Square, Trash2, Upload, X, ZoomIn, ZoomOut } from "lucide-react";
 import { PointerEvent, WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import { ImageViewer } from "../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../lib/libraryImageActions";
 import { API_PROVIDER_CHANGED_EVENT, getModelDisplayName, loadApiSettings, orderedApiProviderItems, orderedApiProviders, readApiProviders, type ApiProvider, type ApiProviderOrderItem } from "../settings/apiProviders";
@@ -303,6 +304,8 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
   const nodeResizeFrameRef = useRef<ScheduledFrame<{ nodeId: string; w: number; h: number }>>({ frame: 0, value: null });
   const groupResizeFrameRef = useRef<ScheduledFrame<{ groupId: string; w: number; h: number }>>({ frame: 0, value: null });
   const linkDraftFrameRef = useRef<ScheduledFrame<LinkDraft>>({ frame: 0, value: null });
+  const skipNextAutoSaveRef = useRef(false);
+  const thumbnailBackfillKeyRef = useRef("");
   const nodes = useCanvasStore((state) => state.nodes);
   const connections = useCanvasStore((state) => state.connections);
   const groups = useCanvasStore((state) => state.groups);
@@ -622,6 +625,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     setViewport,
     setZoomInput,
     clearCanvasTransientState,
+    skipNextAutoSaveRef,
     t,
   });
   const remoteCanvas = useRemoteCanvasExchange();
@@ -762,6 +766,63 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     patchNode,
     t,
   });
+
+  useEffect(() => {
+    if (!activeCanvasId || activeRemoteCanvasId || showCanvasHome || !window.easyTool?.ensureCanvasAssetThumbnail) return;
+    let canceled = false;
+    const localAssetNodes = nodes.filter((node) => isImageLikeNode(node) && node.url?.startsWith("forart-asset://canvas/"));
+    const localActionRows = nodes.flatMap((node) => {
+      if (node.type !== "actionFission") return [];
+      return (node.actionFission?.rows || []).flatMap((row) => (
+        row.resultUrl?.startsWith("forart-asset://canvas/")
+          ? [{ nodeId: node.id, rowId: row.id, url: row.resultUrl }]
+          : []
+      ));
+    });
+    const keys = [
+      ...localAssetNodes.map((node) => `node:${node.id}:${node.url}`),
+      ...localActionRows.map((row) => `row:${row.nodeId}:${row.rowId}:${row.url}`),
+    ];
+    if (!keys.length) return;
+    const runKey = `${activeCanvasId}:${keys.join("|")}`;
+    if (thumbnailBackfillKeyRef.current === runKey) return;
+    thumbnailBackfillKeyRef.current = runKey;
+
+    void (async () => {
+      const nodeThumbs = new Map<string, { thumbUrl?: string; thumbFilePath?: string }>();
+      const rowThumbs = new Map<string, { thumbUrl?: string; thumbFilePath?: string }>();
+      for (const node of localAssetNodes) {
+        if (canceled || !node.url) return;
+        const thumb = await window.easyTool?.ensureCanvasAssetThumbnail({ url: node.url });
+        if (thumb?.thumbUrl) nodeThumbs.set(node.id, thumb);
+      }
+      for (const row of localActionRows) {
+        if (canceled) return;
+        const thumb = await window.easyTool?.ensureCanvasAssetThumbnail({ url: row.url });
+        if (thumb?.thumbUrl) rowThumbs.set(`${row.nodeId}:${row.rowId}`, thumb);
+      }
+      if (canceled || (!nodeThumbs.size && !rowThumbs.size)) return;
+      skipNextAutoSaveRef.current = true;
+      setNodesWithoutHistory((current) => current.map((node) => {
+        const nodeThumb = nodeThumbs.get(node.id);
+        const nextNode = nodeThumb && (node.thumbUrl !== nodeThumb.thumbUrl || node.thumbFilePath !== nodeThumb.thumbFilePath)
+          ? { ...node, thumbUrl: nodeThumb.thumbUrl, thumbFilePath: nodeThumb.thumbFilePath }
+          : node;
+        if (nextNode.type !== "actionFission" || !nextNode.actionFission) return nextNode;
+        let changed = false;
+        const rows = nextNode.actionFission.rows.map((row) => {
+          const rowThumb = rowThumbs.get(`${nextNode.id}:${row.id}`);
+          if (!rowThumb?.thumbUrl || row.resultThumbUrl === rowThumb.thumbUrl) return row;
+          changed = true;
+          return { ...row, resultThumbUrl: rowThumb.thumbUrl };
+        });
+        return changed ? { ...nextNode, actionFission: { ...nextNode.actionFission, rows } } : nextNode;
+      }));
+    })();
+    return () => {
+      canceled = true;
+    };
+  }, [activeCanvasId, activeRemoteCanvasId, nodes, setNodesWithoutHistory, showCanvasHome]);
 
   useEffect(() => {
     if (!activeProject || showCanvasHome) return;
@@ -2175,8 +2236,11 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
 
   function renderDownloadToast() {
     if (!downloadStatus) return null;
+    if (downloadStatus.tone === "error") {
+      return <ErrorCopyLine className="ic-download-toast ic-download-toast--error" text={downloadStatus.text} />;
+    }
     return (
-      <div className={`ic-download-toast ic-download-toast--${downloadStatus.tone}`} role={downloadStatus.tone === "error" ? "alert" : "status"} aria-live={downloadStatus.tone === "error" ? "assertive" : "polite"}>
+      <div className={`ic-download-toast ic-download-toast--${downloadStatus.tone}`} role="status" aria-live="polite">
         {downloadStatus.text}
       </div>
     );
@@ -2194,8 +2258,11 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     ].includes(status);
     if (tone !== "error" && !shouldShowReadyToast) return null;
     const Icon = tone === "error" ? X : Check;
+    if (tone === "error") {
+      return <ErrorCopyLine className="ic-page-toast ic-page-toast--error" text={status} />;
+    }
     return (
-      <div className={`ic-page-toast ic-page-toast--${tone}`} role={tone === "error" ? "alert" : "status"} aria-live={tone === "error" ? "assertive" : "polite"}>
+      <div className={`ic-page-toast ic-page-toast--${tone}`} role="status" aria-live="polite">
         <Icon size={14} aria-hidden="true" />
         <span>{status}</span>
       </div>

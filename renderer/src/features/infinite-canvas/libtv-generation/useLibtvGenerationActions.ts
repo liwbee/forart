@@ -91,7 +91,7 @@ export function useLibtvGenerationActions({
       if (abortController.signal.aborted) throw new DOMException("Aborted", "AbortError");
       const dimensions = await readImageDimensions(result.localUrl);
       const thumb = result.localUrl
-        ? await saveThumbnailForExistingCanvasAsset(result.localUrl, result.fileName)
+        ? await saveThumbnailForExistingCanvasAsset(result.localUrl)
         : {};
       const nextSize = dimensions ? fitImageNodeSize(dimensions.width, dimensions.height) : fitImageNodeSize(1024, 1024);
       patchNode(nodeId, {

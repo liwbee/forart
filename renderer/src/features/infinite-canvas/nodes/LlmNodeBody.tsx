@@ -1,5 +1,6 @@
 import { Bot, Play, Square } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ErrorCopyLine } from "../../../components/ErrorCopyLine";
 import { Select } from "../../../components/Select";
 import { getModelDisplayName, type ApiProvider } from "../../settings/apiProviders";
 import type { CanvasNode } from "../types";
@@ -81,7 +82,7 @@ export function LlmNodeBody({
           <span className="ic-llm-node__status"><Bot size={14} aria-hidden="true" />{node.generationStatus || t("infiniteCanvas:running")}</span>
         ) : node.text || t("infiniteCanvas:llmOutputPlaceholder")}
       </div>
-      {node.generationError ? <div className="ic-llm-node__error">{node.generationError}</div> : null}
+      {node.generationError ? <ErrorCopyLine className="ic-llm-node__error" text={node.generationError} /> : null}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { Images, PersonStanding, Users, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
+import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import { LazyImage } from "../../components/LazyImage";
 import { LibraryTagFilterButton, useLibraryTagSettingsStore } from "../library-tags";
 import { Select } from "../../components/Select";
@@ -162,7 +163,7 @@ export function LibraryAssetPickerContent({
       </div>
 
       <div className="library-asset-picker__body">
-        {picker.errorMessage ? <div className="library-asset-picker__state library-asset-picker__state--error">{t("infiniteCanvas:libraryRequestFailed", { message: picker.errorMessage })}</div> : null}
+        {picker.errorMessage ? <ErrorCopyLine className="library-asset-picker__state library-asset-picker__state--error" text={t("infiniteCanvas:libraryRequestFailed", { message: picker.errorMessage })} /> : null}
         {!picker.storageConfigured && !picker.storageSettingsLoading ? <div className="library-asset-picker__state">{t("outfitLibrary:storageUnavailable")}</div> : null}
         {picker.storageConfigured && !picker.isLoading && !picker.activeProjects.length ? <div className="library-asset-picker__state">{t("common:empty.noProjects")}</div> : null}
         {picker.isLoading ? <div className="library-asset-picker__state">{t("common:states.loading")}</div> : null}

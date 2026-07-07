@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, RefreshCw, X } from "lucide-react";
+import { ErrorCopyLine } from "../components/ErrorCopyLine";
 
 export type LibraryImageActionToastTone = "busy" | "ready" | "error";
 
@@ -32,12 +33,15 @@ export function useLibraryImageActionToast() {
 
 export function LibraryImageActionToast({ toast }: { toast: LibraryImageActionToastState | null }) {
   if (!toast) return null;
+  if (toast.tone === "error") {
+    return <ErrorCopyLine className="library-image-action-toast library-image-action-toast--error" text={toast.text} />;
+  }
   const Icon = toast.tone === "busy" ? RefreshCw : toast.tone === "ready" ? Check : X;
   return (
     <div
       className={`library-image-action-toast library-image-action-toast--${toast.tone}`}
-      role={toast.tone === "error" ? "alert" : "status"}
-      aria-live={toast.tone === "error" ? "assertive" : "polite"}
+      role="status"
+      aria-live="polite"
     >
       <Icon size={14} aria-hidden="true" />
       <span>{toast.text}</span>

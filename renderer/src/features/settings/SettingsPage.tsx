@@ -2,6 +2,7 @@ import { ChevronDown, Download, FolderOpen, GripVertical, HardDrive, KeyRound, L
 import { PointerEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { ForartAppConfig, ForartMode, normalizeConfig, type CanvasCacheAsset, type CanvasCacheDeleteResult, type CanvasCacheScanResult, type LibtvAccountRecord } from "../../app/appConfig";
+import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import { Select } from "../../components/Select";
 import { createApiProvider, getModelDisplayName, loadApiSettings, normalizeApiProvider, readApiProviders, saveApiSettings, uniqueModels, type ApiModelKind, type ApiProvider } from "./apiProviders";
 import { detectImageModelRuleId, IMAGE_MODEL_RULES, normalizeImageModelRuleId } from "./imageModelRules";
@@ -1119,9 +1120,13 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     return (
       <div className="settings-cache-layout" role="tabpanel" aria-label={t("settings:cacheCleanup")}>
         <section className="settings-section settings-cache-section">
-          <div className="settings-inline-status settings-cache-action-status" data-tone={cacheStatus.tone} aria-live="polite">
-            {cacheStatus.text}
-          </div>
+          {cacheStatus.tone === "error" ? (
+            <ErrorCopyLine className="settings-inline-status settings-cache-action-status" text={cacheStatus.text} ariaLive="polite" />
+          ) : (
+            <div className="settings-inline-status settings-cache-action-status" data-tone={cacheStatus.tone} aria-live="polite">
+              {cacheStatus.text}
+            </div>
+          )}
 
           <div className="settings-cache-summary">
             {renderCacheMetric(t("settings:cacheInputImages"), cacheScan?.totals.inputCount || 0, cacheScan?.totals.inputBytes || 0)}
@@ -1266,9 +1271,13 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
           <div>
             <h1>{t("settings:title")}</h1>
           </div>
-          <div className="settings-status" data-tone={status.tone}>
-            {status.text}
-          </div>
+          {status.tone === "error" ? (
+            <ErrorCopyLine className="settings-status" text={status.text} />
+          ) : (
+            <div className="settings-status" data-tone={status.tone}>
+              {status.text}
+            </div>
+          )}
         </header>
 
         <nav className="settings-nav" aria-label={t("settings:settingsNavigation")} role="tablist">
@@ -1624,9 +1633,13 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                         </button>
                       </div>
                       {apiStatus.text && (apiStatus.tone === "ready" || apiStatus.tone === "error") ? (
-                        <div className="settings-inline-status settings-api-action-status" data-tone={apiStatus.tone} aria-live="polite">
-                          {apiStatus.text}
-                        </div>
+                        apiStatus.tone === "error" ? (
+                          <ErrorCopyLine className="settings-inline-status settings-api-action-status" text={apiStatus.text} ariaLive="polite" />
+                        ) : (
+                          <div className="settings-inline-status settings-api-action-status" data-tone={apiStatus.tone} aria-live="polite">
+                            {apiStatus.text}
+                          </div>
+                        )
                       ) : null}
                     </div>
                   </section>

@@ -132,7 +132,7 @@ export function useGenerationTaskWriteback({
         const result = terminalTask.result;
         const dimensions = result?.localUrl ? await readImageDimensions(result.localUrl) : null;
         const thumb = terminalStatus === "succeeded" && result?.localUrl
-          ? await saveThumbnailForExistingCanvasAsset(result.localUrl, result.fileName)
+          ? await saveThumbnailForExistingCanvasAsset(result.localUrl)
           : {};
         const patchResult = await savePatchedNodes(terminalTask.canvasId, (currentNodes) => {
           let changed = false;
@@ -179,7 +179,7 @@ export function useGenerationTaskWriteback({
       const result = terminalTask.result;
       const dimensions = result?.localUrl ? await readImageDimensions(result.localUrl) : null;
       const thumb = terminalStatus === "succeeded" && result?.localUrl
-        ? await saveThumbnailForExistingCanvasAsset(result.localUrl, result.fileName)
+        ? await saveThumbnailForExistingCanvasAsset(result.localUrl)
         : {};
       const nextSize = terminalStatus === "succeeded" && result
         ? dimensions ? fitImageNodeSize(dimensions.width, dimensions.height) : fitImageNodeSize(result.width || 1024, result.height || 1024)

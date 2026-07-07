@@ -211,7 +211,7 @@ export function createActionFolderImportService(runtime, actionService) {
     };
   }
 
-  function importActionEntries(projectId, payload = {}) {
+  async function importActionEntries(projectId, payload = {}) {
     if (!projectExists(db, projectId)) return null;
     const entries = Array.isArray(payload.entries) ? payload.entries : [];
     if (!entries.length) throw new Error("No rows selected for import");
@@ -245,13 +245,12 @@ export function createActionFolderImportService(runtime, actionService) {
           : [];
         const imageData = String(entry.data || "");
         if (!imageData) throw new Error("Invalid image data");
-        const action = actionService.createActionFromFile(projectId, {
+        const action = await actionService.createActionFromFile(projectId, {
           ...(name ? { name } : {}),
           prompt: String(entry.prompt || "").slice(0, PROMPT_LIMIT),
           filename: entry.filename || "image",
           mime_type: entry.mime_type || "image/png",
           buffer: Buffer.from(imageData, "base64"),
-          thumbnail_data_url: entry.thumbnail_data_url,
         });
         if (tagNames.length) actionService.updateAction(action.id, { tags: tagNames });
         const importedAction = tagNames.length ? actionService.loadActionEntry(action.id) || action : action;

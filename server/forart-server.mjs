@@ -16,8 +16,25 @@ import { createOutfitLibraryService } from "./src/library/outfit-library-service
 import {
   deleteLibraryAssetThumbnail,
   ensureLibraryAssetThumbnail,
-  saveUploadedLibraryAssetThumbnail,
 } from "./src/library/library-asset-thumbnails.mjs";
+import { readSharpImageDimensions } from "./src/shared/image-thumbnail-sharp.mjs";
+import { parseRequest } from "./src/shared/validation.mjs";
+import {
+  libraryAddModelImagePayloadSchema,
+  libraryAssetUploadPayloadSchema,
+  libraryBulkEntriesPayloadSchema,
+  libraryCreateModelPayloadSchema,
+  libraryCreateProjectPayloadSchema,
+  libraryCreateTagPayloadSchema,
+  libraryImportEntriesPayloadSchema,
+  libraryTagProjectQuerySchema,
+  libraryTagRouteParamsSchema,
+  libraryUpdateActionPayloadSchema,
+  libraryUpdateModelPayloadSchema,
+  libraryUpdateOutfitPayloadSchema,
+  libraryUpdateProjectPayloadSchema,
+  libraryUpdateTagPayloadSchema,
+} from "./src/library/library-route-schemas.mjs";
 
 const SERVER_PORT = Number(process.env.PORT || 6980);
 const SERVER_HOST = process.env.HOST || "0.0.0.0";
@@ -168,10 +185,6 @@ function normalizeBulkEntryIds(values) {
   return ids;
 }
 
-function sanitizeGender(value) {
-  return value === "female" || value === "male" ? value : "unknown";
-}
-
 function ensureDir(dir) {
   mkdirSync(dir, { recursive: true });
 }
@@ -243,10 +256,6 @@ function guessSuffix(filename, mimeType) {
   if (mimeType === "image/webp") return ".webp";
   if (mimeType === "image/gif") return ".gif";
   return ".bin";
-}
-
-function imageDimensions() {
-  return { width: 0, height: 0 };
 }
 
 function initDatabase() {
@@ -1068,7 +1077,9 @@ function bulkLibraryEntries(kind, payload = {}) {
 function handleBulkLibraryEntriesApi(req, res, kind) {
   parseJsonBody(req)
     .then((payload) => {
-      const result = bulkLibraryEntries(kind, payload || {});
+      const parsed = parseRequest(libraryBulkEntriesPayloadSchema, payload || {});
+      if (!parsed.ok) return sendJson(res, parsed.status, parsed.body);
+      const result = bulkLibraryEntries(kind, parsed.value);
       if (!result) return sendJson(res, 404, { detail: "Project not found" });
       sendJson(res, 200, result);
     })
@@ -1077,48 +1088,57 @@ function handleBulkLibraryEntriesApi(req, res, kind) {
 }
 
 function handleProjectTagApi(req, res, { kind, projectId, tagId }) {
-  if (!projectId) {
-    sendJson(res, 400, { detail: "project_id is required" });
+  const parsedQuery = parseRequest(libraryTagProjectQuerySchema, { project_id: projectId });
+  if (!parsedQuery.ok) {
+    sendJson(res, parsedQuery.status, parsedQuery.body);
     return true;
   }
-  if (!projectExistsForKind(kind, projectId)) {
+  const parsedProjectId = parsedQuery.value.project_id;
+  if (!projectExistsForKind(kind, parsedProjectId)) {
     sendJson(res, 404, { detail: "Project not found" });
     return true;
   }
   const method = String(req.method || "GET").toUpperCase();
   if (method === "GET" && !tagId) {
-    sendJson(res, 200, { tags: listTags(kind, projectId) });
+    sendJson(res, 200, { tags: listTags(kind, parsedProjectId) });
     return true;
   }
   if (method === "POST" && !tagId) {
     parseJsonBody(req)
       .then((payload) => {
-        const name = String(payload?.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
-        if (!name) return sendJson(res, 400, { detail: "Tag name is required" });
-        const tag = runDbTransaction(() => createProjectTag(kind, projectId, name, payload?.color));
+        const parsedBody = parseRequest(libraryCreateTagPayloadSchema, payload || {});
+        if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+        const tag = runDbTransaction(() => createProjectTag(kind, parsedProjectId, parsedBody.value.name, parsedBody.value.color));
         sendJson(res, 200, tag);
       })
       .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
     return true;
   }
   if (method === "PATCH" && tagId) {
+    const parsedParams = parseRequest(libraryTagRouteParamsSchema, { project_id: parsedProjectId, tag_id: tagId });
+    if (!parsedParams.ok) {
+      sendJson(res, parsedParams.status, parsedParams.body);
+      return true;
+    }
     parseJsonBody(req)
       .then((payload) => {
+        const parsedBody = parseRequest(libraryUpdateTagPayloadSchema, payload || {});
+        if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+        const data = parsedBody.value;
         const next = runDbTransaction(() => {
-          const tag = db.prepare("SELECT * FROM library_tags WHERE id = ? AND kind = ? AND project_id = ?").get(tagId, kind, projectId);
+          const tag = db.prepare("SELECT * FROM library_tags WHERE id = ? AND kind = ? AND project_id = ?").get(tagId, kind, parsedProjectId);
           if (!tag) return null;
-          if (payload.name !== undefined) {
-            const nextName = String(payload.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
-            if (!nextName) throw new Error("Tag name is required");
-            const exists = db.prepare("SELECT id FROM library_tags WHERE kind = ? AND project_id = ? AND name = ? AND id <> ?").get(kind, projectId, nextName, tagId);
+          if (data.name !== undefined) {
+            const nextName = data.name;
+            const exists = db.prepare("SELECT id FROM library_tags WHERE kind = ? AND project_id = ? AND name = ? AND id <> ?").get(kind, parsedProjectId, nextName, tagId);
             if (exists) throw new Error("Tag already exists");
             db.prepare("UPDATE library_tags SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), tagId);
           }
-          if (payload.sort_order !== undefined) {
-            db.prepare("UPDATE library_tags SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(payload.sort_order || 0), nowIso(), tagId);
+          if (data.sort_order !== undefined) {
+            db.prepare("UPDATE library_tags SET sort_order = ?, updated_at = ? WHERE id = ?").run(data.sort_order, nowIso(), tagId);
           }
-          if (payload.color !== undefined) {
-            db.prepare("UPDATE library_tags SET color = ?, updated_at = ? WHERE id = ?").run(normalizeLibraryTagColor(payload.color), nowIso(), tagId);
+          if (data.color !== undefined) {
+            db.prepare("UPDATE library_tags SET color = ?, updated_at = ? WHERE id = ?").run(data.color, nowIso(), tagId);
           }
           return db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
         });
@@ -1129,7 +1149,12 @@ function handleProjectTagApi(req, res, { kind, projectId, tagId }) {
     return true;
   }
   if (method === "DELETE" && tagId) {
-    const tag = db.prepare("SELECT * FROM library_tags WHERE id = ? AND kind = ? AND project_id = ?").get(tagId, kind, projectId);
+    const parsedParams = parseRequest(libraryTagRouteParamsSchema, { project_id: parsedProjectId, tag_id: tagId });
+    if (!parsedParams.ok) {
+      sendJson(res, parsedParams.status, parsedParams.body);
+      return true;
+    }
+    const tag = db.prepare("SELECT * FROM library_tags WHERE id = ? AND kind = ? AND project_id = ?").get(tagId, kind, parsedProjectId);
     if (!tag) {
       sendJson(res, 200, { ok: true });
       return true;
@@ -1160,7 +1185,7 @@ function nextCode(projectId, projectName) {
   return `${prefix}${String(max + 1).padStart(3, "0")}`;
 }
 
-function writeAsset(content, mimeType, originalFilename, { source, subdir, filenameStem }) {
+function writeAsset(content, mimeType, originalFilename, { source, subdir, filenameStem, dimensions }) {
   const assetId = newId("asset");
   const suffix = guessSuffix(originalFilename, mimeType);
   const filenameBase = safePathPart(filenameStem || assetId, assetId);
@@ -1175,7 +1200,7 @@ function writeAsset(content, mimeType, originalFilename, { source, subdir, filen
     targetPath = path.join(targetDir, `${filenameBase}_${assetId.slice(0, 8)}${suffix}`);
   }
   writeFileSync(targetPath, content);
-  const dims = imageDimensions(content, mimeType);
+  const dims = dimensions || { width: 0, height: 0 };
   const timestamp = nowIso();
   try {
     db.prepare(
@@ -1193,14 +1218,16 @@ function writeAsset(content, mimeType, originalFilename, { source, subdir, filen
   }
 }
 
-function writeAssetInTransaction(content, mimeType, originalFilename, options, work) {
+async function writeAssetInTransaction(content, mimeType, originalFilename, options, work) {
   let asset = null;
   try {
-    return runDbTransaction(() => {
-      asset = writeAsset(content, mimeType, originalFilename, options);
-      if (options?.thumbnailDataUrl) saveUploadedLibraryAssetThumbnail(actionImportRuntime(), asset.id, options.thumbnailDataUrl);
+    const dimensions = await readSharpImageDimensions(content, { mimeType });
+    const result = runDbTransaction(() => {
+      asset = writeAsset(content, mimeType, originalFilename, { ...options, dimensions });
       return work(asset);
     });
+    await ensureLibraryAssetThumbnail(actionImportRuntime(), asset, assetAbsolutePath(asset.path));
+    return result;
   } catch (error) {
     if (asset?.path) {
       try {
@@ -1279,9 +1306,12 @@ function handleModelLibraryApi(req, res, url) {
   if (method === "POST" && pathname === "/api/outfit-projects") {
     parseJsonBody(req)
       .then((payload) => {
+        const parsedBody = parseRequest(libraryCreateProjectPayloadSchema, payload || {});
+        if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+        const data = parsedBody.value;
         const timestamp = nowIso();
         const id = newId("outfit_project");
-        const name = validateFileNamePart(payload?.name || DEFAULT_OUTFIT_PROJECT_NAME, "project name");
+        const name = validateFileNamePart(data.name || DEFAULT_OUTFIT_PROJECT_NAME, "project name");
         if (outfitProjectNameExists(name)) return sendJson(res, 400, { detail: "Project name must be unique" });
         const sortOrder = db.prepare("SELECT COALESCE(MIN(sort_order), 0) - 1 AS next FROM outfit_projects").get()?.next || 0;
         db.prepare(
@@ -1296,9 +1326,11 @@ function handleModelLibraryApi(req, res, url) {
   const outfitImportEntriesMatch = pathname.match(/^\/api\/outfit-projects\/([^/]+)\/outfits\/import-entries$/);
   if (outfitImportEntriesMatch && method === "POST") {
     parseJsonBody(req)
-      .then((payload) => {
+      .then(async (payload) => {
+        const parsedBody = parseRequest(libraryImportEntriesPayloadSchema, payload || {});
+        if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
         const projectId = decodeURIComponent(outfitImportEntriesMatch[1]);
-        const result = getOutfitLibraryService().importEntries(projectId, payload || {});
+        const result = await getOutfitLibraryService().importEntries(projectId, parsedBody.value);
         if (!result) return sendJson(res, 404, { detail: "Outfit project not found" });
         sendJson(res, 200, result);
       })
@@ -1312,8 +1344,10 @@ function handleModelLibraryApi(req, res, url) {
     const tail = outfitProjectMatch[2] || "";
     if (tail === "" && method === "PATCH") {
       parseJsonBody(req)
-        .then((payload) => {
-          const data = payload || {};
+        .then(async (payload) => {
+          const parsedBody = parseRequest(libraryUpdateProjectPayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const project = loadOutfitProject(projectId);
           if (!project) return sendJson(res, 404, { detail: "Outfit project not found" });
           const nextProject = runDbTransaction(() => {
@@ -1326,12 +1360,12 @@ function handleModelLibraryApi(req, res, url) {
               }
             }
             if (data.cover_asset_id !== undefined) {
-              const coverAssetId = data.cover_asset_id ? String(data.cover_asset_id) : null;
+              const coverAssetId = data.cover_asset_id;
               if (coverAssetId && !loadAsset(coverAssetId)) throw new Error("Asset not found");
               db.prepare("UPDATE outfit_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(coverAssetId, nowIso(), projectId);
             }
             if (data.sort_order !== undefined) {
-              db.prepare("UPDATE outfit_projects SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(data.sort_order || 0), nowIso(), projectId);
+              db.prepare("UPDATE outfit_projects SET sort_order = ?, updated_at = ? WHERE id = ?").run(data.sort_order, nowIso(), projectId);
             }
             return projectWithCover(loadOutfitProject(projectId));
           });
@@ -1362,21 +1396,23 @@ function handleModelLibraryApi(req, res, url) {
     }
     if (tail === "cover/upload" && method === "POST") {
       parseJsonBody(req)
-        .then((payload) => {
+        .then(async (payload) => {
+          const parsedBody = parseRequest(libraryAssetUploadPayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const project = loadOutfitProject(projectId);
           if (!project) return sendJson(res, 404, { detail: "Outfit project not found" });
-          const decoded = parseDataUrl(payload?.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
+          const decoded = parseDataUrl(`data:${data.mime_type};base64,${data.data}`);
           if (!decoded) return sendJson(res, 400, { detail: "Invalid upload data" });
           const relDir = path.relative(STORAGE_ROOT, path.join(outfitProjectDirForName(project.name), "__project_cover__"));
-          const nextProject = writeAssetInTransaction(
+          const nextProject = await writeAssetInTransaction(
             decoded.buffer,
             decoded.mimeType,
-            payload?.filename || "image",
+            data.filename,
             {
               source: "outfit-project-cover",
               subdir: relDir,
               filenameStem: "cover",
-              thumbnailDataUrl: payload?.thumbnail_data_url,
             },
             (asset) => {
               db.prepare("UPDATE outfit_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
@@ -1416,11 +1452,14 @@ function handleModelLibraryApi(req, res, url) {
     if (!isImageUpload && method === "PATCH") {
       parseJsonBody(req)
         .then((payload) => {
+          const parsedBody = parseRequest(libraryUpdateOutfitPayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const outfit = loadOutfit(outfitId);
           if (!outfit) return sendJson(res, 404, { detail: "Outfit not found" });
           const nextOutfit = runDbTransaction(() => {
-            if (payload.name !== undefined) {
-              const nextName = validateFileNamePart(payload.name || DEFAULT_OUTFIT_NAME, "outfit name");
+            if (data.name !== undefined) {
+              const nextName = validateFileNamePart(data.name || DEFAULT_OUTFIT_NAME, "outfit name");
               if (outfitNameExists(outfit.project_id, nextName, outfitId)) throw new Error("Outfit name must be unique");
               if (nextName !== outfit.name) {
                 const project = loadOutfitProject(outfit.project_id);
@@ -1429,8 +1468,8 @@ function handleModelLibraryApi(req, res, url) {
                 db.prepare("UPDATE outfit_entries SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), outfitId);
               }
             }
-            if (payload.tags !== undefined) {
-              updateEntryTags("outfit", outfitId, outfit.project_id, payload.tags);
+            if (data.tags !== undefined) {
+              updateEntryTags("outfit", outfitId, outfit.project_id, data.tags);
               db.prepare("UPDATE outfit_entries SET updated_at = ? WHERE id = ?").run(nowIso(), outfitId);
             }
             return outfitWithAssetAndTags(loadOutfit(outfitId));
@@ -1457,25 +1496,27 @@ function handleModelLibraryApi(req, res, url) {
     }
     if (isImageUpload && method === "POST") {
       parseJsonBody(req)
-        .then((payload) => {
+        .then(async (payload) => {
+          const parsedBody = parseRequest(libraryAssetUploadPayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const outfit = loadOutfit(outfitId);
           if (!outfit) return sendJson(res, 404, { detail: "Outfit not found" });
           const project = loadOutfitProject(outfit.project_id);
           if (!project) return sendJson(res, 404, { detail: "Outfit project not found" });
-          const decoded = parseDataUrl(payload?.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
+          const decoded = parseDataUrl(`data:${data.mime_type};base64,${data.data}`);
           if (!decoded) return sendJson(res, 400, { detail: "Invalid upload data" });
           const previousAssetId = outfit.asset_id;
           const relDir = path.relative(STORAGE_ROOT, outfitProjectDirForName(project.name));
           const timestamp = nowIso();
-          const nextOutfit = writeAssetInTransaction(
+          const nextOutfit = await writeAssetInTransaction(
             decoded.buffer,
             decoded.mimeType,
-            payload?.filename || "image",
+            data.filename,
             {
               source: "outfit-library",
               subdir: relDir,
               filenameStem: outfit.name || DEFAULT_OUTFIT_NAME,
-              thumbnailDataUrl: payload?.thumbnail_data_url,
             },
             (asset) => {
               db.prepare("UPDATE outfit_entries SET asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, timestamp, outfitId);
@@ -1512,9 +1553,12 @@ function handleModelLibraryApi(req, res, url) {
   if (method === "POST" && pathname === "/api/action-projects") {
     parseJsonBody(req)
       .then((payload) => {
+        const parsedBody = parseRequest(libraryCreateProjectPayloadSchema, payload || {});
+        if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+        const data = parsedBody.value;
         const timestamp = nowIso();
         const id = newId("action_project");
-        const name = validateFileNamePart(payload?.name || DEFAULT_ACTION_PROJECT_NAME, "project name");
+        const name = validateFileNamePart(data.name || DEFAULT_ACTION_PROJECT_NAME, "project name");
         if (actionProjectNameExists(name)) return sendJson(res, 400, { detail: "Project name must be unique" });
         const sortOrder = db.prepare("SELECT COALESCE(MIN(sort_order), 0) - 1 AS next FROM action_projects").get()?.next || 0;
         db.prepare(
@@ -1533,7 +1577,9 @@ function handleModelLibraryApi(req, res, url) {
     if (tail === "" && method === "PATCH") {
       parseJsonBody(req)
         .then((payload) => {
-          const data = payload || {};
+          const parsedBody = parseRequest(libraryUpdateProjectPayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const project = loadActionProject(projectId);
           if (!project) return sendJson(res, 404, { detail: "Action project not found" });
           const nextProject = runDbTransaction(() => {
@@ -1546,12 +1592,12 @@ function handleModelLibraryApi(req, res, url) {
               }
             }
             if (data.cover_asset_id !== undefined) {
-              const coverAssetId = data.cover_asset_id ? String(data.cover_asset_id) : null;
+              const coverAssetId = data.cover_asset_id;
               if (coverAssetId && !loadAsset(coverAssetId)) throw new Error("Asset not found");
               db.prepare("UPDATE action_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(coverAssetId, nowIso(), projectId);
             }
             if (data.sort_order !== undefined) {
-              db.prepare("UPDATE action_projects SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(data.sort_order || 0), nowIso(), projectId);
+              db.prepare("UPDATE action_projects SET sort_order = ?, updated_at = ? WHERE id = ?").run(data.sort_order, nowIso(), projectId);
             }
             return projectWithCover(loadActionProject(projectId));
           });
@@ -1582,21 +1628,23 @@ function handleModelLibraryApi(req, res, url) {
     }
     if (tail === "cover/upload" && method === "POST") {
       parseJsonBody(req)
-        .then((payload) => {
+        .then(async (payload) => {
+          const parsedBody = parseRequest(libraryAssetUploadPayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const project = loadActionProject(projectId);
           if (!project) return sendJson(res, 404, { detail: "Action project not found" });
-          const decoded = parseDataUrl(payload?.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
+          const decoded = parseDataUrl(`data:${data.mime_type};base64,${data.data}`);
           if (!decoded) return sendJson(res, 400, { detail: "Invalid upload data" });
           const relDir = path.relative(STORAGE_ROOT, path.join(actionProjectDirForName(project.name), "__project_cover__"));
-          const nextProject = writeAssetInTransaction(
+          const nextProject = await writeAssetInTransaction(
             decoded.buffer,
             decoded.mimeType,
-            payload?.filename || "image",
+            data.filename,
             {
               source: "action-project-cover",
               subdir: relDir,
               filenameStem: "cover",
-              thumbnailDataUrl: payload?.thumbnail_data_url,
             },
             (asset) => {
               db.prepare("UPDATE action_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
@@ -1632,9 +1680,11 @@ function handleModelLibraryApi(req, res, url) {
   const actionImportEntriesMatch = pathname.match(/^\/api\/action-projects\/([^/]+)\/actions\/import-entries$/);
   if (actionImportEntriesMatch && method === "POST") {
     parseJsonBody(req)
-      .then((payload) => {
+      .then(async (payload) => {
+        const parsedBody = parseRequest(libraryImportEntriesPayloadSchema, payload || {});
+        if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
         const projectId = decodeURIComponent(actionImportEntriesMatch[1]);
-        const result = getActionImportService().importActionEntries(projectId, payload || {});
+        const result = await getActionImportService().importActionEntries(projectId, parsedBody.value);
         if (!result) return sendJson(res, 404, { detail: "Action project not found" });
         sendJson(res, 200, result);
       })
@@ -1649,11 +1699,14 @@ function handleModelLibraryApi(req, res, url) {
     if (!isImageUpload && method === "PATCH") {
       parseJsonBody(req)
         .then((payload) => {
+          const parsedBody = parseRequest(libraryUpdateActionPayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const action = loadAction(actionId);
           if (!action) return sendJson(res, 404, { detail: "Action not found" });
           const nextAction = runDbTransaction(() => {
-            if (payload.name !== undefined) {
-              const nextName = validateFileNamePart(payload.name || DEFAULT_ACTION_NAME, "action name");
+            if (data.name !== undefined) {
+              const nextName = validateFileNamePart(data.name || DEFAULT_ACTION_NAME, "action name");
               if (actionNameExists(action.project_id, nextName, actionId)) throw new Error("Action name must be unique");
               if (nextName !== action.name) {
                 const project = loadActionProject(action.project_id);
@@ -1662,12 +1715,12 @@ function handleModelLibraryApi(req, res, url) {
                 db.prepare("UPDATE action_entries SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), actionId);
               }
             }
-            if (payload.tags !== undefined) {
-              updateEntryTags("action", actionId, action.project_id, payload.tags);
+            if (data.tags !== undefined) {
+              updateEntryTags("action", actionId, action.project_id, data.tags);
               db.prepare("UPDATE action_entries SET updated_at = ? WHERE id = ?").run(nowIso(), actionId);
             }
-            if (payload.prompt !== undefined) {
-              db.prepare("UPDATE action_entries SET prompt = ?, updated_at = ? WHERE id = ?").run(String(payload.prompt || "").slice(0, 4000), nowIso(), actionId);
+            if (data.prompt !== undefined) {
+              db.prepare("UPDATE action_entries SET prompt = ?, updated_at = ? WHERE id = ?").run(data.prompt, nowIso(), actionId);
             }
             return actionWithAssetAndTags(loadAction(actionId));
           });
@@ -1693,25 +1746,27 @@ function handleModelLibraryApi(req, res, url) {
     }
     if (isImageUpload && method === "POST") {
       parseJsonBody(req)
-        .then((payload) => {
+        .then(async (payload) => {
+          const parsedBody = parseRequest(libraryAssetUploadPayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const action = loadAction(actionId);
           if (!action) return sendJson(res, 404, { detail: "Action not found" });
           const project = loadActionProject(action.project_id);
           if (!project) return sendJson(res, 404, { detail: "Action project not found" });
-          const decoded = parseDataUrl(payload?.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
+          const decoded = parseDataUrl(`data:${data.mime_type};base64,${data.data}`);
           if (!decoded) return sendJson(res, 400, { detail: "Invalid upload data" });
           const previousAssetId = action.asset_id;
           const relDir = path.relative(STORAGE_ROOT, actionProjectDirForName(project.name));
           const timestamp = nowIso();
-          const nextAction = writeAssetInTransaction(
+          const nextAction = await writeAssetInTransaction(
             decoded.buffer,
             decoded.mimeType,
-            payload?.filename || "image",
+            data.filename,
             {
               source: "action-library",
               subdir: relDir,
               filenameStem: action.name || DEFAULT_ACTION_NAME,
-              thumbnailDataUrl: payload?.thumbnail_data_url,
             },
             (asset) => {
               db.prepare("UPDATE action_entries SET asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, timestamp, actionId);
@@ -1748,9 +1803,12 @@ function handleModelLibraryApi(req, res, url) {
   if (method === "POST" && pathname === "/api/model-projects") {
     parseJsonBody(req)
       .then((payload) => {
+        const parsedBody = parseRequest(libraryCreateProjectPayloadSchema, payload || {});
+        if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+        const data = parsedBody.value;
         const timestamp = nowIso();
         const id = newId("project");
-        const name = validateFileNamePart(payload?.name || DEFAULT_PROJECT_NAME, "project name");
+        const name = validateFileNamePart(data.name || DEFAULT_PROJECT_NAME, "project name");
         if (projectNameExists(name)) return sendJson(res, 400, { detail: "Project name must be unique" });
         const sortOrder = db.prepare("SELECT COALESCE(MIN(sort_order), 0) - 1 AS next FROM model_projects").get()?.next || 0;
         db.prepare(
@@ -1766,9 +1824,11 @@ function handleModelLibraryApi(req, res, url) {
   const modelImportEntriesMatch = pathname.match(/^\/api\/model-projects\/([^/]+)\/models\/import-entries$/);
   if (modelImportEntriesMatch && method === "POST") {
     parseJsonBody(req)
-      .then((payload) => {
+      .then(async (payload) => {
+        const parsedBody = parseRequest(libraryImportEntriesPayloadSchema, payload || {});
+        if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
         const projectId = decodeURIComponent(modelImportEntriesMatch[1]);
-        const result = getModelLibraryService().importEntries(projectId, payload || {});
+        const result = await getModelLibraryService().importEntries(projectId, parsedBody.value);
         if (!result) return sendJson(res, 404, { detail: "Model project not found" });
         sendJson(res, 200, result);
       })
@@ -1783,7 +1843,9 @@ function handleModelLibraryApi(req, res, url) {
     if (tail === "" && method === "PATCH") {
       parseJsonBody(req)
         .then((payload) => {
-          const data = payload || {};
+          const parsedBody = parseRequest(libraryUpdateProjectPayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const project = loadProject(projectId);
           if (!project) return sendJson(res, 404, { detail: "Model project not found" });
           const nextProject = runDbTransaction(() => {
@@ -1796,12 +1858,12 @@ function handleModelLibraryApi(req, res, url) {
               }
             }
             if (data.cover_asset_id !== undefined) {
-              const coverAssetId = data.cover_asset_id ? String(data.cover_asset_id) : null;
+              const coverAssetId = data.cover_asset_id;
               if (coverAssetId && !loadAsset(coverAssetId)) throw new Error("Asset not found");
               db.prepare("UPDATE model_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(coverAssetId, nowIso(), projectId);
             }
             if (data.sort_order !== undefined) {
-              db.prepare("UPDATE model_projects SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(data.sort_order || 0), nowIso(), projectId);
+              db.prepare("UPDATE model_projects SET sort_order = ?, updated_at = ? WHERE id = ?").run(data.sort_order, nowIso(), projectId);
             }
             return projectWithCover(loadProject(projectId));
           });
@@ -1840,21 +1902,23 @@ function handleModelLibraryApi(req, res, url) {
     }
     if (tail === "cover/upload" && method === "POST") {
       parseJsonBody(req)
-        .then((payload) => {
+        .then(async (payload) => {
+          const parsedBody = parseRequest(libraryAssetUploadPayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const project = loadProject(projectId);
           if (!project) return sendJson(res, 404, { detail: "Model project not found" });
-          const decoded = parseDataUrl(payload?.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
+          const decoded = parseDataUrl(`data:${data.mime_type};base64,${data.data}`);
           if (!decoded) return sendJson(res, 400, { detail: "Invalid upload data" });
           const relDir = path.relative(STORAGE_ROOT, path.join(projectDirForName(project.name), "__project_cover__"));
-          const nextProject = writeAssetInTransaction(
+          const nextProject = await writeAssetInTransaction(
             decoded.buffer,
             decoded.mimeType,
-            payload?.filename || "image",
+            data.filename,
             {
               source: "model-project-cover",
               subdir: relDir,
               filenameStem: "cover",
-              thumbnailDataUrl: payload?.thumbnail_data_url,
             },
             (asset) => {
               db.prepare("UPDATE model_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
@@ -1890,17 +1954,20 @@ function handleModelLibraryApi(req, res, url) {
     if (tail === "models" && method === "POST") {
       parseJsonBody(req)
         .then((payload) => {
+          const parsedBody = parseRequest(libraryCreateModelPayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const project = loadProject(projectId);
           if (!project) return sendJson(res, 404, { detail: "Model project not found" });
           const timestamp = nowIso();
           const code = nextCode(projectId, project.name);
           const id = newId("model");
-          const name = validateFileNamePart(payload?.name || DEFAULT_MODEL_NAME, "model name");
+          const name = validateFileNamePart(data.name || DEFAULT_MODEL_NAME, "model name");
           if (modelNameExists(projectId, name)) return sendJson(res, 400, { detail: "Model name must be unique within the project" });
           const model = runDbTransaction(() => {
             db.prepare(
               "INSERT INTO model_entries (id, project_id, name, code, gender, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-            ).run(id, projectId, name, code, sanitizeGender(payload?.gender), timestamp, timestamp);
+            ).run(id, projectId, name, code, data.gender, timestamp, timestamp);
             db.prepare("UPDATE model_projects SET updated_at = ? WHERE id = ?").run(timestamp, projectId);
             return modelWithCoverAndTags(loadModel(id));
           });
@@ -1918,22 +1985,25 @@ function handleModelLibraryApi(req, res, url) {
     if (tail === "" && method === "PATCH") {
       parseJsonBody(req)
         .then((payload) => {
+          const parsedBody = parseRequest(libraryUpdateModelPayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const model = loadModel(modelId);
           if (!model) return sendJson(res, 404, { detail: "Model not found" });
           const nextModel = runDbTransaction(() => {
-            if (payload.name !== undefined) {
-              const nextName = validateFileNamePart(payload.name || DEFAULT_MODEL_NAME, "model name");
+            if (data.name !== undefined) {
+              const nextName = validateFileNamePart(data.name || DEFAULT_MODEL_NAME, "model name");
               if (modelNameExists(model.project_id, nextName, modelId)) throw new Error("Model name must be unique within the project");
               if (nextName !== model.name) {
                 renameModelFolderAndImages(model, nextName);
                 db.prepare("UPDATE model_entries SET name = ?, updated_at = ? WHERE id = ?").run(nextName, nowIso(), modelId);
               }
             }
-            if (payload.tags !== undefined) {
-              updateEntryTags("model", modelId, model.project_id, payload.tags);
+            if (data.tags !== undefined) {
+              updateEntryTags("model", modelId, model.project_id, data.tags);
             }
-            if (payload.cover_image_id !== undefined) {
-              const coverImageId = payload.cover_image_id ? String(payload.cover_image_id) : null;
+            if (data.cover_image_id !== undefined) {
+              const coverImageId = data.cover_image_id;
               if (coverImageId) {
                 const image = db.prepare("SELECT id FROM model_images WHERE id = ? AND model_id = ?").get(coverImageId, modelId);
                 if (!image) throw new Error("Model image not found");
@@ -1990,24 +2060,27 @@ function handleModelLibraryApi(req, res, url) {
     if (tail === "images" && method === "POST") {
       parseJsonBody(req)
         .then((payload) => {
+          const parsedBody = parseRequest(libraryAddModelImagePayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const model = loadModel(modelId);
           if (!model) return sendJson(res, 404, { detail: "Model not found" });
-          const asset = loadAsset(payload?.asset_id);
+          const asset = loadAsset(data.asset_id);
           if (!asset) return sendJson(res, 404, { detail: "Asset not found" });
           const timestamp = nowIso();
           const imageId = newId("image");
-          const sortOrder = Number(payload?.sort_order || 0);
+          const sortOrder = data.sort_order === undefined ? 0 : data.sort_order;
           const image = runDbTransaction(() => {
             db.prepare(
               "INSERT INTO model_images (id, model_id, asset_id, caption, sort_order, created_at, mime_type, filename) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-            ).run(imageId, modelId, asset.id, String(payload?.caption || ""), sortOrder, timestamp, asset.mime_type, asset.filename);
+            ).run(imageId, modelId, asset.id, data.caption || "", sortOrder, timestamp, asset.mime_type, asset.filename);
             return {
               id: imageId,
               model_id: modelId,
               asset_id: asset.id,
               asset_url: assetUrl(asset.id),
               thumbnail_url: assetThumbnailUrl(asset.id),
-              caption: String(payload?.caption || ""),
+              caption: data.caption || "",
               sort_order: sortOrder,
               created_at: timestamp,
               mime_type: asset.mime_type,
@@ -2021,10 +2094,13 @@ function handleModelLibraryApi(req, res, url) {
     }
     if (tail === "images/upload" && method === "POST") {
       parseJsonBody(req)
-        .then((payload) => {
+        .then(async (payload) => {
+          const parsedBody = parseRequest(libraryAssetUploadPayloadSchema, payload || {});
+          if (!parsedBody.ok) return sendJson(res, parsedBody.status, parsedBody.body);
+          const data = parsedBody.value;
           const model = loadModel(modelId);
           if (!model) return sendJson(res, 404, { detail: "Model not found" });
-          const decoded = parseDataUrl(payload?.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
+          const decoded = parseDataUrl(`data:${data.mime_type};base64,${data.data}`);
           if (!decoded) return sendJson(res, 400, { detail: "Invalid upload data" });
           const project = loadProject(model.project_id);
           if (!project) return sendJson(res, 404, { detail: "Model project not found" });
@@ -2033,15 +2109,14 @@ function handleModelLibraryApi(req, res, url) {
           const sortOrder = db.prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM model_images WHERE model_id = ?").get(modelId)?.next || 0;
           const timestamp = nowIso();
           const imageId = newId("image");
-          const result = writeAssetInTransaction(
+          const result = await writeAssetInTransaction(
             decoded.buffer,
             decoded.mimeType,
-            payload?.filename || "image",
+            data.filename,
             {
               source: "model-library",
               subdir: relDir,
               filenameStem: `${modelName}_${String(Number(sortOrder) + 1).padStart(3, "0")}`,
-              thumbnailDataUrl: payload?.thumbnail_data_url,
             },
             (asset) => {
               db.prepare(

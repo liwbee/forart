@@ -1,6 +1,7 @@
 import { PointerEvent, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type WheelEvent as ReactWheelEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleHelp, Flag, FolderOpen, ImageOff, RefreshCw, Save, Search, X } from "lucide-react";
+import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 
 type ImageGroupKey = "model" | "detail";
 
@@ -751,7 +752,7 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
                 </button>
               </div>
             ) : null}
-            {issueError ? <span className="review-report-error">{issueError}</span> : null}
+            {issueError ? <ErrorCopyLine className="review-report-error" text={issueError} /> : null}
             <div className="review-check-actions">
               <button className="button review-check-button review-check-button--issue" type="button" disabled={!image || issueSaving} onClick={openIssueEditor}>
                 <Flag size={15} aria-hidden="true" />
@@ -1020,7 +1021,7 @@ export function ImageReviewPage() {
           onChoose={chooseReviewRoot}
           onScan={refreshReviewDirectory}
         />
-        {folderError ? <span className="review-directory-error">{folderError}</span> : null}
+        {folderError ? <ErrorCopyLine className="review-directory-error" text={folderError} /> : null}
       </div>
 
       <div className="image-review-shell">

@@ -1,9 +1,7 @@
 export const zhCN = {
   imageChoices: "{{name}} 图片选择",
   loadingImages: "正在加载图片...",
-  loadFailed: "加载失败：{{message}}",
   droppedImage: "拖入图片",
-  copyUnsupported: "当前浏览器不支持复制图片到剪贴板",
   resizeRail: "调整{{title}}区域宽度",
   canvasTitle: "3:4 竖屏画布",
   canvasSettings: "画布设置",
@@ -48,9 +46,7 @@ export const zhCN = {
 export const enUS = {
   imageChoices: "{{name}} image choices",
   loadingImages: "Loading images...",
-  loadFailed: "Load failed: {{message}}",
   droppedImage: "Dropped image",
-  copyUnsupported: "This browser does not support copying images to the clipboard",
   resizeRail: "Resize {{title}} area",
   canvasTitle: "3:4 portrait canvas",
   canvasSettings: "Canvas settings",

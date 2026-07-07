@@ -12,7 +12,8 @@ export const zhCN = {
     close: "关闭",
     uploadImage: "上传图片",
     downloadOriginalImage: "下载原图",
-    copyImage: "复制图片"
+    copyImage: "复制图片",
+    copyError: "复制完整报错信息"
   },
   confirm: {
     delete: "确认删除?"
@@ -99,7 +100,8 @@ export const enUS = {
     close: "Close",
     uploadImage: "Upload image",
     downloadOriginalImage: "Download original image",
-    copyImage: "Copy image"
+    copyImage: "Copy image",
+    copyError: "Copy full error message"
   },
   confirm: {
     delete: "Confirm delete?"

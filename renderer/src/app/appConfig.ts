@@ -199,8 +199,10 @@ export interface EasyToolApi {
   importCanvasPackageFromPath: (payload: { filePath: string; projectId?: string }) => Promise<CanvasPackageImportResult>;
   uploadCanvasPackageToRemote: (payload: { filePath: string; uploadUrl: string }) => Promise<unknown>;
   downloadCanvasPackageFromRemote: (payload: { downloadUrl: string }) => Promise<{ ok: true; filePath: string }>;
-  saveCanvasAsset: (payload: { dataUrl?: string; url?: string; thumbDataUrl?: string; defaultName?: string; kind?: "input" | "output" }) => Promise<{ url: string; thumbUrl?: string; fileName: string; filePath?: string; thumbFilePath?: string }>;
-  saveCanvasAssetThumbnail: (payload: { url?: string; filePath?: string; thumbDataUrl?: string }) => Promise<{ thumbUrl?: string; thumbFilePath?: string }>;
+  saveCanvasAsset: (payload: { dataUrl?: string; url?: string; defaultName?: string; kind?: "input" | "output"; type?: string }) => Promise<{ url: string; thumbUrl?: string; fileName: string; filePath?: string; thumbFilePath?: string }>;
+  saveCanvasAssetThumbnail: (payload: { url?: string; filePath?: string }) => Promise<{ thumbUrl?: string; thumbFilePath?: string }>;
+  ensureCanvasAssetThumbnail: (payload: { url?: string; filePath?: string }) => Promise<{ thumbUrl?: string; thumbFilePath?: string }>;
+  cropCanvasAsset: (payload: { url?: string; filePath?: string; x: number; y: number; width: number; height: number; defaultName?: string }) => Promise<{ url: string; thumbUrl?: string; fileName: string; filePath?: string; thumbFilePath?: string; width: number; height: number }>;
   scanCanvasCache: () => Promise<CanvasCacheScanResult>;
   deleteCanvasCacheAssets: (payload: { ids: string[]; olderThanDays?: number }) => Promise<CanvasCacheDeleteResult>;
   revealCanvasCacheAsset: (payload: { id?: string; filePath?: string }) => Promise<{ ok: true }>;

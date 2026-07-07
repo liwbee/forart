@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Copy, Download, Eye, MoreHorizontal, Star, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Fragment } from "react";
+import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import { LazyImage } from "../../components/LazyImage";
 import { ImageViewer } from "../../lib/ImageViewer";
 import { CollapsibleTagFilterRow } from "../library-tags";
@@ -1496,7 +1497,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
           </div>
 
           <div className="library-body scrollbar-thin-stable">
-            {errorMessage ? <div className="library-error">{t("modelLibrary:requestFailed", { message: errorMessage })}</div> : null}
+            {errorMessage ? <ErrorCopyLine className="library-error" text={t("modelLibrary:requestFailed", { message: errorMessage })} /> : null}
             {projectsQuery.isLoading ? <div className="library-empty">{t("common:states.loadingProjects")}</div> : null}
             {!projectsQuery.isLoading && !projects.length ? <div className="library-empty">{t("common:empty.noProjects")}</div> : null}
             {activeProject ? (

@@ -57,14 +57,12 @@ export interface AssetUploadPayload {
   filename: string;
   mime_type: string;
   data: string;
-  thumbnail_data_url?: string;
 }
 
 export interface ModelImportImage {
   filename: string;
   mime_type: string;
   data: string;
-  thumbnail_data_url?: string;
   caption?: string;
   sort_order?: number;
 }

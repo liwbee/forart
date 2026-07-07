@@ -60,9 +60,6 @@ async function convertBlobToPng(blob: Blob) {
 }
 
 export async function copyLibraryImage(url: string) {
-  if (!navigator.clipboard || typeof ClipboardItem === "undefined") {
-    throw new Error("Clipboard image writing is not supported");
-  }
   const blob = await fetchImageBlob(url);
   const clipboardBlob = blob.type === "image/png" ? blob : await convertBlobToPng(blob);
   await navigator.clipboard.write([new ClipboardItem({ "image/png": clipboardBlob })]);

@@ -9,7 +9,7 @@ import {
 import {
   constrainCropRect,
   constrainCropResizeRect,
-  cropImageToRect,
+  cropPixelsForRect,
   cropRectForAspect,
   fitImageNodeSize,
   imageContentRect,
@@ -19,7 +19,6 @@ import {
 import { isImageLikeNode } from "./nodePredicates";
 import type { CanvasConnection, CanvasGroup, CanvasNode, CanvasNodeType, CropAspectKey, CropInteractionState, ImageDialogState } from "./types";
 import type { LibraryAssetSelection } from "../library-asset-picker/types";
-import { createImageThumbnail } from "../image-thumbnails/createImageThumbnail";
 
 type StateUpdater<T> = T | ((current: T) => T);
 const CANVAS_TOAST_AUTO_HIDE_MS = 2000;
@@ -118,20 +117,13 @@ export function useCanvasMediaActions({
   const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
 
   const saveCanvasImageAsset = useCallback(async (source: { url?: string; dataUrl?: string; defaultName?: string; kind: "input" | "output"; type?: string }): Promise<SavedCanvasAsset> => {
-    const thumbnail = await createImageThumbnail({
-      dataUrl: source.dataUrl,
-      url: source.url,
-      name: source.defaultName,
-      type: source.type,
-    });
     if (!window.easyTool?.saveCanvasAsset) {
       return {
         url: source.dataUrl || source.url || "",
-        thumbUrl: thumbnail?.dataUrl,
         fileName: source.defaultName || "canvas-image.png",
       };
     }
-    return window.easyTool.saveCanvasAsset({ ...source, thumbDataUrl: thumbnail?.dataUrl });
+    return window.easyTool.saveCanvasAsset(source);
   }, []);
 
   const showMediaStatus = useCallback((status: DownloadStatus) => {
@@ -405,23 +397,28 @@ export function useCanvasMediaActions({
     const rect = constrainCropRect(imageCrop.rect, node, imageCrop.aspect);
     const naturalWidth = node.imageNaturalWidth || node.w;
     const naturalHeight = node.imageNaturalHeight || node.h;
-    const result = await cropImageToRect(node.url, naturalWidth, naturalHeight, rect, contentRect);
-    if (!result) return;
-    const saved = await saveCanvasImageAsset({ dataUrl: result.dataUrl, defaultName: node.fileName ? `cropped-${node.fileName}` : "cropped-image.png", kind: "output" });
-    const nextSize = fitImageNodeSize(result.width, result.height);
+    const crop = cropPixelsForRect(naturalWidth, naturalHeight, rect, contentRect);
+    if (!window.easyTool?.cropCanvasAsset) return;
+    const saved = await window.easyTool.cropCanvasAsset({
+      url: node.url,
+      filePath: node.filePath,
+      ...crop,
+      defaultName: node.fileName ? `cropped-${node.fileName}` : "cropped-image.png",
+    });
+    const nextSize = fitImageNodeSize(saved.width, saved.height);
     const patch = {
       url: saved.url,
       thumbUrl: saved.thumbUrl,
       fileName: saved.fileName,
       filePath: saved.filePath,
       thumbFilePath: saved.thumbFilePath,
-      imageNaturalWidth: result.width,
-      imageNaturalHeight: result.height,
+      imageNaturalWidth: saved.width,
+      imageNaturalHeight: saved.height,
       ...nextSize,
     };
     patchNode(nodeId, patch);
     setImageCrop(null);
-  }, [imageCrop, nodeMap, patchNode, saveCanvasImageAsset]);
+  }, [imageCrop, nodeMap, patchNode]);
 
   return {
     imagePreview,

@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('easyTool', {
   downloadCanvasPackageFromRemote: (payload) => ipcRenderer.invoke('canvas:download-package-from-remote', payload),
   saveCanvasAsset: (payload) => ipcRenderer.invoke('canvas:save-asset', payload),
   saveCanvasAssetThumbnail: (payload) => ipcRenderer.invoke('canvas:save-asset-thumbnail', payload),
+  ensureCanvasAssetThumbnail: (payload) => ipcRenderer.invoke('canvas:ensure-asset-thumbnail', payload),
+  cropCanvasAsset: (payload) => ipcRenderer.invoke('canvas:crop-asset', payload),
   scanCanvasCache: () => ipcRenderer.invoke('canvas-cache:scan'),
   deleteCanvasCacheAssets: (payload) => ipcRenderer.invoke('canvas-cache:delete', payload),
   revealCanvasCacheAsset: (payload) => ipcRenderer.invoke('canvas-cache:reveal', payload),

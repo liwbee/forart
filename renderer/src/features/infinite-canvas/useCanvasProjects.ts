@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { TFunction } from "i18next";
 import { replaceCanvasDocument } from "./canvasStore";
 import { cloneCanvasNodesForNewCanvas } from "./canvasNodeClone";
@@ -32,6 +32,7 @@ interface UseCanvasProjectsOptions {
   setViewport: (viewport: Viewport) => void;
   setZoomInput: (value: string) => void;
   clearCanvasTransientState: () => void;
+  skipNextAutoSaveRef?: MutableRefObject<boolean>;
   t: TFunction;
 }
 
@@ -233,6 +234,7 @@ export function useCanvasProjects({
   setViewport,
   setZoomInput,
   clearCanvasTransientState,
+  skipNextAutoSaveRef,
   t,
 }: UseCanvasProjectsOptions) {
   const [initialLastCanvasState] = useState(readLastCanvasState);
@@ -766,6 +768,10 @@ export function useCanvasProjects({
   useEffect(() => {
     if (!activeCanvasId) return;
     if (!window.easyTool?.saveCanvas) return;
+    if (skipNextAutoSaveRef?.current) {
+      skipNextAutoSaveRef.current = false;
+      return;
+    }
     const snapshot = {
       title: activeCanvasTitle,
       icon: activeProject?.icon,

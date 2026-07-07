@@ -572,6 +572,7 @@ body {
 
 .settings-status,
 .settings-inline-status {
+  min-width: 0;
   min-height: 34px;
   display: inline-flex;
   align-items: center;
@@ -634,7 +635,9 @@ body {
 }
 
 .settings-status[data-tone="error"],
-.settings-inline-status[data-tone="error"] {
+.settings-inline-status[data-tone="error"],
+.settings-status.error-copy-line,
+.settings-inline-status.error-copy-line {
   color: var(--danger);
   border-color: var(--danger);
   background: var(--danger-soft);

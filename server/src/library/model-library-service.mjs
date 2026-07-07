@@ -9,8 +9,9 @@ import {
 } from "./library-runtime.mjs";
 import {
   deleteLibraryAssetThumbnail,
-  saveUploadedLibraryAssetThumbnail,
+  ensureLibraryAssetThumbnail,
 } from "./library-asset-thumbnails.mjs";
+import { readSharpImageDimensions } from "../shared/image-thumbnail-sharp.mjs";
 
 function safePathPart(value, fallback) {
   const name = String(value || "").trim() || fallback;
@@ -61,10 +62,6 @@ function guessSuffix(filename, mimeType) {
   if (mimeType === "image/webp") return ".webp";
   if (mimeType === "image/gif") return ".gif";
   return ".bin";
-}
-
-function imageDimensions() {
-  return { width: 0, height: 0 };
 }
 
 function ensureDir(dir) {
@@ -360,7 +357,7 @@ export function createModelLibraryService(runtime, options = {}) {
     });
   }
 
-  function writeAsset(content, mimeType, originalFilename, { source, subdir, filenameStem }) {
+  function writeAsset(content, mimeType, originalFilename, { source, subdir, filenameStem, dimensions }) {
     const assetId = newId("asset");
     const suffix = guessSuffix(originalFilename, mimeType);
     const filenameBase = safePathPart(filenameStem || assetId, assetId);
@@ -371,7 +368,7 @@ export function createModelLibraryService(runtime, options = {}) {
     let targetPath = path.join(targetDir, filename);
     if (existsSync(targetPath)) targetPath = path.join(targetDir, `${filenameBase}_${assetId.slice(0, 8)}${suffix}`);
     writeFileSync(targetPath, content);
-    const dims = imageDimensions(content, mimeType);
+    const dims = dimensions || { width: 0, height: 0 };
     const timestamp = nowIso();
     try {
       db.prepare(
@@ -389,14 +386,16 @@ export function createModelLibraryService(runtime, options = {}) {
     }
   }
 
-  function writeAssetInTransaction(content, mimeType, originalFilename, options, work) {
+  async function writeAssetInTransaction(content, mimeType, originalFilename, options, work) {
     let asset = null;
     try {
-      return runDbTransaction(db, () => {
-        asset = writeAsset(content, mimeType, originalFilename, options);
-        if (options?.thumbnailDataUrl) saveUploadedLibraryAssetThumbnail(runtime, asset.id, options.thumbnailDataUrl);
+      const dimensions = await readSharpImageDimensions(content, { mimeType });
+      const result = runDbTransaction(db, () => {
+        asset = writeAsset(content, mimeType, originalFilename, { ...options, dimensions });
         return work(asset);
       });
+      await ensureLibraryAssetThumbnail(runtime, asset, assetAbsolutePath(asset.path));
+      return result;
     } catch (error) {
       if (asset?.path) {
         try {
@@ -504,7 +503,7 @@ export function createModelLibraryService(runtime, options = {}) {
     return { ok: true };
   }
 
-  function uploadProjectCover(projectId, payload = {}) {
+  async function uploadProjectCover(projectId, payload = {}) {
     const project = loadProject(projectId);
     if (!project) return null;
     const decoded = parseDataUrl(payload.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
@@ -514,7 +513,6 @@ export function createModelLibraryService(runtime, options = {}) {
       source: "model-project-cover",
       subdir: relDir,
       filenameStem: "cover",
-      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("UPDATE model_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
       return projectWithCover(loadProject(projectId));
@@ -568,7 +566,7 @@ export function createModelLibraryService(runtime, options = {}) {
     return [];
   }
 
-  function createModelFromImportEntry(projectId, entry = {}, tagNames = []) {
+  async function createModelFromImportEntry(projectId, entry = {}, tagNames = []) {
     const project = loadProject(projectId);
     if (!project) return null;
     const gender = sanitizeGender(entry.gender);
@@ -582,9 +580,19 @@ export function createModelLibraryService(runtime, options = {}) {
     const modelId = newId("model");
     const code = nextCode(projectId, project.name);
     const writtenAssets = [];
+    const preparedImages = [];
+    for (const image of images) {
+      const decoded = parseDataUrl(image?.data ? `data:${image.mime_type || "image/png"};base64,${image.data}` : "");
+      if (!decoded) throw new Error("Invalid image data");
+      preparedImages.push({
+        image,
+        decoded,
+        dimensions: await readSharpImageDimensions(decoded.buffer, { mimeType: decoded.mimeType }),
+      });
+    }
 
     try {
-      return runDbTransaction(db, () => {
+      const result = runDbTransaction(db, () => {
         db.prepare("INSERT INTO model_entries (id, project_id, name, code, gender, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
           .run(modelId, projectId, name, code, gender, timestamp, timestamp);
         db.prepare("UPDATE model_projects SET updated_at = ? WHERE id = ?").run(timestamp, projectId);
@@ -592,16 +600,14 @@ export function createModelLibraryService(runtime, options = {}) {
         const modelName = folderName(name, "model name");
         const relDir = path.relative(storageRoot, modelDirForNames(project.name, name));
         const imageIds = [];
-        images.forEach((image, index) => {
-          const decoded = parseDataUrl(image?.data ? `data:${image.mime_type || "image/png"};base64,${image.data}` : "");
-          if (!decoded) throw new Error("Invalid image data");
+        preparedImages.forEach(({ image, decoded, dimensions }, index) => {
           const sortOrder = Number.isFinite(Number(image.sort_order)) ? Number(image.sort_order) : index;
           const asset = writeAsset(decoded.buffer, decoded.mimeType, image.filename || "image", {
             source: "model-library",
             subdir: relDir,
             filenameStem: `${modelName}_${String(index + 1).padStart(3, "0")}`,
+            dimensions,
           });
-          if (image?.thumbnail_data_url) saveUploadedLibraryAssetThumbnail(runtime, asset.id, image.thumbnail_data_url);
           writtenAssets.push(asset);
           const imageId = newId("image");
           db.prepare("INSERT INTO model_images (id, model_id, asset_id, caption, sort_order, created_at, mime_type, filename) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
@@ -617,6 +623,8 @@ export function createModelLibraryService(runtime, options = {}) {
 
         return modelWithCoverAndTags(loadModel(modelId));
       });
+      await Promise.all(writtenAssets.map((asset) => ensureLibraryAssetThumbnail(runtime, asset, assetAbsolutePath(asset.path))));
+      return result;
     } catch (error) {
       for (const asset of writtenAssets) {
         if (asset?.path) {
@@ -630,7 +638,7 @@ export function createModelLibraryService(runtime, options = {}) {
     }
   }
 
-  function importEntries(projectId, payload = {}) {
+  async function importEntries(projectId, payload = {}) {
     if (!loadProject(projectId)) return null;
     const entries = Array.isArray(payload.entries) ? payload.entries : [];
     if (!entries.length) throw new Error("No rows selected for import");
@@ -659,7 +667,7 @@ export function createModelLibraryService(runtime, options = {}) {
         const tagNames = Array.isArray(entry.tags) && entry.tags.length
           ? existingProjectTagNames(projectId, entry.tags)
           : [];
-        const model = createModelFromImportEntry(projectId, { ...entry, ...(name ? { name } : {}) }, tagNames);
+        const model = await createModelFromImportEntry(projectId, { ...entry, ...(name ? { name } : {}) }, tagNames);
         imported.push(model);
         rows.push({ ...rowBase, model_id: model.id, final_status: rowBase.warnings.length ? "warning" : "imported" });
       } catch (error) {
@@ -831,7 +839,7 @@ export function createModelLibraryService(runtime, options = {}) {
     });
   }
 
-  function uploadImage(modelId, payload = {}) {
+  async function uploadImage(modelId, payload = {}) {
     const model = loadModel(modelId);
     if (!model) return null;
     const decoded = parseDataUrl(payload.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
@@ -847,7 +855,6 @@ export function createModelLibraryService(runtime, options = {}) {
       source: "model-library",
       subdir: relDir,
       filenameStem: `${modelName}_${String(Number(sortOrder) + 1).padStart(3, "0")}`,
-      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("INSERT INTO model_images (id, model_id, asset_id, caption, sort_order, created_at, mime_type, filename) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
         .run(imageId, modelId, asset.id, "", Number(sortOrder), timestamp, asset.mime_type, asset.filename);

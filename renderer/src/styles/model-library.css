@@ -192,11 +192,10 @@
   white-space: nowrap;
 }
 
-.tag-list span {
+.tag-list > span {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
   padding: 3px 7px;
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
@@ -205,6 +204,12 @@
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tag-list > span > span:not(.library-tag-color-dot) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tag-list.empty {

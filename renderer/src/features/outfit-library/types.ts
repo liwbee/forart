@@ -39,7 +39,6 @@ export interface AssetUploadPayload {
   filename: string;
   mime_type: string;
   data: string;
-  thumbnail_data_url?: string;
 }
 
 export interface OutfitImportEntry {
@@ -50,7 +49,6 @@ export interface OutfitImportEntry {
   relative_path?: string;
   mime_type: string;
   data: string;
-  thumbnail_data_url?: string;
   tags?: string[];
   warnings?: Array<{ code: string; message: string }>;
   thumbnail_url?: string;

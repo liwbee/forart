@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Copy, Download, Eye, ImagePlus, MoreHorizontal, Tags, Trash2 } from "lucide-react";
 import { createPortal } from "react-dom";
+import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import { LazyImage } from "../../components/LazyImage";
 import { CollapsibleTagFilterRow } from "../library-tags";
 import { LibraryTagChoiceButton } from "../library-tags";
@@ -893,7 +894,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
           </div>
 
           <div className="library-body scrollbar-thin-stable">
-            {errorMessage ? <div className="library-error">{t("outfitLibrary:requestFailed", { message: errorMessage })}</div> : null}
+            {errorMessage ? <ErrorCopyLine className="library-error" text={t("outfitLibrary:requestFailed", { message: errorMessage })} /> : null}
             {storageSettingsQuery.isLoading || projectsQuery.isLoading ? <div className="library-empty">{t("common:states.loadingProjects")}</div> : null}
             {!storageConfigured ? <div className="library-empty">{t("outfitLibrary:storageUnavailable")}</div> : null}
             {storageConfigured && !projectsQuery.isLoading && !projects.length ? <div className="library-empty">{t("common:empty.noProjects")}</div> : null}

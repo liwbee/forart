@@ -1,7 +1,7 @@
 {
   "name": "forart-main",
   "private": true,
-  "version": "0.1.26",
+  "version": "0.1.27",
   "type": "module",
   "main": "electron/main/electron-main.cjs",
   "scripts": {
@@ -10,6 +10,7 @@
     "electron": "electron .",
     "build": "tsc -b && vite build",
     "package:dir": "npm run build && electron-builder --win --dir",
+    "validate:schemas": "node scripts/validate-zod-schemas.mjs",
     "validate:i18n": "node scripts/validate-i18n.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
@@ -42,10 +43,12 @@
     "adm-zip": "^0.5.18",
     "i18next": "^26.3.1",
     "lucide-react": "^0.468.0",
+    "p-limit": "^7.3.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-i18next": "^17.0.8",
     "sharp": "^0.35.3",
+    "zod": "^4.4.3",
     "zundo": "^2.3.0",
     "zustand": "^5.0.2"
   },

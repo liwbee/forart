@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { ErrorCopyLine } from "../../../components/ErrorCopyLine";
 import type { ActionEntry, ActionTag } from "../../action-library/types";
 import type { ApiProvider, ApiProviderOrderItem } from "../../settings/apiProviders";
 import { selectActionForRow } from "../action-fission/actionFissionActions";
@@ -215,7 +216,7 @@ export function ActionFissionNodeBody({
             : `${t("infiniteCanvas:actionFissionAddRow")} (${state.rows.length}/${MAX_ACTION_FISSION_ROWS})`}
         </button>
         {state.error || (effectiveApiType === "libtv-api" && !libtvReady ? libtvUnavailableMessage : "") ? (
-          <div className="ic-action-fission-node-error" role="alert">{state.error || libtvUnavailableMessage}</div>
+          <ErrorCopyLine className="ic-action-fission-node-error" text={state.error || libtvUnavailableMessage} />
         ) : null}
       </div>
 

@@ -351,7 +351,7 @@
   opacity: 0;
 }
 
-.outfit-card__tags span {
+.outfit-card__tags > span {
   max-width: 100%;
   min-height: 24px;
   display: inline-flex;
@@ -363,6 +363,13 @@
   color: var(--state-hover-text);
   font-size: 0.72rem;
   font-weight: var(--font-weight-medium);
+}
+
+.outfit-card__tags > span > span:not(.library-tag-color-dot) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .outfit-card__menu-button {

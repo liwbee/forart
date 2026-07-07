@@ -1,6 +1,7 @@
 import { Play, Square } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { useTranslation } from "react-i18next";
+import { ErrorCopyLine } from "../../../components/ErrorCopyLine";
 import { Select } from "../../../components/Select";
 import { SizePresetPicker } from "../../../components/SizePresetPicker";
 import { clamp, WORLD_CENTER } from "../canvasGeometry";
@@ -227,7 +228,7 @@ export function LibtvImageGeneratorComposer({
         </button>
       </div>
       {state.status ? <div className="ic-image-composer__status">{state.status}</div> : null}
-      {loadError || state.error ? <div className="ic-image-composer__error">{state.error || loadError}</div> : null}
+      {loadError || state.error ? <ErrorCopyLine className="ic-image-composer__error" text={state.error || loadError} /> : null}
     </div>
   );
 }

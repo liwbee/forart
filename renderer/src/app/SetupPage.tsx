@@ -3,6 +3,7 @@ import { FormEvent, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ForartAppConfig, ForartMode, normalizeConfig } from "./appConfig";
 import { SUPPORTED_LANGUAGES, SupportedLanguage } from "../i18n";
+import { ErrorCopyLine } from "../components/ErrorCopyLine";
 
 interface SetupPageProps {
   initialConfig: ForartAppConfig | null;
@@ -139,7 +140,7 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
             ))}
           </div>
 
-          {error ? <div className="setup-error">{error}</div> : null}
+          {error ? <ErrorCopyLine className="setup-error" text={error} /> : null}
 
           <button className="setup-submit" type="submit" disabled={!canSubmit || saving}>
             {saving ? t("setup:saving") : t("setup:enter")}

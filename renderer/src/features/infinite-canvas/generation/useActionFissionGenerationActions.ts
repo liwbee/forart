@@ -314,7 +314,7 @@ export function useActionFissionGenerationActions({
           }
           const dimensions = result.localUrl ? await readImageDimensions(result.localUrl) : null;
           const thumb = result.localUrl
-            ? await saveThumbnailForExistingCanvasAsset(result.localUrl, result.fileName)
+            ? await saveThumbnailForExistingCanvasAsset(result.localUrl)
             : {};
           await writeRowResult(job.id, {
             libtvQueued: false,

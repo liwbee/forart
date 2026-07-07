@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { createCanvasAssetThumbnailStore } = require('./canvas-asset-thumbnails.cjs');
 
 function uniqueFilePath(directory, fileName) {
   const parsed = path.parse(fileName || 'generated-image.png');
@@ -12,12 +13,6 @@ function uniqueFilePath(directory, fileName) {
     index += 1;
   }
   return candidate;
-}
-
-function thumbFileNameFor(fileName) {
-  const parsed = path.parse(fileName || 'canvas-image.png');
-  const safeBase = (parsed.name || 'canvas-image').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
-  return `${safeBase}.webp`;
 }
 
 function isInside(parent, target) {
@@ -45,12 +40,6 @@ function createAssetStore({ rootDir, net }) {
     return directory;
   }
 
-  function thumbDirectory(kind) {
-    const directory = path.join(assetDirectory(kind), 'thumb');
-    fs.mkdirSync(directory, { recursive: true });
-    return directory;
-  }
-
   function resolveAssetUrl(source) {
     try {
       const parsed = new URL(String(source || ''));
@@ -71,6 +60,11 @@ function createAssetStore({ rootDir, net }) {
     const relative = path.relative(assetRoot, filePath).replace(/\\/g, '/');
     return 'forart-asset://canvas/' + relative.split('/').map(encodeURIComponent).join('/');
   }
+
+  const thumbnailStore = createCanvasAssetThumbnailStore({
+    assetRoot: canvasAssetsRoot,
+    assetUrl,
+  });
 
   async function readImageSource(payload = {}) {
     const source = String(payload.dataUrl || payload.url || '');
@@ -98,49 +92,69 @@ function createAssetStore({ rootDir, net }) {
     };
   }
 
-  function readDataUrlImage(dataUrl) {
-    const dataMatch = String(dataUrl || '').match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/s);
-    if (!dataMatch) return null;
-    return {
-      buffer: Buffer.from(dataMatch[2], 'base64'),
-      extension: extensionFromMime(dataMatch[1]) || '.webp',
-    };
-  }
-
-  function saveThumbnail(payload = {}, sourceFileName = '') {
-    const thumbSource = readDataUrlImage(payload.thumbDataUrl);
-    if (!thumbSource) return null;
-    const filePath = path.join(thumbDirectory(payload.kind), thumbFileNameFor(sourceFileName || payload.defaultName));
-    fs.writeFileSync(filePath, thumbSource.buffer);
-    return {
-      thumbUrl: assetUrl(filePath),
-      thumbFilePath: filePath,
-    };
-  }
-
   async function saveAsset(payload = {}) {
     const source = await readImageSource(payload);
     const directory = assetDirectory(payload.kind);
     const defaultName = payload.defaultName || ('canvas-image' + (source.extension || '.png'));
     const filePath = uniqueFilePath(directory, defaultName);
     fs.writeFileSync(filePath, source.buffer);
-    const thumb = saveThumbnail(payload, path.basename(filePath));
+    const thumb = await thumbnailStore.ensureCanvasAssetThumbnail({ filePath });
     return {
       url: assetUrl(filePath),
-      ...(thumb || {}),
+      ...thumb,
       fileName: path.basename(filePath),
       filePath,
     };
   }
 
   async function saveAssetThumbnail(payload = {}) {
-    const sourcePath = resolveAssetUrl(payload.url || payload.filePath || '');
+    const sourcePath = payload.filePath && fs.existsSync(payload.filePath)
+      ? payload.filePath
+      : resolveAssetUrl(payload.url || '');
     if (!sourcePath || !fs.existsSync(sourcePath)) return {};
-    const thumb = saveThumbnail({
-      ...payload,
-      kind: path.basename(path.dirname(sourcePath)) === 'output' ? 'output' : 'input',
-    }, path.basename(sourcePath));
-    return thumb || {};
+    return thumbnailStore.ensureCanvasAssetThumbnail({ filePath: sourcePath });
+  }
+
+  async function ensureAssetThumbnail(payload = {}) {
+    return saveAssetThumbnail(payload);
+  }
+
+  async function cropAsset(payload = {}) {
+    const sourcePath = payload.filePath && fs.existsSync(payload.filePath)
+      ? payload.filePath
+      : resolveAssetUrl(payload.url || '');
+    if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error('Source image not found.');
+    const left = Math.max(0, Math.round(Number(payload.x || 0)));
+    const top = Math.max(0, Math.round(Number(payload.y || 0)));
+    const width = Math.max(1, Math.round(Number(payload.width || 0)));
+    const height = Math.max(1, Math.round(Number(payload.height || 0)));
+    const { default: sharp } = await import('sharp');
+    const normalized = await sharp(sourcePath, { animated: false })
+      .rotate()
+      .png()
+      .toBuffer({ resolveWithObject: true });
+    const sourceWidth = Math.max(1, Number(normalized.info.width || 0));
+    const sourceHeight = Math.max(1, Number(normalized.info.height || 0));
+    const extractLeft = Math.min(left, sourceWidth - 1);
+    const extractTop = Math.min(top, sourceHeight - 1);
+    const extractWidth = Math.max(1, Math.min(width, sourceWidth - extractLeft));
+    const extractHeight = Math.max(1, Math.min(height, sourceHeight - extractTop));
+    const directory = assetDirectory('output');
+    const parsedName = path.parse(payload.defaultName || 'cropped-image.png');
+    const filePath = uniqueFilePath(directory, `${parsedName.name || 'cropped-image'}.png`);
+    const output = await sharp(normalized.data)
+      .extract({ left: extractLeft, top: extractTop, width: extractWidth, height: extractHeight })
+      .png()
+      .toFile(filePath);
+    const thumb = await thumbnailStore.ensureCanvasAssetThumbnail({ filePath, mimeType: 'image/png' });
+    return {
+      url: assetUrl(filePath),
+      ...thumb,
+      fileName: path.basename(filePath),
+      filePath,
+      width: Number(output.width || extractWidth),
+      height: Number(output.height || extractHeight),
+    };
   }
 
   async function saveResult(payload = {}, downloadsPath) {
@@ -160,6 +174,8 @@ function createAssetStore({ rootDir, net }) {
     resolveAssetUrl,
     saveAsset,
     saveAssetThumbnail,
+    ensureAssetThumbnail,
+    cropAsset,
     saveResult,
   };
 }

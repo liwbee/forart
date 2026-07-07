@@ -87,6 +87,10 @@
   white-space: nowrap;
 }
 
+.ic-llm-node__error.error-copy-line {
+  display: flex;
+}
+
 .ic-node-head {
   min-width: 0;
   display: flex;

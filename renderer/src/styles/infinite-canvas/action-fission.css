@@ -1141,6 +1141,12 @@
   background: color-mix(in srgb, #2563eb 10%, var(--canvas-node-bg));
 }
 
+.ic-action-fission-row__message.error-copy-line {
+  display: flex;
+  align-items: center;
+  line-height: 1;
+}
+
 .ic-action-fission-row__message.is-ready {
   border-color: var(--canvas-node-border);
   color: var(--canvas-state-hover-text);
@@ -1321,6 +1327,10 @@
   font-weight: var(--font-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ic-action-fission-node-error.error-copy-line {
+  display: flex;
 }
 
 .ic-action-fission-footer {

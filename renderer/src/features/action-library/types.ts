@@ -40,7 +40,6 @@ export interface AssetUploadPayload {
   filename: string;
   mime_type: string;
   data: string;
-  thumbnail_data_url?: string;
 }
 
 export interface ActionFilters {

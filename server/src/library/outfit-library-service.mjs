@@ -8,8 +8,9 @@ import {
 } from "./library-runtime.mjs";
 import {
   deleteLibraryAssetThumbnail,
-  saveUploadedLibraryAssetThumbnail,
+  ensureLibraryAssetThumbnail,
 } from "./library-asset-thumbnails.mjs";
+import { readSharpImageDimensions } from "../shared/image-thumbnail-sharp.mjs";
 
 function safePathPart(value, fallback) {
   const name = String(value || "").trim() || fallback;
@@ -50,10 +51,6 @@ function guessSuffix(filename, mimeType) {
   if (mimeType === "image/webp") return ".webp";
   if (mimeType === "image/gif") return ".gif";
   return ".bin";
-}
-
-function imageDimensions() {
-  return { width: 0, height: 0 };
 }
 
 function ensureDir(dir) {
@@ -321,7 +318,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
     }
   }
 
-  function writeAsset(content, mimeType, originalFilename, { source, subdir, filenameStem }) {
+  function writeAsset(content, mimeType, originalFilename, { source, subdir, filenameStem, dimensions }) {
     const assetId = newId("asset");
     const suffix = guessSuffix(originalFilename, mimeType);
     const filenameBase = safePathPart(filenameStem || assetId, assetId);
@@ -332,7 +329,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
     let targetPath = path.join(targetDir, filename);
     if (existsSync(targetPath)) targetPath = path.join(targetDir, `${filenameBase}_${assetId.slice(0, 8)}${suffix}`);
     writeFileSync(targetPath, content);
-    const dims = imageDimensions(content, mimeType);
+    const dims = dimensions || { width: 0, height: 0 };
     const timestamp = nowIso();
     try {
       db.prepare(
@@ -350,14 +347,16 @@ export function createOutfitLibraryService(runtime, options = {}) {
     }
   }
 
-  function writeAssetInTransaction(content, mimeType, originalFilename, options, work) {
+  async function writeAssetInTransaction(content, mimeType, originalFilename, options, work) {
     let asset = null;
     try {
-      return runDbTransaction(db, () => {
-        asset = writeAsset(content, mimeType, originalFilename, options);
-        if (options?.thumbnailDataUrl) saveUploadedLibraryAssetThumbnail(runtime, asset.id, options.thumbnailDataUrl);
+      const dimensions = await readSharpImageDimensions(content, { mimeType });
+      const result = runDbTransaction(db, () => {
+        asset = writeAsset(content, mimeType, originalFilename, { ...options, dimensions });
         return work(asset);
       });
+      await ensureLibraryAssetThumbnail(runtime, asset, assetAbsolutePath(asset.path));
+      return result;
     } catch (error) {
       if (asset?.path) {
         try {
@@ -459,7 +458,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
     return { ok: true };
   }
 
-  function uploadProjectCover(projectId, payload = {}) {
+  async function uploadProjectCover(projectId, payload = {}) {
     const project = loadProject(projectId);
     if (!project) return null;
     const decoded = parseDataUrl(payload.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
@@ -469,7 +468,6 @@ export function createOutfitLibraryService(runtime, options = {}) {
       source: "outfit-project-cover",
       subdir: relDir,
       filenameStem: "cover",
-      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("UPDATE outfit_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
       return projectWithCover(loadProject(projectId));
@@ -492,7 +490,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
     return { outfits: filtered };
   }
 
-  function createOutfitFromFile(projectId, payload = {}) {
+  async function createOutfitFromFile(projectId, payload = {}) {
     const project = loadProject(projectId);
     if (!project) return null;
     const content = Buffer.isBuffer(payload.buffer) ? payload.buffer : Buffer.from(payload.buffer || "");
@@ -508,7 +506,6 @@ export function createOutfitLibraryService(runtime, options = {}) {
       source: "outfit-library",
       subdir: relDir,
       filenameStem: name,
-      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("INSERT INTO outfit_entries (id, project_id, name, asset_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
         .run(id, projectId, name, asset.id, timestamp, timestamp);
@@ -517,7 +514,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
     });
   }
 
-  function importEntries(projectId, payload = {}) {
+  async function importEntries(projectId, payload = {}) {
     if (!loadProject(projectId)) return null;
     const entries = Array.isArray(payload.entries) ? payload.entries : [];
     if (!entries.length) throw new Error("No rows selected for import");
@@ -548,12 +545,11 @@ export function createOutfitLibraryService(runtime, options = {}) {
           : [];
         const imageData = String(entry.data || "");
         if (!imageData) throw new Error("Invalid image data");
-        const outfit = createOutfitFromFile(projectId, {
+        const outfit = await createOutfitFromFile(projectId, {
           ...(name ? { name } : {}),
           filename: entry.filename || "image",
           mime_type: entry.mime_type || "image/png",
           buffer: Buffer.from(imageData, "base64"),
-          thumbnail_data_url: entry.thumbnail_data_url,
         });
         if (tagNames.length) updateOutfit(outfit.id, { tags: tagNames });
         const importedOutfit = tagNames.length ? outfitWithAssetAndTags(loadOutfit(outfit.id)) : outfit;
@@ -686,7 +682,7 @@ export function createOutfitLibraryService(runtime, options = {}) {
     throw new Error("Unsupported bulk operation");
   }
 
-  function replaceOutfitImage(outfitId, payload = {}) {
+  async function replaceOutfitImage(outfitId, payload = {}) {
     const outfit = loadOutfit(outfitId);
     if (!outfit) return null;
     const project = loadProject(outfit.project_id);
@@ -700,7 +696,6 @@ export function createOutfitLibraryService(runtime, options = {}) {
       source: "outfit-library",
       subdir: relDir,
       filenameStem: outfit.name || labels.defaultOutfit,
-      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("UPDATE outfit_entries SET asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, timestamp, outfitId);
       db.prepare("UPDATE outfit_projects SET cover_asset_id = CASE WHEN cover_asset_id = ? THEN ? ELSE cover_asset_id END, updated_at = ? WHERE id = ?")

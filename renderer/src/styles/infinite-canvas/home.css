@@ -298,6 +298,11 @@
   pointer-events: none;
 }
 
+.ic-page-toast.error-copy-line {
+  display: flex;
+  pointer-events: auto;
+}
+
 .ic-page-toast span {
   min-width: 0;
   overflow: hidden;

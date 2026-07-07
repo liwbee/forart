@@ -31,6 +31,8 @@ let outfitLibraryModulePromise = null;
 let actionLibraryModulePromise = null;
 let actionFolderImportModulePromise = null;
 let libraryAssetThumbnailModulePromise = null;
+let validationModulePromise = null;
+let libraryRouteSchemasModulePromise = null;
 let activeRuntime = null;
 let activeRuntimeKey = '';
 let activeModelService = null;
@@ -83,6 +85,20 @@ function libraryAssetThumbnailModule() {
     libraryAssetThumbnailModulePromise = import('../../../server/src/library/library-asset-thumbnails.mjs');
   }
   return libraryAssetThumbnailModulePromise;
+}
+
+function validationModule() {
+  if (!validationModulePromise) {
+    validationModulePromise = import('../../../server/src/shared/validation.mjs');
+  }
+  return validationModulePromise;
+}
+
+function libraryRouteSchemasModule() {
+  if (!libraryRouteSchemasModulePromise) {
+    libraryRouteSchemasModulePromise = import('../../../server/src/library/library-route-schemas.mjs');
+  }
+  return libraryRouteSchemasModulePromise;
 }
 
 async function getLibraryRuntime({ configStore, app, dataRoot }) {
@@ -212,14 +228,40 @@ function notFoundIfNull(result, detail) {
   return result ? success(result) : failure(404, detail);
 }
 
-function dispatchTagRoute({ method, url, tagMatch, service, projectNotFoundDetail }) {
+async function parseLibraryRoutePayload(schemaName, input) {
+  const [{ parseRequest }, schemas] = await Promise.all([
+    validationModule(),
+    libraryRouteSchemasModule(),
+  ]);
+  return parseRequest(schemas[schemaName], input || {});
+}
+
+async function dispatchTagRoute({ method, url, tagMatch, service, projectNotFoundDetail }) {
   const tagId = tagMatch[1] ? decodeURIComponent(tagMatch[1]) : '';
-  const projectId = url.searchParams.get('project_id') || '';
-  if (!projectId) return failure(400, 'project_id is required');
+  const parsedQuery = await parseLibraryRoutePayload('libraryTagProjectQuerySchema', {
+    project_id: url.searchParams.get('project_id') || '',
+  });
+  if (!parsedQuery.ok) return parsedQuery;
+  const projectId = parsedQuery.value.project_id;
   if (!service.projectExists(projectId)) return failure(404, projectNotFoundDetail);
   if (!tagId && (method === 'GET' || method === 'HEAD')) return success({ tags: service.listTags(projectId) });
-  if (!tagId && method === 'POST') return notFoundIfNull(service.createTag(projectId, url.body || {}), projectNotFoundDetail);
-  if (tagId && method === 'PATCH') return notFoundIfNull(service.updateTag(projectId, tagId, url.body || {}), 'Tag not found');
+  if (!tagId && method === 'POST') {
+    const parsedBody = await parseLibraryRoutePayload('libraryCreateTagPayloadSchema', url.body || {});
+    if (!parsedBody.ok) return parsedBody;
+    return notFoundIfNull(service.createTag(projectId, parsedBody.value), projectNotFoundDetail);
+  }
+  if (tagId && (method === 'PATCH' || method === 'DELETE')) {
+    const parsedParams = await parseLibraryRoutePayload('libraryTagRouteParamsSchema', {
+      project_id: projectId,
+      tag_id: tagId,
+    });
+    if (!parsedParams.ok) return parsedParams;
+  }
+  if (tagId && method === 'PATCH') {
+    const parsedBody = await parseLibraryRoutePayload('libraryUpdateTagPayloadSchema', url.body || {});
+    if (!parsedBody.ok) return parsedBody;
+    return notFoundIfNull(service.updateTag(projectId, tagId, parsedBody.value), 'Tag not found');
+  }
   if (tagId && method === 'DELETE') return success(service.deleteTag(projectId, tagId));
   return null;
 }
@@ -231,37 +273,67 @@ async function dispatchModelLibraryRoute({ method, url, body, runtime }) {
   try {
     if (pathname === '/api/model-projects') {
       if (method === 'GET' || method === 'HEAD') return success(service.listProjects());
-      if (method === 'POST') return success(service.createProject(body || {}));
+      if (method === 'POST') {
+        const parsed = await parseLibraryRoutePayload('libraryCreateProjectPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return success(service.createProject(parsed.value));
+      }
     }
 
     const importEntriesMatch = pathname.match(/^\/api\/model-projects\/([^/]+)\/models\/import-entries$/);
     if (importEntriesMatch && method === 'POST') {
       const projectId = decodeURIComponent(importEntriesMatch[1]);
-      return notFoundIfNull(service.importEntries(projectId, body || {}), 'Model project not found');
+      const parsed = await parseLibraryRoutePayload('libraryImportEntriesPayloadSchema', body || {});
+      if (!parsed.ok) return parsed;
+      return notFoundIfNull(await service.importEntries(projectId, parsed.value), 'Model project not found');
     }
 
     const projectMatch = pathname.match(/^\/api\/model-projects\/([^/]+)(?:\/(cover\/upload|models))?$/);
     if (projectMatch) {
       const projectId = decodeURIComponent(projectMatch[1]);
       const tail = projectMatch[2] || '';
-      if (tail === '' && method === 'PATCH') return notFoundIfNull(service.updateProject(projectId, body || {}), 'Model project not found');
+      if (tail === '' && method === 'PATCH') {
+        const parsed = await parseLibraryRoutePayload('libraryUpdateProjectPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(service.updateProject(projectId, parsed.value), 'Model project not found');
+      }
       if (tail === '' && method === 'DELETE') return notFoundIfNull(service.deleteProject(projectId), 'Model project not found');
-      if (tail === 'cover/upload' && method === 'POST') return notFoundIfNull(service.uploadProjectCover(projectId, body || {}), 'Model project not found');
+      if (tail === 'cover/upload' && method === 'POST') {
+        const parsed = await parseLibraryRoutePayload('libraryAssetUploadPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(await service.uploadProjectCover(projectId, parsed.value), 'Model project not found');
+      }
       if (tail === 'models' && (method === 'GET' || method === 'HEAD')) {
         return notFoundIfNull(service.listModels(projectId, searchObject(url)), 'Model project not found');
       }
-      if (tail === 'models' && method === 'POST') return notFoundIfNull(service.createModel(projectId, body || {}), 'Model project not found');
+      if (tail === 'models' && method === 'POST') {
+        const parsed = await parseLibraryRoutePayload('libraryCreateModelPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(service.createModel(projectId, parsed.value), 'Model project not found');
+      }
     }
 
     const modelMatch = pathname.match(/^\/api\/models\/([^/]+)(?:\/(images|images\/upload))?$/);
     if (modelMatch) {
       const modelId = decodeURIComponent(modelMatch[1]);
       const tail = modelMatch[2] || '';
-      if (tail === '' && method === 'PATCH') return notFoundIfNull(service.updateModel(modelId, body || {}), 'Model not found');
+      if (tail === '' && method === 'PATCH') {
+        const parsed = await parseLibraryRoutePayload('libraryUpdateModelPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(service.updateModel(modelId, parsed.value), 'Model not found');
+      }
       if (tail === '' && method === 'DELETE') return notFoundIfNull(service.deleteModel(modelId), 'Model not found');
       if (tail === 'images' && (method === 'GET' || method === 'HEAD')) return notFoundIfNull(service.listImages(modelId), 'Model not found');
-      if (tail === 'images' && method === 'POST') return notFoundIfNull(service.addImage(modelId, body || {}), 'Model not found');
-      if (tail === 'images/upload' && method === 'POST') return notFoundIfNull(service.uploadImage(modelId, body || {}), 'Model not found');
+      if (tail === 'images' && method === 'POST') {
+        const parsed = await parseLibraryRoutePayload('libraryAddModelImagePayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(service.addImage(modelId, parsed.value), 'Model not found');
+      }
+      if (tail === 'images/upload' && method === 'POST') {
+        const parsed = await parseLibraryRoutePayload('libraryAssetUploadPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(await service.uploadImage(modelId, parsed.value), 'Model not found');
+      }
     }
 
     const imageMatch = pathname.match(/^\/api\/model-images\/([^/]+)$/);
@@ -272,11 +344,13 @@ async function dispatchModelLibraryRoute({ method, url, body, runtime }) {
     const tagMatch = pathname.match(/^\/api\/libraries\/model\/tags(?:\/([^/]+))?$/);
     if (tagMatch) {
       url.body = body;
-      return dispatchTagRoute({ method, url, tagMatch, service, projectNotFoundDetail: 'Model project not found' });
+      return await dispatchTagRoute({ method, url, tagMatch, service, projectNotFoundDetail: 'Model project not found' });
     }
 
     if (pathname === '/api/libraries/model/entries/bulk' && method === 'POST') {
-      return notFoundIfNull(service.bulkEntries(body || {}), 'Model project not found');
+      const parsed = await parseLibraryRoutePayload('libraryBulkEntriesPayloadSchema', body || {});
+      if (!parsed.ok) return parsed;
+      return notFoundIfNull(service.bulkEntries(parsed.value), 'Model project not found');
     }
 
     return null;
@@ -292,22 +366,36 @@ async function dispatchOutfitLibraryRoute({ method, url, body, runtime }) {
   try {
     if (pathname === '/api/outfit-projects') {
       if (method === 'GET' || method === 'HEAD') return success(service.listProjects());
-      if (method === 'POST') return success(service.createProject(body || {}));
+      if (method === 'POST') {
+        const parsed = await parseLibraryRoutePayload('libraryCreateProjectPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return success(service.createProject(parsed.value));
+      }
     }
 
     const importEntriesMatch = pathname.match(/^\/api\/outfit-projects\/([^/]+)\/outfits\/import-entries$/);
     if (importEntriesMatch && method === 'POST') {
       const projectId = decodeURIComponent(importEntriesMatch[1]);
-      return notFoundIfNull(service.importEntries(projectId, body || {}), 'Outfit project not found');
+      const parsed = await parseLibraryRoutePayload('libraryImportEntriesPayloadSchema', body || {});
+      if (!parsed.ok) return parsed;
+      return notFoundIfNull(await service.importEntries(projectId, parsed.value), 'Outfit project not found');
     }
 
     const projectMatch = pathname.match(/^\/api\/outfit-projects\/([^/]+)(?:\/(cover\/upload|outfits))?$/);
     if (projectMatch) {
       const projectId = decodeURIComponent(projectMatch[1]);
       const tail = projectMatch[2] || '';
-      if (tail === '' && method === 'PATCH') return notFoundIfNull(service.updateProject(projectId, body || {}), 'Outfit project not found');
+      if (tail === '' && method === 'PATCH') {
+        const parsed = await parseLibraryRoutePayload('libraryUpdateProjectPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(service.updateProject(projectId, parsed.value), 'Outfit project not found');
+      }
       if (tail === '' && method === 'DELETE') return notFoundIfNull(service.deleteProject(projectId), 'Outfit project not found');
-      if (tail === 'cover/upload' && method === 'POST') return notFoundIfNull(service.uploadProjectCover(projectId, body || {}), 'Outfit project not found');
+      if (tail === 'cover/upload' && method === 'POST') {
+        const parsed = await parseLibraryRoutePayload('libraryAssetUploadPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(await service.uploadProjectCover(projectId, parsed.value), 'Outfit project not found');
+      }
       if (tail === 'outfits' && (method === 'GET' || method === 'HEAD')) {
         return notFoundIfNull(service.listOutfits(projectId, searchObject(url)), 'Outfit project not found');
       }
@@ -317,19 +405,29 @@ async function dispatchOutfitLibraryRoute({ method, url, body, runtime }) {
     if (outfitMatch) {
       const outfitId = decodeURIComponent(outfitMatch[1]);
       const isImageUpload = pathname.endsWith('/image/upload');
-      if (!isImageUpload && method === 'PATCH') return notFoundIfNull(service.updateOutfit(outfitId, body || {}), 'Outfit not found');
+      if (!isImageUpload && method === 'PATCH') {
+        const parsed = await parseLibraryRoutePayload('libraryUpdateOutfitPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(service.updateOutfit(outfitId, parsed.value), 'Outfit not found');
+      }
       if (!isImageUpload && method === 'DELETE') return notFoundIfNull(service.deleteOutfit(outfitId), 'Outfit not found');
-      if (isImageUpload && method === 'POST') return notFoundIfNull(service.replaceOutfitImage(outfitId, body || {}), 'Outfit not found');
+      if (isImageUpload && method === 'POST') {
+        const parsed = await parseLibraryRoutePayload('libraryAssetUploadPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(await service.replaceOutfitImage(outfitId, parsed.value), 'Outfit not found');
+      }
     }
 
     const tagMatch = pathname.match(/^\/api\/libraries\/outfit\/tags(?:\/([^/]+))?$/);
     if (tagMatch) {
       url.body = body;
-      return dispatchTagRoute({ method, url, tagMatch, service, projectNotFoundDetail: 'Outfit project not found' });
+      return await dispatchTagRoute({ method, url, tagMatch, service, projectNotFoundDetail: 'Outfit project not found' });
     }
 
     if (pathname === '/api/libraries/outfit/entries/bulk' && method === 'POST') {
-      return notFoundIfNull(service.bulkEntries(body || {}), 'Outfit project not found');
+      const parsed = await parseLibraryRoutePayload('libraryBulkEntriesPayloadSchema', body || {});
+      if (!parsed.ok) return parsed;
+      return notFoundIfNull(service.bulkEntries(parsed.value), 'Outfit project not found');
     }
 
     return null;
@@ -345,30 +443,46 @@ async function dispatchActionLibraryRoute({ method, url, body, runtime }) {
   try {
     if (pathname === '/api/action-projects') {
       if (method === 'GET' || method === 'HEAD') return success(service.listProjects());
-      if (method === 'POST') return success(service.createProject(body || {}));
+      if (method === 'POST') {
+        const parsed = await parseLibraryRoutePayload('libraryCreateProjectPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return success(service.createProject(parsed.value));
+      }
     }
 
     const importEntriesMatch = pathname.match(/^\/api\/action-projects\/([^/]+)\/actions\/import-entries$/);
     if (importEntriesMatch && method === 'POST') {
       const projectId = decodeURIComponent(importEntriesMatch[1]);
       const importService = await getActionFolderImportService(runtime);
-      return notFoundIfNull(importService.importActionEntries(projectId, body || {}), 'Action project not found');
+      const parsed = await parseLibraryRoutePayload('libraryImportEntriesPayloadSchema', body || {});
+      if (!parsed.ok) return parsed;
+      return notFoundIfNull(await importService.importActionEntries(projectId, parsed.value), 'Action project not found');
     }
 
     const importPreviewMatch = pathname.match(/^\/api\/action-projects\/([^/]+)\/actions\/import-folder\/preview$/);
     if (importPreviewMatch && method === 'POST') {
       const projectId = decodeURIComponent(importPreviewMatch[1]);
       const importService = await getActionFolderImportService(runtime);
-      return notFoundIfNull(registerActionImportPreview(importService.previewActionFolderImport(projectId, body || {})), 'Action project not found');
+      const parsed = await parseLibraryRoutePayload('libraryActionImportPreviewPayloadSchema', body || {});
+      if (!parsed.ok) return parsed;
+      return notFoundIfNull(registerActionImportPreview(importService.previewActionFolderImport(projectId, parsed.value)), 'Action project not found');
     }
 
     const projectMatch = pathname.match(/^\/api\/action-projects\/([^/]+)(?:\/(cover\/upload|actions))?$/);
     if (projectMatch) {
       const projectId = decodeURIComponent(projectMatch[1]);
       const tail = projectMatch[2] || '';
-      if (tail === '' && method === 'PATCH') return notFoundIfNull(service.updateProject(projectId, body || {}), 'Action project not found');
+      if (tail === '' && method === 'PATCH') {
+        const parsed = await parseLibraryRoutePayload('libraryUpdateProjectPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(service.updateProject(projectId, parsed.value), 'Action project not found');
+      }
       if (tail === '' && method === 'DELETE') return notFoundIfNull(service.deleteProject(projectId), 'Action project not found');
-      if (tail === 'cover/upload' && method === 'POST') return notFoundIfNull(service.uploadProjectCover(projectId, body || {}), 'Action project not found');
+      if (tail === 'cover/upload' && method === 'POST') {
+        const parsed = await parseLibraryRoutePayload('libraryAssetUploadPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(await service.uploadProjectCover(projectId, parsed.value), 'Action project not found');
+      }
       if (tail === 'actions' && (method === 'GET' || method === 'HEAD')) {
         return notFoundIfNull(service.listActions(projectId, searchObject(url)), 'Action project not found');
       }
@@ -378,19 +492,29 @@ async function dispatchActionLibraryRoute({ method, url, body, runtime }) {
     if (actionMatch) {
       const actionId = decodeURIComponent(actionMatch[1]);
       const isImageUpload = pathname.endsWith('/image/upload');
-      if (!isImageUpload && method === 'PATCH') return notFoundIfNull(service.updateAction(actionId, body || {}), 'Action not found');
+      if (!isImageUpload && method === 'PATCH') {
+        const parsed = await parseLibraryRoutePayload('libraryUpdateActionPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(service.updateAction(actionId, parsed.value), 'Action not found');
+      }
       if (!isImageUpload && method === 'DELETE') return notFoundIfNull(service.deleteAction(actionId), 'Action not found');
-      if (isImageUpload && method === 'POST') return notFoundIfNull(service.replaceActionImage(actionId, body || {}), 'Action not found');
+      if (isImageUpload && method === 'POST') {
+        const parsed = await parseLibraryRoutePayload('libraryAssetUploadPayloadSchema', body || {});
+        if (!parsed.ok) return parsed;
+        return notFoundIfNull(await service.replaceActionImage(actionId, parsed.value), 'Action not found');
+      }
     }
 
     const tagMatch = pathname.match(/^\/api\/libraries\/action\/tags(?:\/([^/]+))?$/);
     if (tagMatch) {
       url.body = body;
-      return dispatchTagRoute({ method, url, tagMatch, service, projectNotFoundDetail: 'Action project not found' });
+      return await dispatchTagRoute({ method, url, tagMatch, service, projectNotFoundDetail: 'Action project not found' });
     }
 
     if (pathname === '/api/libraries/action/entries/bulk' && method === 'POST') {
-      return notFoundIfNull(service.bulkEntries(body || {}), 'Action project not found');
+      const parsed = await parseLibraryRoutePayload('libraryBulkEntriesPayloadSchema', body || {});
+      if (!parsed.ok) return parsed;
+      return notFoundIfNull(service.bulkEntries(parsed.value), 'Action project not found');
     }
 
     return null;

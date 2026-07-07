@@ -715,6 +715,7 @@
   padding: 0 var(--space-4) var(--space-4);
   color: var(--danger);
   font-weight: var(--font-weight-medium);
+  line-height: 1.4;
 }
 @media (max-width: 920px) {
   .free-canvas-editor {

@@ -16,8 +16,12 @@
   font-size: 12px;
   font-weight: var(--font-weight-medium);
   line-height: 1.45;
-  overflow-wrap: anywhere;
+  overflow: hidden;
   pointer-events: none;
+}
+
+.ic-download-toast.error-copy-line {
+  pointer-events: auto;
 }
 
 .ic-download-toast--busy {

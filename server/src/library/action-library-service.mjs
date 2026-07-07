@@ -8,8 +8,9 @@ import {
 } from "./library-runtime.mjs";
 import {
   deleteLibraryAssetThumbnail,
-  saveUploadedLibraryAssetThumbnail,
+  ensureLibraryAssetThumbnail,
 } from "./library-asset-thumbnails.mjs";
+import { readSharpImageDimensions } from "../shared/image-thumbnail-sharp.mjs";
 
 function safePathPart(value, fallback) {
   const name = String(value || "").trim() || fallback;
@@ -50,10 +51,6 @@ function guessSuffix(filename, mimeType) {
   if (mimeType === "image/webp") return ".webp";
   if (mimeType === "image/gif") return ".gif";
   return ".bin";
-}
-
-function imageDimensions() {
-  return { width: 0, height: 0 };
 }
 
 function ensureDir(dir) {
@@ -329,7 +326,7 @@ export function createActionLibraryService(runtime, options = {}) {
     }
   }
 
-  function writeAsset(content, mimeType, originalFilename, { source, subdir, filenameStem }) {
+  function writeAsset(content, mimeType, originalFilename, { source, subdir, filenameStem, dimensions }) {
     const assetId = newId("asset");
     const suffix = guessSuffix(originalFilename, mimeType);
     const filenameBase = safePathPart(filenameStem || assetId, assetId);
@@ -340,7 +337,7 @@ export function createActionLibraryService(runtime, options = {}) {
     let targetPath = path.join(targetDir, filename);
     if (existsSync(targetPath)) targetPath = path.join(targetDir, `${filenameBase}_${assetId.slice(0, 8)}${suffix}`);
     writeFileSync(targetPath, content);
-    const dims = imageDimensions(content, mimeType);
+    const dims = dimensions || { width: 0, height: 0 };
     const timestamp = nowIso();
     try {
       db.prepare(
@@ -358,14 +355,16 @@ export function createActionLibraryService(runtime, options = {}) {
     }
   }
 
-  function writeAssetInTransaction(content, mimeType, originalFilename, options, work) {
+  async function writeAssetInTransaction(content, mimeType, originalFilename, options, work) {
     let asset = null;
     try {
-      return runDbTransaction(db, () => {
-        asset = writeAsset(content, mimeType, originalFilename, options);
-        if (options?.thumbnailDataUrl) saveUploadedLibraryAssetThumbnail(runtime, asset.id, options.thumbnailDataUrl);
+      const dimensions = await readSharpImageDimensions(content, { mimeType });
+      const result = runDbTransaction(db, () => {
+        asset = writeAsset(content, mimeType, originalFilename, { ...options, dimensions });
         return work(asset);
       });
+      await ensureLibraryAssetThumbnail(runtime, asset, assetAbsolutePath(asset.path));
+      return result;
     } catch (error) {
       if (asset?.path) {
         try {
@@ -467,7 +466,7 @@ export function createActionLibraryService(runtime, options = {}) {
     return { ok: true };
   }
 
-  function uploadProjectCover(projectId, payload = {}) {
+  async function uploadProjectCover(projectId, payload = {}) {
     const project = loadProject(projectId);
     if (!project) return null;
     const decoded = parseDataUrl(payload.data ? `data:${payload.mime_type || "image/png"};base64,${payload.data}` : "");
@@ -477,7 +476,6 @@ export function createActionLibraryService(runtime, options = {}) {
       source: "action-project-cover",
       subdir: relDir,
       filenameStem: "cover",
-      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("UPDATE action_projects SET cover_asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, nowIso(), projectId);
       return projectWithCover(loadProject(projectId));
@@ -500,7 +498,7 @@ export function createActionLibraryService(runtime, options = {}) {
     return { actions: filtered };
   }
 
-  function createActionFromFile(projectId, payload = {}) {
+  async function createActionFromFile(projectId, payload = {}) {
     const project = loadProject(projectId);
     if (!project) return null;
     const content = Buffer.isBuffer(payload.buffer) ? payload.buffer : Buffer.from(payload.buffer || "");
@@ -516,7 +514,6 @@ export function createActionLibraryService(runtime, options = {}) {
       source: "action-library",
       subdir: relDir,
       filenameStem: name,
-      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("INSERT INTO action_entries (id, project_id, name, asset_id, prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
         .run(id, projectId, name, asset.id, String(payload.prompt || "").slice(0, 4000), timestamp, timestamp);
@@ -618,7 +615,7 @@ export function createActionLibraryService(runtime, options = {}) {
     throw new Error("Unsupported bulk operation");
   }
 
-  function replaceActionImage(actionId, payload = {}) {
+  async function replaceActionImage(actionId, payload = {}) {
     const action = loadAction(actionId);
     if (!action) return null;
     const project = loadProject(action.project_id);
@@ -632,7 +629,6 @@ export function createActionLibraryService(runtime, options = {}) {
       source: "action-library",
       subdir: relDir,
       filenameStem: action.name || labels.defaultAction,
-      thumbnailDataUrl: payload.thumbnail_data_url,
     }, (asset) => {
       db.prepare("UPDATE action_entries SET asset_id = ?, updated_at = ? WHERE id = ?").run(asset.id, timestamp, actionId);
       db.prepare("UPDATE action_projects SET cover_asset_id = CASE WHEN cover_asset_id = ? THEN ? ELSE cover_asset_id END, updated_at = ? WHERE id = ?")
