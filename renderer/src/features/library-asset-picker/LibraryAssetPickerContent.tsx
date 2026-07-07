@@ -2,7 +2,7 @@ import { Images, PersonStanding, Users, X, type LucideIcon } from "lucide-react"
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { LazyImage } from "../../components/LazyImage";
-import { LibraryTagFilterButton } from "../library-tags";
+import { LibraryTagFilterButton, useLibraryTagSettingsStore } from "../library-tags";
 import { Select } from "../../components/Select";
 import { cacheBustedLibraryAssetUrl, useLibraryAssetPickerData } from "./useLibraryAssetPickerData";
 import type { LibraryAssetItem, LibraryAssetPickerSource, LibraryAssetSelection, LibraryAssetTab } from "./types";
@@ -51,6 +51,7 @@ export function LibraryAssetPickerContent({
   variant = "dialog",
 }: LibraryAssetPickerContentProps) {
   const { t } = useTranslation();
+  const sameColorSingleFilter = useLibraryTagSettingsStore((state) => state.sameColorSingleFilter);
   const picker = useLibraryAssetPickerData({ enabled, sources, initialTab });
   const visibleSources = allLibrarySources.filter((source) => picker.availableTabs.includes(source.id));
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -130,6 +131,7 @@ export function LibraryAssetPickerContent({
           allLabel={t("infiniteCanvas:allLibraryTags")}
           ariaLabel={t("infiniteCanvas:libraryTagFilter")}
           onChange={picker.changeTag}
+          sameColorSingleFilter={sameColorSingleFilter}
           active={Boolean(picker.hasActiveTagFilter || (picker.activeTab === "models" && picker.activeModelGender))}
           menuContentBefore={picker.activeTab === "models" ? (
             <div className="library-asset-picker__filter-menu-section" aria-label={t("modelLibrary:genderCategory")}>

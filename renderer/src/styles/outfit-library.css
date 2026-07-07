@@ -1,4 +1,4 @@
-﻿.outfit-toolbar {
+.outfit-toolbar {
   justify-content: flex-start;
 }
 
@@ -42,7 +42,7 @@
   color: var(--state-active-text);
 }
 
-.model-lib-body--composer {
+.outfit-composer-body {
   display: grid;
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
@@ -70,9 +70,18 @@
   box-shadow: var(--shadow-card);
 }
 
+.outfit-card {
+  content-visibility: auto;
+  contain-intrinsic-size: 220px 220px;
+}
+
 .action-library-page .outfit-add-card,
 .action-library-page .outfit-card {
   aspect-ratio: 3 / 4;
+}
+
+.action-library-page .outfit-card {
+  contain-intrinsic-size: 220px 293px;
 }
 
 .outfit-add-card {
@@ -497,8 +506,8 @@
 
 .outfit-tag-menu button.selected {
   border-color: var(--state-active-border);
-  background: var(--state-active-bg);
-  color: var(--state-active-text);
+  background: var(--surface-control);
+  box-shadow: inset 0 0 0 1px var(--state-active-border);
 }
 
 .outfit-tag-menu__empty {

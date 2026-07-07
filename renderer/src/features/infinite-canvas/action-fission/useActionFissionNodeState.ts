@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import type { CanvasNode } from "../types";
 import {
   addActionFissionRow,
+  changeActionFissionRowFilter,
   changeActionFissionRowProject,
   changeActionFissionRowTags,
   normalizeActionFissionState,
@@ -42,6 +43,10 @@ export function useActionFissionNodeState({ node, onPatchNode, onBeforeRemoveRow
 
   const setRowTags = useCallback((rowId: string, includeTagIds: string[], excludeTagIds: string[]) => {
     patchActionFission((current) => changeActionFissionRowTags(current, rowId, includeTagIds, excludeTagIds));
+  }, [patchActionFission]);
+
+  const setRowFilter = useCallback((rowId: string, projectId: string, includeTagIds: string[], excludeTagIds: string[]) => {
+    patchActionFission((current) => changeActionFissionRowFilter(current, rowId, projectId, includeTagIds, excludeTagIds));
   }, [patchActionFission]);
 
   const addRow = useCallback(() => {
@@ -92,6 +97,7 @@ export function useActionFissionNodeState({ node, onPatchNode, onBeforeRemoveRow
     selectRowAction,
     setRowProject,
     setRowTags,
+    setRowFilter,
     addRow,
     removeRow,
     setApiType,

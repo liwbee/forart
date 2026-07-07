@@ -24,6 +24,8 @@ const DATABASE_DIR = path.resolve(process.env.FORART_DATABASE_DIR || path.join(D
 const LIBRARY_DIR = path.resolve(process.env.FORART_LIBRARY_DIR || path.join(DEFAULT_DATA_ROOT, "library"));
 const CANVAS_STORAGE_ROOT = path.resolve(process.env.FORART_CANVAS_STORAGE_ROOT || process.env.FORART_LIBRARY_DIR || LIBRARY_DIR);
 const DATABASE_FILENAME = "forart-library.sqlite";
+const LIBRARY_TAG_COLORS = ["default", "red", "yellow", "brown", "blue", "green", "purple"];
+const LIBRARY_TAG_COLOR_SET = new Set(LIBRARY_TAG_COLORS);
 const SERVER_LANGUAGE = process.env.FORART_LANGUAGE === "en-US" ? "en-US" : "zh-CN";
 const LIBRARY_LABELS = SERVER_LANGUAGE === "en-US"
   ? {
@@ -100,6 +102,11 @@ function withCorsHeaders(headers = {}) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function normalizeLibraryTagColor(value) {
+  const next = String(value || "").trim();
+  return LIBRARY_TAG_COLOR_SET.has(next) ? next : "default";
 }
 
 function newId(prefix = "") {
@@ -319,6 +326,7 @@ function initDatabase() {
     kind TEXT NOT NULL,
     project_id TEXT NOT NULL,
     name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT 'default',
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -360,6 +368,7 @@ function initDatabase() {
   ensureProjectSortOrder("model_projects");
   ensureProjectSortOrder("outfit_projects");
   ensureProjectSortOrder("action_projects");
+  ensureLibraryTagColor();
   db.exec(`
   CREATE INDEX IF NOT EXISTS idx_model_projects_sort ON model_projects(sort_order ASC, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_outfit_projects_sort ON outfit_projects(sort_order ASC, created_at DESC);
@@ -392,6 +401,21 @@ function ensureProjectSortOrder(tableName) {
     const update = db.prepare(`UPDATE ${tableName} SET sort_order = ? WHERE id = ?`);
     rows.forEach((row, index) => update.run(index + 1, row.id));
   }
+}
+
+function ensureLibraryTagColor() {
+  const columns = db.prepare("PRAGMA table_info(library_tags)").all();
+  if (!columns.some((column) => column.name === "color")) {
+    db.exec("ALTER TABLE library_tags ADD COLUMN color TEXT NOT NULL DEFAULT 'default'");
+  }
+  const allowed = LIBRARY_TAG_COLORS.map((color) => `'${color}'`).join(", ");
+  db.exec(`
+    UPDATE library_tags
+    SET color = 'default'
+    WHERE color IS NULL
+       OR color = ''
+       OR color NOT IN (${allowed})
+  `);
 }
 
 function switchDataDir(nextDataDir) {
@@ -863,15 +887,16 @@ function projectExistsForKind(kind, projectId) {
   return false;
 }
 
-function createProjectTag(kind, projectId, name) {
+function createProjectTag(kind, projectId, name, color = "default") {
   const existing = db.prepare("SELECT * FROM library_tags WHERE kind = ? AND project_id = ? AND name = ?").get(kind, projectId, name);
   if (existing) return { ...existing, usage_count: tagUsage(existing.id) };
   const timestamp = nowIso();
   const id = newId("tag");
+  const tagColor = normalizeLibraryTagColor(color);
   const sortOrder = db.prepare("SELECT COUNT(*) AS total FROM library_tags WHERE kind = ? AND project_id = ?").get(kind, projectId)?.total || 0;
   db.prepare(
-    "INSERT INTO library_tags (id, kind, project_id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).run(id, kind, projectId, name, sortOrder + 1, timestamp, timestamp);
+    "INSERT INTO library_tags (id, kind, project_id, name, color, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(id, kind, projectId, name, tagColor, sortOrder + 1, timestamp, timestamp);
   const tag = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(id);
   return { ...tag, usage_count: 0 };
 }
@@ -1055,7 +1080,7 @@ function handleProjectTagApi(req, res, { kind, projectId, tagId }) {
       .then((payload) => {
         const name = String(payload?.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
         if (!name) return sendJson(res, 400, { detail: "Tag name is required" });
-        const tag = runDbTransaction(() => createProjectTag(kind, projectId, name));
+        const tag = runDbTransaction(() => createProjectTag(kind, projectId, name, payload?.color));
         sendJson(res, 200, tag);
       })
       .catch((error) => sendJson(res, 400, { detail: error instanceof Error ? error.message : String(error) }));
@@ -1076,6 +1101,9 @@ function handleProjectTagApi(req, res, { kind, projectId, tagId }) {
           }
           if (payload.sort_order !== undefined) {
             db.prepare("UPDATE library_tags SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(payload.sort_order || 0), nowIso(), tagId);
+          }
+          if (payload.color !== undefined) {
+            db.prepare("UPDATE library_tags SET color = ?, updated_at = ? WHERE id = ?").run(normalizeLibraryTagColor(payload.color), nowIso(), tagId);
           }
           return db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
         });

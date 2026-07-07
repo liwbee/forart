@@ -59,6 +59,7 @@ export const zhCN = {
     noTagsYet: "还没有标签。"
   },
   labels: {
+    tagColor: "标签颜色",
     ascending: "升序",
     createdAt: "时间",
     descending: "降序",
@@ -164,6 +165,7 @@ export const enUS = {
     notSelected: "Not selected",
     projectName: "Project name",
     selectProjectFirst: "Select a project first",
+    tagColor: "Tag color",
     tagList: "Tag list",
     tagNamePlaceholder: "Enter a tag name",
     tags: "Tags"

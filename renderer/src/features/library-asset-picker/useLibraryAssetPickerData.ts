@@ -7,7 +7,7 @@ import { listModelImages, listModelProjects, listModels, listModelTags, modelLib
 import { useModelLibraryStore } from "../model-library/modelLibraryStore";
 import { getStorageSettings, listOutfitProjects, listOutfits, listOutfitTags, outfitLibraryKeys } from "../outfit-library/api";
 import { useOutfitLibraryStore } from "../outfit-library/outfitLibraryStore";
-import { cleanLibraryTagFilter, countLibraryTags, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
+import { applySameColorSingleIncludeFilter, cleanLibraryTagFilter, countLibraryTags, hasLibraryTagFilter, useLibraryTagSettingsStore, type LibraryTagFilter } from "../library-tags";
 import { cacheBustedLibraryImageUrl } from "../../lib/libraryImageActions";
 import type { LibraryAssetItem, LibraryAssetTab } from "./types";
 
@@ -55,6 +55,7 @@ export function useLibraryAssetPickerData({
   const setActiveActionProjectId = useActionLibraryStore((state) => state.setActiveProjectId);
   const activeActionTagFilter = useActionLibraryStore((state) => state.activeTagFilter);
   const setActiveActionTagFilter = useActionLibraryStore((state) => state.setActiveTagFilter);
+  const sameColorSingleFilter = useLibraryTagSettingsStore((state) => state.sameColorSingleFilter);
 
   useEffect(() => {
     if (!availableTabs.includes(activeTab)) {
@@ -149,33 +150,45 @@ export function useLibraryAssetPickerData({
 
   useEffect(() => {
     const tags = outfitTagsQuery.data?.tags || [];
-    const validFilter = cleanLibraryTagFilter(activeOutfitTagFilter, tags.map((tag) => tag.id));
+    const validFilter = applySameColorSingleIncludeFilter(
+      cleanLibraryTagFilter(activeOutfitTagFilter, tags.map((tag) => tag.id)),
+      tags,
+      sameColorSingleFilter,
+    );
     if (
       activeTab === "outfits"
       && (validFilter.includeTagIds.length !== activeOutfitTagFilter.includeTagIds.length
         || validFilter.excludeTagIds.length !== activeOutfitTagFilter.excludeTagIds.length)
     ) setActiveOutfitTagFilter(validFilter);
-  }, [activeOutfitTagFilter, activeTab, outfitTagsQuery.data?.tags, setActiveOutfitTagFilter]);
+  }, [activeOutfitTagFilter, activeTab, outfitTagsQuery.data?.tags, sameColorSingleFilter, setActiveOutfitTagFilter]);
 
   useEffect(() => {
     const tags = modelTagsQuery.data?.tags || [];
-    const validFilter = cleanLibraryTagFilter(activeModelTagFilter, tags.map((tag) => tag.id));
+    const validFilter = applySameColorSingleIncludeFilter(
+      cleanLibraryTagFilter(activeModelTagFilter, tags.map((tag) => tag.id)),
+      tags,
+      sameColorSingleFilter,
+    );
     if (
       activeTab === "models"
       && (validFilter.includeTagIds.length !== activeModelTagFilter.includeTagIds.length
         || validFilter.excludeTagIds.length !== activeModelTagFilter.excludeTagIds.length)
     ) setActiveModelTagFilter(validFilter);
-  }, [activeModelTagFilter, activeTab, modelTagsQuery.data?.tags, setActiveModelTagFilter]);
+  }, [activeModelTagFilter, activeTab, modelTagsQuery.data?.tags, sameColorSingleFilter, setActiveModelTagFilter]);
 
   useEffect(() => {
     const tags = actionTagsQuery.data?.tags || [];
-    const validFilter = cleanLibraryTagFilter(activeActionTagFilter, tags.map((tag) => tag.id));
+    const validFilter = applySameColorSingleIncludeFilter(
+      cleanLibraryTagFilter(activeActionTagFilter, tags.map((tag) => tag.id)),
+      tags,
+      sameColorSingleFilter,
+    );
     if (
       activeTab === "actions"
       && (validFilter.includeTagIds.length !== activeActionTagFilter.includeTagIds.length
         || validFilter.excludeTagIds.length !== activeActionTagFilter.excludeTagIds.length)
     ) setActiveActionTagFilter(validFilter);
-  }, [activeActionTagFilter, activeTab, actionTagsQuery.data?.tags, setActiveActionTagFilter]);
+  }, [activeActionTagFilter, activeTab, actionTagsQuery.data?.tags, sameColorSingleFilter, setActiveActionTagFilter]);
 
   const outfitsQuery = useQuery({
     queryKey: activeOutfitProjectId ? outfitLibraryKeys.outfits(activeOutfitProjectId, activeOutfitTagFilter) : ["outfits", "empty", activeOutfitTagFilter],

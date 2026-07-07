@@ -21,7 +21,7 @@ export function useActionFissionReferencePreviews(nodeId: string): Extract<Image
           kind: "image",
           order: previews.length + 1,
           title: source.fileName || source.title || source.type,
-          url: source.url,
+          url: source.thumbUrl || source.url,
         });
       });
     return previews;

@@ -199,7 +199,8 @@ export interface EasyToolApi {
   importCanvasPackageFromPath: (payload: { filePath: string; projectId?: string }) => Promise<CanvasPackageImportResult>;
   uploadCanvasPackageToRemote: (payload: { filePath: string; uploadUrl: string }) => Promise<unknown>;
   downloadCanvasPackageFromRemote: (payload: { downloadUrl: string }) => Promise<{ ok: true; filePath: string }>;
-  saveCanvasAsset: (payload: { dataUrl?: string; url?: string; defaultName?: string; kind?: "input" | "output" }) => Promise<{ url: string; fileName: string; filePath?: string }>;
+  saveCanvasAsset: (payload: { dataUrl?: string; url?: string; thumbDataUrl?: string; defaultName?: string; kind?: "input" | "output" }) => Promise<{ url: string; thumbUrl?: string; fileName: string; filePath?: string; thumbFilePath?: string }>;
+  saveCanvasAssetThumbnail: (payload: { url?: string; filePath?: string; thumbDataUrl?: string }) => Promise<{ thumbUrl?: string; thumbFilePath?: string }>;
   scanCanvasCache: () => Promise<CanvasCacheScanResult>;
   deleteCanvasCacheAssets: (payload: { ids: string[]; olderThanDays?: number }) => Promise<CanvasCacheDeleteResult>;
   revealCanvasCacheAsset: (payload: { id?: string; filePath?: string }) => Promise<{ ok: true }>;
@@ -252,6 +253,9 @@ export interface CanvasCacheAsset {
   filePath: string;
   fileName: string;
   sizeBytes: number;
+  thumbUrl?: string;
+  thumbFilePath?: string;
+  thumbSizeBytes?: number;
   modifiedAt: number;
   exists: boolean;
   referenced: boolean;

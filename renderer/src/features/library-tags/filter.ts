@@ -1,3 +1,5 @@
+import { normalizeLibraryTagColor, type LibraryTagColorLike } from "./tagColors";
+
 export interface LibraryTagFilter {
   includeTagIds: string[];
   excludeTagIds: string[];
@@ -34,6 +36,52 @@ export function cleanLibraryTagFilter(filter: LibraryTagFilter, validTagIds: rea
   );
 }
 
+export function applySameColorSingleIncludeFilter<TTag extends SameColorFilterTagLike>(
+  filter: LibraryTagFilter,
+  tags: readonly TTag[],
+  enabled: boolean,
+): LibraryTagFilter {
+  if (!enabled || filter.untaggedOnly) return createLibraryTagFilter(filter.includeTagIds, filter.excludeTagIds, filter.untaggedOnly);
+
+  const tagsById = new Map(tags.map((tag) => [tag.id, tag]));
+  const seenColors = new Set<string>();
+  const reversedIncludeTagIds = [...filter.includeTagIds].reverse();
+  const nextIncludeTagIds = reversedIncludeTagIds.filter((tagId) => {
+    const color = normalizeLibraryTagColor(tagsById.get(tagId)?.color);
+    if (color === "default") return true;
+    if (seenColors.has(color)) return false;
+    seenColors.add(color);
+    return true;
+  }).reverse();
+
+  return createLibraryTagFilter(nextIncludeTagIds, filter.excludeTagIds, false);
+}
+
+export function createLibraryTagFilterWithSameColorInclude<TTag extends SameColorFilterTagLike>(
+  includeTagIds: string[] = [],
+  excludeTagIds: string[] = [],
+  tags: readonly TTag[] = [],
+  sameColorSingleInclude = false,
+): LibraryTagFilter {
+  return applySameColorSingleIncludeFilter(createLibraryTagFilter(includeTagIds, excludeTagIds), tags, sameColorSingleInclude);
+}
+
+export function toggleLibraryTagFilterInclude<TTag extends SameColorFilterTagLike>(
+  filter: LibraryTagFilter,
+  tagId: string,
+  tags: readonly TTag[],
+  sameColorSingleInclude: boolean,
+): LibraryTagFilter {
+  return createLibraryTagFilterWithSameColorInclude(
+    filter.includeTagIds.includes(tagId)
+      ? filter.includeTagIds.filter((activeTagId) => activeTagId !== tagId)
+      : [...filter.includeTagIds, tagId],
+    filter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId),
+    tags,
+    sameColorSingleInclude,
+  );
+}
+
 export function libraryTagFilterKey(filter: LibraryTagFilter) {
   return [
     [...filter.includeTagIds].sort().join(","),
@@ -64,4 +112,8 @@ export function countLibraryTags<T extends { tags: readonly string[] }>(items: r
 interface LibraryFilterTagLike {
   id: string;
   name: string;
+}
+
+interface SameColorFilterTagLike extends LibraryTagColorLike {
+  id: string;
 }

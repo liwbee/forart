@@ -127,6 +127,11 @@ function formatBytes(size: number) {
   return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+function formatResolution(width: number, height: number) {
+  if (!width || !height) return "-";
+  return `${width} x ${height}`;
+}
+
 function listReviewProducts(modelFolderValue: string, reviewRootPath: string) {
   if (!window.forartReview?.products) return Promise.reject(new Error("Image review bridge is not available."));
   return window.forartReview.products({ root: reviewRootPath, modelFolders: modelFolderValue }).then((payload) => sortProducts(payload.products));
@@ -324,23 +329,19 @@ const ProductList = memo(function ProductList({
 
 const ReviewThumbNav = memo(function ReviewThumbNav({
   title,
-  group,
   images,
   activeIndex,
   thumbStripRef,
   activeThumbRef,
-  onActivate,
   onSelectImage,
   onScrollStrip,
   onWheel,
 }: {
   title: string;
-  group: ImageGroupKey;
   images: ReviewImage[];
   activeIndex: number;
   thumbStripRef: MutableRefObject<HTMLDivElement | null>;
   activeThumbRef: MutableRefObject<HTMLButtonElement | null>;
-  onActivate: (group: ImageGroupKey) => void;
   onSelectImage: (index: number) => void;
   onScrollStrip: (direction: -1 | 1) => void;
   onWheel: (event: ReactWheelEvent<HTMLDivElement>) => void;
@@ -360,10 +361,7 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
         type="button"
         aria-label={t("imageReview:scrollThumbsLeft")}
         disabled={!images.length}
-        onClick={() => {
-          onActivate(group);
-          onScrollStrip(-1);
-        }}
+        onClick={() => onScrollStrip(-1)}
       >
         <ChevronLeft size={24} aria-hidden="true" />
       </button>
@@ -386,10 +384,7 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
               type="button"
               aria-label={t("imageReview:viewImage", { name: item.name })}
               aria-current={index === activeIndex ? "true" : undefined}
-              onClick={() => {
-                onActivate(group);
-                onSelectImage(index);
-              }}
+              onClick={() => onSelectImage(index)}
             >
               <img src={item.url} alt="" loading={index === activeIndex ? "eager" : "lazy"} decoding="async" draggable={false} />
             </button>
@@ -404,10 +399,7 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
         type="button"
         aria-label={t("imageReview:scrollThumbsRight")}
         disabled={!images.length}
-        onClick={() => {
-          onActivate(group);
-          onScrollStrip(1);
-        }}
+        onClick={() => onScrollStrip(1)}
       >
         <ChevronRight size={24} aria-hidden="true" />
       </button>
@@ -415,7 +407,6 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
   );
 }, (previous, next) =>
   previous.title === next.title &&
-  previous.group === next.group &&
   previous.images === next.images &&
   previous.activeIndex === next.activeIndex
 );
@@ -423,23 +414,19 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
 const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   title: string;
   group: ImageGroupKey;
-  isActive: boolean;
   folderValue: string;
   images: ReviewImage[];
   resetKey: string;
   onFolderValueChange: (value: string) => void;
-  onActivate: (group: ImageGroupKey) => void;
   onReportIssue: (image: ReviewImage, issue: string) => Promise<void>;
   onLoadIssue: (image: ReviewImage) => Promise<string>;
 }>(function ProductImagePane({
   title,
   group,
-  isActive,
   folderValue,
   images,
   resetKey,
   onFolderValueChange,
-  onActivate,
   onReportIssue,
   onLoadIssue,
 }, ref) {
@@ -452,6 +439,7 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   const [issueText, setIssueText] = useState("");
   const [issueError, setIssueError] = useState("");
   const [issueSaving, setIssueSaving] = useState(false);
+  const [imageResolution, setImageResolution] = useState({ width: 0, height: 0 });
   const frameRef = useRef<HTMLDivElement | null>(null);
   const checkPanelRef = useRef<HTMLDivElement | null>(null);
   const thumbStripRef = useRef<HTMLDivElement | null>(null);
@@ -463,6 +451,7 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
     setActiveIndex(0);
     setDragStart(null);
     setTransform({ scale: 1, x: 0, y: 0 });
+    setImageResolution({ width: 0, height: 0 });
   }, [resetKey]);
 
   useEffect(() => {
@@ -485,6 +474,7 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
 
   useEffect(() => {
     setDragStart(null);
+    setImageResolution({ width: 0, height: 0 });
   }, [image?.id]);
 
   useEffect(() => {
@@ -618,7 +608,6 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   }
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
-    onActivate(group);
     const target = event.target as Node | null;
     if (target && checkPanelRef.current?.contains(target)) return;
     if (!image || !isZoomed) return;
@@ -646,7 +635,6 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
 
   async function openIssueEditor() {
     if (!image) return;
-    onActivate(group);
     setIssueError("");
     setIssueEditorOpen(true);
     try {
@@ -681,7 +669,6 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
 
   async function approveCurrentImage() {
     if (!image) return;
-    onActivate(group);
     setIssueSaving(true);
     setIssueError("");
     try {
@@ -697,13 +684,12 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   }
 
   return (
-    <section className={`review-image-pane${isActive ? " active" : ""}`} aria-label={title} onFocusCapture={() => onActivate(group)}>
+    <section className="review-image-pane" aria-label={title}>
       <div className="review-pane-head">
         <label className="review-pane-folder-rule">
           <input
             value={folderValue}
             onChange={(event) => onFolderValueChange(event.target.value)}
-            onFocus={() => onActivate(group)}
             placeholder={t("imageReview:examplePlaceholder", { title })}
           />
         </label>
@@ -725,6 +711,12 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
               loading="eager"
               decoding="async"
               draggable={false}
+              onLoad={(event) => {
+                setImageResolution({
+                  width: event.currentTarget.naturalWidth,
+                  height: event.currentTarget.naturalHeight,
+                });
+              }}
               style={{ transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})` }}
             />
           ) : (
@@ -775,12 +767,10 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
       </div>
       <ReviewThumbNav
         title={title}
-        group={group}
         images={images}
         activeIndex={activeIndex}
         thumbStripRef={thumbStripRef}
         activeThumbRef={activeThumbRef}
-        onActivate={onActivate}
         onSelectImage={selectImage}
         onScrollStrip={scrollThumbStrip}
         onWheel={handleThumbWheel}
@@ -790,6 +780,10 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
           <div>
             <dt>{t("imageReview:file")}</dt>
             <dd title={image?.relativePath || ""}>{image?.relativePath || "-"}</dd>
+          </div>
+          <div>
+            <dt>{t("imageReview:resolution")}</dt>
+            <dd>{image ? formatResolution(imageResolution.width, imageResolution.height) : "-"}</dd>
           </div>
           <div>
             <dt>{t("imageReview:size")}</dt>
@@ -809,13 +803,11 @@ export function ImageReviewPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [modelFolderValue, setModelFolderValue] = useState(() => t("imageReview:defaultModelFolder"));
   const [detailFolderValue, setDetailFolderValue] = useState(() => t("imageReview:defaultDetailFolder"));
-  const [activeImageGroup, setActiveImageGroup] = useState<ImageGroupKey>("detail");
   const [folderLoading, setFolderLoading] = useState(false);
   const [productImagesLoading, setProductImagesLoading] = useState(false);
   const [folderError, setFolderError] = useState("");
   const [productListVersion, setProductListVersion] = useState(0);
   const modelPaneRef = useRef<ProductImagePaneHandle | null>(null);
-  const detailPaneRef = useRef<ProductImagePaneHandle | null>(null);
   const settingsLoadedRef = useRef(false);
   const hasSavedFolderSettingsRef = useRef(false);
   const folderSettingsDirtyRef = useRef(false);
@@ -828,13 +820,9 @@ export function ImageReviewPage() {
   const detailImages = productImagesLoading ? [] : activeProduct?.detailImages || [];
   const productListActiveId = activeProduct?.id || "";
   const activeProductIndex = activeProduct ? products.findIndex((product) => product.id === activeProduct.id) : -1;
-  const activateGroup = useCallback((group: ImageGroupKey) => {
-    setActiveImageGroup((currentGroup) => (currentGroup === group ? currentGroup : group));
+  const goModelPaneImages = useCallback((direction: -1 | 1) => {
+    modelPaneRef.current?.goImages(direction);
   }, []);
-  const goActivePaneImages = useCallback((direction: -1 | 1) => {
-    const pane = activeImageGroup === "model" ? modelPaneRef.current : detailPaneRef.current;
-    pane?.goImages(direction);
-  }, [activeImageGroup]);
   const changeModelFolderValue = useCallback((value: string) => {
     folderSettingsDirtyRef.current = true;
     setModelFolderValue(value);
@@ -956,17 +944,17 @@ export function ImageReviewPage() {
       }
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        goActivePaneImages(-1);
+        goModelPaneImages(-1);
       }
       if (event.key === "ArrowRight") {
         event.preventDefault();
-        goActivePaneImages(1);
+        goModelPaneImages(1);
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeProduct, goActivePaneImages, goProduct]);
+  }, [activeProduct, goModelPaneImages, goProduct]);
 
   useEffect(() => {
     if (!activeProductId) return;
@@ -1020,7 +1008,7 @@ export function ImageReviewPage() {
     <section className="image-review-page" aria-labelledby="image-review-title">
       <div className="image-review-header">
         <div>
-          <h1 id="image-review-title" className="model-library-title">
+          <h1 id="image-review-title" className="library-title">
             {t("imageReview:title")}
           </h1>
         </div>
@@ -1058,25 +1046,20 @@ export function ImageReviewPage() {
                 ref={modelPaneRef}
                 title={t("imageReview:modelPaneTitle")}
                 group="model"
-                isActive={activeImageGroup === "model"}
                 folderValue={modelFolderValue}
                 images={modelImages}
                 resetKey={`${activeProduct?.id || ""}:model:${productListVersion}:${productImagesLoading ? "loading" : "ready"}`}
                 onFolderValueChange={changeModelFolderValue}
-                onActivate={activateGroup}
                 onReportIssue={reportIssue}
                 onLoadIssue={loadIssue}
               />
               <ProductImagePane
-                ref={detailPaneRef}
                 title={t("imageReview:detailPaneTitle")}
                 group="detail"
-                isActive={activeImageGroup === "detail"}
                 folderValue={detailFolderValue}
                 images={detailImages}
                 resetKey={`${activeProduct?.id || ""}:detail:${productListVersion}:${productImagesLoading ? "loading" : "ready"}`}
                 onFolderValueChange={changeDetailFolderValue}
-                onActivate={activateGroup}
                 onReportIssue={reportIssue}
                 onLoadIssue={loadIssue}
               />

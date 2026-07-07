@@ -1,4 +1,4 @@
-import { Ban, Check, ChevronDown, Copy, Download, Play, RefreshCw, Search, Square, X } from "lucide-react";
+import { ChevronDown, Copy, Download, Play, RefreshCw, Search, Square, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
@@ -8,15 +8,14 @@ import { resolveLibraryImageUrl } from "../../../../lib/libraryImageActions";
 import type { ActionFissionRow } from "../../action-fission/actionFissionTypes";
 import { resolveActionFissionRowNotice } from "../../action-fission/actionFissionRowNotice";
 import type { CanvasGenerationTask } from "../../types";
+import { ActionFissionSelectorDialog } from "./ActionFissionSelectorDialog";
 
 interface ActionFissionRowItemProps {
   nodeId: string;
   row: ActionFissionRow;
   tags: ActionTag[];
   actions: ActionEntry[];
-  candidates: ActionEntry[];
   candidateCount: number;
-  tagCounts: Record<string, number>;
   publicReferenceCount: number;
   publicReferenceLimit: number;
   selectedProvider: ApiProvider | null;
@@ -24,8 +23,7 @@ interface ActionFissionRowItemProps {
   projects: ActionProject[];
   openSelectId: string;
   onOpenSelectChange: (selectId: string) => void;
-  onSetProject: (rowId: string, projectId: string) => void;
-  onSetTags: (rowId: string, includeTagIds: string[], excludeTagIds: string[]) => void;
+  onSetFilter: (rowId: string, projectId: string, includeTagIds: string[], excludeTagIds: string[]) => void;
   onRemoveRow: (rowId: string) => void | Promise<void>;
   onRefreshRow: (nodeId: string, rowId: string, actions: ActionEntry[], tags: ActionTag[]) => void;
   onRunRow: (nodeId: string, rowId: string, actions: ActionEntry[], tags: ActionTag[]) => void;
@@ -41,11 +39,6 @@ interface ActionFissionRowItemProps {
 
 function rowSelectId(nodeId: string, rowId: string, name: string) {
   return `${nodeId}:${rowId}:${name}`;
-}
-
-function clampPanelLeft(left: number, width: number) {
-  const viewportWidth = window.innerWidth || 0;
-  return Math.max(10, Math.min(left, viewportWidth - width - 10));
 }
 
 async function copyTextToClipboard(text: string) {
@@ -70,9 +63,7 @@ export function ActionFissionRowItem({
   row,
   tags,
   actions,
-  candidates,
   candidateCount,
-  tagCounts,
   publicReferenceCount,
   publicReferenceLimit,
   selectedProvider,
@@ -80,8 +71,7 @@ export function ActionFissionRowItem({
   projects,
   openSelectId,
   onOpenSelectChange,
-  onSetProject,
-  onSetTags,
+  onSetFilter,
   onRemoveRow,
   onRefreshRow,
   onRunRow,
@@ -98,6 +88,7 @@ export function ActionFissionRowItem({
   const disabled = isRowActive;
   const resultAlt = row.resultFileName || row.selectedActionName || "action result";
   const promptPreview = row.selectedActionPrompt?.trim() || t("infiniteCanvas:actionFissionNoSelectedPrompt");
+  const resultDisplayUrl = row.resultThumbUrl || row.resultUrl || "";
   const selectedActionImageUrl = resolveLibraryImageUrl(row.selectedActionAssetUrl || "");
   const [noticeNow, setNoticeNow] = useState(Date.now());
   const notice = resolveActionFissionRowNotice({
@@ -124,12 +115,8 @@ export function ActionFissionRowItem({
     .filter(Boolean)
     .map((name) => `不含 ${name}`),
   ];
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const panelPositionRef = useRef("");
   const promptButtonRef = useRef<HTMLButtonElement | null>(null);
   const promptPositionRef = useRef("");
-  const [panelStyle, setPanelStyle] = useState<CSSProperties>({ visibility: "hidden" });
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptStyle, setPromptStyle] = useState<CSSProperties>({ visibility: "hidden" });
 
@@ -140,75 +127,6 @@ export function ActionFissionRowItem({
     return () => window.clearInterval(interval);
   }, [isRowActive]);
 
-  function updatePanelPosition() {
-    const trigger = triggerRef.current;
-    if (!trigger) return false;
-    const rect = trigger.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0 || rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) {
-      onOpenSelectChange("");
-      return false;
-    }
-    const width = Math.max(420, rect.width);
-    const viewportHeight = window.innerHeight || 0;
-    const below = viewportHeight - rect.bottom - 10;
-    const maxHeight = Math.min(360, Math.max(220, below));
-    const left = clampPanelLeft(rect.left, width);
-    const top = rect.bottom + 8;
-    const nextStyle: CSSProperties = {
-      left,
-      top,
-      width,
-      maxHeight,
-      visibility: "visible",
-    };
-    const nextKey = `${Math.round(left)}:${Math.round(top)}:${Math.round(width)}:${Math.round(maxHeight)}`;
-    if (panelPositionRef.current !== nextKey) {
-      panelPositionRef.current = nextKey;
-      setPanelStyle(nextStyle);
-    }
-    return true;
-  }
-
-  useLayoutEffect(() => {
-    if (!selectorOpen) {
-      setPanelStyle({ visibility: "hidden" });
-      panelPositionRef.current = "";
-      return;
-    }
-    let frame = 0;
-    updatePanelPosition();
-
-    function trackPanelPosition() {
-      if (updatePanelPosition()) frame = window.requestAnimationFrame(trackPanelPosition);
-    }
-
-    frame = window.requestAnimationFrame(trackPanelPosition);
-
-    function handlePointerDown(event: globalThis.PointerEvent) {
-      const target = event.target as Node | null;
-      if (target && (triggerRef.current?.contains(target) || panelRef.current?.contains(target))) return;
-      onOpenSelectChange("");
-    }
-
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") onOpenSelectChange("");
-    }
-
-    window.addEventListener("pointerdown", handlePointerDown, true);
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", updatePanelPosition);
-    window.addEventListener("scroll", updatePanelPosition, true);
-    return () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      panelPositionRef.current = "";
-      setPanelStyle({ visibility: "hidden" });
-      window.removeEventListener("pointerdown", handlePointerDown, true);
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", updatePanelPosition);
-      window.removeEventListener("scroll", updatePanelPosition, true);
-    };
-  }, [selectorOpen, onOpenSelectChange]);
-
   function updatePromptPosition() {
     const trigger = promptButtonRef.current;
     if (!trigger) return false;
@@ -218,7 +136,8 @@ export function ActionFissionRowItem({
       return false;
     }
     const width = 360;
-    const left = clampPanelLeft(rect.left + rect.width / 2 - width / 2, width);
+    const viewportWidth = window.innerWidth || 0;
+    const left = Math.max(10, Math.min(rect.left + rect.width / 2 - width / 2, viewportWidth - width - 10));
     const top = rect.top - 8;
     const nextKey = `${Math.round(left)}:${Math.round(top)}`;
     if (promptPositionRef.current !== nextKey) {
@@ -260,114 +179,16 @@ export function ActionFissionRowItem({
     }
   }
 
-  const selectorPanel = selectorOpen ? createPortal(
-    <div
-      ref={panelRef}
-      className="ic-action-fission-selector-panel nodrag nopan nowheel"
-      style={panelStyle}
-      onPointerDown={(event) => event.stopPropagation()}
-      onWheel={(event) => event.stopPropagation()}
-    >
-      <div className="ic-action-fission-selector-panel__section ic-action-fission-selector-panel__projects-section">
-        <span className="ic-action-fission-selector-panel__label">选择项目</span>
-        <div className="ic-action-fission-selector-panel__projects scrollbar-thin">
-          {projects.length ? projects.map((project) => {
-            const selected = project.id === row.actionProjectId;
-            return (
-              <button
-                key={project.id}
-                type="button"
-                className={selected ? "selected" : ""}
-                aria-pressed={selected}
-                onClick={() => onSetProject(row.id, project.id)}
-              >
-                <span>{project.name}</span>
-                {selected ? <Check size={14} aria-hidden="true" /> : null}
-              </button>
-            );
-          }) : <span className="ic-action-fission-selector-panel__empty">{t("common:empty.noProjects")}</span>}
-        </div>
-      </div>
-
-      <div className="ic-action-fission-selector-panel__right">
-        <div className="ic-action-fission-selector-panel__section">
-          <span className="ic-action-fission-selector-panel__label">选择标签</span>
-          <div className="ic-action-fission-selector-panel__tags">
-            {row.actionProjectId && tags.length ? tags.map((tag) => {
-              const included = row.includeActionTagIds.includes(tag.id);
-              const excluded = row.excludeActionTagIds.includes(tag.id);
-              return (
-                <button
-                  key={tag.id}
-                  type="button"
-                  className={`ic-action-fission-tag-choice${included ? " ic-action-fission-tag-choice--include" : ""}${excluded ? " ic-action-fission-tag-choice--exclude" : ""}`}
-                  aria-pressed={included || excluded}
-                  onClick={() => {
-                    const nextIncludeTags = included
-                      ? row.includeActionTagIds.filter((tagId) => tagId !== tag.id)
-                      : [...row.includeActionTagIds, tag.id];
-                    const nextExcludeTags = row.excludeActionTagIds.filter((tagId) => tagId !== tag.id);
-                    onSetTags(row.id, nextIncludeTags, nextExcludeTags);
-                  }}
-                >
-                  <span>{tag.name}</span>
-                  <span className="ic-action-fission-tag-choice__count">{tagCounts[tag.id] || 0}</span>
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    className="ic-action-fission-tag-choice__exclude"
-                    aria-label={`排除 ${tag.name}`}
-                    title={`排除 ${tag.name}`}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      const nextExcludeTags = excluded
-                        ? row.excludeActionTagIds.filter((tagId) => tagId !== tag.id)
-                        : [...row.excludeActionTagIds, tag.id];
-                      const nextIncludeTags = row.includeActionTagIds.filter((tagId) => tagId !== tag.id);
-                      onSetTags(row.id, nextIncludeTags, nextExcludeTags);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" && event.key !== " ") return;
-                      event.preventDefault();
-                      event.stopPropagation();
-                      const nextExcludeTags = excluded
-                        ? row.excludeActionTagIds.filter((tagId) => tagId !== tag.id)
-                        : [...row.excludeActionTagIds, tag.id];
-                      const nextIncludeTags = row.includeActionTagIds.filter((tagId) => tagId !== tag.id);
-                      onSetTags(row.id, nextIncludeTags, nextExcludeTags);
-                    }}
-                  >
-                    <Ban size={12} aria-hidden="true" />
-                  </span>
-                </button>
-              );
-            }) : <span className="ic-action-fission-selector-panel__empty">{row.actionProjectId ? "暂无标签" : "先选择项目"}</span>}
-          </div>
-        </div>
-
-        <div className="ic-action-fission-selector-panel__section ic-action-fission-selector-panel__results">
-          <span className="ic-action-fission-selector-panel__label">筛选结果 · {candidateCount}</span>
-          <div className="ic-action-fission-selector-panel__result-list scrollbar-stable">
-            {candidates.length ? candidates.slice(0, 12).map((action) => {
-              const actionImageUrl = resolveLibraryImageUrl(action.asset_url || "");
-              return (
-                <div key={action.id} className="ic-action-fission-selector-panel__result" title={action.name}>
-                  {actionImageUrl ? (
-                    <img
-                      src={actionImageUrl}
-                      alt={action.name}
-                      draggable={false}
-                    />
-                  ) : null}
-                </div>
-              );
-            }) : <span className="ic-action-fission-selector-panel__empty">{row.actionProjectId ? t("infiniteCanvas:actionFissionNoCandidates") : "先选择项目"}</span>}
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body,
+  const selectorDialog = selectorOpen ? (
+    <ActionFissionSelectorDialog
+      row={row}
+      projects={projects}
+      onClose={() => onOpenSelectChange("")}
+      onApply={(projectId, includeTagIds, excludeTagIds) => {
+        onSetFilter(row.id, projectId, includeTagIds, excludeTagIds);
+        onOpenSelectChange("");
+      }}
+    />
   ) : null;
   const promptPanel = promptOpen && row.selectedActionPrompt ? createPortal(
     <div className="ic-action-fission-prompt-panel nodrag nopan nowheel" style={promptStyle} role="tooltip">
@@ -409,7 +230,7 @@ export function ActionFissionRowItem({
           }}
         >
           <img
-            src={row.resultUrl}
+            src={resultDisplayUrl}
             alt={resultAlt}
             draggable={false}
           />
@@ -442,7 +263,6 @@ export function ActionFissionRowItem({
       <div className="ic-action-fission-row__main">
         <div className="ic-action-fission-row__config">
           <button
-            ref={triggerRef}
             type="button"
             className="ic-action-fission-filter-button"
             aria-expanded={selectorOpen}
@@ -495,7 +315,7 @@ export function ActionFissionRowItem({
             </button>
           </div>
 
-          {selectorPanel}
+          {selectorDialog}
           {promptPanel}
         </div>
 

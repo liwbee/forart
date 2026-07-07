@@ -748,14 +748,7 @@
   overflow: hidden;
   cursor: zoom-in;
   touch-action: none;
-  background:
-    linear-gradient(45deg, color-mix(in srgb, var(--surface-card-muted) 68%, transparent) 25%, transparent 25%),
-    linear-gradient(-45deg, color-mix(in srgb, var(--surface-card-muted) 68%, transparent) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--surface-card-muted) 68%, transparent) 75%),
-    linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--surface-card-muted) 68%, transparent) 75%);
   background-color: var(--surface-card);
-  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
-  background-size: 20px 20px;
 }
 
 .review-image-stage.zoomed {
@@ -852,7 +845,9 @@
   min-width: 0;
   min-height: 78px;
   position: relative;
-  overflow: auto;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
   padding: var(--space-2) var(--space-3);
   overscroll-behavior-x: contain;
 }
@@ -912,7 +907,7 @@
 .review-file-meta dl {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px;
+  grid-template-columns: minmax(0, 1fr) 112px 96px;
   gap: var(--space-3);
   margin: 0;
 }

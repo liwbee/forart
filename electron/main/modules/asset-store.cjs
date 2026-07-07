@@ -14,6 +14,12 @@ function uniqueFilePath(directory, fileName) {
   return candidate;
 }
 
+function thumbFileNameFor(fileName) {
+  const parsed = path.parse(fileName || 'canvas-image.png');
+  const safeBase = (parsed.name || 'canvas-image').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+  return `${safeBase}.webp`;
+}
+
 function isInside(parent, target) {
   const relative = path.relative(path.resolve(parent), path.resolve(target));
   return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
@@ -35,6 +41,12 @@ function createAssetStore({ rootDir, net }) {
   function assetDirectory(kind) {
     const safeKind = kind === 'output' ? 'output' : 'input';
     const directory = path.join(canvasAssetsRoot(), safeKind);
+    fs.mkdirSync(directory, { recursive: true });
+    return directory;
+  }
+
+  function thumbDirectory(kind) {
+    const directory = path.join(assetDirectory(kind), 'thumb');
     fs.mkdirSync(directory, { recursive: true });
     return directory;
   }
@@ -86,17 +98,49 @@ function createAssetStore({ rootDir, net }) {
     };
   }
 
+  function readDataUrlImage(dataUrl) {
+    const dataMatch = String(dataUrl || '').match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/s);
+    if (!dataMatch) return null;
+    return {
+      buffer: Buffer.from(dataMatch[2], 'base64'),
+      extension: extensionFromMime(dataMatch[1]) || '.webp',
+    };
+  }
+
+  function saveThumbnail(payload = {}, sourceFileName = '') {
+    const thumbSource = readDataUrlImage(payload.thumbDataUrl);
+    if (!thumbSource) return null;
+    const filePath = path.join(thumbDirectory(payload.kind), thumbFileNameFor(sourceFileName || payload.defaultName));
+    fs.writeFileSync(filePath, thumbSource.buffer);
+    return {
+      thumbUrl: assetUrl(filePath),
+      thumbFilePath: filePath,
+    };
+  }
+
   async function saveAsset(payload = {}) {
     const source = await readImageSource(payload);
     const directory = assetDirectory(payload.kind);
     const defaultName = payload.defaultName || ('canvas-image' + (source.extension || '.png'));
     const filePath = uniqueFilePath(directory, defaultName);
     fs.writeFileSync(filePath, source.buffer);
+    const thumb = saveThumbnail(payload, path.basename(filePath));
     return {
       url: assetUrl(filePath),
+      ...(thumb || {}),
       fileName: path.basename(filePath),
       filePath,
     };
+  }
+
+  async function saveAssetThumbnail(payload = {}) {
+    const sourcePath = resolveAssetUrl(payload.url || payload.filePath || '');
+    if (!sourcePath || !fs.existsSync(sourcePath)) return {};
+    const thumb = saveThumbnail({
+      ...payload,
+      kind: path.basename(path.dirname(sourcePath)) === 'output' ? 'output' : 'input',
+    }, path.basename(sourcePath));
+    return thumb || {};
   }
 
   async function saveResult(payload = {}, downloadsPath) {
@@ -115,6 +159,7 @@ function createAssetStore({ rootDir, net }) {
     readImageSource,
     resolveAssetUrl,
     saveAsset,
+    saveAssetThumbnail,
     saveResult,
   };
 }

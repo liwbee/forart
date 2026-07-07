@@ -14,6 +14,7 @@ import { isGenerationTaskActive } from "./generationTaskRuntime";
 import { ensureLibtvReadyProject, generateLibtvBatch, listLibtvImageModels, listLibtvWorkspaces } from "../libtv-generation/libtvGenerationApi";
 import { readImageDimensions } from "../imageCrop";
 import { sanitizeCanvasNodesForSave } from "../canvasSerialization";
+import { saveThumbnailForExistingCanvasAsset } from "../canvasAssetThumbnails";
 
 type StateUpdater<T> = T | ((current: T) => T);
 
@@ -312,10 +313,14 @@ export function useActionFissionGenerationActions({
             continue;
           }
           const dimensions = result.localUrl ? await readImageDimensions(result.localUrl) : null;
+          const thumb = result.localUrl
+            ? await saveThumbnailForExistingCanvasAsset(result.localUrl, result.fileName)
+            : {};
           await writeRowResult(job.id, {
             libtvQueued: false,
             libtvRunning: false,
             resultUrl: result.localUrl || result.url,
+            resultThumbUrl: thumb.thumbUrl,
             resultFileName: result.fileName || "libtv-generated-image.png",
             resultWidth: dimensions?.width,
             resultHeight: dimensions?.height,

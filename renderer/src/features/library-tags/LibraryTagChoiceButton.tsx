@@ -1,7 +1,9 @@
 import { Ban } from "lucide-react";
+import { normalizeLibraryTagColor, type LibraryTagColor } from "./tagColors";
 
 interface LibraryTagChoiceButtonProps {
   name: string;
+  color?: LibraryTagColor | string | null;
   count?: number;
   included: boolean;
   excluded: boolean;
@@ -12,6 +14,7 @@ interface LibraryTagChoiceButtonProps {
 
 export function LibraryTagChoiceButton({
   name,
+  color,
   count,
   included,
   excluded,
@@ -28,6 +31,7 @@ export function LibraryTagChoiceButton({
       aria-checked={role ? included || excluded : undefined}
       onClick={onToggleInclude}
     >
+      <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(color)}`} aria-hidden="true" />
       <span>{name}</span>
       {count !== undefined ? <span className="library-tag-choice__count">{count}</span> : null}
       <span

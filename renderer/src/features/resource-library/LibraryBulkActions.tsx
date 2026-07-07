@@ -1,10 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { CheckSquare, Settings, Tags, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { normalizeLibraryTagColor, type LibraryTagColor } from "../library-tags";
 
 export interface LibraryBulkTag {
   id: string;
   name: string;
+  color?: LibraryTagColor | string | null;
 }
 
 type BulkTagMode = "add" | "remove";
@@ -212,7 +214,8 @@ function BulkTagDialog({
                   });
                 }}
               >
-                {tag.name}
+                <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
+                <span>{tag.name}</span>
               </button>
             );
           })}

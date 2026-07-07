@@ -4,6 +4,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 export const LIBRARY_DATABASE_FILENAME = "forart-library.sqlite";
+export const LIBRARY_TAG_COLORS = ["default", "red", "yellow", "brown", "blue", "green", "purple"];
+
+const LIBRARY_TAG_COLOR_SET = new Set(LIBRARY_TAG_COLORS);
 
 const RESERVED_FILE_NAMES = new Set([
   "CON",
@@ -67,6 +70,11 @@ export function newId(prefix = "") {
 
 export function normalizeName(value) {
   return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+export function normalizeLibraryTagColor(value) {
+  const next = String(value || "").trim();
+  return LIBRARY_TAG_COLOR_SET.has(next) ? next : "default";
 }
 
 export function validateFileNamePart(value, label) {
@@ -134,6 +142,21 @@ function ensureProjectSortOrder(db, tableName) {
     const update = db.prepare(`UPDATE ${tableName} SET sort_order = ? WHERE id = ?`);
     rows.forEach((row, index) => update.run(index + 1, row.id));
   }
+}
+
+function ensureLibraryTagColor(db) {
+  const columns = db.prepare("PRAGMA table_info(library_tags)").all();
+  if (!columns.some((column) => column.name === "color")) {
+    db.exec("ALTER TABLE library_tags ADD COLUMN color TEXT NOT NULL DEFAULT 'default'");
+  }
+  const allowed = LIBRARY_TAG_COLORS.map((color) => `'${color}'`).join(", ");
+  db.exec(`
+    UPDATE library_tags
+    SET color = 'default'
+    WHERE color IS NULL
+       OR color = ''
+       OR color NOT IN (${allowed})
+  `);
 }
 
 function initDatabase(db, labels) {
@@ -217,6 +240,7 @@ function initDatabase(db, labels) {
     kind TEXT NOT NULL,
     project_id TEXT NOT NULL,
     name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT 'default',
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -258,6 +282,7 @@ function initDatabase(db, labels) {
   ensureProjectSortOrder(db, "model_projects");
   ensureProjectSortOrder(db, "outfit_projects");
   ensureProjectSortOrder(db, "action_projects");
+  ensureLibraryTagColor(db);
   db.exec(`
   CREATE INDEX IF NOT EXISTS idx_model_projects_sort ON model_projects(sort_order ASC, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_outfit_projects_sort ON outfit_projects(sort_order ASC, created_at DESC);

@@ -18,6 +18,7 @@ function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackag
   ipcMain.handle('canvas:upload-package-to-remote', async (_event, payload = {}) => canvasPackageStore.uploadPackageToRemote(payload));
   ipcMain.handle('canvas:download-package-from-remote', async (_event, payload = {}) => canvasPackageStore.downloadPackageFromRemote(payload));
   ipcMain.handle('canvas:save-asset', async (_event, payload) => assetStore.saveAsset(payload));
+  ipcMain.handle('canvas:save-asset-thumbnail', async (_event, payload) => assetStore.saveAssetThumbnail(payload));
   ipcMain.handle('generation-tasks:get', async (_event, taskId) => generationTaskStore.getTask(taskId));
   ipcMain.handle('generation-tasks:create', async (_event, payload) => imageGenerationRunner.startTask(payload));
   ipcMain.handle('generation-tasks:update', async (_event, taskId, patch) => generationTaskStore.updateTask(taskId, patch));

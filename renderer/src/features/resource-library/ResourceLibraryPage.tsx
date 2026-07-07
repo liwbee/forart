@@ -1,6 +1,6 @@
-import { Search, X } from "lucide-react";
 import { Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LibrarySearchInput } from "../library-layout/LibrarySearchInput";
 import { resourceLibraryTabById, resourceLibraryTabs, type ResourceLibraryTab } from "./resourceLibraryTabs";
 
 export function ResourceLibraryPage() {
@@ -38,20 +38,13 @@ export function ResourceLibraryPage() {
             })}
           </div>
 
-          <label className="model-library-search resource-library-search">
-            <Search size={18} aria-hidden="true" />
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={t("resourceLibrary:searchPlaceholder")}
-              aria-label={t("resourceLibrary:searchPlaceholder")}
-            />
-            {searchQuery ? (
-              <button type="button" aria-label={t("resourceLibrary:clearSearch")} onClick={() => setSearchQuery("")}>
-                <X size={16} aria-hidden="true" />
-              </button>
-            ) : null}
-          </label>
+          <LibrarySearchInput
+            className="resource-library-search"
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder={t("resourceLibrary:searchPlaceholder")}
+            clearLabel={t("resourceLibrary:clearSearch")}
+          />
         </nav>
 
         <div className="resource-library-content" role="tabpanel" aria-label={t(activeTabConfig.labelKey)}>

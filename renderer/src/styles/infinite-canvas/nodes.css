@@ -70,7 +70,6 @@
   padding: 0;
   border-color: color-mix(in srgb, var(--canvas-link-active) 34%, var(--canvas-node-border));
   background: color-mix(in srgb, var(--canvas-node-bg) 76%, transparent);
-  backdrop-filter: blur(16px);
 }
 
 .ic-node--imageLoader.has-image,

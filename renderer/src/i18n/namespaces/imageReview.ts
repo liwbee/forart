@@ -37,6 +37,7 @@ export const zhCN = {
   reportIssue: "报告问题",
   approve: "检查通过",
   file: "文件",
+  resolution: "分辨率",
   size: "大小",
   defaultModelFolder: "模特图",
   defaultDetailFolder: "产品",
@@ -50,7 +51,7 @@ export const zhCN = {
   modelPaneTitle: "模特图",
   detailPaneTitle: "产品",
   previousProduct: "上一个产品",
-  keyHint: "上下切换产品，左右切换当前激活区域图片，点击图片区域可切换控制目标",
+  keyHint: "上下切换产品，左右切换左侧模特图",
   nextProduct: "下一个产品"
 } as const;
 
@@ -93,6 +94,7 @@ export const enUS = {
   reportIssue: "Report issue",
   approve: "Pass",
   file: "File",
+  resolution: "Resolution",
   size: "Size",
   defaultModelFolder: "Model Images",
   defaultDetailFolder: "Product",
@@ -106,6 +108,6 @@ export const enUS = {
   modelPaneTitle: "Model Images",
   detailPaneTitle: "Product",
   previousProduct: "Previous product",
-  keyHint: "Use up/down to switch products, left/right to switch images in the active pane, and click an image pane to change the control target",
+  keyHint: "Use up/down to switch products, left/right to switch images in the left model pane",
   nextProduct: "Next product"
 } as const;

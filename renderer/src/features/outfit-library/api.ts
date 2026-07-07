@@ -104,14 +104,14 @@ export function listOutfitTags(projectId: string) {
   return apiRequest<{ tags: OutfitTag[] }>(`/api/libraries/outfit/tags${queryString({ project_id: projectId })}`);
 }
 
-export function createOutfitTag(projectId: string, name: string) {
+export function createOutfitTag(projectId: string, name: string, color?: OutfitTag["color"]) {
   return apiRequest<OutfitTag>(`/api/libraries/outfit/tags${queryString({ project_id: projectId })}`, {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, ...(color ? { color } : {}) }),
   });
 }
 
-export function updateOutfitTag(projectId: string, tagId: string, payload: Partial<Pick<OutfitTag, "name" | "sort_order">>) {
+export function updateOutfitTag(projectId: string, tagId: string, payload: Partial<Pick<OutfitTag, "name" | "sort_order" | "color">>) {
   return apiRequest<OutfitTag>(`/api/libraries/outfit/tags/${encodeURIComponent(tagId)}${queryString({ project_id: projectId })}`, {
     method: "PATCH",
     body: JSON.stringify(payload),

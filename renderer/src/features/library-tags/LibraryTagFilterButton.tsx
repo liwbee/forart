@@ -1,11 +1,13 @@
 import { Ban, ListFilter } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { createLibraryTagFilter, type LibraryTagFilter } from "./filter";
+import { createLibraryTagFilter, toggleLibraryTagFilterInclude, type LibraryTagFilter } from "./filter";
+import { normalizeLibraryTagColor, type LibraryTagColor } from "./tagColors";
 
 export interface LibraryFilterTag {
   id: string;
   name: string;
+  color?: LibraryTagColor | string | null;
 }
 
 interface LibraryTagFilterButtonProps {
@@ -18,13 +20,14 @@ interface LibraryTagFilterButtonProps {
   className?: string;
   active?: boolean;
   menuContentBefore?: ReactNode;
+  sameColorSingleFilter?: boolean;
 }
 
 function joinClassNames(...classNames: Array<string | false | undefined>) {
   return classNames.filter(Boolean).join(" ");
 }
 
-export function LibraryTagFilterButton({ tags, tagFilter, tagCounts = {}, allLabel, ariaLabel, onChange, className, active, menuContentBefore }: LibraryTagFilterButtonProps) {
+export function LibraryTagFilterButton({ tags, tagFilter, tagCounts = {}, allLabel, ariaLabel, onChange, className, active, menuContentBefore, sameColorSingleFilter = false }: LibraryTagFilterButtonProps) {
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState({ left: 0, top: 0, width: 320, maxHeight: 280 });
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -37,10 +40,7 @@ export function LibraryTagFilterButton({ tags, tagFilter, tagCounts = {}, allLab
   ];
 
   function toggleIncludeTag(tagId: string) {
-    onChange(createLibraryTagFilter(
-      includeTagSet.has(tagId) ? tagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId) : [...tagFilter.includeTagIds, tagId],
-      tagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId),
-    ));
+    onChange(toggleLibraryTagFilterInclude(tagFilter, tagId, tags, sameColorSingleFilter));
   }
 
   function toggleExcludeTag(tagId: string) {
@@ -130,6 +130,7 @@ export function LibraryTagFilterButton({ tags, tagFilter, tagCounts = {}, allLab
               toggleIncludeTag(tag.id);
             }}
           >
+            <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
             <span>{tag.name}</span>
             <span className="library-tag-filter-menu__count">{tagCounts[tag.id] || 0}</span>
             <span

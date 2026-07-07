@@ -101,6 +101,23 @@ export function changeActionFissionRowTags(state: ActionFissionState, rowId: str
   };
 }
 
+export function changeActionFissionRowFilter(
+  state: ActionFissionState,
+  rowId: string,
+  actionProjectId: string,
+  includeActionTagIds: string[],
+  excludeActionTagIds: string[],
+): ActionFissionState {
+  return {
+    ...state,
+    rows: state.rows.map((row) => (
+      row.id === rowId
+        ? clearSelectedAction({ ...row, actionProjectId, includeActionTagIds, excludeActionTagIds, error: "" })
+        : row
+    )),
+  };
+}
+
 export function addActionFissionRow(state: ActionFissionState): ActionFissionState {
   if (state.rows.length >= MAX_ACTION_FISSION_ROWS) return state;
   return {

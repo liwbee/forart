@@ -1,4 +1,4 @@
-import type { LibraryTagFilter } from "../library-tags";
+import type { LibraryTagColor, LibraryTagFilter } from "../library-tags";
 
 export type ModelGender = "female" | "male" | "unknown";
 
@@ -43,6 +43,7 @@ export interface ModelTag {
   kind: "model";
   project_id: string;
   name: string;
+  color: LibraryTagColor;
   sort_order: number;
   usage_count: number;
   created_at: string;

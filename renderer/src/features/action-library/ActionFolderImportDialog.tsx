@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, FolderOpen, Loader2, RefreshCw, Tags, XCircle } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { LibrarySearchInput } from "../library-layout/LibrarySearchInput";
+import { normalizeLibraryTagColor } from "../library-tags";
 import { importActionEntries } from "./actionFolderImportApi";
 import type { ActionTag } from "./types";
 import type { ActionFolderImportPreview, ActionFolderImportResult, ActionFolderImportResultRow, ActionFolderImportRow, ActionFolderImportUploadEntry } from "./actionFolderImportTypes";
@@ -18,6 +20,8 @@ type LiveImportStatus = ActionFolderImportResultRow["final_status"] | "pending" 
 type LiveImportRow = Omit<ActionFolderImportResultRow, "final_status"> & {
   final_status: LiveImportStatus;
 };
+
+const EMPTY_IMPORT_ROWS: ActionFolderImportRow[] = [];
 
 function issueText(row: Pick<ActionFolderImportRow, "errors" | "warnings">) {
   return [...(row.errors || []), ...(row.warnings || [])].map((issue) => issue.message).join(" / ");
@@ -40,6 +44,20 @@ function liveStatusClass(status: LiveImportStatus | "") {
 
 function rowIsValid(row: ActionFolderImportRow) {
   return !row.errors?.length;
+}
+
+function rowMatchesSearch(row: ActionFolderImportRow, searchText: string) {
+  if (!searchText) return true;
+  const searchableName = `${row.proposed_name || ""} ${row.filename || ""} ${row.stem || ""}`.toLocaleLowerCase();
+  return searchableName.includes(searchText);
+}
+
+function filteredValidRowIdSet(rows: ActionFolderImportRow[], searchText: string) {
+  return new Set(rows.filter((row) => rowIsValid(row) && rowMatchesSearch(row, searchText)).map((row) => row.id));
+}
+
+function rowIdSignature(rowIds: string[]) {
+  return rowIds.join("\u0001");
 }
 
 function finalStatusLabel(status: string, t: ReturnType<typeof useTranslation>["t"]) {
@@ -70,7 +88,6 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   const [preview, setPreview] = useState<ActionFolderImportPreview | null>(null);
   const [result, setResult] = useState<ActionFolderImportResult | null>(null);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
-  const [autoSelectFilteredValidRows, setAutoSelectFilteredValidRows] = useState(false);
   const [stage, setStage] = useState<ImportStage>("idle");
   const [fileRows, setFileRows] = useState<ImportFileRow[]>([]);
   const [scanError, setScanError] = useState("");
@@ -94,7 +111,6 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
       setPreview(null);
       setResult(null);
       setSelectedRows(new Set());
-      setAutoSelectFilteredValidRows(false);
       setStage("idle");
       setFileRows([]);
       setScanError("");
@@ -321,19 +337,16 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
     },
   });
 
-  const rows = preview?.rows || [];
+  const rows = preview?.rows || EMPTY_IMPORT_ROWS;
   const displayRows = fileRows.length ? fileRows : rows;
   const rowSearchText = rowSearchQuery.trim().toLocaleLowerCase();
   const filteredDisplayRows = useMemo(() => {
     if (!rowSearchText) return displayRows;
-    return displayRows.filter((row) => {
-      const searchableName = `${row.proposed_name || ""} ${row.filename || ""} ${row.stem || ""}`.toLocaleLowerCase();
-      return searchableName.includes(rowSearchText);
-    });
+    return displayRows.filter((row) => rowMatchesSearch(row, rowSearchText));
   }, [displayRows, rowSearchText]);
-  const selectedRowsForBulkActions = autoSelectFilteredValidRows
-    ? new Set(filteredDisplayRows.filter(rowIsValid).map((row) => row.id))
-    : selectedRows;
+  const filteredValidRowIds = useMemo(() => filteredDisplayRows.filter(rowIsValid).map((row) => row.id), [filteredDisplayRows]);
+  const filteredValidRowSignature = useMemo(() => rowIdSignature(filteredValidRowIds), [filteredValidRowIds]);
+  const selectedRowsForBulkActions = selectedRows;
   const selectedRowList = displayRows.filter((row) => selectedRowsForBulkActions.has(row.id));
   const selectedInvalidCount = selectedRowList.filter((row) => !rowIsValid(row)).length;
   const selectedWarningCount = selectedRowList.filter((row) => row.warnings?.length).length;
@@ -353,9 +366,12 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   const virtualHeight = filteredDisplayRows.length * VIRTUAL_ROW_HEIGHT;
 
   useEffect(() => {
-    if (!autoSelectFilteredValidRows || importStarted) return;
-    setSelectedRows(new Set(filteredDisplayRows.filter(rowIsValid).map((row) => row.id)));
-  }, [autoSelectFilteredValidRows, filteredDisplayRows, importStarted]);
+    if (importStarted) return;
+    setSelectedRows((current) => {
+      if (current.size === filteredValidRowIds.length && filteredValidRowIds.every((rowId) => current.has(rowId))) return current;
+      return new Set(filteredValidRowIds);
+    });
+  }, [filteredValidRowSignature, importStarted]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -411,7 +427,6 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
     setResult(null);
     setFileRows([]);
     setSelectedRows(new Set());
-    setAutoSelectFilteredValidRows(false);
     setRowSearchQuery("");
     setImportProgress({ completed: 0, total: 0 });
     setRowImportStates(new Map());
@@ -452,7 +467,6 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   }
 
   function toggleRow(row: ActionFolderImportRow) {
-    setAutoSelectFilteredValidRows(false);
     setSelectedRows((current) => {
       if (importStarted) return current;
       const next = new Set(current);
@@ -463,12 +477,10 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   }
 
   function selectFilteredValidRows() {
-    setAutoSelectFilteredValidRows(true);
-    setSelectedRows(new Set(filteredDisplayRows.filter(rowIsValid).map((row) => row.id)));
+    setSelectedRows(new Set(filteredValidRowIds));
   }
 
   function clearSelection() {
-    setAutoSelectFilteredValidRows(false);
     setSelectedRows(new Set());
   }
 
@@ -573,7 +585,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
           </div>
         </div>
 
-        {errorText ? <div className="model-lib-error">{t("actionLibrary:requestFailed", { message: errorText })}</div> : null}
+        {errorText ? <div className="library-error">{t("actionLibrary:requestFailed", { message: errorText })}</div> : null}
 
         <>
             <div className="action-folder-import__summary">
@@ -596,22 +608,22 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
             </div>
 
             <div className="action-folder-import__actions">
-              <input
+              <LibrarySearchInput
                 className="action-folder-import__search"
-                type="search"
                 value={rowSearchQuery}
                 disabled={scanActive || importStarted}
                 placeholder={t("actionLibrary:bulkImportSearchPlaceholder")}
-                aria-label={t("actionLibrary:bulkImportSearchPlaceholder")}
-                onChange={(event) => {
-                  setRowSearchQuery(event.currentTarget.value);
+                clearLabel={t("resourceLibrary:clearSearch")}
+                onChange={(nextSearchQuery) => {
+                  setRowSearchQuery(nextSearchQuery);
+                  setSelectedRows(filteredValidRowIdSet(displayRows, nextSearchQuery.trim().toLocaleLowerCase()));
                   if (rowsViewportRef.current) rowsViewportRef.current.scrollTop = 0;
                   setRowViewport((current) => ({ ...current, scrollTop: 0 }));
                 }}
               />
               <div className="action-folder-import__selection-actions">
                 <button
-                  className="model-lib-button action-folder-import__tag-trigger"
+                  className="library-button action-folder-import__tag-trigger"
                   type="button"
                   disabled={!selectedRowsForBulkActions.size || scanActive || importStarted}
                   aria-haspopup="menu"
@@ -621,10 +633,10 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
                   <Tags size={16} aria-hidden="true" />
                   <span>{t("actionLibrary:bulkImportApplyTags")}</span>
                 </button>
-                <button className="model-lib-button" type="button" disabled={!filteredDisplayRows.length || scanActive || importStarted} onClick={selectFilteredValidRows}>
+                <button className="library-button" type="button" disabled={!filteredValidRowIds.length || scanActive || importStarted} onClick={selectFilteredValidRows}>
                   {t("actionLibrary:bulkImportSelectValid")}
                 </button>
-                <button className="model-lib-button" type="button" disabled={!displayRows.length || scanActive || importStarted} onClick={clearSelection}>
+                <button className="library-button" type="button" disabled={!displayRows.length || scanActive || importStarted} onClick={clearSelection}>
                   {t("actionLibrary:bulkImportClearSelection")}
                 </button>
               </div>
@@ -647,7 +659,8 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
                             role="menuitemcheckbox"
                             onClick={() => applyTagToSelectedRows(tag.name)}
                           >
-                            {tag.name}
+                            <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
+                            <span>{tag.name}</span>
                           </button>
                         ))}
                         <button type="button" role="menuitem" onClick={clearSelectedRowTags}>
@@ -683,7 +696,8 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
                               aria-checked={active}
                               onClick={() => toggleRowTag(rowTagMenuState.rowId, tag.name)}
                             >
-                              {tag.name}
+                              <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
+                              <span>{tag.name}</span>
                             </button>
                           );
                         })}

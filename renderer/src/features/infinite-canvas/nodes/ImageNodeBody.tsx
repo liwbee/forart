@@ -51,6 +51,7 @@ export function ImageNodeBody({
   const imageHeight = Math.round(node.imageNaturalHeight || loadedSize?.height || 0);
   const imageResolution = imageWidth > 0 && imageHeight > 0 ? `${imageWidth} x ${imageHeight}` : "";
   const elapsedText = formatGenerationDuration(getGenerationElapsedMs(activeTask, timerNow));
+  const displayUrl = node.thumbUrl || node.url || "";
 
   useEffect(() => {
     setLoadedSize(null);
@@ -102,7 +103,7 @@ export function ImageNodeBody({
         {node.url ? (
           <>
             <img
-              src={node.url}
+              src={displayUrl}
               alt={node.fileName || "canvas input"}
               draggable={false}
               onLoad={(event) => {

@@ -12,8 +12,8 @@ import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalIm
 import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
 import { LibraryImageDropZone } from "../resource-library/LibraryImageDropZone";
 import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
-import { LibraryProjectSidebar } from "../resource-library/LibraryProjectSidebar";
-import { LibraryTagManagerDialog } from "../resource-library/LibraryTagManagerDialog";
+import { LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
+import { LibraryTagManagerDialog } from "../library-tags/LibraryTagManagerDialog";
 import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
 import {
   bulkOutfitEntries,
@@ -34,8 +34,8 @@ import {
 } from "./api";
 import { useOutfitLibraryStore } from "./outfitLibraryStore";
 import { AssetUploadPayload, OutfitEntry, OutfitProject, OutfitTag } from "./types";
-import { normalizeTags, toggleTag } from "../model-library/tagUtils";
-import { EMPTY_LIBRARY_TAG_FILTER, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
+import { normalizeTags, toggleTag } from "../library-tags/tagUtils";
+import { EMPTY_LIBRARY_TAG_FILTER, applySameColorSingleIncludeFilter, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, createLibraryTagsByName, hasLibraryTagFilter, normalizeLibraryTagColor, toggleLibraryTagFilterInclude, useLibraryTagSettingsStore, type LibraryTagColor, type LibraryTagFilter, type LibraryTagNameColorLike } from "../library-tags";
 
 function getRequestError(errors: unknown[]) {
   const first = errors.find(Boolean);
@@ -87,7 +87,7 @@ function OutfitToolbar({
   const includeTagSet = useMemo(() => new Set(tagFilter.includeTagIds), [tagFilter.includeTagIds]);
   const excludeTagSet = useMemo(() => new Set(tagFilter.excludeTagIds), [tagFilter.excludeTagIds]);
   return (
-    <div className="model-toolbar outfit-toolbar">
+    <div className="library-toolbar outfit-toolbar">
       <div className="library-tag-section">
         <LibraryBulkManageButton disabled={false} onClick={selectionMode ? onExitSelectionMode : onEnterSelectionMode} />
         <span className="library-filter-label">{t("common:labels.tags")}</span>
@@ -104,6 +104,7 @@ function OutfitToolbar({
                 <LibraryTagChoiceButton
                   key={tag.id}
                   name={tag.name}
+                  color={tag.color}
                   count={tagCounts[tag.id] || 0}
                   included={includeTagSet.has(tag.id)}
                   excluded={excludeTagSet.has(tag.id)}
@@ -143,6 +144,7 @@ function AddOutfitCard({ disabled, busy, onCreate }: { disabled: boolean; busy: 
 function OutfitCard({
   outfit,
   tags,
+  tagsByName,
   deleteConfirmOutfitId,
   isDeleting,
   selectionMode,
@@ -154,6 +156,7 @@ function OutfitCard({
 }: {
   outfit: OutfitEntry;
   tags: OutfitTag[];
+  tagsByName: Map<string, LibraryTagNameColorLike>;
   deleteConfirmOutfitId: string;
   isDeleting: boolean;
   selectionMode: boolean;
@@ -295,7 +298,10 @@ function OutfitCard({
       {outfit.tags.length ? (
         <div className="outfit-card__tags" aria-label={t("outfitLibrary:outfitTags")}>
           {outfit.tags.map((tag) => (
-            <span key={tag}>{tag}</span>
+            <span key={tag}>
+              <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tagsByName.get(tag)?.color)}`} aria-hidden="true" />
+              <span>{tag}</span>
+            </span>
           ))}
         </div>
       ) : null}
@@ -367,7 +373,8 @@ function OutfitCard({
                     aria-checked={outfit.tags.includes(tag.name)}
                     onClick={() => onToggleTag(outfit.id, tag.name)}
                   >
-                    {tag.name}
+                    <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
+                    <span>{tag.name}</span>
                   </button>
                 ))
               ) : (
@@ -411,6 +418,7 @@ function OutfitGrid({
 }) {
   const cardSize = useLibraryCardSize("outfit");
   const librarySort = useLibrarySort();
+  const tagsByName = useMemo(() => createLibraryTagsByName(tags), [tags]);
   return (
     <div className="library-card-size-scope">
       <div className="outfit-grid" style={cardSize.gridStyle}>
@@ -420,6 +428,7 @@ function OutfitGrid({
             key={outfit.id}
             outfit={outfit}
             tags={tags}
+            tagsByName={tagsByName}
             deleteConfirmOutfitId={deleteConfirmOutfitId}
             isDeleting={deletingOutfitId === outfit.id}
             selectionMode={selectionMode}
@@ -517,6 +526,8 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const activeTagFilter = useOutfitLibraryStore((state) => state.activeTagFilter);
   const setActiveProjectId = useOutfitLibraryStore((state) => state.setActiveProjectId);
   const setActiveTagFilter = useOutfitLibraryStore((state) => state.setActiveTagFilter);
+  const sameColorSingleFilter = useLibraryTagSettingsStore((state) => state.sameColorSingleFilter);
+  const setSameColorSingleFilter = useLibraryTagSettingsStore((state) => state.setSameColorSingleFilter);
   const bulkSelection = useLibraryBulkSelection();
 
   const storageSettingsQuery = useQuery({
@@ -549,7 +560,11 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
 
   useEffect(() => {
     const tags = tagsQuery.data?.tags || [];
-    const validFilter = cleanLibraryTagFilter(activeTagFilter, tags.map((tag) => tag.id));
+    const validFilter = applySameColorSingleIncludeFilter(
+      cleanLibraryTagFilter(activeTagFilter, tags.map((tag) => tag.id)),
+      tags,
+      sameColorSingleFilter,
+    );
     if (
       validFilter.includeTagIds.length !== activeTagFilter.includeTagIds.length
       || validFilter.excludeTagIds.length !== activeTagFilter.excludeTagIds.length
@@ -557,7 +572,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     ) {
       setActiveTagFilter(validFilter);
     }
-  }, [activeTagFilter, setActiveTagFilter, tagsQuery.data?.tags]);
+  }, [activeTagFilter, sameColorSingleFilter, setActiveTagFilter, tagsQuery.data?.tags]);
 
   const outfitsQuery = useQuery({
     queryKey: activeProjectId ? outfitLibraryKeys.outfits(activeProjectId, activeTagFilter) : ["outfits", "empty"],
@@ -673,11 +688,12 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   });
 
   const updateTagMutation = useMutation({
-    mutationFn: ({ tagId, name, sort_order }: { tagId: string; name?: string; sort_order?: number }) => {
+    mutationFn: ({ tagId, name, sort_order, color }: { tagId: string; name?: string; sort_order?: number; color?: LibraryTagColor }) => {
       if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
       return updateOutfitTag(activeProjectId, tagId, {
         ...(name !== undefined ? { name } : {}),
         ...(sort_order !== undefined ? { sort_order } : {}),
+        ...(color !== undefined ? { color } : {}),
       });
     },
     onSuccess: async () => {
@@ -757,6 +773,19 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     updateTagMutation.mutate({ tagId, name: next });
   }
 
+  function handleChangeTagColor(tagId: string, color: LibraryTagColor) {
+    const queryKey = activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : outfitLibraryKeys.tagRoot;
+    const previous = queryClient.getQueryData<{ tags: OutfitTag[] }>(queryKey);
+    queryClient.setQueryData<{ tags: OutfitTag[] }>(queryKey, (current) => current ? {
+      tags: current.tags.map((tag) => tag.id === tagId ? { ...tag, color: normalizeLibraryTagColor(color) } : tag),
+    } : current);
+    updateTagMutation.mutate({ tagId, color }, {
+      onError: () => {
+        if (previous) queryClient.setQueryData(queryKey, previous);
+      },
+    });
+  }
+
   function handleReorderTags(nextTags: OutfitTag[]) {
     nextTags.forEach((tag, index) => {
       const nextSortOrder = index + 1;
@@ -767,12 +796,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   }
 
   function handleToggleTagFilter(tagId: string) {
-    setActiveTagFilter(createLibraryTagFilter(
-      activeTagFilter.includeTagIds.includes(tagId)
-        ? activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId)
-        : [...activeTagFilter.includeTagIds, tagId],
-      activeTagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId),
-    ));
+    setActiveTagFilter(toggleLibraryTagFilterInclude(activeTagFilter, tagId, tags, sameColorSingleFilter));
   }
 
   function handleExcludeTagFilter(tagId: string) {
@@ -840,8 +864,8 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   ]);
 
   return (
-    <section className="model-library-page outfit-library-page" aria-label={t("outfitLibrary:title")}>
-      <div className="model-library">
+    <section className="library-page outfit-library-page" aria-label={t("outfitLibrary:title")}>
+      <div className="library-layout">
         <LibraryProjectSidebar<OutfitProject>
           projects={projects}
           activeProjectId={activeProjectId}
@@ -867,8 +891,8 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
           closeMenuToken={closeMenuToken}
         />
 
-        <main className="model-content-pane">
-          <div className="model-content-head">
+        <main className="library-content-pane">
+          <div className="library-content-head">
             <OutfitToolbar
               tags={tags}
               tagFilter={activeTagFilter}
@@ -883,11 +907,11 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
             />
           </div>
 
-          <div className="model-lib-body scrollbar-thin-stable">
-            {errorMessage ? <div className="model-lib-error">{t("outfitLibrary:requestFailed", { message: errorMessage })}</div> : null}
-            {storageSettingsQuery.isLoading || projectsQuery.isLoading ? <div className="model-lib-empty">{t("common:states.loadingProjects")}</div> : null}
-            {!storageConfigured ? <div className="model-lib-empty">{t("outfitLibrary:storageUnavailable")}</div> : null}
-            {storageConfigured && !projectsQuery.isLoading && !projects.length ? <div className="model-lib-empty">{t("common:empty.noProjects")}</div> : null}
+          <div className="library-body scrollbar-thin-stable">
+            {errorMessage ? <div className="library-error">{t("outfitLibrary:requestFailed", { message: errorMessage })}</div> : null}
+            {storageSettingsQuery.isLoading || projectsQuery.isLoading ? <div className="library-empty">{t("common:states.loadingProjects")}</div> : null}
+            {!storageConfigured ? <div className="library-empty">{t("outfitLibrary:storageUnavailable")}</div> : null}
+            {storageConfigured && !projectsQuery.isLoading && !projects.length ? <div className="library-empty">{t("common:empty.noProjects")}</div> : null}
             {activeProject ? (
               <LibraryImageDropZone
                 disabled={!storageConfigured || createOutfitMutation.isPending}
@@ -931,8 +955,11 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         onClose={() => setTagManagerOpen(false)}
         onCreateTag={handleCreateTag}
         onRenameTag={handleRenameTag}
+        onChangeTagColor={handleChangeTagColor}
         onDeleteTag={handleDeleteTag}
         onReorderTags={handleReorderTags}
+        sameColorSingleFilter={sameColorSingleFilter}
+        onSameColorSingleFilterChange={setSameColorSingleFilter}
       />
       <LibraryImageActionToast toast={imageActionToast} />
       {activeProject ? (

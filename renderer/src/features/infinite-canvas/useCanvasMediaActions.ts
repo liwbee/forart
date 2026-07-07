@@ -19,6 +19,7 @@ import {
 import { isImageLikeNode } from "./nodePredicates";
 import type { CanvasConnection, CanvasGroup, CanvasNode, CanvasNodeType, CropAspectKey, CropInteractionState, ImageDialogState } from "./types";
 import type { LibraryAssetSelection } from "../library-asset-picker/types";
+import { createImageThumbnail } from "../image-thumbnails/createImageThumbnail";
 
 type StateUpdater<T> = T | ((current: T) => T);
 const CANVAS_TOAST_AUTO_HIDE_MS = 2000;
@@ -31,8 +32,10 @@ interface DownloadStatus {
 
 interface SavedCanvasAsset {
   url: string;
+  thumbUrl?: string;
   fileName?: string;
   filePath?: string;
+  thumbFilePath?: string;
 }
 
 interface UseCanvasMediaActionsOptions {
@@ -114,14 +117,21 @@ export function useCanvasMediaActions({
   const cropInteractionRef = useRef<CropInteractionState | null>(null);
   const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
 
-  const saveCanvasImageAsset = useCallback(async (source: { url?: string; dataUrl?: string; defaultName?: string; kind: "input" | "output" }): Promise<SavedCanvasAsset> => {
+  const saveCanvasImageAsset = useCallback(async (source: { url?: string; dataUrl?: string; defaultName?: string; kind: "input" | "output"; type?: string }): Promise<SavedCanvasAsset> => {
+    const thumbnail = await createImageThumbnail({
+      dataUrl: source.dataUrl,
+      url: source.url,
+      name: source.defaultName,
+      type: source.type,
+    });
     if (!window.easyTool?.saveCanvasAsset) {
       return {
         url: source.dataUrl || source.url || "",
+        thumbUrl: thumbnail?.dataUrl,
         fileName: source.defaultName || "canvas-image.png",
       };
     }
-    return window.easyTool.saveCanvasAsset(source);
+    return window.easyTool.saveCanvasAsset({ ...source, thumbDataUrl: thumbnail?.dataUrl });
   }, []);
 
   const showMediaStatus = useCallback((status: DownloadStatus) => {
@@ -162,13 +172,15 @@ export function useCanvasMediaActions({
 
   const readImagePatch = useCallback(async (file: File): Promise<Partial<CanvasNode>> => {
     const dataUrl = await readFileAsDataUrl(file);
-    const saved = await saveCanvasImageAsset({ dataUrl, defaultName: file.name, kind: "input" });
+    const saved = await saveCanvasImageAsset({ dataUrl, defaultName: file.name, kind: "input", type: file.type });
     const dimensions = await readImageDimensions(saved.url);
     const nextSize = dimensions ? fitImageNodeSize(dimensions.width, dimensions.height) : {};
     return {
       url: saved.url,
+      thumbUrl: saved.thumbUrl,
       fileName: saved.fileName || file.name,
       filePath: saved.filePath,
+      thumbFilePath: saved.thumbFilePath,
       title: file.name || "Image",
       imageMode: "asset",
       imageSource: "uploaded",
@@ -399,8 +411,10 @@ export function useCanvasMediaActions({
     const nextSize = fitImageNodeSize(result.width, result.height);
     const patch = {
       url: saved.url,
+      thumbUrl: saved.thumbUrl,
       fileName: saved.fileName,
       filePath: saved.filePath,
+      thumbFilePath: saved.thumbFilePath,
       imageNaturalWidth: result.width,
       imageNaturalHeight: result.height,
       ...nextSize,

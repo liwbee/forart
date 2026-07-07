@@ -30,6 +30,16 @@ function formatAssetId(filePath) {
   return path.resolve(filePath).replace(/\\/g, '/');
 }
 
+function isThumbPath(filePath) {
+  return path.basename(path.dirname(filePath)).toLowerCase() === 'thumb';
+}
+
+function thumbPathForAsset(filePath) {
+  const directory = path.dirname(filePath);
+  const parsed = path.parse(filePath);
+  return path.join(directory, 'thumb', `${parsed.name}.webp`);
+}
+
 function collectTasksFromUnknown(value, tasks = []) {
   if (!value) return tasks;
   if (Array.isArray(value)) {
@@ -176,7 +186,7 @@ function createCanvasCacheStore({ rootDir, assetStore, canvasStore, shell }) {
       const filePath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
         files.push(...enumerateAssetFiles(filePath));
-      } else if (entry.isFile() && IMAGE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+      } else if (entry.isFile() && !isThumbPath(filePath) && IMAGE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
         files.push(filePath);
       }
     }
@@ -185,6 +195,8 @@ function createCanvasCacheStore({ rootDir, assetStore, canvasStore, shell }) {
 
   function assetRecord(filePath, referenceMap) {
     const stats = fs.statSync(filePath);
+    const thumbPath = thumbPathForAsset(filePath);
+    const thumbStats = fs.existsSync(thumbPath) ? fs.statSync(thumbPath) : null;
     const key = formatAssetId(filePath);
     const referenceEntry = referenceMap.get(key);
     return {
@@ -194,6 +206,9 @@ function createCanvasCacheStore({ rootDir, assetStore, canvasStore, shell }) {
       filePath,
       fileName: path.basename(filePath),
       sizeBytes: stats.size,
+      thumbUrl: thumbStats ? assetStore.assetUrl(thumbPath) : '',
+      thumbFilePath: thumbStats ? thumbPath : '',
+      thumbSizeBytes: thumbStats ? thumbStats.size : 0,
       modifiedAt: stats.mtimeMs,
       exists: true,
       referenced: Boolean(referenceEntry?.references.length),
@@ -231,18 +246,18 @@ function createCanvasCacheStore({ rootDir, assetStore, canvasStore, shell }) {
     for (const asset of assets) {
       if (asset.kind === 'input') {
         totals.inputCount += 1;
-        totals.inputBytes += asset.sizeBytes;
+        totals.inputBytes += asset.sizeBytes + Number(asset.thumbSizeBytes || 0);
       }
       if (asset.kind === 'output') {
         totals.outputCount += 1;
-        totals.outputBytes += asset.sizeBytes;
+        totals.outputBytes += asset.sizeBytes + Number(asset.thumbSizeBytes || 0);
       }
       if (asset.referenced) {
         totals.referencedCount += 1;
-        totals.referencedBytes += asset.sizeBytes;
+        totals.referencedBytes += asset.sizeBytes + Number(asset.thumbSizeBytes || 0);
       } else {
         totals.cleanableCount += 1;
-        totals.cleanableBytes += asset.sizeBytes;
+        totals.cleanableBytes += asset.sizeBytes + Number(asset.thumbSizeBytes || 0);
       }
     }
     return totals;
@@ -298,6 +313,12 @@ function createCanvasCacheStore({ rootDir, assetStore, canvasStore, shell }) {
           continue;
         }
         fs.unlinkSync(asset.filePath);
+        const thumbPath = thumbPathForAsset(asset.filePath);
+        if (fs.existsSync(thumbPath)) {
+          const thumbStats = fs.statSync(thumbPath);
+          fs.unlinkSync(thumbPath);
+          freedBytes += thumbStats.size;
+        }
         deletedCount += 1;
         freedBytes += stats.size;
       } catch (error) {

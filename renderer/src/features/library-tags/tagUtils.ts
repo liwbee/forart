@@ -1,5 +1,5 @@
 export function normalizeTags(value: string | string[]): string[] {
-  const rawItems = Array.isArray(value) ? value : String(value || "").split(/[,，;；\n]+/);
+  const rawItems = Array.isArray(value) ? value : String(value || "").split(/[,，；;\n]+/);
   const tags: string[] = [];
 
   for (const item of rawItems) {

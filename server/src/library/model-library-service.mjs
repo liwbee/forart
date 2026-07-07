@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   newId,
   normalizeName,
+  normalizeLibraryTagColor,
   nowIso,
   validateFileNamePart,
 } from "./library-runtime.mjs";
@@ -218,14 +219,15 @@ export function createModelLibraryService(runtime, options = {}) {
     ).all(projectId).map((tag) => ({ ...tag, usage_count: tagUsage(tag.id) }));
   }
 
-  function createProjectTag(projectId, name) {
+  function createProjectTag(projectId, name, color = "default") {
     const existing = db.prepare("SELECT * FROM library_tags WHERE kind = 'model' AND project_id = ? AND name = ?").get(projectId, name);
     if (existing) return { ...existing, usage_count: tagUsage(existing.id) };
     const timestamp = nowIso();
     const id = newId("tag");
+    const tagColor = normalizeLibraryTagColor(color);
     const sortOrder = db.prepare("SELECT COUNT(*) AS total FROM library_tags WHERE kind = 'model' AND project_id = ?").get(projectId)?.total || 0;
-    db.prepare("INSERT INTO library_tags (id, kind, project_id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run(id, "model", projectId, name, sortOrder + 1, timestamp, timestamp);
+    db.prepare("INSERT INTO library_tags (id, kind, project_id, name, color, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(id, "model", projectId, name, tagColor, sortOrder + 1, timestamp, timestamp);
     const tag = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(id);
     return { ...tag, usage_count: 0 };
   }
@@ -857,7 +859,7 @@ export function createModelLibraryService(runtime, options = {}) {
     if (!loadProject(projectId)) return null;
     const name = String(payload.name || "").trim().replace(/\s+/g, " ").slice(0, 24);
     if (!name) throw new Error("Tag name is required");
-    return runDbTransaction(db, () => createProjectTag(projectId, name));
+    return runDbTransaction(db, () => createProjectTag(projectId, name, payload.color));
   }
 
   function updateTag(projectId, tagId, payload = {}) {
@@ -874,6 +876,9 @@ export function createModelLibraryService(runtime, options = {}) {
       }
       if (payload.sort_order !== undefined) {
         db.prepare("UPDATE library_tags SET sort_order = ?, updated_at = ? WHERE id = ?").run(Number(payload.sort_order || 0), nowIso(), tagId);
+      }
+      if (payload.color !== undefined) {
+        db.prepare("UPDATE library_tags SET color = ?, updated_at = ? WHERE id = ?").run(normalizeLibraryTagColor(payload.color), nowIso(), tagId);
       }
       const next = db.prepare("SELECT * FROM library_tags WHERE id = ?").get(tagId);
       return { ...next, usage_count: tagUsage(tagId) };

@@ -18,6 +18,7 @@ export interface ActionFissionRow {
   selectedActionTags?: string[];
   selectedActionAssetUrl?: string | null;
   resultUrl?: string;
+  resultThumbUrl?: string;
   resultFileName?: string;
   resultWidth?: number;
   resultHeight?: number;

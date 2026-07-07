@@ -976,7 +976,7 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
             kind: "image",
             order: imagePreviews.length + 1,
             title: source.fileName || getKindLabel(source.type),
-            url: source.url,
+            url: source.thumbUrl || source.url,
           });
           return;
         }

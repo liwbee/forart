@@ -14,7 +14,6 @@ import { ActionFissionApiBar } from "./action-fission/ActionFissionApiBar";
 import { ActionFissionFooter } from "./action-fission/ActionFissionFooter";
 import { ActionFissionReferenceStrip } from "./action-fission/ActionFissionReferenceStrip";
 import { ActionFissionRowItem } from "./action-fission/ActionFissionRowItem";
-import { countLibraryTags } from "../../library-tags";
 
 interface SavedCanvasAsset {
   url: string;
@@ -97,8 +96,7 @@ export function ActionFissionNodeBody({
   const { t } = useTranslation();
   const {
     state,
-    setRowProject,
-    setRowTags,
+    setRowFilter,
     selectRowAction,
     addRow,
     removeRow,
@@ -182,9 +180,7 @@ export function ActionFissionNodeBody({
             row={row}
             tags={tags}
             actions={actions}
-            candidates={candidates}
             candidateCount={candidates.length}
-            tagCounts={countLibraryTags(candidates, tags)}
             publicReferenceCount={publicReferenceCount}
             publicReferenceLimit={BASE_PUBLIC_REFERENCE_LIMIT}
             selectedProvider={effectiveApiType === "libtv-api" ? (libtvReady ? ({ id: "libtv-api" } as ApiProvider) : null) : selectedProvider}
@@ -192,8 +188,7 @@ export function ActionFissionNodeBody({
             projects={projects}
             openSelectId={openSelectId}
             onOpenSelectChange={onOpenSelectChange}
-            onSetProject={setRowProject}
-            onSetTags={setRowTags}
+            onSetFilter={setRowFilter}
             onRemoveRow={removeRow}
             onRefreshRow={onRefreshRow}
             onRunRow={onRunRow}

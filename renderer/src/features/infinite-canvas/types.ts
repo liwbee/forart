@@ -38,8 +38,10 @@ export interface CanvasNode {
   h: number;
   title: string;
   url?: string;
+  thumbUrl?: string;
   fileName?: string;
   filePath?: string;
+  thumbFilePath?: string;
   imageNaturalWidth?: number;
   imageNaturalHeight?: number;
   imageMode?: "imageGenerator" | "asset";

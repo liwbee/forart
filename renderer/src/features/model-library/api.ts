@@ -105,14 +105,14 @@ export function listModelTags(projectId: string) {
   return apiRequest<{ tags: ModelTag[] }>(`/api/libraries/model/tags${queryString({ project_id: projectId })}`);
 }
 
-export function createModelTag(projectId: string, name: string) {
+export function createModelTag(projectId: string, name: string, color?: ModelTag["color"]) {
   return apiRequest<ModelTag>(`/api/libraries/model/tags${queryString({ project_id: projectId })}`, {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, ...(color ? { color } : {}) }),
   });
 }
 
-export function updateModelTag(projectId: string, tagId: string, payload: Partial<Pick<ModelTag, "name" | "sort_order">>) {
+export function updateModelTag(projectId: string, tagId: string, payload: Partial<Pick<ModelTag, "name" | "sort_order" | "color">>) {
   return apiRequest<ModelTag>(`/api/libraries/model/tags/${encodeURIComponent(tagId)}${queryString({ project_id: projectId })}`, {
     method: "PATCH",
     body: JSON.stringify(payload),

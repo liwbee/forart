@@ -3,6 +3,7 @@ import type { TFunction } from "i18next";
 import { normalizeActionFissionState, patchActionFissionRow } from "../action-fission/actionFissionState";
 import { fitImageNodeSize, readImageDimensions } from "../imageCrop";
 import { sanitizeCanvasNodesForSave } from "../canvasSerialization";
+import { saveThumbnailForExistingCanvasAsset } from "../canvasAssetThumbnails";
 import type { CanvasConnection, CanvasDocument, CanvasDocumentRecord, CanvasGenerationTask, CanvasGenerationTaskStatus, CanvasGroup, CanvasNode, Viewport } from "../types";
 
 type StateUpdater<T> = T | ((current: T) => T);
@@ -130,6 +131,9 @@ export function useGenerationTaskWriteback({
         const { nodeId, rowId } = terminalTask.target;
         const result = terminalTask.result;
         const dimensions = result?.localUrl ? await readImageDimensions(result.localUrl) : null;
+        const thumb = terminalStatus === "succeeded" && result?.localUrl
+          ? await saveThumbnailForExistingCanvasAsset(result.localUrl, result.fileName)
+          : {};
         const patchResult = await savePatchedNodes(terminalTask.canvasId, (currentNodes) => {
           let changed = false;
           let orphanReason = "Action fission node was not found.";
@@ -151,6 +155,7 @@ export function useGenerationTaskWriteback({
               actionFission: patchActionFissionRow(state, rowId, {
                 ...(terminalStatus === "succeeded" && result ? {
                   resultUrl: result.localUrl || result.url,
+                  resultThumbUrl: thumb.thumbUrl,
                   resultFileName: result.fileName || "generated-image.png",
                   resultWidth: dimensions?.width || result.width,
                   resultHeight: dimensions?.height || result.height,
@@ -173,6 +178,9 @@ export function useGenerationTaskWriteback({
       const nodeId = terminalTask.target?.nodeId || terminalTask.nodeId;
       const result = terminalTask.result;
       const dimensions = result?.localUrl ? await readImageDimensions(result.localUrl) : null;
+      const thumb = terminalStatus === "succeeded" && result?.localUrl
+        ? await saveThumbnailForExistingCanvasAsset(result.localUrl, result.fileName)
+        : {};
       const nextSize = terminalStatus === "succeeded" && result
         ? dimensions ? fitImageNodeSize(dimensions.width, dimensions.height) : fitImageNodeSize(result.width || 1024, result.height || 1024)
         : {};
@@ -189,6 +197,8 @@ export function useGenerationTaskWriteback({
             ...node,
             ...(terminalStatus === "succeeded" && result ? {
               url: result.localUrl || result.url,
+              thumbUrl: thumb.thumbUrl,
+              thumbFilePath: thumb.thumbFilePath,
               fileName: result.fileName || "generated-image.png",
               imageProviderId: terminalTask.providerId,
               imageModel: terminalTask.model,

@@ -1,0 +1,110 @@
+/* Shared resource library form controls. */
+.library-entry-title-input {
+  min-height: 48px;
+  width: 100%;
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  padding: 0 var(--space-4);
+  background: var(--input-bg);
+  color: var(--input-text);
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold);
+  box-shadow: none;
+}
+
+.library-rename-input--error {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 14%, transparent) !important;
+}
+
+.library-rename-error-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 4;
+  max-width: min(260px, 100%);
+  border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--border-subtle));
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--danger-soft) 94%, var(--surface-card));
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+}
+
+.library-button {
+  min-height: var(--button-functional-min-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px solid var(--button-functional-border);
+  border-radius: var(--button-functional-radius);
+  padding: 0 var(--space-4);
+  background: var(--button-functional-bg);
+  color: var(--button-functional-text);
+  font-weight: var(--font-weight-semibold);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.library-button:hover {
+  border-color: var(--button-functional-hover-border);
+  background: var(--button-functional-hover-bg);
+}
+
+.library-button.danger {
+  border-color: color-mix(in srgb, var(--danger) 34%, transparent);
+  background: var(--button-functional-bg);
+  color: var(--danger);
+}
+
+.library-button.danger:hover {
+  border-color: color-mix(in srgb, var(--danger) 52%, transparent);
+  background: var(--danger-soft);
+}
+
+.library-button.danger.confirming {
+  background: var(--danger-soft);
+}
+
+.library-modal-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.library-modal-tags button {
+  min-height: 32px;
+  min-width: 32px;
+  max-width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+}
+
+.library-modal-tags button:hover {
+  border-color: var(--border-subtle);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+}
+
+.library-modal-tags button.selected {
+  border-color: var(--state-active-border);
+  background: var(--surface-control);
+  box-shadow: inset 0 0 0 1px var(--state-active-border);
+}
+
+.library-modal-tags.empty {
+  color: var(--text-muted);
+  font-size: 13px;
+}

@@ -137,6 +137,7 @@ function cleanActionFissionForJsonOnly(actionFission) {
   next.rows = Array.isArray(next.rows) ? next.rows.map((row) => {
     const cleanRow = { ...row };
     delete cleanRow.resultUrl;
+    delete cleanRow.resultThumbUrl;
     delete cleanRow.resultFileName;
     delete cleanRow.resultWidth;
     delete cleanRow.resultHeight;
@@ -162,6 +163,7 @@ function cleanActionFissionForPackage(actionFission) {
   delete next.error;
   next.rows = Array.isArray(next.rows) ? next.rows.map((row) => {
     const cleanRow = { ...row };
+    delete cleanRow.resultThumbUrl;
     delete cleanRow.error;
     delete cleanRow.libtvQueued;
     delete cleanRow.libtvRunning;
@@ -198,7 +200,9 @@ function sanitizeCanvasForJsonOnly(canvas) {
   next.nodes = Array.isArray(next.nodes) ? next.nodes.map((node) => {
     const cleanNode = cleanGenerationTask({ ...node });
     if (isLocalUrlLike(cleanNode.url) && !isExternalHttpUrl(cleanNode.url)) delete cleanNode.url;
+    delete cleanNode.thumbUrl;
     delete cleanNode.filePath;
+    delete cleanNode.thumbFilePath;
     delete cleanNode.fileName;
     delete cleanNode.imageNaturalWidth;
     delete cleanNode.imageNaturalHeight;
@@ -223,7 +227,9 @@ function sanitizeCanvasForPackage(canvas, options = {}) {
   const next = cloneSerializable(canvas);
   next.nodes = Array.isArray(next.nodes) ? next.nodes.map((node) => {
     const cleanNode = cleanGenerationTask({ ...node });
+    delete cleanNode.thumbUrl;
     delete cleanNode.filePath;
+    delete cleanNode.thumbFilePath;
     cleanNode.running = false;
     cleanNode.actionFission = cleanActionFissionForPackage(cleanNode.actionFission);
     cleanNode.libtvImageGeneration = cleanLibtvForPackage(cleanNode.libtvImageGeneration);

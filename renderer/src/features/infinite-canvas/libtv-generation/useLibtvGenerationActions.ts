@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef } from "react";
 import type { TFunction } from "i18next";
 import { collectPrompt, collectReferenceImages } from "../core/workflow";
 import { fitImageNodeSize, readImageDimensions } from "../imageCrop";
+import { saveThumbnailForExistingCanvasAsset } from "../canvasAssetThumbnails";
 import type { CanvasConnection, CanvasNode } from "../types";
 import { generateLibtvImage } from "./libtvGenerationApi";
 import { LIBTV_ASPECT_RATIO_OPTIONS, LIBTV_QUALITY_OPTIONS, type LibtvAspectRatio, type LibtvQuality } from "./libtvGenerationTypes";
@@ -89,10 +90,15 @@ export function useLibtvGenerationActions({
       });
       if (abortController.signal.aborted) throw new DOMException("Aborted", "AbortError");
       const dimensions = await readImageDimensions(result.localUrl);
+      const thumb = result.localUrl
+        ? await saveThumbnailForExistingCanvasAsset(result.localUrl, result.fileName)
+        : {};
       const nextSize = dimensions ? fitImageNodeSize(dimensions.width, dimensions.height) : fitImageNodeSize(1024, 1024);
       patchNode(nodeId, {
         ...nextSize,
         url: result.localUrl || result.url,
+        thumbUrl: thumb.thumbUrl,
+        thumbFilePath: thumb.thumbFilePath,
         fileName: result.fileName || "libtv-generated-image.png",
         imageNaturalWidth: dimensions?.width || 1024,
         imageNaturalHeight: dimensions?.height || 1024,

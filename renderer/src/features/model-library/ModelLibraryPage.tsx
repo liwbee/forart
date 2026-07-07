@@ -12,10 +12,10 @@ import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageA
 import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalImage, resolveLibraryImageUrl } from "../../lib/libraryImageActions";
 import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
 import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
-import { LibraryProjectSidebar } from "../resource-library/LibraryProjectSidebar";
-import { LibraryTagManagerDialog } from "../resource-library/LibraryTagManagerDialog";
+import { LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
+import { LibraryTagManagerDialog } from "../library-tags/LibraryTagManagerDialog";
 import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
-import { EMPTY_LIBRARY_TAG_FILTER, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, hasLibraryTagFilter, type LibraryTagFilter } from "../library-tags";
+import { EMPTY_LIBRARY_TAG_FILTER, applySameColorSingleIncludeFilter, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, createLibraryTagsByName, hasLibraryTagFilter, normalizeLibraryTagColor, toggleLibraryTagFilterInclude, useLibraryTagSettingsStore, type LibraryTagColor, type LibraryTagFilter, type LibraryTagNameColorLike } from "../library-tags";
 import {
   bulkModelEntries,
   createModelTag,
@@ -37,7 +37,7 @@ import {
   updateModelProject,
 } from "./api";
 import { useModelLibraryStore } from "./modelLibraryStore";
-import { normalizeTags, toggleTag } from "./tagUtils";
+import { normalizeTags, toggleTag } from "../library-tags/tagUtils";
 import { AssetUploadPayload, ModelEntry, ModelGender, ModelImage, ModelProject, ModelTag } from "./types";
 
 function getRequestError(errors: unknown[]) {
@@ -108,7 +108,7 @@ function ModelToolbar({
   const excludeTagSet = useMemo(() => new Set(tagFilter.excludeTagIds), [tagFilter.excludeTagIds]);
 
   return (
-    <div className="model-toolbar">
+    <div className="library-toolbar">
       <div className="library-gender-filter" aria-label={t("modelLibrary:genderCategory")}>
         <span className="library-filter-label">{t("modelLibrary:gender")}</span>
         <button
@@ -149,6 +149,7 @@ function ModelToolbar({
                 <LibraryTagChoiceButton
                   key={tag.id}
                   name={tag.name}
+                  color={tag.color}
                   count={tagCounts[tag.id] || 0}
                   included={includeTagSet.has(tag.id)}
                   excluded={excludeTagSet.has(tag.id)}
@@ -202,6 +203,7 @@ function AddModelCard({ disabled, busy, onCreate }: { disabled: boolean; busy: b
 
 function ModelCard({
   model,
+  tagsByName,
   isOpen,
   onOpen,
   selectionMode,
@@ -209,6 +211,7 @@ function ModelCard({
   onToggleSelected,
 }: {
   model: ModelEntry;
+  tagsByName: Map<string, LibraryTagNameColorLike>;
   isOpen: boolean;
   onOpen: () => void;
   selectionMode: boolean;
@@ -243,7 +246,10 @@ function ModelCard({
         {model.tags.length ? (
           <div className="tag-list">
             {model.tags.map((tag) => (
-              <span key={tag}>{tag}</span>
+              <span key={tag}>
+                <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tagsByName.get(tag)?.color)}`} aria-hidden="true" />
+                <span>{tag}</span>
+              </span>
             ))}
           </div>
         ) : (
@@ -532,7 +538,7 @@ function ModelInlineEditor({
           </label>
           <div className="model-inline-summary" aria-label={t("modelLibrary:assetOverview")}>
             <button
-              className={`model-lib-button danger model-delete-confirm-button${isConfirmingDelete ? " confirming" : ""}`}
+              className={`library-button danger model-delete-confirm-button${isConfirmingDelete ? " confirming" : ""}`}
               type="button"
               disabled={isDeleting}
               onClick={() => onDelete(model.id, isConfirmingDelete)}
@@ -564,7 +570,8 @@ function ModelInlineEditor({
                     type="button"
                     onClick={() => onToggleTag(model.id, tag.name)}
                   >
-                    {tag.name}
+                    <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
+                    <span>{tag.name}</span>
                   </button>
                 );
               })
@@ -585,7 +592,7 @@ function ModelInlineEditor({
               <span className="model-inline-section-label">{t("modelLibrary:images")}</span>
               <p>{images.length ? t("modelLibrary:assetCount", { count: images.length }) : t("modelLibrary:noAssets")}</p>
             </div>
-            <button className="model-lib-button" type="button" onClick={() => fileInputRef.current?.click()}>
+            <button className="library-button" type="button" onClick={() => fileInputRef.current?.click()}>
               <Upload size={16} aria-hidden="true" />
               <span>{t("common:actions.uploadImage")}</span>
             </button>
@@ -788,6 +795,7 @@ function ModelGrid({
   const gridRef = useRef<HTMLDivElement | null>(null);
   const cardSize = useLibraryCardSize("model");
   const librarySort = useLibrarySort();
+  const tagsByName = useMemo(() => createLibraryTagsByName(tags), [tags]);
   const [columnCount, setColumnCount] = useState(1);
   const openModel = models.find((model) => model.id === openModelId) || null;
   const openIndex = models.findIndex((model) => model.id === openModelId);
@@ -828,6 +836,7 @@ function ModelGrid({
           <FragmentWithEditor
             key={model.id}
             model={model}
+            tagsByName={tagsByName}
             isOpen={model.id === openModelId}
             shouldRenderEditor={Boolean(openModel && index === insertAfterIndex)}
             openModel={openModel}
@@ -870,6 +879,7 @@ function ModelGrid({
 
 function FragmentWithEditor({
   model,
+  tagsByName,
   isOpen,
   shouldRenderEditor,
   openModel,
@@ -894,6 +904,7 @@ function FragmentWithEditor({
   onToggleSelected,
 }: {
   model: ModelEntry;
+  tagsByName: Map<string, LibraryTagNameColorLike>;
   isOpen: boolean;
   shouldRenderEditor: boolean;
   openModel: ModelEntry | null;
@@ -921,6 +932,7 @@ function FragmentWithEditor({
     <>
       <ModelCard
         model={model}
+        tagsByName={tagsByName}
         isOpen={isOpen}
         selectionMode={selectionMode}
         selected={selectedIds.has(model.id)}
@@ -1028,6 +1040,8 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   const toggleGender = useModelLibraryStore((state) => state.toggleGender);
   const openEditor = useModelLibraryStore((state) => state.openEditor);
   const closeEditor = useModelLibraryStore((state) => state.closeEditor);
+  const sameColorSingleFilter = useLibraryTagSettingsStore((state) => state.sameColorSingleFilter);
+  const setSameColorSingleFilter = useLibraryTagSettingsStore((state) => state.setSameColorSingleFilter);
   const bulkSelection = useLibraryBulkSelection();
 
   const storageSettingsQuery = useQuery({
@@ -1060,7 +1074,11 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
 
   useEffect(() => {
     const tags = tagsQuery.data?.tags || [];
-    const validFilter = cleanLibraryTagFilter(activeTagFilter, tags.map((tag) => tag.id));
+    const validFilter = applySameColorSingleIncludeFilter(
+      cleanLibraryTagFilter(activeTagFilter, tags.map((tag) => tag.id)),
+      tags,
+      sameColorSingleFilter,
+    );
     if (
       validFilter.includeTagIds.length !== activeTagFilter.includeTagIds.length
       || validFilter.excludeTagIds.length !== activeTagFilter.excludeTagIds.length
@@ -1068,7 +1086,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     ) {
       setActiveTagFilter(validFilter);
     }
-  }, [activeTagFilter, setActiveTagFilter, tagsQuery.data?.tags]);
+  }, [activeTagFilter, sameColorSingleFilter, setActiveTagFilter, tagsQuery.data?.tags]);
 
   const modelsQuery = useQuery({
     queryKey: activeProjectId ? modelLibraryKeys.models(activeProjectId, activeTagFilter, activeGender) : ["models", "empty"],
@@ -1206,11 +1224,12 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   });
 
   const updateTagMutation = useMutation({
-    mutationFn: ({ tagId, name, sort_order }: { tagId: string; name?: string; sort_order?: number }) => {
+    mutationFn: ({ tagId, name, sort_order, color }: { tagId: string; name?: string; sort_order?: number; color?: LibraryTagColor }) => {
       if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
       return updateModelTag(activeProjectId, tagId, {
         ...(name !== undefined ? { name } : {}),
         ...(sort_order !== undefined ? { sort_order } : {}),
+        ...(color !== undefined ? { color } : {}),
       });
     },
     onSuccess: async () => {
@@ -1337,6 +1356,19 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     updateTagMutation.mutate({ tagId, name: next });
   }
 
+  function handleChangeTagColor(tagId: string, color: LibraryTagColor) {
+    const queryKey = activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot;
+    const previous = queryClient.getQueryData<{ tags: ModelTag[] }>(queryKey);
+    queryClient.setQueryData<{ tags: ModelTag[] }>(queryKey, (current) => current ? {
+      tags: current.tags.map((tag) => tag.id === tagId ? { ...tag, color: normalizeLibraryTagColor(color) } : tag),
+    } : current);
+    updateTagMutation.mutate({ tagId, color }, {
+      onError: () => {
+        if (previous) queryClient.setQueryData(queryKey, previous);
+      },
+    });
+  }
+
   function handleReorderTags(nextTags: ModelTag[]) {
     nextTags.forEach((tag, index) => {
       const nextSortOrder = index + 1;
@@ -1347,12 +1379,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   }
 
   function handleToggleTagFilter(tagId: string) {
-    setActiveTagFilter(createLibraryTagFilter(
-      activeTagFilter.includeTagIds.includes(tagId)
-        ? activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId)
-        : [...activeTagFilter.includeTagIds, tagId],
-      activeTagFilter.excludeTagIds.filter((activeTagId) => activeTagId !== tagId),
-    ));
+    setActiveTagFilter(toggleLibraryTagFilterInclude(activeTagFilter, tagId, tags, sameColorSingleFilter));
   }
 
   function handleExcludeTagFilter(tagId: string) {
@@ -1439,8 +1466,8 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   ]);
 
   return (
-    <section className="model-library-page" aria-label={t("modelLibrary:title")}>
-      <div className="model-library">
+    <section className="library-page" aria-label={t("modelLibrary:title")}>
+      <div className="library-layout">
         <LibraryProjectSidebar<ModelProject>
           projects={projects}
           activeProjectId={activeProjectId}
@@ -1465,8 +1492,8 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
           closeMenuToken={closeMenuToken}
         />
 
-        <main className="model-content-pane">
-          <div className="model-content-head">
+        <main className="library-content-pane">
+          <div className="library-content-head">
             <ModelToolbar
               tags={tags}
               tagFilter={activeTagFilter}
@@ -1483,10 +1510,10 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
             />
           </div>
 
-          <div className="model-lib-body scrollbar-thin-stable">
-            {errorMessage ? <div className="model-lib-error">{t("modelLibrary:requestFailed", { message: errorMessage })}</div> : null}
-            {projectsQuery.isLoading ? <div className="model-lib-empty">{t("common:states.loadingProjects")}</div> : null}
-            {!projectsQuery.isLoading && !projects.length ? <div className="model-lib-empty">{t("common:empty.noProjects")}</div> : null}
+          <div className="library-body scrollbar-thin-stable">
+            {errorMessage ? <div className="library-error">{t("modelLibrary:requestFailed", { message: errorMessage })}</div> : null}
+            {projectsQuery.isLoading ? <div className="library-empty">{t("common:states.loadingProjects")}</div> : null}
+            {!projectsQuery.isLoading && !projects.length ? <div className="library-empty">{t("common:empty.noProjects")}</div> : null}
             {activeProject ? (
               <>
                 <ModelGrid
@@ -1540,8 +1567,11 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
         onClose={() => setTagManagerOpen(false)}
         onCreateTag={handleCreateTag}
         onRenameTag={handleRenameTag}
+        onChangeTagColor={handleChangeTagColor}
         onDeleteTag={handleDeleteTag}
         onReorderTags={handleReorderTags}
+        sameColorSingleFilter={sameColorSingleFilter}
+        onSameColorSingleFilterChange={setSameColorSingleFilter}
       />
       <LibraryImageActionToast toast={imageActionToast} />
       {activeProject ? (
