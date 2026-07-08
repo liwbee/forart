@@ -299,6 +299,8 @@ function createActionFolderImportStore() {
       const previewId = crypto.randomUUID().replace(/-/g, '');
       const imageByStem = new Map();
       const textByStem = new Map();
+      const rowFiles = new Map();
+      activePreview = { id: previewId, sourceRoot, rowFiles };
       const ignoredAttributeNames = collectWindowsHiddenOrSystemNames(sourceRoot);
       const dirEntries = await fs.promises.readdir(sourceRoot, { withFileTypes: true });
       const entries = dirEntries
@@ -348,7 +350,6 @@ function createActionFolderImportStore() {
       const stems = Array.from(new Set([...imageByStem.keys(), ...textByStem.keys()])).sort(compareByName);
       const duplicateInBatch = new Set();
       const seenNames = new Set();
-      const rowFiles = new Map();
       const rows = [];
       let pendingRows = [];
 
@@ -391,7 +392,6 @@ function createActionFolderImportStore() {
         ...createSummary(projectId, sourceRoot, imageByStem, textByStem, rows),
         preview_id: previewId,
       };
-      activePreview = { id: previewId, sourceRoot, rowFiles };
       emitScan(sender, 'action-import:scan-complete', { scanId, preview });
     } catch (error) {
       if (!scanIsCanceled(scanId)) {

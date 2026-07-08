@@ -1,4 +1,5 @@
 import { PointerEvent, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type WheelEvent as ReactWheelEvent } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleHelp, Flag, FolderOpen, ImageOff, RefreshCw, Save, Search, X } from "lucide-react";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
@@ -40,69 +41,6 @@ type ThumbScrollMomentum = {
 };
 
 type VirtualAxis = "vertical" | "horizontal";
-
-function useVirtualWindow(
-  containerRef: MutableRefObject<HTMLDivElement | null>,
-  itemCount: number,
-  itemSize: number,
-  axis: VirtualAxis,
-  buffer = 4,
-) {
-  const [scrollOffset, setScrollOffset] = useState(0);
-  const [viewportSize, setViewportSize] = useState(0);
-
-  useEffect(() => {
-    const node = containerRef.current;
-    if (!node) return;
-
-    function measure() {
-      if (!containerRef.current) return;
-      setViewportSize(axis === "vertical" ? containerRef.current.clientHeight : containerRef.current.clientWidth);
-      setScrollOffset(axis === "vertical" ? containerRef.current.scrollTop : containerRef.current.scrollLeft);
-    }
-
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [axis, containerRef]);
-
-  const visibleRange = useMemo(() => {
-    if (!itemCount || !itemSize || !viewportSize) return { start: 0, end: Math.min(itemCount, buffer * 2 + 1) };
-    const firstVisible = Math.floor(scrollOffset / itemSize);
-    const visibleCount = Math.ceil(viewportSize / itemSize);
-    const start = Math.max(0, firstVisible - buffer);
-    const end = Math.min(itemCount, firstVisible + visibleCount + buffer);
-    return { start, end };
-  }, [buffer, itemCount, itemSize, scrollOffset, viewportSize]);
-
-  const onScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
-    setScrollOffset(axis === "vertical" ? event.currentTarget.scrollTop : event.currentTarget.scrollLeft);
-  }, [axis]);
-
-  return {
-    ...visibleRange,
-    onScroll,
-    totalSize: itemCount * itemSize,
-  };
-}
-
-function scrollVirtualItemIntoView(container: HTMLDivElement | null, index: number, itemSize: number, axis: VirtualAxis) {
-  if (!container || index < 0) return;
-  const start = index * itemSize;
-  const end = start + itemSize;
-  const viewportStart = axis === "vertical" ? container.scrollTop : container.scrollLeft;
-  const viewportSize = axis === "vertical" ? container.clientHeight : container.clientWidth;
-  const viewportEnd = viewportStart + viewportSize;
-  let nextOffset = viewportStart;
-
-  if (start < viewportStart) nextOffset = start;
-  else if (end > viewportEnd) nextOffset = Math.max(0, end - viewportSize);
-  else return;
-
-  if (axis === "vertical") container.scrollTop = nextOffset;
-  else container.scrollLeft = nextOffset;
-}
 
 type ProductImagePaneHandle = {
   goImages: (direction: -1 | 1) => void;
@@ -249,8 +187,15 @@ const ProductList = memo(function ProductList({
     ? products.filter((product) => product.id.toLocaleLowerCase().includes(normalizedQuery))
     : products;
   const itemSize = virtualAxis === "vertical" ? PRODUCT_ROW_HEIGHT : PRODUCT_COLUMN_WIDTH;
-  const virtual = useVirtualWindow(listRef, filteredProducts.length, itemSize, virtualAxis, 5);
-  const visibleProducts = filteredProducts.slice(virtual.start, virtual.end);
+  const virtualizer = useVirtualizer({
+    count: filteredProducts.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => itemSize,
+    horizontal: virtualAxis === "horizontal",
+    overscan: 5,
+    getItemKey: (index) => filteredProducts[index]?.id || index,
+  });
+  const virtualItems = virtualizer.getVirtualItems();
 
   useEffect(() => {
     const list = listRef.current;
@@ -270,8 +215,8 @@ const ProductList = memo(function ProductList({
 
   useEffect(() => {
     const index = filteredProducts.findIndex((product) => product.id === activeProductId);
-    scrollVirtualItemIntoView(listRef.current, index, itemSize, virtualAxis);
-  }, [activeProductId, filteredProducts, itemSize, virtualAxis]);
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: "auto" });
+  }, [activeProductId, filteredProducts, itemSize, virtualAxis, virtualizer]);
 
   return (
     <aside className="review-product-list" aria-label={t("imageReview:productList")}>
@@ -290,24 +235,26 @@ const ProductList = memo(function ProductList({
         <span>{filteredProducts.length} / {products.length}</span>
       </div>
 
-      <div className={`review-product-items scrollbar-thin-stable${filteredProducts.length ? "" : " is-empty"}`} ref={listRef} onScroll={virtual.onScroll}>
+      <div className={`review-product-items scrollbar-thin-stable${filteredProducts.length ? "" : " is-empty"}`} ref={listRef}>
         {filteredProducts.length ? (
           <div
             className="review-product-items__spacer"
-            style={virtualAxis === "vertical" ? { height: virtual.totalSize } : { width: virtual.totalSize }}
+            style={virtualAxis === "vertical" ? { height: virtualizer.getTotalSize() } : { width: virtualizer.getTotalSize() }}
           >
             <div
               className="review-product-items__virtual"
               style={virtualAxis === "vertical"
-                ? { transform: `translateY(${virtual.start * itemSize}px)` }
-                : { transform: `translateX(${virtual.start * itemSize}px)` }}
+                ? { transform: `translateY(${virtualItems[0]?.start || 0}px)` }
+                : { transform: `translateX(${virtualItems[0]?.start || 0}px)` }}
             >
-          {visibleProducts.map((product) => {
+          {virtualItems.map((virtualItem) => {
+            const product = filteredProducts[virtualItem.index];
+            if (!product) return null;
             const isActive = product.id === activeProductId;
             const missingModel = !product.hasModelImages;
             return (
               <button
-                key={product.id}
+                key={virtualItem.key}
                 className={isActive ? "active" : ""}
                 type="button"
                 aria-current={isActive ? "true" : undefined}
@@ -333,7 +280,6 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
   images,
   activeIndex,
   thumbStripRef,
-  activeThumbRef,
   onSelectImage,
   onScrollStrip,
   onWheel,
@@ -342,18 +288,24 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
   images: ReviewImage[];
   activeIndex: number;
   thumbStripRef: MutableRefObject<HTMLDivElement | null>;
-  activeThumbRef: MutableRefObject<HTMLButtonElement | null>;
   onSelectImage: (index: number) => void;
   onScrollStrip: (direction: -1 | 1) => void;
   onWheel: (event: ReactWheelEvent<HTMLDivElement>) => void;
 }) {
   const { t } = useTranslation();
-  const virtual = useVirtualWindow(thumbStripRef, images.length, THUMB_ITEM_WIDTH, "horizontal", 8);
-  const visibleImages = images.slice(virtual.start, virtual.end);
+  const virtualizer = useVirtualizer({
+    count: images.length,
+    getScrollElement: () => thumbStripRef.current,
+    estimateSize: () => THUMB_ITEM_WIDTH,
+    horizontal: true,
+    overscan: 8,
+    getItemKey: (index) => images[index]?.id || index,
+  });
+  const virtualItems = virtualizer.getVirtualItems();
 
   useEffect(() => {
-    scrollVirtualItemIntoView(thumbStripRef.current, activeIndex, THUMB_ITEM_WIDTH, "horizontal");
-  }, [activeIndex, thumbStripRef]);
+    if (activeIndex >= 0) virtualizer.scrollToIndex(activeIndex, { align: "auto" });
+  }, [activeIndex, virtualizer]);
 
   return (
     <div className="review-thumb-nav">
@@ -370,17 +322,17 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
         className="review-thumb-strip scrollbar-thin"
         ref={(node) => { thumbStripRef.current = node; }}
         aria-label={t("imageReview:thumbsLabel", { title })}
-        onScroll={virtual.onScroll}
         onWheel={onWheel}
       >
-        <div className="review-thumb-strip__spacer" style={{ width: virtual.totalSize }}>
-          <div className="review-thumb-strip__virtual" style={{ transform: `translateX(${virtual.start * THUMB_ITEM_WIDTH}px)` }}>
-        {visibleImages.map((item, offset) => {
-          const index = virtual.start + offset;
+        <div className="review-thumb-strip__spacer" style={{ width: virtualizer.getTotalSize() }}>
+          <div className="review-thumb-strip__virtual" style={{ transform: `translateX(${virtualItems[0]?.start || 0}px)` }}>
+        {virtualItems.map((virtualItem) => {
+          const index = virtualItem.index;
+          const item = images[index];
+          if (!item) return null;
           return (
             <button
-              key={item.id}
-              ref={index === activeIndex ? (node) => { activeThumbRef.current = node; } : undefined}
+              key={virtualItem.key}
               className={index === activeIndex ? "active" : ""}
               type="button"
               aria-label={t("imageReview:viewImage", { name: item.name })}
@@ -444,7 +396,6 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const checkPanelRef = useRef<HTMLDivElement | null>(null);
   const thumbStripRef = useRef<HTMLDivElement | null>(null);
-  const activeThumbRef = useRef<HTMLButtonElement | null>(null);
   const thumbMomentumRef = useRef<ThumbScrollMomentum>({ frame: 0, lastTime: 0, velocity: 0 });
   const isZoomed = transform.scale > 1.01;
 
@@ -484,10 +435,6 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
     setIssueError("");
     setIssueSaving(false);
   }, [image?.id]);
-
-  useEffect(() => {
-    activeThumbRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
-  }, [activeIndex, images]);
 
   useEffect(() => {
     if (!issueEditorOpen) return;
@@ -771,7 +718,6 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
         images={images}
         activeIndex={activeIndex}
         thumbStripRef={thumbStripRef}
-        activeThumbRef={activeThumbRef}
         onSelectImage={selectImage}
         onScrollStrip={scrollThumbStrip}
         onWheel={handleThumbWheel}

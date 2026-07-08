@@ -1,12 +1,24 @@
-import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 
 export const LIBRARY_DATABASE_FILENAME = "forart-library.sqlite";
 export const LIBRARY_TAG_COLORS = ["default", "red", "yellow", "brown", "blue", "green", "purple"];
 
 const LIBRARY_TAG_COLOR_SET = new Set(LIBRARY_TAG_COLORS);
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const APP_ROOT_DIR = path.resolve(MODULE_DIR, "..", "..", "..");
+
+function loadDatabaseConstructor() {
+  if (process.versions?.electron) {
+    return createRequire(path.join(APP_ROOT_DIR, "package.json"))("better-sqlite3");
+  }
+  return createRequire(import.meta.url)("better-sqlite3");
+}
+
+const Database = loadDatabaseConstructor();
 
 const RESERVED_FILE_NAMES = new Set([
   "CON",
@@ -305,7 +317,7 @@ export function createLibraryRuntime({
   const resolvedDatabaseDir = path.resolve(databaseDir || path.join(resolvedDataDir, ".forart", "database"));
   ensureDir(resolvedDatabaseDir);
   const databasePath = path.join(resolvedDatabaseDir, databaseFilename);
-  const db = new DatabaseSync(databasePath);
+  const db = new Database(databasePath);
   initDatabase(db, labels);
 
   return {

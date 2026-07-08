@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
@@ -259,7 +259,7 @@ function guessSuffix(filename, mimeType) {
 }
 
 function initDatabase() {
-  db = new DatabaseSync(DATABASE_PATH);
+  db = new Database(DATABASE_PATH);
   db.exec(`
   PRAGMA journal_mode = WAL;
   PRAGMA busy_timeout = 5000;

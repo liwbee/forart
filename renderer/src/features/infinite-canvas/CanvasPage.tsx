@@ -1483,10 +1483,10 @@ export function CanvasPage({ imageDownloadPath = "" }: CanvasPageProps) {
     const nextNodes = sourceNodes.map((node) => {
       const nextId = uid(node.type);
       idMap.set(node.id, nextId);
+      const clonedNode = cloneCanvasNodeForNewTarget(node, nextId);
       return {
-        ...node,
-        id: nextId,
-        title: node.title,
+        ...clonedNode,
+        title: clonedNode.title,
       };
     });
     const nextConnections = connections.flatMap((connection) => {

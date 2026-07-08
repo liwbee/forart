@@ -2,6 +2,7 @@ import { MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, FolderOpen, Loader2, RefreshCw, Tags, XCircle } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import { LibrarySearchInput } from "../library-layout/LibrarySearchInput";
@@ -99,7 +100,6 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   const [bulkTagMenuState, setBulkTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
   const [rowTagMenuState, setRowTagMenuState] = useState<{ rowId: string; x: number; y: number }>({ rowId: "", x: 0, y: 0 });
   const [scanProgress, setScanProgress] = useState({ processedFiles: 0, totalFiles: 0, builtRows: 0, totalRows: 0 });
-  const [rowViewport, setRowViewport] = useState({ scrollTop: 0, height: 420 });
 
   useEffect(() => {
     if (!isOpen) {
@@ -356,15 +356,14 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   const importStarted = stage === "importing" || stage === "complete";
   const errorMessage = scanError || importMutation.error;
   const errorText = errorMessage instanceof Error ? errorMessage.message : errorMessage ? String(errorMessage) : "";
-  const virtualRows = useMemo(() => {
-    const startIndex = Math.max(0, Math.floor(rowViewport.scrollTop / VIRTUAL_ROW_HEIGHT) - VIRTUAL_OVERSCAN);
-    const visibleCount = Math.ceil(rowViewport.height / VIRTUAL_ROW_HEIGHT) + VIRTUAL_OVERSCAN * 2;
-    return filteredDisplayRows.slice(startIndex, startIndex + visibleCount).map((row, offset) => ({
-      row,
-      index: startIndex + offset,
-    }));
-  }, [filteredDisplayRows, rowViewport]);
-  const virtualHeight = filteredDisplayRows.length * VIRTUAL_ROW_HEIGHT;
+  const rowVirtualizer = useVirtualizer({
+    count: filteredDisplayRows.length,
+    getScrollElement: () => rowsViewportRef.current,
+    estimateSize: () => VIRTUAL_ROW_HEIGHT,
+    overscan: VIRTUAL_OVERSCAN,
+    getItemKey: (index) => filteredDisplayRows[index]?.id || index,
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
 
   useEffect(() => {
     if (importStarted) return;
@@ -373,15 +372,6 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
       return new Set(filteredValidRowIds);
     });
   }, [filteredValidRowSignature, importStarted]);
-
-  useEffect(() => {
-    if (!isOpen) return undefined;
-    const frame = window.requestAnimationFrame(() => {
-      const element = rowsViewportRef.current;
-      if (element) setRowViewport({ scrollTop: element.scrollTop, height: element.clientHeight || 420 });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [filteredDisplayRows.length, isOpen]);
 
   const resultTotals = useMemo(() => {
     const resultRows = result?.rows || [];
@@ -435,6 +425,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
     setRowTagMenuState({ rowId: "", x: 0, y: 0 });
     setScanProgress({ processedFiles: 0, totalFiles: 0, builtRows: 0, totalRows: 0 });
     if (rowsViewportRef.current) rowsViewportRef.current.scrollTop = 0;
+    rowVirtualizer.scrollToOffset(0);
     const started = await window.forartActionImport.startScan({
       projectId,
       scanId,
@@ -618,8 +609,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
                 onChange={(nextSearchQuery) => {
                   setRowSearchQuery(nextSearchQuery);
                   setSelectedRows(filteredValidRowIdSet(displayRows, nextSearchQuery.trim().toLocaleLowerCase()));
-                  if (rowsViewportRef.current) rowsViewportRef.current.scrollTop = 0;
-                  setRowViewport((current) => ({ ...current, scrollTop: 0 }));
+                  rowVirtualizer.scrollToOffset(0);
                 }}
               />
               <div className="action-folder-import__selection-actions">
@@ -719,13 +709,11 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
               className="action-folder-import__rows scrollbar-thin-stable"
               role="list"
               aria-label={t("actionLibrary:bulkImportRows")}
-              onScroll={(event) => {
-                const target = event.currentTarget;
-                setRowViewport({ scrollTop: target.scrollTop, height: target.clientHeight });
-              }}
             >
-              <div className="action-folder-import__virtual" style={{ height: virtualHeight || undefined }}>
-              {virtualRows.map(({ row, index }) => {
+              <div className="action-folder-import__virtual" style={{ height: rowVirtualizer.getTotalSize() || undefined }}>
+              {virtualRows.map((virtualRow) => {
+                const row = filteredDisplayRows[virtualRow.index];
+                if (!row) return null;
                 const checked = selectedRows.has(row.id);
                 const liveRow = rowImportStates.get(row.id);
                 const displayRow = liveRow || row;
@@ -733,7 +721,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
                 const message = issueText(displayRow);
                 const selectedTagNames = rowTagSelections.get(row.id) || new Set<string>();
                 return (
-                  <div key={row.id} className={`action-folder-import-row ${liveStatus ? liveStatusClass(liveStatus) : statusClass(row)}${checked ? " is-selected" : ""}`} role="listitem" style={{ transform: `translateY(${index * VIRTUAL_ROW_HEIGHT}px)` }}>
+                  <div key={virtualRow.key} className={`action-folder-import-row ${liveStatus ? liveStatusClass(liveStatus) : statusClass(row)}${checked ? " is-selected" : ""}`} role="listitem" style={{ transform: `translateY(${virtualRow.start}px)` }}>
                     {importStarted ? (
                       <div className="action-folder-import-row__check action-folder-import-row__result-icon" aria-hidden="true">
                         {liveStatus === "importing" ? <Loader2 size={18} /> : liveStatus === "failed" ? <XCircle size={18} /> : liveStatus === "not_selected" ? <span /> : <CheckCircle2 size={18} />}

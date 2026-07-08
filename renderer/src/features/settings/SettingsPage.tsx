@@ -1,5 +1,6 @@
 import { ChevronDown, Download, FolderOpen, GripVertical, HardDrive, KeyRound, LogIn, LogOut, Plus, RefreshCw, Settings, TestTube2, Trash2 } from "lucide-react";
-import { PointerEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { PointerEvent, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import { ForartAppConfig, ForartMode, normalizeConfig, type CanvasCacheAsset, type CanvasCacheDeleteResult, type CanvasCacheScanResult, type LibtvAccountRecord } from "../../app/appConfig";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
@@ -40,6 +41,66 @@ interface LibtvAccountSummary {
   accountName: string;
   memberName: string;
   updatedAt: string;
+}
+
+interface SettingsVirtualListProps<TItem> {
+  items: TItem[];
+  className: string;
+  estimateSize: number;
+  empty: ReactNode;
+  getItemKey: (item: TItem, index: number) => string | number;
+  renderItem: (item: TItem, index: number) => ReactNode;
+  overscan?: number;
+  measureItems?: boolean;
+}
+
+function SettingsVirtualList<TItem>({
+  items,
+  className,
+  estimateSize,
+  empty,
+  getItemKey,
+  renderItem,
+  overscan = 6,
+  measureItems = false,
+}: SettingsVirtualListProps<TItem>) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => estimateSize,
+    overscan,
+    getItemKey: (index) => {
+      const item = items[index];
+      return item ? getItemKey(item, index) : index;
+    },
+    measureElement: measureItems ? (element) => element.getBoundingClientRect().height : undefined,
+  });
+  const virtualItems = virtualizer.getVirtualItems();
+
+  return (
+    <div ref={scrollRef} className={`${className} settings-virtual-list`}>
+      {items.length ? (
+        <div className="settings-virtual-list__spacer" style={{ height: virtualizer.getTotalSize() }}>
+          {virtualItems.map((virtualItem) => {
+            const item = items[virtualItem.index];
+            if (!item) return null;
+            return (
+              <div
+                key={virtualItem.key}
+                ref={measureItems ? virtualizer.measureElement : undefined}
+                data-index={virtualItem.index}
+                className="settings-virtual-list__item"
+                style={{ transform: `translateY(${virtualItem.start}px)` }}
+              >
+                {renderItem(item, virtualItem.index)}
+              </div>
+            );
+          })}
+        </div>
+      ) : empty}
+    </div>
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -927,6 +988,31 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     return !filter || model.id.toLowerCase().includes(filter);
   });
 
+  function renderFetchedModelRow(model: FetchedModelEntry) {
+    return (
+      <div className={`settings-api-picker-row${model.selected ? " selected" : ""}`}>
+        <label>
+          <input type="checkbox" checked={model.selected} onChange={() => toggleFetchedModel(model.id)} />
+          <span title={model.id}>{model.id}</span>
+        </label>
+        <Select
+          value={model.kind}
+          className="settings-select"
+          menuClassName="settings-select-menu"
+          options={[
+            { value: "image", label: t("settings:imageModels") },
+            { value: "chat", label: t("settings:chatModels") },
+            { value: "video", label: t("settings:videoModels") },
+          ]}
+          onChange={(kind) => patchFetchedModelKind(model.id, kind as ApiModelKind)}
+          ariaLabel={t("settings:selectModels")}
+          portal
+          menuPlacement="bottom"
+        />
+      </div>
+    );
+  }
+
   function deleteSelectedProvider() {
     if (!selectedProvider) return;
     setApiProviders((current) => {
@@ -1029,6 +1115,48 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     const key = kind === "image" ? "imageModels" : kind === "chat" ? "chatModels" : "videoModels";
     const title = kind === "image" ? t("settings:imageModels") : kind === "chat" ? t("settings:chatModels") : t("settings:videoModels");
     const models = selectedProvider[key];
+    const renderModelRow = (model: string, index: number) => {
+      const alias = selectedProvider.modelAliases[kind]?.[model];
+      const displayName = alias ?? model;
+      const imageRuleId = kind === "image" && model ? normalizeImageModelRuleId(selectedProvider.modelRules.image[model] || detectImageModelRuleId(model)) : "generic-image";
+      return (
+        <div className="settings-api-model-row">
+          {model ? (
+            <label className="settings-api-model-alias">
+              <input
+                value={displayName}
+                onChange={(event) => updateModelAlias(kind, model, event.target.value)}
+                onBlur={() => clearEmptyModelAlias(kind, model)}
+                placeholder={model}
+                title={model}
+              />
+              <small title={model}>{model}</small>
+            </label>
+          ) : (
+            <label className="settings-api-model-alias">
+              <input value={model} onChange={(event) => updateModel(kind, index, event.target.value)} placeholder={t("settings:modelNamePlaceholder")} />
+            </label>
+          )}
+          {kind === "image" && model ? (
+            <label className="settings-api-model-rule">
+              <Select
+                value={imageRuleId}
+                className="settings-select"
+                menuClassName="settings-select-menu"
+                options={IMAGE_MODEL_RULES.map((rule) => ({ value: rule.id, label: rule.label }))}
+                onChange={(nextRuleId) => updateImageModelRule(model, nextRuleId)}
+                ariaLabel="Rule"
+                portal
+                menuPlacement="bottom"
+              />
+            </label>
+          ) : null}
+          <button type="button" aria-label={t("settings:deleteModel")} title={t("settings:deleteModel")} onClick={() => deleteModel(kind, index)}>
+            <Trash2 size={15} aria-hidden="true" />
+          </button>
+        </div>
+      );
+    };
     return (
       <section className="settings-api-model-card">
         <div className="settings-api-model-head">
@@ -1041,49 +1169,15 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
           </button>
         </div>
         <div className="settings-api-model-list-wrap">
-          <div className="settings-api-model-list scrollbar-thin-stable" data-kind={kind}>
-            {models.length ? models.map((model, index) => {
-              const alias = selectedProvider.modelAliases[kind]?.[model];
-              const displayName = alias ?? model;
-              const imageRuleId = kind === "image" && model ? normalizeImageModelRuleId(selectedProvider.modelRules.image[model] || detectImageModelRuleId(model)) : "generic-image";
-              return (
-              <div className="settings-api-model-row" key={`${kind}-${index}`}>
-                {model ? (
-                  <label className="settings-api-model-alias">
-                    <input
-                      value={displayName}
-                      onChange={(event) => updateModelAlias(kind, model, event.target.value)}
-                      onBlur={() => clearEmptyModelAlias(kind, model)}
-                      placeholder={model}
-                      title={model}
-                    />
-                    <small title={model}>{model}</small>
-                  </label>
-                ) : (
-                  <label className="settings-api-model-alias">
-                    <input value={model} onChange={(event) => updateModel(kind, index, event.target.value)} placeholder={t("settings:modelNamePlaceholder")} />
-                  </label>
-                )}
-                {kind === "image" && model ? (
-                  <label className="settings-api-model-rule">
-                    <Select
-                      value={imageRuleId}
-                      className="settings-select"
-                      menuClassName="settings-select-menu"
-                      options={IMAGE_MODEL_RULES.map((rule) => ({ value: rule.id, label: rule.label }))}
-                      onChange={(nextRuleId) => updateImageModelRule(model, nextRuleId)}
-                      ariaLabel="Rule"
-                      portal
-                      menuPlacement="bottom"
-                    />
-                  </label>
-                ) : null}
-                <button type="button" aria-label={t("settings:deleteModel")} title={t("settings:deleteModel")} onClick={() => deleteModel(kind, index)}>
-                  <Trash2 size={15} aria-hidden="true" />
-                </button>
-              </div>
-            );}) : <div className="settings-api-empty-row">{t("settings:noModels")}</div>}
-          </div>
+          <SettingsVirtualList
+            items={models}
+            className="settings-api-model-list scrollbar-thin-stable"
+            estimateSize={58}
+            overscan={5}
+            getItemKey={(model, index) => `${kind}-${model || "draft"}-${index}`}
+            renderItem={renderModelRow}
+            empty={<div className="settings-api-empty-row">{t("settings:noModels")}</div>}
+          />
         </div>
       </section>
     );
@@ -1116,6 +1210,42 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
     const oldCleanableAssets = cleanableAssets.filter((asset) => asset.modifiedAt < Date.now() - 14 * 24 * 60 * 60 * 1000);
     const allVisibleCleanableSelected = filteredCacheAssets.some((asset) => asset.exists && !asset.referenced)
       && filteredCacheAssets.filter((asset) => asset.exists && !asset.referenced).every((asset) => selectedCacheAssetIds.has(asset.id));
+    const renderCacheAssetRow = (asset: CanvasCacheAsset) => {
+      const canDelete = asset.exists && !asset.referenced;
+      return (
+        <article className={`settings-cache-row${!asset.exists ? " settings-cache-row--missing" : ""}`}>
+          <label className="settings-cache-row-select" aria-label={t("settings:cacheSelectAsset")}>
+            <input type="checkbox" checked={selectedCacheAssetIds.has(asset.id)} disabled={!canDelete} onChange={() => toggleCacheAssetSelection(asset)} />
+          </label>
+          <div className="settings-cache-thumb">
+            {asset.exists ? <img src={asset.url} alt={asset.fileName} loading="lazy" decoding="async" /> : <HardDrive size={20} aria-hidden="true" />}
+          </div>
+          <div className="settings-cache-info">
+            <div className="settings-cache-title-line">
+              <strong title={asset.fileName}>{asset.fileName}</strong>
+              <span className={`settings-cache-pill settings-cache-pill--${asset.exists ? asset.referenced ? "referenced" : "cleanable" : "missing"}`}>{cacheStatusLabel(asset)}</span>
+              <span className="settings-cache-pill">{cacheKindLabel(asset.kind)}</span>
+            </div>
+            <div className="settings-cache-meta">
+              <span>{formatBytes(asset.sizeBytes)}</span>
+              <span>{formatCacheTime(asset.modifiedAt)}</span>
+              <span>{t("settings:cacheReferenceCount", { count: asset.references.length })}</span>
+            </div>
+            <div className="settings-cache-reference-line" title={asset.references.map((reference) => `${reference.canvasTitle || reference.canvasId}${reference.nodeTitle ? ` / ${reference.nodeTitle}` : ""}`).join("\n")}>
+              {asset.references.length ? asset.references.slice(0, 3).map((reference) => reference.canvasTitle || reference.canvasId || "-").join(" / ") : t("settings:cacheNoReferences")}
+            </div>
+          </div>
+          <div className="settings-cache-row-actions">
+            <button type="button" className="settings-api-small-button" disabled={!asset.filePath} onClick={() => revealCanvasCacheAsset(asset)}>
+              {t("settings:cacheShowInFolder")}
+            </button>
+            <button type="button" className="settings-api-small-button settings-api-action-button--danger" disabled={!canDelete || cacheAction !== ""} title={canDelete ? t("common:actions.delete") : t("settings:cacheReferencedCannotDelete")} onClick={() => deleteCacheAssets([asset], "delete")}>
+              {t("common:actions.delete")}
+            </button>
+          </div>
+        </article>
+      );
+    };
 
     return (
       <div className="settings-cache-layout" role="tabpanel" aria-label={t("settings:cacheCleanup")}>
@@ -1203,49 +1333,21 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
             <span>{cacheScan?.rootPath || ""}</span>
           </div>
 
-          <div className="settings-cache-list">
-            {filteredCacheAssets.length ? filteredCacheAssets.map((asset) => {
-              const canDelete = asset.exists && !asset.referenced;
-              return (
-                <article key={asset.id} className={`settings-cache-row${!asset.exists ? " settings-cache-row--missing" : ""}`}>
-                  <label className="settings-cache-row-select" aria-label={t("settings:cacheSelectAsset")}>
-                    <input type="checkbox" checked={selectedCacheAssetIds.has(asset.id)} disabled={!canDelete} onChange={() => toggleCacheAssetSelection(asset)} />
-                  </label>
-                  <div className="settings-cache-thumb">
-                    {asset.exists ? <img src={asset.url} alt={asset.fileName} loading="lazy" decoding="async" /> : <HardDrive size={20} aria-hidden="true" />}
-                  </div>
-                  <div className="settings-cache-info">
-                    <div className="settings-cache-title-line">
-                      <strong title={asset.fileName}>{asset.fileName}</strong>
-                      <span className={`settings-cache-pill settings-cache-pill--${asset.exists ? asset.referenced ? "referenced" : "cleanable" : "missing"}`}>{cacheStatusLabel(asset)}</span>
-                      <span className="settings-cache-pill">{cacheKindLabel(asset.kind)}</span>
-                    </div>
-                    <div className="settings-cache-meta">
-                      <span>{formatBytes(asset.sizeBytes)}</span>
-                      <span>{formatCacheTime(asset.modifiedAt)}</span>
-                      <span>{t("settings:cacheReferenceCount", { count: asset.references.length })}</span>
-                    </div>
-                    <div className="settings-cache-reference-line" title={asset.references.map((reference) => `${reference.canvasTitle || reference.canvasId}${reference.nodeTitle ? ` / ${reference.nodeTitle}` : ""}`).join("\n")}>
-                      {asset.references.length ? asset.references.slice(0, 3).map((reference) => reference.canvasTitle || reference.canvasId || "-").join(" / ") : t("settings:cacheNoReferences")}
-                    </div>
-                  </div>
-                  <div className="settings-cache-row-actions">
-                    <button type="button" className="settings-api-small-button" disabled={!asset.filePath} onClick={() => revealCanvasCacheAsset(asset)}>
-                      {t("settings:cacheShowInFolder")}
-                    </button>
-                    <button type="button" className="settings-api-small-button settings-api-action-button--danger" disabled={!canDelete || cacheAction !== ""} title={canDelete ? t("common:actions.delete") : t("settings:cacheReferencedCannotDelete")} onClick={() => deleteCacheAssets([asset], "delete")}>
-                      {t("common:actions.delete")}
-                    </button>
-                  </div>
-                </article>
-              );
-            }) : (
+          <SettingsVirtualList
+            items={filteredCacheAssets}
+            className="settings-cache-list"
+            estimateSize={106}
+            overscan={6}
+            measureItems
+            getItemKey={(asset) => asset.id}
+            renderItem={renderCacheAssetRow}
+            empty={(
               <div className="settings-empty-state">
                 <HardDrive size={22} aria-hidden="true" />
                 <p>{cacheAction === "scan" ? t("settings:cacheScanning") : t("settings:cacheNoAssets")}</p>
               </div>
             )}
-          </div>
+          />
 
           {selectedCacheAssetIds.size ? (
             <div className="settings-cache-selection-bar">
@@ -1702,30 +1804,15 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                 </div>
               </div>
 
-              <div className="settings-api-picker-list">
-                {filteredFetchedModels.length ? filteredFetchedModels.map((model) => (
-                  <div className={`settings-api-picker-row${model.selected ? " selected" : ""}`} key={model.id}>
-                    <label>
-                      <input type="checkbox" checked={model.selected} onChange={() => toggleFetchedModel(model.id)} />
-                      <span title={model.id}>{model.id}</span>
-                    </label>
-                    <Select
-                      value={model.kind}
-                      className="settings-select"
-                      menuClassName="settings-select-menu"
-                      options={[
-                        { value: "image", label: t("settings:imageModels") },
-                        { value: "chat", label: t("settings:chatModels") },
-                        { value: "video", label: t("settings:videoModels") },
-                      ]}
-                      onChange={(kind) => patchFetchedModelKind(model.id, kind as ApiModelKind)}
-                      ariaLabel={t("settings:selectModels")}
-                      portal
-                      menuPlacement="bottom"
-                    />
-                  </div>
-                )) : <div className="settings-api-picker-empty">{t("settings:noMatchingModels")}</div>}
-              </div>
+              <SettingsVirtualList
+                items={filteredFetchedModels}
+                className="settings-api-picker-list"
+                estimateSize={58}
+                overscan={8}
+                getItemKey={(model) => model.id}
+                renderItem={renderFetchedModelRow}
+                empty={<div className="settings-api-picker-empty">{t("settings:noMatchingModels")}</div>}
+              />
 
               <footer className="settings-api-model-picker-foot">
                 <div className="settings-api-picker-summary">

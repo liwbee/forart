@@ -13,6 +13,7 @@ import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalIm
 import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
 import { LibraryImageDropZone } from "../resource-library/LibraryImageDropZone";
 import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
+import { VirtualLibraryCardGrid } from "../resource-library/VirtualLibraryCardGrid";
 import { LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
 import { LibraryTagManagerDialog } from "../library-tags/LibraryTagManagerDialog";
 import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
@@ -536,9 +537,15 @@ function ActionGrid({
   const tagsByName = useMemo(() => createLibraryTagsByName(tags), [tags]);
   return (
     <div className="library-card-size-scope">
-      <div className="outfit-grid" style={cardSize.gridStyle}>
-        {!selectionMode ? <AddActionCard disabled={creating} busy={creating} onCreate={onCreate} onOpenBulkImport={onOpenBulkImport} /> : null}
-        {actions.map((action) => (
+      <VirtualLibraryCardGrid
+        items={actions}
+        getItemKey={(action) => action.id}
+        style={cardSize.gridStyle}
+        itemAspectRatio={4 / 3}
+        renderLeadingItem={!selectionMode ? () => (
+          <AddActionCard disabled={creating} busy={creating} onCreate={onCreate} onOpenBulkImport={onOpenBulkImport} />
+        ) : undefined}
+        renderItem={(action) => (
           <ActionCard
             key={action.id}
             action={action}
@@ -556,8 +563,8 @@ function ActionGrid({
             renameError={renameErrors[action.id] || ""}
             onClearRenameError={onClearRenameError}
           />
-        ))}
-      </div>
+        )}
+      />
       <LibraryCardToolbar
         activePresetId={cardSize.activePresetId}
         activePresetIndex={cardSize.activePresetIndex}

@@ -221,6 +221,61 @@ export function LibraryProjectSidebar<TProject extends LibraryProjectSidebarProj
 
   const activeMenuProject = projects.find((project) => project.id === menuState.projectId);
 
+  function renderProjectRow(project: TProject, index: number, style?: CSSProperties) {
+    const isActive = project.id === activeProjectId;
+    const isRenaming = project.id === renamingProjectId;
+    const isDragging = project.id === dragState?.project.id;
+    return (
+      <div
+        key={project.id}
+        data-project-row
+        className={`library-project-row${isActive ? " active" : ""}${isRenaming ? " renaming" : ""}${isDragging ? " dragging" : ""}`}
+        style={style}
+      >
+        {canManageProjects && !isRenaming ? (
+          <span className="library-project-drag-handle" aria-hidden="true" onPointerDown={(event) => startProjectDrag(event, project, index)}>
+            <GripVertical size={15} />
+          </span>
+        ) : null}
+        {isRenaming ? (
+          <input
+            className="library-project-rename-input"
+            value={renameDraft}
+            autoFocus
+            onChange={(event) => setRenameDraft(event.target.value)}
+            onBlur={() => void commitRename(project)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void commitRename(project);
+              if (event.key === "Escape") cancelRename();
+            }}
+          />
+        ) : (
+          <button
+            className="library-project-list-item"
+            type="button"
+            onClick={() => {
+              if (!dragState?.hasMoved) onSelect(project.id);
+            }}
+          >
+            <span title={project.name}>{project.name}</span>
+          </button>
+        )}
+        {canManageProjects && !isRenaming ? (
+          <button
+            className="library-project-menu-button"
+            type="button"
+            aria-label={projectActionsLabel(project.name)}
+            aria-haspopup="menu"
+            aria-expanded={menuState.projectId === project.id}
+            onClick={(event) => openProjectMenu(project, event)}
+          >
+            <MoreHorizontal size={17} aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <aside className="library-project-rail" aria-label={ariaLabel}>
       <div className="library-project-actions">
@@ -230,59 +285,7 @@ export function LibraryProjectSidebar<TProject extends LibraryProjectSidebarProj
         </button>
       </div>
       <div ref={listRef} className={`library-project-list scrollbar-thin-stable${dragState ? " sorting" : ""}`}>
-        {projects.map((project, index) => {
-          const isActive = project.id === activeProjectId;
-          const isRenaming = project.id === renamingProjectId;
-          const isDragging = project.id === dragState?.project.id;
-          return (
-            <div
-              key={project.id}
-              data-project-row
-              className={`library-project-row${isActive ? " active" : ""}${isRenaming ? " renaming" : ""}${isDragging ? " dragging" : ""}`}
-            >
-              {canManageProjects && !isRenaming ? (
-                <span className="library-project-drag-handle" aria-hidden="true" onPointerDown={(event) => startProjectDrag(event, project, index)}>
-                  <GripVertical size={15} />
-                </span>
-              ) : null}
-              {isRenaming ? (
-                <input
-                  className="library-project-rename-input"
-                  value={renameDraft}
-                  autoFocus
-                  onChange={(event) => setRenameDraft(event.target.value)}
-                  onBlur={() => void commitRename(project)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") void commitRename(project);
-                    if (event.key === "Escape") cancelRename();
-                  }}
-                />
-              ) : (
-                <button
-                  className="library-project-list-item"
-                  type="button"
-                  onClick={() => {
-                    if (!dragState?.hasMoved) onSelect(project.id);
-                  }}
-                >
-                  <span title={project.name}>{project.name}</span>
-                </button>
-              )}
-              {canManageProjects && !isRenaming ? (
-                <button
-                  className="library-project-menu-button"
-                  type="button"
-                  aria-label={projectActionsLabel(project.name)}
-                  aria-haspopup="menu"
-                  aria-expanded={menuState.projectId === project.id}
-                  onClick={(event) => openProjectMenu(project, event)}
-                >
-                  <MoreHorizontal size={17} aria-hidden="true" />
-                </button>
-              ) : null}
-            </div>
-          );
-        })}
+        {projects.map((project, index) => renderProjectRow(project, index))}
         {!projects.length ? <div className="library-project-list-empty">{t("common:empty.noProjects")}</div> : null}
         {dragState ? <div className="library-project-insert-indicator" style={dragState.indicatorStyle} /> : null}
       </div>

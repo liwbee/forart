@@ -13,6 +13,7 @@ import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalIm
 import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
 import { LibraryImageDropZone } from "../resource-library/LibraryImageDropZone";
 import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
+import { VirtualLibraryCardGrid } from "../resource-library/VirtualLibraryCardGrid";
 import { LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
 import { LibraryTagManagerDialog } from "../library-tags/LibraryTagManagerDialog";
 import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
@@ -407,9 +408,14 @@ function OutfitGrid({
   const tagsByName = useMemo(() => createLibraryTagsByName(tags), [tags]);
   return (
     <div className="library-card-size-scope">
-      <div className="outfit-grid" style={cardSize.gridStyle}>
-        {!selectionMode ? <AddOutfitCard disabled={creating} busy={creating} onCreate={onCreate} /> : null}
-        {outfits.map((outfit) => (
+      <VirtualLibraryCardGrid
+        items={outfits}
+        getItemKey={(outfit) => outfit.id}
+        style={cardSize.gridStyle}
+        renderLeadingItem={!selectionMode ? () => (
+          <AddOutfitCard disabled={creating} busy={creating} onCreate={onCreate} />
+        ) : undefined}
+        renderItem={(outfit) => (
           <OutfitCard
             key={outfit.id}
             outfit={outfit}
@@ -424,8 +430,8 @@ function OutfitGrid({
             onDelete={onDelete}
             onImageActionStatus={onImageActionStatus}
           />
-        ))}
-      </div>
+        )}
+      />
       <LibraryCardToolbar
         activePresetId={cardSize.activePresetId}
         activePresetIndex={cardSize.activePresetIndex}
