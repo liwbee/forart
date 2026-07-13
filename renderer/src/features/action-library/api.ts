@@ -1,6 +1,6 @@
 import { apiRequest } from "../../lib/apiClient";
 import { EMPTY_LIBRARY_TAG_FILTER, libraryTagFilterKey, type LibraryTagFilter } from "../library-tags";
-import { ActionEntry, ActionFilters, ActionProject, ActionTag, AssetUploadPayload, LibraryBulkEntriesPayload, LibraryBulkEntriesResult, StorageSettings } from "./types";
+import { ActionEntry, ActionFilters, ActionProject, ActionTag, LibraryBulkEntriesPayload, LibraryBulkEntriesResult, StorageSettings } from "./types";
 import type { ActionFolderImportResult, ActionFolderImportUploadEntry } from "./actionFolderImportTypes";
 
 export const actionLibraryKeys = {
@@ -54,13 +54,6 @@ export function deleteActionProject(projectId: string) {
   });
 }
 
-export function uploadActionProjectCover(projectId: string, payload: AssetUploadPayload) {
-  return apiRequest<ActionProject>(`/api/action-projects/${encodeURIComponent(projectId)}/cover/upload`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
 export function listActions({ projectId, tagFilter = EMPTY_LIBRARY_TAG_FILTER }: ActionFilters) {
   return apiRequest<{ actions: ActionEntry[] }>(
     `/api/action-projects/${encodeURIComponent(projectId)}/actions${queryString({ tag_id: tagFilter.includeTagIds, exclude_tag_id: tagFilter.excludeTagIds, untagged: tagFilter.untaggedOnly ? "1" : "" })}`
@@ -89,13 +82,6 @@ export function deleteAction(actionId: string) {
 
 export function bulkActionEntries(payload: LibraryBulkEntriesPayload) {
   return apiRequest<LibraryBulkEntriesResult>("/api/libraries/action/entries/bulk", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export function replaceActionImage(actionId: string, payload: AssetUploadPayload) {
-  return apiRequest<ActionEntry>(`/api/actions/${encodeURIComponent(actionId)}/image/upload`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

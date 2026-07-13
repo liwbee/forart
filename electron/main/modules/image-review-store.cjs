@@ -2,17 +2,6 @@ const fs = require('fs');
 const path = require('path');
 
 const REVIEW_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']);
-const REVIEW_MIME_TYPES = {
-  '.avif': 'image/avif',
-  '.bmp': 'image/bmp',
-  '.gif': 'image/gif',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp',
-};
-
 function normalizeReviewFolderName(value) {
   return String(value || '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
 }
@@ -117,7 +106,6 @@ function loadProducts({ root, modelFolders }) {
       hasModelImages: productHasModelImages(productDir, modelFolders),
       modelImages: [],
       detailImages: [],
-      unknownImages: [],
     };
   });
 }
@@ -132,81 +120,57 @@ function loadProductImages({ root, productId, modelFolders, detailFolders }) {
     hasModelImages: false,
     modelImages: [],
     detailImages: [],
-    unknownImages: [],
   };
 
   for (const folderName of listReviewDirectories(productDir)) {
-    const images = collectReviewImages(path.join(productDir, folderName), root);
     const normalized = normalizeReviewFolderName(folderName);
+    if (!modelFolderSet.has(normalized) && !detailFolderSet.has(normalized)) continue;
+    const images = collectReviewImages(path.join(productDir, folderName), root);
     if (modelFolderSet.has(normalized)) product.modelImages.push(...images);
-    else if (detailFolderSet.has(normalized)) product.detailImages.push(...images);
-    else product.unknownImages.push(...images);
+    else product.detailImages.push(...images);
   }
 
   product.modelImages.sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' }));
   product.detailImages.sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' }));
-  product.unknownImages.sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' }));
   product.hasModelImages = product.modelImages.length > 0;
   return product;
 }
 
-function issuePath(root) {
-  return path.join(selectedReviewRoot(root), 'error.txt');
-}
-
-function readIssueText(root) {
-  try {
-    return fs.readFileSync(issuePath(root), 'utf8');
-  } catch {
-    return '';
-  }
-}
-
-function findIssue({ root, path: imagePath }) {
-  const normalizedPath = String(imagePath || '').trim();
-  if (!normalizedPath) return '';
-  const name = path.basename(normalizedPath);
-  const line = readIssueText(root)
-    .split(/\r?\n/)
-    .find((item) => item.startsWith(`${normalizedPath}  `) || item.startsWith(`${name}  `));
-  if (!line) return '';
-  return line.startsWith(`${normalizedPath}  `) ? line.slice(normalizedPath.length).trim() : line.slice(name.length).trim();
-}
-
-function saveIssue({ root, path: imagePath, issue }) {
-  const normalizedPath = String(imagePath || '').trim();
-  const nextIssue = String(issue || '').trim();
-  if (!normalizedPath) throw new Error('Image path is required');
-  if (!nextIssue) throw new Error('Issue is required');
-  reviewAbsolutePath(root, normalizedPath);
-  const nextLine = `${normalizedPath}  ${nextIssue}`;
-  const lines = readIssueText(root)
-    .split(/\r?\n/)
-    .filter((line) => line.trim() && !line.startsWith(`${normalizedPath}  `) && !line.startsWith(`${path.basename(normalizedPath)}  `));
-  lines.push(nextLine);
-  fs.writeFileSync(issuePath(root), `${lines.join('\n')}\n`, 'utf8');
-}
-
-function resolveImageUrl(urlText) {
+function resolveImageUrl(urlText, authorizeRoot) {
   const url = new URL(urlText);
-  const root = url.searchParams.get('root') || '';
+  const root = authorizeRoot(url.searchParams.get('root') || '');
   const imagePath = url.searchParams.get('path') || '';
   const filePath = reviewAbsolutePath(root, imagePath);
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return null;
   return filePath;
 }
 
-function imageMimeType(filePath) {
-  return REVIEW_MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
-}
-
 module.exports = {
-  createImageReviewStore: () => ({
-    findIssue,
-    imageMimeType,
-    loadProductImages,
-    loadProducts,
-    resolveImageUrl,
-    saveIssue,
-  }),
+  createImageReviewStore: () => {
+    const authorizedRoots = new Set();
+
+    function rootKey(rootPath) {
+      const root = selectedReviewRoot(rootPath);
+      return process.platform === 'win32' ? root.toLocaleLowerCase() : root;
+    }
+
+    function authorizeRoot(rootPath) {
+      const root = selectedReviewRoot(rootPath);
+      authorizedRoots.add(rootKey(root));
+      return root;
+    }
+
+    function requireAuthorizedRoot(rootPath) {
+      const root = selectedReviewRoot(rootPath);
+      if (!authorizedRoots.has(rootKey(root))) throw new Error('Review root is not authorized');
+      return root;
+    }
+
+    return {
+      authorizeRoot,
+      loadProductImages: (payload = {}) => loadProductImages({ ...payload, root: requireAuthorizedRoot(payload.root) }),
+      loadProducts: (payload = {}) => loadProducts({ ...payload, root: requireAuthorizedRoot(payload.root) }),
+      resolveImageUrl: (urlText) => resolveImageUrl(urlText, requireAuthorizedRoot),
+    };
+  },
 };

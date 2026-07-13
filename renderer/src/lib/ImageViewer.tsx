@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { Button } from "../components/ui/button";
 
 interface ImageViewerNavigation {
   index: number;
@@ -216,8 +217,8 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
   }
 
   function renderActionIcon(icon: ImageViewerAction["icon"]) {
-    if (icon === "shuffle") return <Shuffle size={15} aria-hidden="true" />;
-    return <RefreshCw size={15} aria-hidden="true" />;
+    if (icon === "shuffle") return <Shuffle data-icon="inline-start" aria-hidden="true" />;
+    return <RefreshCw data-icon="inline-start" aria-hidden="true" />;
   }
 
   return createPortal(
@@ -263,9 +264,11 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
           </div>
         ) : null}
         <div className="model-image-viewer-top-left" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-          <button
+          <Button
             className="model-image-viewer-back-button"
             type="button"
+            variant="ghost"
+            size="icon"
             aria-label={t("common:actions.back")}
             title={t("common:actions.back")}
             onClick={(event) => {
@@ -273,8 +276,8 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
               requestClose();
             }}
           >
-            <ArrowLeft size={20} aria-hidden="true" />
-          </button>
+            <ArrowLeft aria-hidden="true" />
+          </Button>
           <span className="model-image-viewer-resolution" aria-live="polite">
             {resolutionText}
           </span>
@@ -282,10 +285,11 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
         {(actions.length || hasNavigation) ? (
           <div className="model-image-viewer-top-right" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
             {actions.map((action) => (
-              <button
+              <Button
                 key={action.id}
                 className="model-image-viewer-tool-button"
                 type="button"
+                variant="ghost"
                 aria-label={action.label}
                 title={action.label}
                 disabled={action.disabled}
@@ -296,7 +300,7 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
               >
                 {renderActionIcon(action.icon)}
                 <span className="model-image-viewer-tool-button__label">{action.label}</span>
-              </button>
+              </Button>
             ))}
             {hasNavigation && navigation ? (
               <span className="model-image-viewer-counter" aria-label={`${navigation.index + 1} / ${navigation.total}`}>
@@ -307,9 +311,11 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
         ) : null}
         {hasNavigation && navigation ? (
           <>
-            <button
+            <Button
               className="model-image-viewer-nav model-image-viewer-nav--previous"
               type="button"
+              variant="ghost"
+              size="icon-lg"
               aria-label={navigation.previousLabel}
               title={navigation.previousLabel}
               onPointerDown={(event) => event.stopPropagation()}
@@ -318,11 +324,13 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
                 navigation.onPrevious();
               }}
             >
-              <ChevronLeft size={28} aria-hidden="true" />
-            </button>
-            <button
+              <ChevronLeft aria-hidden="true" />
+            </Button>
+            <Button
               className="model-image-viewer-nav model-image-viewer-nav--next"
               type="button"
+              variant="ghost"
+              size="icon-lg"
               aria-label={navigation.nextLabel}
               title={navigation.nextLabel}
               onPointerDown={(event) => event.stopPropagation()}
@@ -331,8 +339,8 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
                 navigation.onNext();
               }}
             >
-              <ChevronRight size={28} aria-hidden="true" />
-            </button>
+              <ChevronRight aria-hidden="true" />
+            </Button>
           </>
         ) : null}
       </div>

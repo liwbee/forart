@@ -1,7 +1,12 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
-import { createPortal } from "react-dom";
-import { GripVertical } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import { createPortal, flushSync } from "react-dom";
+import { GripVertical, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ConfirmingDeleteButton } from "../../components/ConfirmingDeleteButton";
+import { Button } from "../../components/ui/button";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog";
+import { Input } from "../../components/ui/input";
+import { Switch } from "../../components/ui/switch";
 import { normalizeTags } from "./tagUtils";
 import { LIBRARY_TAG_COLORS, normalizeLibraryTagColor, type LibraryTagColor } from "./tagColors";
 
@@ -44,7 +49,6 @@ interface LibraryTagManagerDialogProps<TTag extends LibraryTagManagerTag> {
   isOpen: boolean;
   tags: TTag[];
   isCreating: boolean;
-  deleteConfirmTagId: string;
   titleId: string;
   description: string;
   emptyText: string;
@@ -52,7 +56,7 @@ interface LibraryTagManagerDialogProps<TTag extends LibraryTagManagerTag> {
   onCreateTag: (name: string) => void;
   onRenameTag: (tagId: string, name: string) => void;
   onChangeTagColor: (tagId: string, color: LibraryTagColor) => void;
-  onDeleteTag: (tagId: string, isConfirming: boolean) => void;
+  onDeleteTag: (tagId: string) => void;
   onReorderTags: (tags: TTag[]) => void;
   sameColorSingleFilter: boolean;
   onSameColorSingleFilterChange: (enabled: boolean) => void;
@@ -132,7 +136,6 @@ export function LibraryTagManagerDialog<TTag extends LibraryTagManagerTag>({
   isOpen,
   tags,
   isCreating,
-  deleteConfirmTagId,
   titleId,
   description,
   emptyText,
@@ -152,10 +155,24 @@ export function LibraryTagManagerDialog<TTag extends LibraryTagManagerTag>({
   const [draftTagName, setDraftTagName] = useState("");
   const [dragState, setDragState] = useState<DragState<TTag> | null>(null);
   const dragStateRef = useRef<DragState<TTag> | null>(null);
+  const pendingTagOrderRef = useRef<string[] | null>(null);
   const selectedTag = tags.find((tag) => tag.id === selectedTagId) || null;
+
+  useLayoutEffect(() => {
+    const pendingOrder = pendingTagOrderRef.current;
+    const orderCommitted = pendingOrder
+      && pendingOrder.length === tags.length
+      && pendingOrder.every((id, index) => tags[index]?.id === id);
+    if (!orderCommitted) return;
+    pendingTagOrderRef.current = null;
+    dragStateRef.current = null;
+    setDragState(null);
+  }, [tags]);
 
   useEffect(() => {
     if (!isOpen) {
+      pendingTagOrderRef.current = null;
+      dragStateRef.current = null;
       setSelectedTagId("");
       setNewTagName("");
       setDraftTagName("");
@@ -206,15 +223,33 @@ export function LibraryTagManagerDialog<TTag extends LibraryTagManagerTag>({
       if (event.pointerId !== activeDrag.pointerId) return;
       event.preventDefault();
       const current = dragStateRef.current;
-      setDragState(null);
-      dragStateRef.current = null;
-      if (!current || !current.hasMoved) return;
+      if (!current || !current.hasMoved) {
+        dragStateRef.current = null;
+        setDragState(null);
+        return;
+      }
       const draggedIndex = tags.findIndex((tag) => tag.id === current.tag.id);
       const nextTags = reorderTags(tags, draggedIndex, current.insertIndex);
-      if (nextTags.some((tag, index) => tag.id !== tags[index]?.id)) onReorderTags(nextTags);
+      if (!nextTags.some((tag, index) => tag.id !== tags[index]?.id)) {
+        dragStateRef.current = null;
+        setDragState(null);
+        return;
+      }
+      pendingTagOrderRef.current = nextTags.map((tag) => tag.id);
+      try {
+        onReorderTags(nextTags);
+      } catch (error) {
+        pendingTagOrderRef.current = null;
+        dragStateRef.current = null;
+        flushSync(() => setDragState(null));
+        throw error;
+      }
     }
     function cancelDrag(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") setDragState(null);
+      if (event.key !== "Escape") return;
+      pendingTagOrderRef.current = null;
+      dragStateRef.current = null;
+      setDragState(null);
     }
     window.addEventListener("pointermove", handlePointerMove, { passive: false });
     window.addEventListener("pointerup", finishDrag);
@@ -227,8 +262,6 @@ export function LibraryTagManagerDialog<TTag extends LibraryTagManagerTag>({
       window.removeEventListener("keydown", cancelDrag);
     };
   }, [dragState, onReorderTags, tags]);
-
-  if (!isOpen) return null;
 
   function submitActiveTagRename() {
     if (!selectedTag) return;
@@ -271,12 +304,13 @@ export function LibraryTagManagerDialog<TTag extends LibraryTagManagerTag>({
     const dragging = dragState?.tag.id === tag.id;
     const originalIndex = tags.findIndex((item) => item.id === tag.id);
     return (
-      <button
+      <Button
         key={tag.id}
         data-tag-id={tag.id}
         data-tag-index={originalIndex}
         className={`${selected ? "active" : ""}${dragging ? " dragging" : ""}`}
         type="button"
+        variant={selected ? "default" : "outline"}
         onClick={() => setSelectedTagId(tag.id)}
       >
         <span className="library-tag-manager__drag-handle" aria-hidden="true" onPointerDown={(event) => startTagDrag(event, tag, originalIndex)}>
@@ -284,7 +318,7 @@ export function LibraryTagManagerDialog<TTag extends LibraryTagManagerTag>({
         </span>
         <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
         <span className="library-tag-manager__tag-name">{tag.name}</span>
-      </button>
+      </Button>
     );
   }
 
@@ -293,106 +327,125 @@ export function LibraryTagManagerDialog<TTag extends LibraryTagManagerTag>({
     : undefined;
 
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="library-tag-manager" role="dialog" aria-modal="true" aria-labelledby={titleId} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dialog__head library-tag-manager__head">
-          <div>
-            <h2 id={titleId}>{t("common:labels.manageTags")}</h2>
-            <p>{description}</p>
-          </div>
-          <label className="library-tag-manager__setting">
-            <span>同色单选筛选</span>
-            <input
-              type="checkbox"
-              checked={sameColorSingleFilter}
-              onChange={(event) => onSameColorSingleFilterChange(event.target.checked)}
-            />
-          </label>
-        </div>
-
-        <div className="dialog-field">
-          <span>{t("common:labels.newTag")}</span>
-          <div className="tag-create-row">
-            <input value={newTagName} onChange={(event) => setNewTagName(event.target.value)} maxLength={24} placeholder={t("common:labels.tagNamePlaceholder")} />
-            <button
-              className="button primary"
-              type="button"
-              disabled={isCreating}
-              onClick={() => {
-                onCreateTag(newTagName);
-                setNewTagName("");
-              }}
-            >
-              {t("common:actions.add")}
-            </button>
-          </div>
-        </div>
-
-        <div className="library-tag-manager__body">
-          <div ref={listRef} className={`library-tag-manager__list${dragState ? " sorting" : ""}`} aria-label={t("common:labels.tagList")}>
-            {tags.map((tag) => renderTagChip(tag))}
-            {dragState ? <div className="library-tag-manager__insert-indicator" style={dragState.indicatorStyle} /> : null}
-            {!tags.length ? <div className="library-tag-manager__empty">{emptyText}</div> : null}
-          </div>
-
-          {selectedTag ? (
-            <div className="library-tag-manager__editor">
-              <label className="dialog-field">
-                <span>{t("common:labels.editTag")}</span>
-                <input
-                  value={draftTagName}
-                  onChange={(event) => setDraftTagName(event.target.value)}
-                  onBlur={submitActiveTagRename}
-                  maxLength={24}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      submitActiveTagRename();
-                    }
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      setDraftTagName(selectedTag.name);
-                    }
-                  }}
+    <>
+      <Dialog open={isOpen} onOpenChange={(open) => {
+        if (!open && !isCreating) onClose();
+      }}>
+        <DialogContent
+          className="library-tag-manager max-w-none overflow-y-auto sm:max-w-none"
+          onEscapeKeyDown={(event) => {
+            if (isCreating || dragState) event.preventDefault();
+          }}
+          onPointerDownOutside={(event) => {
+            if (isCreating) event.preventDefault();
+          }}
+        >
+          <DialogHeader className="library-tag-manager__head flex-row text-left">
+            <div>
+              <DialogTitle id={titleId}>{t("common:labels.manageTags")}</DialogTitle>
+              <DialogDescription>{description}</DialogDescription>
+            </div>
+            <div className="library-tag-manager__head-actions">
+              <label className="library-tag-manager__setting">
+                <span>{t("common:labels.sameColorSingleFilter")}</span>
+                <Switch
+                  checked={sameColorSingleFilter}
+                  onCheckedChange={onSameColorSingleFilterChange}
+                  aria-label={t("common:labels.sameColorSingleFilter")}
                 />
               </label>
-              <div className="dialog-field">
-                <span>{t("common:labels.tagColor", { defaultValue: "标签颜色" })}</span>
-                <div className="library-tag-manager__color-options" role="radiogroup" aria-label={t("common:labels.tagColor", { defaultValue: "标签颜色" })}>
-                  {LIBRARY_TAG_COLORS.map((color) => {
-                    const selected = normalizeLibraryTagColor(selectedTag.color) === color;
-                    return (
-                      <button
-                        key={color}
-                        className={`library-tag-manager__color-option${selected ? " active" : ""}`}
-                        type="button"
-                        role="radio"
-                        aria-checked={selected}
-                        aria-label={color}
-                        title={color}
-                        onClick={() => {
-                          if (!selected) onChangeTagColor(selectedTag.id, color);
-                        }}
-                      >
-                        <span className={`library-tag-color-dot library-tag-color-dot--${color}`} aria-hidden="true" />
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <button
-                className={`button danger${deleteConfirmTagId === selectedTag.id ? " confirming" : ""}`}
-                type="button"
-                onClick={() => onDeleteTag(selectedTag.id, deleteConfirmTagId === selectedTag.id)}
-              >
-                {deleteConfirmTagId === selectedTag.id ? t("common:confirm.delete") : t("common:actions.delete")}
-              </button>
+              <DialogClose asChild>
+                <Button variant="ghost" size="icon-sm" type="button" disabled={isCreating} aria-label={t("common:actions.close")} title={t("common:actions.close")}>
+                  <X aria-hidden="true" />
+                </Button>
+              </DialogClose>
             </div>
-          ) : (
-            <div className="library-tag-manager__editor library-tag-manager__editor--empty">{t("common:labels.emptyTagEditor")}</div>
-          )}
-        </div>
-      </section>
+          </DialogHeader>
+
+          <div className="dialog-field">
+            <span>{t("common:labels.newTag")}</span>
+            <div className="tag-create-row">
+              <Input value={newTagName} onChange={(event) => setNewTagName(event.target.value)} maxLength={24} placeholder={t("common:labels.tagNamePlaceholder")} />
+              <Button
+                type="button"
+                disabled={isCreating}
+                onClick={() => {
+                  onCreateTag(newTagName);
+                  setNewTagName("");
+                }}
+              >
+                {t("common:actions.add")}
+              </Button>
+            </div>
+          </div>
+
+          <div className="library-tag-manager__body">
+            <div ref={listRef} className={`library-tag-manager__list${dragState ? " sorting" : ""}`} aria-label={t("common:labels.tagList")}>
+              {tags.map((tag) => renderTagChip(tag))}
+              {dragState ? <div className="library-tag-manager__insert-indicator" style={dragState.indicatorStyle} /> : null}
+              {!tags.length ? <div className="library-tag-manager__empty">{emptyText}</div> : null}
+            </div>
+
+            {selectedTag ? (
+              <div className="library-tag-manager__editor">
+                <label className="dialog-field">
+                  <span>{t("common:labels.editTag")}</span>
+                  <Input
+                    value={draftTagName}
+                    onChange={(event) => setDraftTagName(event.target.value)}
+                    onBlur={submitActiveTagRename}
+                    maxLength={24}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        submitActiveTagRename();
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setDraftTagName(selectedTag.name);
+                      }
+                    }}
+                  />
+                </label>
+                <div className="dialog-field">
+                  <span>{t("common:labels.tagColor")}</span>
+                  <div className="library-tag-manager__color-options" role="radiogroup" aria-label={t("common:labels.tagColor")}>
+                    {LIBRARY_TAG_COLORS.map((color) => {
+                      const selected = normalizeLibraryTagColor(selectedTag.color) === color;
+                      return (
+                        <Button
+                          key={color}
+                          className={`library-tag-manager__color-option${selected ? " active" : ""}`}
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          role="radio"
+                          aria-checked={selected}
+                          aria-label={color}
+                          title={color}
+                          onClick={() => {
+                            if (!selected) onChangeTagColor(selectedTag.id, color);
+                          }}
+                        >
+                          <span className={`library-tag-color-dot library-tag-color-dot--${color}`} aria-hidden="true" />
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <ConfirmingDeleteButton
+                  label={t("common:actions.delete")}
+                  confirmLabel={t("common:confirm.delete")}
+                  resetKey={selectedTag.id}
+                  onDelete={() => onDeleteTag(selectedTag.id)}
+                />
+              </div>
+            ) : (
+              <div className="library-tag-manager__editor library-tag-manager__editor--empty">{t("common:labels.emptyTagEditor")}</div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
       {dragState
         ? createPortal(
             <div className="library-tag-manager__floating-tag" style={floatingStyle}>
@@ -405,6 +458,6 @@ export function LibraryTagManagerDialog<TTag extends LibraryTagManagerTag>({
             document.body,
           )
         : null}
-    </div>
+    </>
   );
 }

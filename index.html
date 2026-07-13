@@ -8,8 +8,8 @@
     <script>
       (() => {
         try {
-          const theme = localStorage.getItem("forart_theme") || "light";
-          if (theme === "dark") document.documentElement.classList.add("theme-dark");
+          const theme = localStorage.getItem("forart_theme") || "dark";
+          if (theme !== "light") document.documentElement.classList.add("theme-dark", "dark");
         } catch {}
       })();
     </script>

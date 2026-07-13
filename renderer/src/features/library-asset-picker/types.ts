@@ -8,6 +8,7 @@ export interface LibraryAssetSelection {
   assetId?: string | null;
   name: string;
   url: string;
+  thumbnailUrl?: string;
   updatedAt?: string;
 }
 

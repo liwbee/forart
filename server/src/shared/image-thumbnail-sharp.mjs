@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, statSync } from "node:fs";
 import path from "node:path";
 import pLimit from "p-limit";
 import sharp from "sharp";
@@ -28,9 +28,18 @@ function logThumbnailError(logger, message, error) {
   logger(`${message}: ${detail}`);
 }
 
+function isThumbnailFresh(sourcePath, targetPath) {
+  if (!existsSync(sourcePath) || !existsSync(targetPath)) return false;
+  try {
+    return statSync(targetPath).mtimeMs >= statSync(sourcePath).mtimeMs;
+  } catch {
+    return false;
+  }
+}
+
 async function generateSharpImageThumbnailNow({ sourcePath, targetPath, mimeType = "", logger = console.warn } = {}) {
   if (!sourcePath || !targetPath || isSvgImage({ sourcePath, mimeType }) || !existsSync(sourcePath)) return null;
-  if (existsSync(targetPath)) return { filePath: targetPath, mimeType: "image/webp" };
+  if (isThumbnailFresh(sourcePath, targetPath)) return { filePath: targetPath, mimeType: "image/webp" };
 
   try {
     const image = sharp(sourcePath, { animated: false }).rotate();
@@ -62,7 +71,7 @@ async function generateSharpImageThumbnailNow({ sourcePath, targetPath, mimeType
 
 export function generateSharpImageThumbnail({ key, sourcePath, targetPath, mimeType = "", logger = console.warn } = {}) {
   if (!sourcePath || !targetPath) return Promise.resolve(null);
-  if (existsSync(targetPath)) return Promise.resolve({ filePath: targetPath, mimeType: "image/webp" });
+  if (isThumbnailFresh(sourcePath, targetPath)) return Promise.resolve({ filePath: targetPath, mimeType: "image/webp" });
   const taskKey = String(key || targetPath);
   if (inFlight.has(taskKey)) return inFlight.get(taskKey);
   const task = limit(() => generateSharpImageThumbnailNow({ sourcePath, targetPath, mimeType, logger }))

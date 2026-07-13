@@ -2,12 +2,34 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
+function extractProjectUuid(payload, stdout = '') {
+  const candidates = [
+    payload?.projectMeta?.uuid,
+    payload?.project?.uuid,
+    payload?.uuid,
+    payload?.projectUuid,
+    payload?.projectId,
+    payload?.data?.projectMeta?.uuid,
+    payload?.data?.project?.uuid,
+    payload?.data?.uuid,
+    payload?.data?.projectUuid,
+    payload?.data?.projectId,
+  ];
+  const isUuid = (value) => /^[a-zA-Z0-9_-]{16,}$/.test(value) && !/^\d+$/.test(value);
+  const jsonCandidate = candidates.map((item) => String(item || '').trim()).find(isUuid);
+  if (jsonCandidate) return jsonCandidate;
+  const matches = [...String(stdout || '').matchAll(/(?:projectUuid|uuid)["'\s:=]+([a-zA-Z0-9_-]{16,})/gi)];
+  return matches.map((match) => match[1]).find(isUuid) || '';
+}
+
 function createLibtvAdapter({ rootDir }) {
   const LIBTV_DEFAULT_BINARY = process.platform === 'win32' && process.env.USERPROFILE
     ? path.join(process.env.USERPROFILE, '.libtv', 'libtv.exe')
     : 'libtv';
   const LIBTV_VERSION_CHANNEL_URL = 'https://api2.liblib.art/api/www/landing-activities/getById?id=240';
   const LIBTV_FALLBACK_INSTALL_COMMAND = 'irm https://liblibai-web-static.liblib.cloud/cli/latest/install-libtv-cli.ps1 | iex';
+  const workspaceEnsurePromises = new Map();
+  const projectEnsurePromises = new Map();
 
   function resolveLibtvBinary() {
     return process.env.LIBTV_CLI_BINARY || process.env.LIBTV_BIN || (fs.existsSync(LIBTV_DEFAULT_BINARY) ? LIBTV_DEFAULT_BINARY : 'libtv');
@@ -22,21 +44,38 @@ function createLibtvAdapter({ rootDir }) {
       });
       let stdout = '';
       let stderr = '';
-      const timeoutMs = options.timeoutMs || 120000;
-      const timeout = setTimeout(() => {
+      let settled = false;
+      const timeoutMs = options.timeoutMs === null ? 0 : Number(options.timeoutMs || 120000);
+      const finish = (callback) => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        options.signal?.removeEventListener('abort', abortProcess);
+        callback();
+      };
+      const abortProcess = () => {
         child.kill();
-        reject(new Error(`${command} timed out`));
-      }, timeoutMs);
+        const error = new Error('LibTV operation was interrupted.');
+        error.name = 'AbortError';
+        finish(() => reject(error));
+      };
+      const timeout = timeoutMs > 0 ? setTimeout(() => {
+        child.kill();
+        finish(() => reject(new Error(`${command} timed out`)));
+      }, timeoutMs) : null;
+      if (options.signal?.aborted) {
+        abortProcess();
+        return;
+      }
+      options.signal?.addEventListener('abort', abortProcess, { once: true });
       child.stdout.on('data', (data) => { stdout += data.toString(); });
       child.stderr.on('data', (data) => { stderr += data.toString(); });
       child.on('error', (error) => {
-        clearTimeout(timeout);
-        reject(error);
+        finish(() => reject(error));
       });
       child.on('close', (code) => {
-        clearTimeout(timeout);
         if (code === 0) {
-          resolve({ stdout, stderr });
+          finish(() => resolve({ stdout, stderr }));
           return;
         }
         const error = new Error((stderr || stdout || `${command} exited with code ${code}`).trim());
@@ -45,7 +84,7 @@ function createLibtvAdapter({ rootDir }) {
         error.exitCode = code;
         error.stdout = stdout;
         error.stderr = stderr;
-        reject(error);
+        finish(() => reject(error));
       });
     });
   }
@@ -92,26 +131,34 @@ function createLibtvAdapter({ rootDir }) {
 
   function normalizeProjectRecord(item) {
     return {
-      uuid: String(item.uuid || item.id || item.projectUuid || item.projectId || ''),
+      uuid: extractProjectUuid(item),
       name: String(item.name || item.title || item.projectName || ''),
       raw: item,
     };
   }
 
-  function extractProjectUuid(payload, stdout = '') {
+  function normalizeWorkspaceRecord(item) {
+    return {
+      id: String(item.id || item.uuid || item.folderId || item.workspaceId || ''),
+      name: String(item.name || item.title || item.folderName || ''),
+      fileCnt: Number(item.fileCnt || item.fileCount || 0),
+      raw: item,
+    };
+  }
+
+  function extractWorkspaceId(payload, stdout = '') {
     const candidates = [
-      payload?.uuid,
-      payload?.projectUuid,
-      payload?.projectId,
+      payload?.workspaceId,
+      payload?.folderId,
       payload?.id,
-      payload?.data?.uuid,
-      payload?.data?.projectUuid,
-      payload?.data?.projectId,
+      payload?.uuid,
+      payload?.data?.workspaceId,
+      payload?.data?.folderId,
       payload?.data?.id,
     ];
     const jsonCandidate = candidates.map((item) => String(item || '').trim()).find(Boolean);
     if (jsonCandidate) return jsonCandidate;
-    const match = String(stdout || '').match(/(?:projectUuid|uuid|projectId|id)["'\s:=]+([a-zA-Z0-9_-]{6,})/i);
+    const match = String(stdout || '').match(/(?:workspaceId|folderId|id|uuid)["'\s:=]+([a-zA-Z0-9_-]{1,})/i);
     return match?.[1] || '';
   }
 
@@ -219,18 +266,46 @@ function createLibtvAdapter({ rootDir }) {
   async function listWorkspaces(payload = {}) {
     const page = Math.max(1, Number(payload.page || 1));
     const pageSize = Math.max(1, Math.min(200, Number(payload.pageSize || 100)));
-    const result = await runLibtv(['workspace', 'list', '-p', page, '-s', pageSize], { timeoutMs: 60000 });
+    const args = ['workspace', 'list', '-p', page, '-s', pageSize];
+    if (payload.name) args.push('--name', String(payload.name));
+    const result = await runLibtv(args, { timeoutMs: 60000 });
     const parsed = parseJsonOutput(result.stdout);
     return {
       ok: true,
-      workspaces: normalizeListPayload(parsed, ['folders', 'workspaces', 'items', 'list']).map((item) => ({
-        id: String(item.id || item.uuid || item.folderId || ''),
-        name: String(item.name || item.title || item.folderName || ''),
-        fileCnt: Number(item.fileCnt || item.fileCount || 0),
-        raw: item,
-      })).filter((item) => item.id),
+      workspaces: normalizeListPayload(parsed, ['folders', 'workspaces', 'items', 'list'])
+        .map(normalizeWorkspaceRecord)
+        .filter((item) => item.id),
       raw: parsed,
     };
+  }
+
+  async function createWorkspace(payload = {}) {
+    const title = requireText(payload.title, 'LibTV workspace title');
+    const args = ['workspace', 'create', title];
+    if (payload.description) args.push('--description', String(payload.description));
+    const result = await runLibtv(args, { timeoutMs: 60000 });
+    const parsed = parseJsonOutput(result.stdout);
+    const id = extractWorkspaceId(parsed, result.stdout);
+    if (!id) throw new Error(`LibTV workspace create did not return a workspace id for ${title}.`);
+    return { ok: true, created: true, workspace: normalizeWorkspaceRecord({ ...parsed, id, name: parsed?.name || title }) };
+  }
+
+  async function ensureNamedWorkspace(payload = {}) {
+    const name = requireText(payload.name || 'LibtvImage', 'LibTV workspace name');
+    const key = name.toLocaleLowerCase();
+    if (workspaceEnsurePromises.has(key)) return workspaceEnsurePromises.get(key);
+    const pending = (async () => {
+      const listed = await listWorkspaces({ page: 1, pageSize: 200 });
+      const existing = listed.workspaces.find((workspace) => workspace.name === name);
+      if (existing) return { ok: true, created: false, workspace: existing };
+      return createWorkspace({ title: name });
+    })();
+    workspaceEnsurePromises.set(key, pending);
+    try {
+      return await pending;
+    } finally {
+      workspaceEnsurePromises.delete(key);
+    }
   }
 
   async function listProjects(payload = {}) {
@@ -255,12 +330,13 @@ function createLibtvAdapter({ rootDir }) {
     const parsed = parseJsonOutput(result.stdout);
     const uuid = extractProjectUuid(parsed, result.stdout);
     if (!uuid) throw new Error(`LibTV project create did not return a project uuid for ${title}.`);
+    const projectMeta = parsed?.projectMeta || parsed?.project || parsed?.data?.projectMeta || parsed?.data?.project || parsed;
     return {
       ok: true,
       project: {
         uuid,
-        name: String(parsed?.name || parsed?.title || title),
-        raw: parsed,
+        name: String(projectMeta?.name || projectMeta?.title || title),
+        raw: projectMeta,
       },
       raw: parsed,
     };
@@ -269,13 +345,21 @@ function createLibtvAdapter({ rootDir }) {
   async function ensureDailyProject(payload = {}) {
     const workspaceId = requireText(payload.workspaceId, 'LibTV workspace');
     const title = String(payload.title || todayCanvasName()).trim() || todayCanvasName();
-    const listed = await listProjects({ workspaceId, page: 1, pageSize: 100, name: title });
-    const existing = listed.projects.find((project) => project.name === title);
-    if (existing) {
-      return { ok: true, created: false, project: existing };
+    const key = `${workspaceId}:${title}`;
+    if (projectEnsurePromises.has(key)) return projectEnsurePromises.get(key);
+    const pending = (async () => {
+      const listed = await listProjects({ workspaceId, page: 1, pageSize: 200 });
+      const existing = listed.projects.find((project) => project.name === title);
+      if (existing) return { ok: true, created: false, project: existing };
+      const created = await createProject({ workspaceId, title });
+      return { ok: true, created: true, project: created.project };
+    })();
+    projectEnsurePromises.set(key, pending);
+    try {
+      return await pending;
+    } finally {
+      projectEnsurePromises.delete(key);
     }
-    const created = await createProject({ workspaceId, title });
-    return { ok: true, created: true, project: created.project };
   }
 
   async function waitForProjectReady(payload = {}) {
@@ -288,7 +372,7 @@ function createLibtvAdapter({ rootDir }) {
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
-        const listed = await listProjects({ workspaceId, page: 1, pageSize: 100, name: projectName || undefined });
+        const listed = await listProjects({ workspaceId, page: 1, pageSize: 200 });
         const project = listed.projects.find((item) => item.uuid === projectUuid)
           || (projectName ? listed.projects.find((item) => item.name === projectName) : null);
         if (project?.uuid) {
@@ -320,6 +404,14 @@ function createLibtvAdapter({ rootDir }) {
     };
   }
 
+  async function imageModelSchema(payload = {}) {
+    const model = requireText(payload.model, 'LibTV image model');
+    const result = await runLibtv(['model', model], { timeoutMs: 60000 });
+    const parsed = parseJsonOutput(result.stdout);
+    if (!parsed) throw new Error(`LibTV model schema did not return JSON for ${model}.`);
+    return { ok: true, ...parsed };
+  }
+
   async function uploadImageNode(projectUuid, filePath, payload = {}) {
     const project = requireText(projectUuid, 'LibTV project');
     const file = requireText(filePath, 'Image file');
@@ -327,7 +419,36 @@ function createLibtvAdapter({ rootDir }) {
     const args = ['upload', title, '-p', project, '-t', 'image', '-f', file];
     if (Number.isFinite(Number(payload.x))) args.push('--x', Math.round(Number(payload.x)));
     if (Number.isFinite(Number(payload.y))) args.push('--y', Math.round(Number(payload.y)));
-    const result = await runLibtv(args, { timeoutMs: 5 * 60 * 1000 });
+    const result = await runLibtv(args, { timeoutMs: 5 * 60 * 1000, signal: payload.signal });
+    return { ok: true, stdout: result.stdout, stderr: result.stderr, payload: parseJsonOutput(result.stdout) };
+  }
+
+  async function createAndRunImageNode(projectUuid, payload = {}) {
+    const project = requireText(projectUuid, 'LibTV project');
+    const title = requireText(payload.title || 'Forart Image Generation', 'LibTV node title');
+    const prompt = requireText(payload.prompt, 'Prompt');
+    const model = requireText(payload.model, 'LibTV image model');
+    const args = ['node'];
+    if (Number.isFinite(Number(payload.x))) args.push('--x', Math.round(Number(payload.x)));
+    if (Number.isFinite(Number(payload.y))) args.push('--y', Math.round(Number(payload.y)));
+    args.push('create', title, '-p', project, '-t', 'image', '--prompt', prompt, '--set', `model=${model}`);
+    if (Number.isFinite(Number(payload.count))) args.push('--set', `count=${Math.max(1, Math.round(Number(payload.count)))}`);
+    if (payload.modeType) args.push('--set', `modeType=${String(payload.modeType)}`);
+    if (payload.ratio) args.push('--set', `ratio=${String(payload.ratio)}`);
+    if (payload.quality) args.push('--set', `quality=${String(payload.quality)}`);
+    if (payload.resolution) args.push('--set', `resolution=${String(payload.resolution)}`);
+    (Array.isArray(payload.leftNodeIds) ? payload.leftNodeIds : []).forEach((nodeId) => {
+      args.push('--left', String(nodeId));
+    });
+    args.push('--run');
+    const result = await runLibtv(args, { timeoutMs: null, signal: payload.signal });
+    return { ok: true, stdout: result.stdout, stderr: result.stderr, payload: parseJsonOutput(result.stdout) };
+  }
+
+  async function deleteNode(projectUuid, nodeId) {
+    const project = requireText(projectUuid, 'LibTV project');
+    const node = requireText(nodeId, 'LibTV node');
+    const result = await runLibtv(['node', 'delete', node, '-p', project], { timeoutMs: 60000 });
     return { ok: true, stdout: result.stdout, stderr: result.stderr, payload: parseJsonOutput(result.stdout) };
   }
 
@@ -340,10 +461,12 @@ function createLibtvAdapter({ rootDir }) {
     if (Number.isFinite(Number(payload.y))) args.push('--y', Math.round(Number(payload.y)));
     args.push('create', title, '-p', project, '-t', 'image', '--prompt', prompt);
     if (payload.model) args.push('-s', `model=${String(payload.model)}`);
+    if (Number.isFinite(Number(payload.count))) args.push('-s', `count=${Math.max(1, Math.round(Number(payload.count)))}`);
     if (payload.modeType) args.push('-s', `modeType=${String(payload.modeType)}`);
     if (payload.ratio) args.push('-s', `ratio=${String(payload.ratio)}`);
     if (payload.quality) args.push('-s', `quality=${String(payload.quality)}`);
-    const result = await runLibtv(args, { timeoutMs: 5 * 60 * 1000 });
+    if (payload.resolution) args.push('-s', `resolution=${String(payload.resolution)}`);
+    const result = await runLibtv(args, { timeoutMs: 5 * 60 * 1000, signal: payload.signal });
     return { ok: true, stdout: result.stdout, stderr: result.stderr, payload: parseJsonOutput(result.stdout) };
   }
 
@@ -390,10 +513,13 @@ function createLibtvAdapter({ rootDir }) {
     return { ok: true, stdout: result.stdout, stderr: result.stderr, payload: parseJsonOutput(result.stdout) };
   }
 
-  async function runNode(projectUuid, nodeId) {
+  async function runNode(projectUuid, nodeId, options = {}) {
     const project = requireText(projectUuid, 'LibTV project');
     const target = requireText(nodeId, 'LibTV node');
-    const result = await runLibtv(['node', target, '-p', project, '--run'], { timeoutMs: 30 * 60 * 1000 });
+    const result = await runLibtv(['node', target, '-p', project, '--run'], {
+      timeoutMs: 30 * 60 * 1000,
+      signal: options.signal,
+    });
     return { ok: true, stdout: result.stdout, stderr: result.stderr, payload: parseJsonOutput(result.stdout) };
   }
 
@@ -402,11 +528,16 @@ function createLibtvAdapter({ rootDir }) {
     accounts,
     bindGroupNodes,
     connectLeft,
+    createAndRunImageNode,
     createGroup,
     createImageNode,
     createProject,
+    createWorkspace,
+    deleteNode,
     ensureDailyProject,
+    ensureNamedWorkspace,
     imageModels,
+    imageModelSchema,
     install,
     listProjects,
     listWorkspaces,
@@ -422,4 +553,4 @@ function createLibtvAdapter({ rootDir }) {
   };
 }
 
-module.exports = { createLibtvAdapter };
+module.exports = { createLibtvAdapter, extractProjectUuid };

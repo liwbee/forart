@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { Button } from "../../components/ui/button";
 
 interface CollapsibleTagFilterRowProps {
   children: ReactNode;
@@ -39,16 +40,18 @@ export function CollapsibleTagFilterRow({ children, expandLabel, collapseLabel }
         {children}
       </div>
       {overflowing ? (
-        <button
+        <Button
           className="library-tag-collapsible__toggle"
           type="button"
+          variant="ghost"
+          size="icon-sm"
           aria-label={expanded ? collapseLabel : expandLabel}
           title={expanded ? collapseLabel : expandLabel}
           aria-expanded={expanded}
           onClick={() => setExpanded((current) => !current)}
         >
-          {expanded ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}
-        </button>
+          {expanded ? <ChevronUp aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
+        </Button>
       ) : null}
     </div>
   );

@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "node:fs";
-import { networkInterfaces } from "node:os";
+import { localNetworkUrls } from "../shared/network-addresses.mjs";
 
 function toIsoFromMs(value) {
   return Number.isFinite(value) && value > 0 ? new Date(value).toISOString() : "";
@@ -20,18 +20,6 @@ function fileStatPayload(filePath) {
     sizeBytes: stat.size,
     modifiedAt: toIsoFromMs(stat.mtimeMs),
   };
-}
-
-function localNetworkUrls(port) {
-  const urls = [];
-  for (const interfaces of Object.values(networkInterfaces())) {
-    for (const item of interfaces || []) {
-      if (item.family === "IPv4" && !item.internal) {
-        urls.push(`http://${item.address}:${port}`);
-      }
-    }
-  }
-  return urls;
 }
 
 export function createAdminContext({

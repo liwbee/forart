@@ -157,6 +157,12 @@ export function handleCanvasExchangeApi(req, res, url, context) {
       else sendJson(res, 200, canvas);
       return true;
     }
+    if (method === "PATCH") {
+      parseJsonBody(req)
+        .then((payload) => sendJson(res, 200, store.updateCanvas(canvasId, payload)))
+        .catch((error) => sendError(res, error));
+      return true;
+    }
     if (method === "DELETE") {
       try {
         sendJson(res, 200, store.deleteCanvas(canvasId));

@@ -10,6 +10,7 @@ export const zhCN = {
     search: "搜索",
     save: "保存",
     close: "关闭",
+    toggleSidebar: "切换侧边栏",
     uploadImage: "上传图片",
     downloadOriginalImage: "下载原图",
     copyImage: "复制图片",
@@ -50,6 +51,11 @@ export const zhCN = {
     imageDownloadStarted: "已开始下载图片"
   },
   errors: {
+    fileReadFailed: "读取文件失败",
+    imageReadFailed: "读取图片失败",
+    imageReadFailedWithStatus: "读取图片失败（HTTP {{status}}）",
+    canvasUnavailable: "无法创建图片处理画布",
+    clipboardImagePrepareFailed: "无法准备要复制的图片",
     imageActionFailed: "图片操作失败：{{message}}",
     nameAlreadyExists: "名称已存在",
     invalidFileNameCharacters: "名称不能包含这些字符：< > : \" / \\ | ? *"
@@ -61,6 +67,11 @@ export const zhCN = {
   },
   labels: {
     tagColor: "标签颜色",
+    collapseTags: "收起标签",
+    excludeTag: "排除 {{name}}",
+    excludedTag: "不含 {{name}}",
+    expandTags: "展开标签",
+    sameColorSingleFilter: "同色单选筛选",
     ascending: "升序",
     createdAt: "时间",
     descending: "降序",
@@ -98,6 +109,7 @@ export const enUS = {
     search: "Search",
     save: "Save",
     close: "Close",
+    toggleSidebar: "Toggle sidebar",
     uploadImage: "Upload image",
     downloadOriginalImage: "Download original image",
     copyImage: "Copy image",
@@ -138,6 +150,11 @@ export const enUS = {
     imageDownloadStarted: "Image download started"
   },
   errors: {
+    fileReadFailed: "Failed to read the file",
+    imageReadFailed: "Failed to read the image",
+    imageReadFailedWithStatus: "Failed to read the image (HTTP {{status}})",
+    canvasUnavailable: "The image processing canvas is unavailable",
+    clipboardImagePrepareFailed: "Failed to prepare the image for the clipboard",
     imageActionFailed: "Image action failed: {{message}}",
     nameAlreadyExists: "Name already exists",
     invalidFileNameCharacters: "Name cannot contain these characters: < > : \" / \\ | ? *"
@@ -148,6 +165,11 @@ export const enUS = {
     noTagsYet: "No tags yet."
   },
   labels: {
+    collapseTags: "Collapse tags",
+    excludeTag: "Exclude {{name}}",
+    excludedTag: "Without {{name}}",
+    expandTags: "Expand tags",
+    sameColorSingleFilter: "Single selection per color",
     ascending: "Asc",
     createdAt: "Time",
     descending: "Desc",

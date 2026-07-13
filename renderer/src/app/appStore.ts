@@ -14,16 +14,18 @@ function readStoredView(): AppView {
 }
 
 function readStoredTheme(): ThemeMode {
-  if (typeof window === "undefined") return "light";
+  if (typeof window === "undefined") return "dark";
   const theme = window.localStorage.getItem(THEME_KEY);
-  return theme === "dark" ? "dark" : "light";
+  return theme === "light" ? "light" : "dark";
 }
 
 function syncDocumentTheme(theme: ThemeMode) {
   if (typeof document === "undefined") return;
   const isDark = theme === "dark";
   document.documentElement.classList.toggle("theme-dark", isDark);
+  document.documentElement.classList.toggle("dark", isDark);
   document.body.classList.toggle("theme-dark", isDark);
+  document.body.classList.toggle("dark", isDark);
 }
 
 interface AppState {

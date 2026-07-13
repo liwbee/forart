@@ -1,7 +1,7 @@
 /* Opt-in shared popover and menu surfaces. Layout stays in feature styles. */
 .popover-surface {
   border: 1px solid var(--popover-border, var(--canvas-node-border, var(--border-subtle)));
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--popover-bg, var(--canvas-control-bg, var(--surface-card)));
   box-shadow: var(--shadow-popover);
 }
@@ -17,7 +17,7 @@
   align-items: center;
   gap: 9px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0 10px;
   color: var(--popover-item-text, var(--canvas-state-hover-text, var(--text-primary)));
   background: transparent;
@@ -31,4 +31,166 @@
 .popover-menu-item:focus-visible {
   background: var(--popover-item-hover-bg, var(--canvas-state-hover-bg, var(--surface-card-muted)));
   outline: 0;
+}
+
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"],
+[data-slot="context-menu-content"],
+[data-slot="context-menu-sub-content"] {
+  border: 1px solid var(--popover-border, var(--canvas-node-border, var(--border-subtle)));
+  border-radius: var(--radius);
+  padding: var(--popover-menu-padding, 5px);
+  background: var(--popover-bg, var(--canvas-control-bg, var(--surface-card)));
+  color: var(--popover-item-text, var(--canvas-state-hover-text, var(--text-primary)));
+  box-shadow: var(--shadow-popover);
+}
+
+[data-slot="dropdown-menu-content"],
+[data-slot="context-menu-content"] {
+  display: grid;
+  gap: var(--popover-menu-gap, 3px);
+}
+
+[data-slot="dropdown-menu-sub-content"],
+[data-slot="context-menu-sub-content"] {
+  gap: var(--popover-menu-gap, 3px);
+}
+
+[data-slot="dropdown-menu-item"],
+[data-slot="dropdown-menu-checkbox-item"],
+[data-slot="dropdown-menu-radio-item"],
+[data-slot="dropdown-menu-sub-trigger"],
+[data-slot="context-menu-item"],
+[data-slot="context-menu-checkbox-item"],
+[data-slot="context-menu-radio-item"],
+[data-slot="context-menu-sub-trigger"] {
+  min-height: 38px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--popover-item-text, var(--canvas-state-hover-text, var(--text-primary)));
+  background: transparent;
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  outline: 0;
+}
+
+[data-slot="dropdown-menu-item"],
+[data-slot="dropdown-menu-sub-trigger"],
+[data-slot="context-menu-item"],
+[data-slot="context-menu-sub-trigger"] {
+  padding: 0 10px;
+}
+
+[data-slot="dropdown-menu-checkbox-item"],
+[data-slot="dropdown-menu-radio-item"],
+[data-slot="context-menu-checkbox-item"],
+[data-slot="context-menu-radio-item"] {
+  padding-top: 0;
+  padding-right: 10px;
+  padding-bottom: 0;
+  padding-left: 32px;
+}
+
+[data-slot="dropdown-menu-sub-trigger"],
+[data-slot="context-menu-sub-trigger"] {
+  gap: 9px;
+}
+
+[data-slot="dropdown-menu-item"] span,
+[data-slot="dropdown-menu-checkbox-item"] span,
+[data-slot="dropdown-menu-radio-item"] span,
+[data-slot="dropdown-menu-sub-trigger"] span,
+[data-slot="context-menu-item"] span,
+[data-slot="context-menu-checkbox-item"] span,
+[data-slot="context-menu-radio-item"] span,
+[data-slot="context-menu-sub-trigger"] span {
+  min-width: 0;
+}
+
+[data-slot="dropdown-menu-item"]:hover,
+[data-slot="dropdown-menu-item"]:focus,
+[data-slot="dropdown-menu-item"]:focus-visible,
+[data-slot="dropdown-menu-item"][data-highlighted],
+[data-slot="dropdown-menu-checkbox-item"]:hover,
+[data-slot="dropdown-menu-checkbox-item"]:focus,
+[data-slot="dropdown-menu-checkbox-item"]:focus-visible,
+[data-slot="dropdown-menu-checkbox-item"][data-highlighted],
+[data-slot="dropdown-menu-radio-item"]:hover,
+[data-slot="dropdown-menu-radio-item"]:focus,
+[data-slot="dropdown-menu-radio-item"]:focus-visible,
+[data-slot="dropdown-menu-radio-item"][data-highlighted],
+[data-slot="dropdown-menu-sub-trigger"]:hover,
+[data-slot="dropdown-menu-sub-trigger"]:focus,
+[data-slot="dropdown-menu-sub-trigger"]:focus-visible,
+[data-slot="dropdown-menu-sub-trigger"][data-highlighted],
+[data-slot="dropdown-menu-sub-trigger"][data-state="open"],
+[data-slot="context-menu-item"]:hover,
+[data-slot="context-menu-item"]:focus,
+[data-slot="context-menu-item"]:focus-visible,
+[data-slot="context-menu-item"][data-highlighted],
+[data-slot="context-menu-checkbox-item"]:hover,
+[data-slot="context-menu-checkbox-item"]:focus,
+[data-slot="context-menu-checkbox-item"]:focus-visible,
+[data-slot="context-menu-checkbox-item"][data-highlighted],
+[data-slot="context-menu-radio-item"]:hover,
+[data-slot="context-menu-radio-item"]:focus,
+[data-slot="context-menu-radio-item"]:focus-visible,
+[data-slot="context-menu-radio-item"][data-highlighted],
+[data-slot="context-menu-sub-trigger"]:hover,
+[data-slot="context-menu-sub-trigger"]:focus,
+[data-slot="context-menu-sub-trigger"]:focus-visible,
+[data-slot="context-menu-sub-trigger"][data-highlighted],
+[data-slot="context-menu-sub-trigger"][data-state="open"] {
+  color: var(--popover-item-hover-text, var(--popover-item-text, var(--canvas-state-hover-text, var(--text-primary))));
+  background: var(--popover-item-hover-bg, var(--canvas-state-hover-bg, var(--surface-card-muted)));
+  outline: 0;
+}
+
+[data-slot="dropdown-menu-item"][data-variant="destructive"],
+[data-slot="context-menu-item"][data-variant="destructive"] {
+  color: var(--danger);
+}
+
+[data-slot="dropdown-menu-item"][data-variant="destructive"] svg,
+[data-slot="context-menu-item"][data-variant="destructive"] svg {
+  color: var(--danger);
+}
+
+[data-slot="dropdown-menu-item"][data-variant="destructive"]:hover,
+[data-slot="dropdown-menu-item"][data-variant="destructive"]:focus,
+[data-slot="dropdown-menu-item"][data-variant="destructive"][data-highlighted],
+[data-slot="context-menu-item"][data-variant="destructive"]:hover,
+[data-slot="context-menu-item"][data-variant="destructive"]:focus,
+[data-slot="context-menu-item"][data-variant="destructive"][data-highlighted] {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+[data-slot="dropdown-menu-item"][data-variant="destructive"][data-confirming="true"],
+[data-slot="dropdown-menu-item"][data-variant="destructive"][data-confirming="true"]:hover,
+[data-slot="dropdown-menu-item"][data-variant="destructive"][data-confirming="true"]:focus,
+[data-slot="dropdown-menu-item"][data-variant="destructive"][data-confirming="true"][data-highlighted],
+[data-slot="context-menu-item"][data-variant="destructive"][data-confirming="true"],
+[data-slot="context-menu-item"][data-variant="destructive"][data-confirming="true"]:hover,
+[data-slot="context-menu-item"][data-variant="destructive"][data-confirming="true"]:focus,
+[data-slot="context-menu-item"][data-variant="destructive"][data-confirming="true"][data-highlighted] {
+  color: var(--popover-destructive-foreground, var(--destructive-foreground));
+  background: var(--danger);
+}
+
+[data-slot="dropdown-menu-item"][data-variant="destructive"][data-confirming="true"] svg,
+[data-slot="dropdown-menu-item"][data-variant="destructive"][data-confirming="true"] svg *,
+[data-slot="context-menu-item"][data-variant="destructive"][data-confirming="true"] svg,
+[data-slot="context-menu-item"][data-variant="destructive"][data-confirming="true"] svg * {
+  color: var(--popover-destructive-foreground, var(--destructive-foreground)) !important;
+  stroke: currentColor;
+}
+
+[data-slot="dropdown-menu-item"][data-disabled],
+[data-slot="dropdown-menu-checkbox-item"][data-disabled],
+[data-slot="dropdown-menu-radio-item"][data-disabled],
+[data-slot="context-menu-item"][data-disabled],
+[data-slot="context-menu-checkbox-item"][data-disabled],
+[data-slot="context-menu-radio-item"][data-disabled] {
+  opacity: var(--state-disabled-opacity);
 }

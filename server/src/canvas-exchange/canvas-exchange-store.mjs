@@ -129,6 +129,19 @@ export function createCanvasExchangeStore({ paths, index, packages }) {
     return readJson(filePath);
   }
 
+  function updateCanvas(canvasId, patch = {}) {
+    const canvas = loadCanvas(canvasId);
+    const manifest = loadManifest(canvasId);
+    if (!canvas || !manifest) throw new Error("Canvas not found");
+    const title = patch.title !== undefined ? validateName(patch.title, "canvas name") : manifest.title;
+    const timestamp = nowIso();
+    const nextCanvas = { ...canvas, title, updatedAt: Date.now() };
+    const nextManifest = { ...manifest, title, updatedAt: timestamp };
+    writeJson(paths.canvasJsonPath(canvasId), nextCanvas);
+    writeJson(paths.manifestPath(canvasId), nextManifest);
+    return { ok: true, canvas: index.upsertCanvas(nextManifest) };
+  }
+
   function uploadCanvasPackage({ packagePath, projectId }) {
     ensureDefaultProject();
     const targetProjectId = index.listProjects().some((project) => project.id === projectId) ? projectId : DEFAULT_PROJECT_ID;
@@ -191,6 +204,7 @@ export function createCanvasExchangeStore({ paths, index, packages }) {
     listProjects,
     loadCanvas,
     readAsset,
+    updateCanvas,
     updateProject,
     uploadCanvasPackage,
   };

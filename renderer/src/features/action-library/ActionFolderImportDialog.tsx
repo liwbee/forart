@@ -1,13 +1,17 @@
-import { MouseEvent, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { AlertTriangle, CheckCircle2, FolderOpen, Loader2, RefreshCw, Tags, XCircle } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, FolderOpen, Loader2, RefreshCw, Tags, X, XCircle } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
-import { LibrarySearchInput } from "../library-layout/LibrarySearchInput";
+import { SearchInput } from "../../components/SearchInput";
+import { VirtualList } from "../../components/VirtualList";
+import { Button } from "../../components/ui/button";
+import { Checkbox } from "../../components/ui/checkbox";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu";
+import { Empty, EmptyDescription } from "../../components/ui/empty";
 import { normalizeLibraryTagColor } from "../library-tags";
-import { importActionEntries } from "./actionFolderImportApi";
+import { importActionEntries } from "./api";
 import type { ActionTag } from "./types";
 import type { ActionFolderImportPreview, ActionFolderImportResult, ActionFolderImportResultRow, ActionFolderImportRow, ActionFolderImportUploadEntry } from "./actionFolderImportTypes";
 
@@ -97,9 +101,6 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   const [rowImportStates, setRowImportStates] = useState<Map<string, LiveImportRow>>(new Map());
   const [rowTagSelections, setRowTagSelections] = useState<Map<string, Set<string>>>(new Map());
   const [rowSearchQuery, setRowSearchQuery] = useState("");
-  const [bulkTagMenuState, setBulkTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
-  const [rowTagMenuState, setRowTagMenuState] = useState<{ rowId: string; x: number; y: number }>({ rowId: "", x: 0, y: 0 });
-  const [scanProgress, setScanProgress] = useState({ processedFiles: 0, totalFiles: 0, builtRows: 0, totalRows: 0 });
 
   useEffect(() => {
     if (!isOpen) {
@@ -119,28 +120,8 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
       setRowImportStates(new Map());
       setRowTagSelections(new Map());
       setRowSearchQuery("");
-      setBulkTagMenuState({ open: false, x: 0, y: 0 });
-      setRowTagMenuState({ rowId: "", x: 0, y: 0 });
-      setScanProgress({ processedFiles: 0, totalFiles: 0, builtRows: 0, totalRows: 0 });
     }
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!bulkTagMenuState.open && !rowTagMenuState.rowId) return undefined;
-    function closeMenu() {
-      setBulkTagMenuState({ open: false, x: 0, y: 0 });
-      setRowTagMenuState({ rowId: "", x: 0, y: 0 });
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") closeMenu();
-    }
-    window.addEventListener("pointerdown", closeMenu);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", closeMenu);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [bulkTagMenuState.open, rowTagMenuState.rowId]);
 
   useEffect(() => {
     if (!isOpen || !window.forartActionImport?.onScanProgress || !window.forartActionImport?.onScanComplete || !window.forartActionImport?.onScanError) return undefined;
@@ -153,12 +134,6 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
         preview_id: current?.preview_id || payload.summary?.preview_id || "",
         rows: current?.rows || [],
       } as ActionFolderImportPreview));
-      setScanProgress({
-        processedFiles: payload.processedFiles || 0,
-        totalFiles: payload.totalFiles || 0,
-        builtRows: payload.builtRows || payload.rows?.length || 0,
-        totalRows: payload.totalRows || 0,
-      });
       if (payload.rows?.length) {
         setFileRows((current) => {
           const seen = new Set(current.map((row) => row.id));
@@ -196,11 +171,6 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
         return next;
       });
       setStage("ready");
-      setScanProgress((current) => ({
-        ...current,
-        builtRows: payload.preview.rows.length,
-        totalRows: payload.preview.rows.length,
-      }));
       setSelectedRows((current) => new Set(payload.preview.rows
         .filter((row) => rowIsValid(row) && (previousSelectionRef.current ? previousSelectionRef.current.has(row.id) : current.has(row.id) || row.selected))
         .map((row) => row.id)));
@@ -246,7 +216,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
             return next;
           });
           if (!preview.preview_id) throw new Error(t("actionLibrary:bulkImportNoPreview"));
-          if (!window.forartActionImport?.readEntry) throw new Error("Action import bridge is unavailable.");
+          if (!window.forartActionImport?.readEntry) throw new Error(t("actionLibrary:importBridgeUnavailable"));
           const entryData = await window.forartActionImport.readEntry({ previewId: preview.preview_id, rowId: row.id });
           const entry: ActionFolderImportUploadEntry = {
             id: row.id,
@@ -354,17 +324,9 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
   const scanActive = stage === "discovering" || stage === "building";
   const canImport = Boolean(stage === "ready" && preview && selectedRowsForBulkActions.size && !selectedInvalidCount && !importMutation.isPending);
   const importStarted = stage === "importing" || stage === "complete";
+  const closeBlocked = stage === "importing" || importMutation.isPending;
   const errorMessage = scanError || importMutation.error;
   const errorText = errorMessage instanceof Error ? errorMessage.message : errorMessage ? String(errorMessage) : "";
-  const rowVirtualizer = useVirtualizer({
-    count: filteredDisplayRows.length,
-    getScrollElement: () => rowsViewportRef.current,
-    estimateSize: () => VIRTUAL_ROW_HEIGHT,
-    overscan: VIRTUAL_OVERSCAN,
-    getItemKey: (index) => filteredDisplayRows[index]?.id || index,
-  });
-  const virtualRows = rowVirtualizer.getVirtualItems();
-
   useEffect(() => {
     if (importStarted) return;
     setSelectedRows((current) => {
@@ -383,20 +345,9 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
     };
   }, [result?.rows]);
 
-  if (!isOpen) return null;
-
-  async function cancelActiveScan() {
-    const scanId = activeScanIdRef.current;
-    if (!scanId) return;
-    activeScanIdRef.current = "";
-    previousSelectionRef.current = null;
-    await window.forartActionImport?.cancelScan?.({ scanId });
-    setStage("idle");
-  }
-
   async function scanFolder(nextSourcePath = sourcePath, previousSelection: Set<string> | null = null) {
     setScanError("");
-    if (!window.forartActionImport?.startScan) throw new Error("Action import bridge is unavailable.");
+    if (!window.forartActionImport?.startScan) throw new Error(t("actionLibrary:importBridgeUnavailable"));
     if (activeScanIdRef.current) await window.forartActionImport.cancelScan?.({ scanId: activeScanIdRef.current });
     const scanId = `scan_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
     activeScanIdRef.current = scanId;
@@ -421,11 +372,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
     setRowSearchQuery("");
     setImportProgress({ completed: 0, total: 0 });
     setRowImportStates(new Map());
-    setBulkTagMenuState({ open: false, x: 0, y: 0 });
-    setRowTagMenuState({ rowId: "", x: 0, y: 0 });
-    setScanProgress({ processedFiles: 0, totalFiles: 0, builtRows: 0, totalRows: 0 });
     if (rowsViewportRef.current) rowsViewportRef.current.scrollTop = 0;
-    rowVirtualizer.scrollToOffset(0);
     const started = await window.forartActionImport.startScan({
       projectId,
       scanId,
@@ -437,7 +384,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
 
   async function chooseFolder() {
     if (!window.forartActionImport?.chooseFolder) {
-      setScanError("Action import bridge is unavailable.");
+      setScanError(t("actionLibrary:importBridgeUnavailable"));
       return;
     }
     try {
@@ -488,13 +435,16 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
     });
   }
 
-  function applyTagToSelectedRows(tagName: string) {
+  function toggleTagForSelectedRows(tagName: string) {
     if (importStarted || !selectedRowsForBulkActions.size) return;
+    const selected = Array.from(selectedRowsForBulkActions);
+    const shouldRemove = selected.every((rowId) => rowTagSelections.get(rowId)?.has(tagName));
     setRowTagSelections((current) => {
       const next = new Map(current);
-      for (const rowId of selectedRowsForBulkActions) {
+      for (const rowId of selected) {
         const tagsForRow = new Set(next.get(rowId) || []);
-        tagsForRow.add(tagName);
+        if (shouldRemove) tagsForRow.delete(tagName);
+        else tagsForRow.add(tagName);
         next.set(rowId, tagsForRow);
       }
       return next;
@@ -519,59 +469,38 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
     });
   }
 
-  function tagMenuPositionFromButton(button: HTMLButtonElement) {
-    const rect = button.getBoundingClientRect();
-    const menuWidth = 184;
-    const menuMaxHeight = 280;
-    const pad = 8;
-    return {
-      x: Math.max(pad, Math.min(rect.left, window.innerWidth - menuWidth - pad)),
-      y: Math.max(pad, Math.min(rect.bottom + 8, window.innerHeight - menuMaxHeight - pad)),
-    };
-  }
-
-  function openBulkTagMenu(event: MouseEvent<HTMLButtonElement>) {
-    event.stopPropagation();
-    if (bulkTagMenuState.open) {
-      setBulkTagMenuState({ open: false, x: 0, y: 0 });
-      return;
-    }
-    const position = tagMenuPositionFromButton(event.currentTarget);
-    setRowTagMenuState({ rowId: "", x: 0, y: 0 });
-    setBulkTagMenuState({ open: true, ...position });
-  }
-
-  function openRowTagMenu(rowId: string, event: MouseEvent<HTMLButtonElement>) {
-    event.stopPropagation();
-    if (rowTagMenuState.rowId === rowId) {
-      setRowTagMenuState({ rowId: "", x: 0, y: 0 });
-      return;
-    }
-    const position = tagMenuPositionFromButton(event.currentTarget);
-    setBulkTagMenuState({ open: false, x: 0, y: 0 });
-    setRowTagMenuState({ rowId, ...position });
-  }
-
   return (
-    <div className="dialog-backdrop action-folder-import-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="action-folder-import" role="dialog" aria-modal="true" aria-labelledby="action-folder-import-title" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="action-folder-import__head">
+    <Dialog open={isOpen} onOpenChange={(open) => {
+      if (!open && !closeBlocked) onClose();
+    }}>
+      <DialogContent
+        className="action-folder-import max-w-none overflow-hidden sm:max-w-none"
+        onEscapeKeyDown={(event) => {
+          if (closeBlocked) event.preventDefault();
+        }}
+        onPointerDownOutside={(event) => {
+          if (closeBlocked) event.preventDefault();
+        }}
+      >
+        <DialogHeader className="action-folder-import__head flex-row text-left">
           <div>
-            <h2 id="action-folder-import-title">{t("actionLibrary:bulkImportTitle")}</h2>
-            <p>{t("actionLibrary:bulkImportDescription", { project: projectName || t("common:labels.projectName") })}</p>
+            <DialogTitle>{t("actionLibrary:bulkImportTitle")}</DialogTitle>
+            <DialogDescription>{t("actionLibrary:bulkImportDescription", { project: projectName || t("common:labels.projectName") })}</DialogDescription>
           </div>
-          <button className="action-folder-import__icon-button" type="button" aria-label={t("common:actions.close")} onClick={onClose}>
-            <XCircle size={20} aria-hidden="true" />
-          </button>
-        </header>
+          <DialogClose asChild>
+            <Button variant="ghost" size="icon-sm" type="button" disabled={closeBlocked} aria-label={t("common:actions.close")} title={t("common:actions.close")}>
+              <X aria-hidden="true" />
+            </Button>
+          </DialogClose>
+        </DialogHeader>
 
         <div className="action-folder-import__toolbar">
-          <button className="action-folder-import__icon-button" type="button" onClick={chooseFolder} disabled={scanActive || importStarted} aria-label={sourcePath ? t("actionLibrary:bulkImportChangeFolder") : t("actionLibrary:bulkImportChooseFolder")} title={sourcePath ? t("actionLibrary:bulkImportChangeFolder") : t("actionLibrary:bulkImportChooseFolder")}>
-            <FolderOpen size={18} aria-hidden="true" />
-          </button>
-          <button className={`action-folder-import__icon-button${scanActive ? " is-spinning" : ""}`} type="button" onClick={rescan} disabled={!sourcePath || scanActive || importStarted} aria-label={t("actionLibrary:bulkImportRescan")} title={t("actionLibrary:bulkImportRescan")}>
-            <RefreshCw size={18} aria-hidden="true" />
-          </button>
+          <Button variant="outline" size="icon-lg" type="button" onClick={chooseFolder} disabled={scanActive || importStarted} aria-label={sourcePath ? t("actionLibrary:bulkImportChangeFolder") : t("actionLibrary:bulkImportChooseFolder")} title={sourcePath ? t("actionLibrary:bulkImportChangeFolder") : t("actionLibrary:bulkImportChooseFolder")}>
+            <FolderOpen aria-hidden="true" />
+          </Button>
+          <Button className={scanActive ? "action-folder-import__icon-button is-spinning" : "action-folder-import__icon-button"} variant="outline" size="icon-lg" type="button" onClick={rescan} disabled={!sourcePath || scanActive || importStarted} aria-label={t("actionLibrary:bulkImportRescan")} title={t("actionLibrary:bulkImportRescan")}>
+            <RefreshCw aria-hidden="true" />
+          </Button>
           <div className="action-folder-import__path" title={preview?.source_path || sourcePath}>
             {preview?.source_path || sourcePath || t("actionLibrary:bulkImportNoFolder")}
           </div>
@@ -579,8 +508,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
 
         {errorText ? <ErrorCopyLine className="library-error" text={t("actionLibrary:requestFailed", { message: errorText })} /> : null}
 
-        <>
-            <div className="action-folder-import__summary">
+        <div className="action-folder-import__summary">
               {result ? (
                 <>
                   <span>{t("actionLibrary:bulkImportResultImported", { count: resultTotals.imported })}</span>
@@ -600,7 +528,7 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
             </div>
 
             <div className="action-folder-import__actions">
-              <LibrarySearchInput
+              <SearchInput
                 className="action-folder-import__search"
                 value={rowSearchQuery}
                 disabled={scanActive || importStarted}
@@ -609,111 +537,89 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
                 onChange={(nextSearchQuery) => {
                   setRowSearchQuery(nextSearchQuery);
                   setSelectedRows(filteredValidRowIdSet(displayRows, nextSearchQuery.trim().toLocaleLowerCase()));
-                  rowVirtualizer.scrollToOffset(0);
+                  if (rowsViewportRef.current) rowsViewportRef.current.scrollTop = 0;
                 }}
               />
               <div className="action-folder-import__selection-actions">
-                <button
-                  className="library-button action-folder-import__tag-trigger"
-                  type="button"
-                  disabled={!selectedRowsForBulkActions.size || scanActive || importStarted}
-                  aria-haspopup="menu"
-                  aria-expanded={bulkTagMenuState.open}
-                  onClick={openBulkTagMenu}
-                >
-                  <Tags size={16} aria-hidden="true" />
-                  <span>{t("actionLibrary:bulkImportApplyTags")}</span>
-                </button>
-                <button className="library-button" type="button" disabled={!filteredValidRowIds.length || scanActive || importStarted} onClick={selectFilteredValidRows}>
-                  {t("actionLibrary:bulkImportSelectValid")}
-                </button>
-                <button className="library-button" type="button" disabled={!displayRows.length || scanActive || importStarted} onClick={clearSelection}>
-                  {t("actionLibrary:bulkImportClearSelection")}
-                </button>
-              </div>
-            </div>
-            {bulkTagMenuState.open
-              ? createPortal(
-                  <div
-                    className="outfit-tag-menu outfit-tag-menu--submenu action-folder-import__tag-menu"
-                    role="menu"
-                    aria-label={t("actionLibrary:chooseTags")}
-                    style={{ left: bulkTagMenuState.x, top: bulkTagMenuState.y }}
-                    onPointerDown={(event) => event.stopPropagation()}
-                  >
-                    {tags.length ? (
-                      <>
-                        {tags.map((tag) => (
-                          <button
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      className="action-folder-import__tag-trigger"
+                      type="button"
+                      variant="default"
+                      disabled={!selectedRowsForBulkActions.size || scanActive || importStarted}
+                    >
+                      <Tags data-icon="inline-start" aria-hidden="true" />
+                      <span>{t("actionLibrary:bulkImportApplyTags")}</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="library-tag-dropdown-menu max-h-72 min-w-44 !overflow-y-auto">
+                    <DropdownMenuGroup>
+                      {tags.length ? tags.map((tag) => {
+                        const checked = Array.from(selectedRowsForBulkActions).every((rowId) => rowTagSelections.get(rowId)?.has(tag.name));
+                        return (
+                          <DropdownMenuCheckboxItem
                             key={tag.id}
-                            type="button"
-                            role="menuitemcheckbox"
-                            onClick={() => applyTagToSelectedRows(tag.name)}
+                            className="library-tag-dropdown-item"
+                            checked={checked}
+                            indicatorSide="right"
+                            onSelect={(event) => {
+                              event.preventDefault();
+                              toggleTagForSelectedRows(tag.name);
+                            }}
                           >
                             <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
-                            <span>{tag.name}</span>
-                          </button>
-                        ))}
-                        <button type="button" role="menuitem" onClick={clearSelectedRowTags}>
+                            <span className="library-tag-dropdown-item__label">{tag.name}</span>
+                          </DropdownMenuCheckboxItem>
+                        );
+                      }) : (
+                        <div className="px-2 py-1.5 text-sm text-muted-foreground">{t("actionLibrary:noTags")}</div>
+                      )}
+                      {tags.length ? (
+                        <DropdownMenuItem onSelect={(event) => {
+                          event.preventDefault();
+                          clearSelectedRowTags();
+                        }}>
                           {t("actionLibrary:bulkImportClearTags")}
-                        </button>
-                      </>
-                    ) : (
-                      <div className="outfit-tag-menu__empty">{t("actionLibrary:noTags")}</div>
-                    )}
-                  </div>,
-                  document.body,
-                )
-              : null}
-            {rowTagMenuState.rowId
-              ? createPortal(
-                  <div
-                    className="outfit-tag-menu outfit-tag-menu--submenu action-folder-import__tag-menu"
-                    role="menu"
-                    aria-label={t("actionLibrary:chooseTags")}
-                    style={{ left: rowTagMenuState.x, top: rowTagMenuState.y }}
-                    onPointerDown={(event) => event.stopPropagation()}
-                  >
-                    {tags.length ? (
-                      <>
-                        {tags.map((tag) => {
-                          const active = rowTagSelections.get(rowTagMenuState.rowId)?.has(tag.name) || false;
-                          return (
-                            <button
-                              key={tag.id}
-                              className={active ? "selected" : ""}
-                              type="button"
-                              role="menuitemcheckbox"
-                              aria-checked={active}
-                              onClick={() => toggleRowTag(rowTagMenuState.rowId, tag.name)}
-                            >
-                              <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
-                              <span>{tag.name}</span>
-                            </button>
-                          );
-                        })}
-                        <button type="button" role="menuitem" onClick={() => clearRowTags(rowTagMenuState.rowId)}>
-                          {t("actionLibrary:bulkImportClearTags")}
-                        </button>
-                      </>
-                    ) : (
-                      <div className="outfit-tag-menu__empty">{t("actionLibrary:noTags")}</div>
-                    )}
-                  </div>,
-                  document.body,
-                )
-              : null}
+                        </DropdownMenuItem>
+                      ) : null}
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button variant="default" type="button" disabled={!filteredValidRowIds.length || scanActive || importStarted} onClick={selectFilteredValidRows}>
+                  {t("actionLibrary:bulkImportSelectValid")}
+                </Button>
+                <Button variant="default" type="button" disabled={!displayRows.length || scanActive || importStarted} onClick={clearSelection}>
+                  {t("actionLibrary:bulkImportClearSelection")}
+                </Button>
+              </div>
+            </div>
 
-            <div
-              ref={rowsViewportRef}
-              className="action-folder-import__rows scrollbar-thin-stable"
+            <VirtualList
+              items={filteredDisplayRows}
+              estimateSize={VIRTUAL_ROW_HEIGHT}
+              overscan={VIRTUAL_OVERSCAN}
+              getItemKey={(row) => row.id}
+              className="action-folder-import__rows"
+              viewportClassName="action-folder-import__rows-viewport"
+              viewportRef={rowsViewportRef}
+              spacerClassName="action-folder-import__virtual"
+              itemRole="listitem"
               role="list"
-              aria-label={t("actionLibrary:bulkImportRows")}
-            >
-              <div className="action-folder-import__virtual" style={{ height: rowVirtualizer.getTotalSize() || undefined }}>
-              {virtualRows.map((virtualRow) => {
-                const row = filteredDisplayRows[virtualRow.index];
-                if (!row) return null;
+              ariaLabel={t("actionLibrary:bulkImportRows")}
+              itemClassName={(row) => {
+                const checked = selectedRows.has(row.id);
+                const liveStatus = rowImportStates.get(row.id)?.final_status || "";
+                return `action-folder-import-row ${liveStatus ? liveStatusClass(liveStatus) : statusClass(row)}${checked ? " is-selected" : ""}`;
+              }}
+              empty={
+                !preview
+                  ? <Empty className="action-folder-import__empty"><EmptyDescription>{t("actionLibrary:bulkImportPickFolderFirst")}</EmptyDescription></Empty>
+                  : !displayRows.length
+                    ? <Empty className="action-folder-import__empty"><EmptyDescription>{t("actionLibrary:bulkImportPickFolderFirst")}</EmptyDescription></Empty>
+                    : <Empty className="action-folder-import__empty"><EmptyDescription>{t("actionLibrary:bulkImportNoSearchResults")}</EmptyDescription></Empty>
+              }
+              renderItem={(row) => {
                 const checked = selectedRows.has(row.id);
                 const liveRow = rowImportStates.get(row.id);
                 const displayRow = liveRow || row;
@@ -721,15 +627,15 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
                 const message = issueText(displayRow);
                 const selectedTagNames = rowTagSelections.get(row.id) || new Set<string>();
                 return (
-                  <div key={virtualRow.key} className={`action-folder-import-row ${liveStatus ? liveStatusClass(liveStatus) : statusClass(row)}${checked ? " is-selected" : ""}`} role="listitem" style={{ transform: `translateY(${virtualRow.start}px)` }}>
+                  <>
                     {importStarted ? (
                       <div className="action-folder-import-row__check action-folder-import-row__result-icon" aria-hidden="true">
                         {liveStatus === "importing" ? <Loader2 size={18} /> : liveStatus === "failed" ? <XCircle size={18} /> : liveStatus === "not_selected" ? <span /> : <CheckCircle2 size={18} />}
                       </div>
                     ) : (
-                      <label className="action-folder-import-row__check">
-                        <input type="checkbox" checked={checked} onChange={() => toggleRow(row)} aria-label={t("actionLibrary:bulkImportToggleRow", { name: row.proposed_name || row.filename })} />
-                      </label>
+                      <div className="action-folder-import-row__check">
+                        <Checkbox checked={checked} onCheckedChange={() => toggleRow(row)} aria-label={t("actionLibrary:bulkImportToggleRow", { name: row.proposed_name || row.filename })} />
+                      </div>
                     )}
                     <div className="action-folder-import-row__thumb">
                       {displayRow.thumbnail_url ? <img src={displayRow.thumbnail_url} alt={displayRow.proposed_name || displayRow.filename} loading="lazy" decoding="async" /> : <span>{t("common:empty.noImage")}</span>}
@@ -737,17 +643,52 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
                     <div className="action-folder-import-row__main">
                       <div className="action-folder-import-row__name" title={displayRow.proposed_name || displayRow.filename}>{displayRow.proposed_name || displayRow.filename}</div>
                       <div className="action-folder-import-row__tags" aria-label={t("actionLibrary:bulkImportRowTags", { name: displayRow.proposed_name || displayRow.filename })}>
-                        <button
-                          className="action-folder-import-row__tag-trigger"
-                          type="button"
-                          disabled={importStarted}
-                          aria-label={t("actionLibrary:chooseTags")}
-                          aria-haspopup="menu"
-                          aria-expanded={rowTagMenuState.rowId === row.id}
-                          onClick={(event) => openRowTagMenu(row.id, event)}
-                        >
-                          <Tags size={15} aria-hidden="true" />
-                        </button>
+                        <DropdownMenu modal={false}>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              className="action-folder-import-row__tag-trigger"
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              disabled={importStarted}
+                              aria-label={t("actionLibrary:chooseTags")}
+                            >
+                              <Tags aria-hidden="true" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="library-tag-dropdown-menu max-h-72 min-w-44 !overflow-y-auto">
+                            <DropdownMenuGroup>
+                              {tags.length ? tags.map((tag) => {
+                                const checked = selectedTagNames.has(tag.name);
+                                return (
+                                  <DropdownMenuCheckboxItem
+                                    key={tag.id}
+                                    className="library-tag-dropdown-item"
+                                    checked={checked}
+                                    indicatorSide="right"
+                                    onSelect={(event) => {
+                                      event.preventDefault();
+                                      toggleRowTag(row.id, tag.name);
+                                    }}
+                                  >
+                                    <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
+                                    <span className="library-tag-dropdown-item__label">{tag.name}</span>
+                                  </DropdownMenuCheckboxItem>
+                                );
+                              }) : (
+                                <div className="px-2 py-1.5 text-sm text-muted-foreground">{t("actionLibrary:noTags")}</div>
+                              )}
+                              {tags.length ? (
+                                <DropdownMenuItem onSelect={(event) => {
+                                  event.preventDefault();
+                                  clearRowTags(row.id);
+                                }}>
+                                  {t("actionLibrary:bulkImportClearTags")}
+                                </DropdownMenuItem>
+                              ) : null}
+                            </DropdownMenuGroup>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                         <div className="action-folder-import-row__tag-summary">
                           {selectedTagNames.size ? (
                             Array.from(selectedTagNames).map((tagName) => <span key={tagName}>{tagName}</span>)
@@ -768,16 +709,12 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
                       </div>
                     </div>
                     <span className="action-folder-import-row__status">{liveStatus ? finalStatusLabel(liveStatus, t) : row.errors?.length ? t("actionLibrary:bulkImportStatusInvalid") : row.warnings?.length ? t("actionLibrary:bulkImportStatusWarning") : t("actionLibrary:bulkImportStatusReady")}</span>
-                  </div>
+                  </>
                 );
-              })}
-              </div>
-              {!preview ? <div className="action-folder-import__empty">{t("actionLibrary:bulkImportPickFolderFirst")}</div> : null}
-              {preview && !displayRows.length ? <div className="action-folder-import__empty">{t("actionLibrary:bulkImportPickFolderFirst")}</div> : null}
-              {preview && displayRows.length && !filteredDisplayRows.length ? <div className="action-folder-import__empty">{t("actionLibrary:bulkImportNoSearchResults")}</div> : null}
-            </div>
+              }}
+            />
 
-            <footer className="action-folder-import__footer">
+            <DialogFooter className="action-folder-import__footer flex-row sm:justify-between">
               <span>
                 {stage === "complete"
                   ? t("actionLibrary:bulkImportResultDone")
@@ -787,21 +724,19 @@ export function ActionFolderImportDialog({ projectId, projectName, existingActio
               </span>
               <div>
                 {stage === "complete" ? (
-                  <button className="button primary" type="button" onClick={onClose}>{t("common:actions.close")}</button>
+                  <DialogClose asChild>
+                    <Button type="button">{t("common:actions.close")}</Button>
+                  </DialogClose>
                 ) : (
-                  <>
-                    <button className="button secondary" type="button" onClick={onClose} disabled={importMutation.isPending}>{t("common:actions.cancel")}</button>
-                    <button className="button primary" type="button" disabled={!canImport} onClick={() => importMutation.mutate()}>
-                      {importMutation.isPending
-                        ? `${t("actionLibrary:bulkImportImporting")} ${importProgress.completed}/${importProgress.total}`
-                        : t("actionLibrary:bulkImportStart")}
-                    </button>
-                  </>
+                  <Button type="button" disabled={!canImport} onClick={() => importMutation.mutate()}>
+                    {importMutation.isPending
+                      ? `${t("actionLibrary:bulkImportImporting")} ${importProgress.completed}/${importProgress.total}`
+                      : t("actionLibrary:bulkImportStart")}
+                  </Button>
                 )}
               </div>
-            </footer>
-          </>
-      </section>
-    </div>
+            </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

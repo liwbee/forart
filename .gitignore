@@ -26,6 +26,10 @@ Thumbs.db
 .cache/
 .vite/
 coverage/
+playwright-report/
+test-results/
+.agents/
+skills-lock.json
 *.tsbuildinfo
 
 server/node_modules/

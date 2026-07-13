@@ -1,6 +1,5 @@
 import { parseRequest } from "../server/src/shared/validation.mjs";
 import {
-  libraryActionImportPreviewPayloadSchema,
   libraryAddModelImagePayloadSchema,
   libraryAssetUploadPayloadSchema,
   libraryBulkEntriesPayloadSchema,
@@ -278,15 +277,5 @@ expectInvalid(libraryImportEntriesPayloadSchema, "import entries rejects unknown
   entries: [{}],
   extra: true,
 }, "");
-
-expectValid(libraryActionImportPreviewPayloadSchema, "action import preview trims source path", {
-  source_path: " C:/assets ",
-}, (value) => {
-  assert(value.source_path === "C:/assets", "source_path should trim");
-});
-
-expectInvalid(libraryActionImportPreviewPayloadSchema, "action import preview requires source path", {
-  source_path: " ",
-}, "source_path");
 
 console.log("Zod schema validation checks passed.");

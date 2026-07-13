@@ -1,12 +1,18 @@
 import { Images, PersonStanding, Users, X, type LucideIcon } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
+import { AppScrollArea } from "../../components/AppScrollArea";
 import { LazyImage } from "../../components/LazyImage";
+import { NativeTabs } from "../../components/NativeTabs";
+import { AppSelect as Select } from "../../components/AppSelect";
+import { Button } from "../../components/ui/button";
+import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
+import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { LibraryTagFilterButton, useLibraryTagSettingsStore } from "../library-tags";
-import { Select } from "../../components/Select";
 import { cacheBustedLibraryAssetUrl, useLibraryAssetPickerData } from "./useLibraryAssetPickerData";
-import type { LibraryAssetItem, LibraryAssetPickerSource, LibraryAssetSelection, LibraryAssetTab } from "./types";
+import type { LibraryAssetItem, LibraryAssetPickerSource, LibraryAssetSelection } from "./types";
 
 const allLibrarySources: Array<LibraryAssetPickerSource & { icon: LucideIcon }> = [
   { id: "models", labelKey: "resourceLibrary:models", icon: Users },
@@ -35,46 +41,17 @@ function GenderSymbol({ gender, className }: { gender: "female" | "male"; classN
 }
 
 interface LibraryAssetPickerContentProps {
-  enabled?: boolean;
-  sources?: readonly LibraryAssetTab[];
-  initialTab?: LibraryAssetTab;
   onSelect: (selection: LibraryAssetSelection) => void;
-  className?: string;
-  variant?: "dialog" | "rail";
 }
 
-export function LibraryAssetPickerContent({
-  enabled = true,
-  sources,
-  initialTab = "outfits",
-  onSelect,
-  className = "",
-  variant = "dialog",
-}: LibraryAssetPickerContentProps) {
+export function LibraryAssetPickerContent({ onSelect }: LibraryAssetPickerContentProps) {
   const { t } = useTranslation();
   const sameColorSingleFilter = useLibraryTagSettingsStore((state) => state.sameColorSingleFilter);
-  const picker = useLibraryAssetPickerData({ enabled, sources, initialTab });
+  const picker = useLibraryAssetPickerData();
   const visibleSources = allLibrarySources.filter((source) => picker.availableTabs.includes(source.id));
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const choicesRef = useRef<HTMLDivElement | null>(null);
-  const [railChoicesPosition, setRailChoicesPosition] = useState({ left: 0, top: 0 });
+  const [projectSelectOpen, setProjectSelectOpen] = useState(false);
 
-  function selectItem(item: LibraryAssetItem, target?: HTMLElement | null) {
-    if (item.needsChoices) {
-      if (variant === "rail" && target) {
-        const contentRect = contentRef.current?.getBoundingClientRect();
-        const targetRect = target.getBoundingClientRect();
-        if (contentRect) {
-          setRailChoicesPosition({
-            left: targetRect.right - contentRect.left + 8,
-            top: targetRect.top - contentRect.top,
-          });
-        }
-      }
-      picker.setModelChoiceFor(item);
-      picker.prefetchModelChoices(item);
-      return;
-    }
+  function selectItem(item: LibraryAssetItem) {
     if (!item.url) return;
     onSelect({
       kind: item.kind,
@@ -82,47 +59,46 @@ export function LibraryAssetPickerContent({
       assetId: item.assetId,
       name: item.name,
       url: item.url,
+      thumbnailUrl: item.thumbnailUrl,
       updatedAt: item.updatedAt,
     });
   }
 
   const modelChoiceFor = picker.modelChoiceFor;
 
-  useEffect(() => {
-    if (variant !== "rail" || !modelChoiceFor) return;
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target as Node | null;
-      if (target && choicesRef.current?.contains(target)) return;
-      picker.setModelChoiceFor(null);
+  function changeModelChoicesOpen(item: LibraryAssetItem, open: boolean) {
+    if (open) {
+      picker.setModelChoiceFor(item);
+      picker.prefetchModelChoices(item);
+      return;
     }
-    window.addEventListener("pointerdown", handlePointerDown);
-    return () => window.removeEventListener("pointerdown", handlePointerDown);
-  }, [modelChoiceFor, picker.setModelChoiceFor, variant]);
+    if (modelChoiceFor?.id === item.id) picker.setModelChoiceFor(null);
+  }
 
   return (
-    <div ref={contentRef} className={`library-asset-picker-content${className ? ` ${className}` : ""}`}>
+    <div className="library-asset-picker-content">
       {visibleSources.length > 1 ? (
-        <div className="library-asset-picker__tabs" role="tablist" aria-label={t("resourceLibrary:navigation")}>
-          {visibleSources.map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button key={tab.id} type="button" role="tab" aria-selected={picker.activeTab === tab.id} className={picker.activeTab === tab.id ? "active" : ""} onClick={() => picker.setActiveTab(tab.id)}>
-                <Icon size={17} aria-hidden="true" />
-                <span>{t(tab.labelKey)}</span>
-              </button>
-            );
-          })}
-        </div>
+        <NativeTabs
+          items={visibleSources.map((tab) => ({ value: tab.id, label: t(tab.labelKey), icon: tab.icon }))}
+          value={picker.activeTab}
+          onChange={picker.setActiveTab}
+          ariaLabel={t("resourceLibrary:navigation")}
+          className="library-asset-picker__tabs"
+        />
       ) : null}
 
       <div className="library-asset-picker__filters">
         <Select
           value={picker.activeProjectId}
           disabled={!picker.activeProjects.length}
+          open={projectSelectOpen && Boolean(picker.activeProjects.length)}
+          onOpenChange={setProjectSelectOpen}
           options={picker.activeProjects.map((project) => ({ value: project.id, label: project.name || t("infiniteCanvas:untitledCanvas") }))}
-          onChange={picker.changeProject}
+          onChange={(projectId) => {
+            picker.changeProject(projectId);
+            setProjectSelectOpen(false);
+          }}
           ariaLabel={t("freeCanvas:project")}
-          portal
           menuPlacement="bottom"
         />
         <LibraryTagFilterButton
@@ -137,32 +113,49 @@ export function LibraryAssetPickerContent({
           menuContentBefore={picker.activeTab === "models" ? (
             <div className="library-asset-picker__filter-menu-section" aria-label={t("modelLibrary:genderCategory")}>
               <span>{t("modelLibrary:gender")}</span>
-              <div className="library-asset-picker__gender-filter">
-                <button
-                  className={`gender-icon-filter female${picker.activeModelGender === "female" ? " active" : ""}`}
-                  type="button"
+              <ToggleGroup
+                className="library-asset-picker__gender-filter"
+                type="single"
+                variant="outline"
+                size="sm"
+                spacing={1}
+                value={picker.activeModelGender}
+                aria-label={t("modelLibrary:genderCategory")}
+                onValueChange={(value) => {
+                  if (value === "female" || value === "male") {
+                    if (value !== picker.activeModelGender) picker.toggleModelGender(value);
+                    return;
+                  }
+                  if (picker.activeModelGender) picker.toggleModelGender(picker.activeModelGender);
+                }}
+              >
+                <ToggleGroupItem
+                  className="gender-icon-filter female"
+                  value="female"
                   aria-label={t("modelLibrary:femaleModel")}
                   title={t("modelLibrary:femaleModel")}
-                  onClick={() => picker.toggleModelGender("female")}
                 >
                   <GenderSymbol gender="female" className="gender-symbol-icon" />
-                </button>
-                <button
-                  className={`gender-icon-filter male${picker.activeModelGender === "male" ? " active" : ""}`}
-                  type="button"
+                </ToggleGroupItem>
+                <ToggleGroupItem
+                  className="gender-icon-filter male"
+                  value="male"
                   aria-label={t("modelLibrary:maleModel")}
                   title={t("modelLibrary:maleModel")}
-                  onClick={() => picker.toggleModelGender("male")}
                 >
                   <GenderSymbol gender="male" className="gender-symbol-icon" />
-                </button>
-              </div>
+                </ToggleGroupItem>
+              </ToggleGroup>
             </div>
           ) : null}
         />
       </div>
 
-      <div className="library-asset-picker__body">
+      <AppScrollArea
+        className="library-asset-picker__body"
+        viewportClassName="library-asset-picker__body-viewport"
+        scrollBarClassName="library-asset-picker__body-scrollbar"
+      >
         {picker.errorMessage ? <ErrorCopyLine className="library-asset-picker__state library-asset-picker__state--error" text={t("infiniteCanvas:libraryRequestFailed", { message: picker.errorMessage })} /> : null}
         {!picker.storageConfigured && !picker.storageSettingsLoading ? <div className="library-asset-picker__state">{t("outfitLibrary:storageUnavailable")}</div> : null}
         {picker.storageConfigured && !picker.isLoading && !picker.activeProjects.length ? <div className="library-asset-picker__state">{t("common:empty.noProjects")}</div> : null}
@@ -172,66 +165,84 @@ export function LibraryAssetPickerContent({
           <div className="library-asset-picker__grid">
             {picker.activeItems.map((item) => {
               const src = item.url ? cacheBustedLibraryAssetUrl(item.thumbnailUrl || item.url, item.updatedAt || item.assetId || item.id) : "";
-              return (
-                <button key={item.id} type="button" data-kind={item.kind} disabled={!src} onClick={(event) => selectItem(item, event.currentTarget)}>
+              const itemButton = (
+                <button type="button" data-kind={item.kind} disabled={!src} onClick={item.needsChoices ? undefined : () => selectItem(item)}>
                   {src ? <LazyImage src={src} alt={item.name} draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
                   <strong>{item.name || t("infiniteCanvas:untitledCanvas")}</strong>
                 </button>
               );
-            })}
-          </div>
-        ) : null}
-      </div>
 
-      {modelChoiceFor ? (
-        <div
-          ref={choicesRef}
-          className="library-asset-picker__choices"
-          role="dialog"
-          aria-label={t("infiniteCanvas:chooseModelImage", { name: modelChoiceFor.name })}
-          style={variant === "rail" ? ({
-            "--library-asset-choice-left": `${railChoicesPosition.left}px`,
-            "--library-asset-choice-top": `${railChoicesPosition.top}px`,
-          } as CSSProperties) : undefined}
-          onPointerDown={(event) => {
-            if (variant === "rail") event.stopPropagation();
-          }}
-        >
-          <div className="library-asset-picker__choices-head">
-            <strong>{modelChoiceFor.name}</strong>
-            <button type="button" aria-label={t("common:actions.back")} title={t("common:actions.back")} onClick={() => picker.setModelChoiceFor(null)}>
-              <X size={16} aria-hidden="true" />
-            </button>
-          </div>
-          <div className="library-asset-picker__choice-grid">
-            {picker.modelChoicesQuery.isLoading ? <div className="library-asset-picker__state">{t("freeCanvasEditor:loadingImages")}</div> : null}
-            {!picker.modelChoicesQuery.isLoading && !(picker.modelChoicesQuery.data?.images || []).length ? <div className="library-asset-picker__state">{t("freeCanvasEditor:noModelImages")}</div> : null}
-            {(picker.modelChoicesQuery.data?.images || []).map((image) => {
-              const src = image.asset_url ? cacheBustedLibraryAssetUrl(image.thumbnail_url || image.asset_url, image.created_at || image.asset_id || image.id) : "";
+              if (!item.needsChoices) {
+                return <Fragment key={item.id}>{itemButton}</Fragment>;
+              }
+
+              const choicesOpen = modelChoiceFor?.id === item.id;
               return (
-                <button
-                  key={image.id}
-                  type="button"
-                  disabled={!src}
-                  onClick={() => {
-                    if (!src || !image.asset_url) return;
-                    onSelect({
-                      kind: "model",
-                      entryId: modelChoiceFor.id,
-                      assetId: image.asset_id,
-                      name: image.caption || image.filename || modelChoiceFor.name,
-                      url: image.asset_url,
-                      updatedAt: image.created_at,
-                    });
-                  }}
-                >
-                  {src ? <LazyImage src={src} alt={image.caption || image.filename || modelChoiceFor.name} draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
-                </button>
+                <Popover key={item.id} open={choicesOpen} onOpenChange={(open) => changeModelChoicesOpen(item, open)}>
+                  <PopoverTrigger asChild>{itemButton}</PopoverTrigger>
+                  <PopoverContent
+                    className="library-asset-picker__choices"
+                    side="right"
+                    sideOffset={8}
+                    align="start"
+                    collisionPadding={16}
+                    aria-label={t("infiniteCanvas:chooseModelImage", { name: item.name })}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                    onWheel={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <div className="library-asset-picker__choices-head">
+                      <strong>{item.name}</strong>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex">
+                            <PopoverClose asChild>
+                              <Button type="button" variant="ghost" size="icon-sm" aria-label={t("common:actions.close")}>
+                                <X aria-hidden="true" />
+                              </Button>
+                            </PopoverClose>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("common:actions.close")}</TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <AppScrollArea className="library-asset-picker__choice-grid" viewportClassName="library-asset-picker__choice-grid-viewport">
+                      {picker.modelChoicesQuery.isLoading ? <div className="library-asset-picker__state">{t("freeCanvasEditor:loadingImages")}</div> : null}
+                      {!picker.modelChoicesQuery.isLoading && !(picker.modelChoicesQuery.data?.images || []).length ? <div className="library-asset-picker__state">{t("freeCanvasEditor:noModelImages")}</div> : null}
+                      {(picker.modelChoicesQuery.data?.images || []).map((image) => {
+                        const choiceSrc = image.asset_url ? cacheBustedLibraryAssetUrl(image.thumbnail_url || image.asset_url, image.created_at || image.asset_id || image.id) : "";
+                        return (
+                          <PopoverClose key={image.id} asChild>
+                            <button
+                              type="button"
+                              disabled={!choiceSrc}
+                              onClick={() => {
+                                if (!choiceSrc || !image.asset_url) return;
+                                onSelect({
+                                  kind: "model",
+                                  entryId: item.id,
+                                  assetId: image.asset_id,
+                                  name: image.caption || image.filename || item.name,
+                                  url: image.asset_url,
+                                  thumbnailUrl: image.thumbnail_url || undefined,
+                                  updatedAt: image.created_at,
+                                });
+                              }}
+                            >
+                              {choiceSrc ? <LazyImage src={choiceSrc} alt={image.caption || image.filename || item.name} draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
+                            </button>
+                          </PopoverClose>
+                        );
+                      })}
+                    </AppScrollArea>
+                  </PopoverContent>
+                </Popover>
               );
             })}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </AppScrollArea>
     </div>
   );
 }

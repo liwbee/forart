@@ -1,6 +1,9 @@
 import { Ban, ListFilter } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { type ReactNode, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { AppScrollArea } from "../../components/AppScrollArea";
+import { Button } from "../../components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
 import { createLibraryTagFilter, toggleLibraryTagFilterInclude, type LibraryTagFilter } from "./filter";
 import { normalizeLibraryTagColor, type LibraryTagColor } from "./tagColors";
 
@@ -28,15 +31,13 @@ function joinClassNames(...classNames: Array<string | false | undefined>) {
 }
 
 export function LibraryTagFilterButton({ tags, tagFilter, tagCounts, allLabel, ariaLabel, onChange, className, active, menuContentBefore, sameColorSingleFilter = false }: LibraryTagFilterButtonProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [menuStyle, setMenuStyle] = useState({ left: 0, top: 0, width: 320, maxHeight: 280 });
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const includeTagSet = new Set(tagFilter.includeTagIds);
   const excludeTagSet = new Set(tagFilter.excludeTagIds);
   const activeTagNames = [
     ...tags.filter((tag) => includeTagSet.has(tag.id)).map((tag) => tag.name),
-    ...tags.filter((tag) => excludeTagSet.has(tag.id)).map((tag) => `不含 ${tag.name}`),
+    ...tags.filter((tag) => excludeTagSet.has(tag.id)).map((tag) => t("common:labels.excludedTag", { name: tag.name })),
   ];
 
   function toggleIncludeTag(tagId: string) {
@@ -50,63 +51,12 @@ export function LibraryTagFilterButton({ tags, tagFilter, tagCounts, allLabel, a
     ));
   }
 
-  function updateMenuPosition() {
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    const viewportWidth = window.innerWidth || 0;
-    const viewportHeight = window.innerHeight || 0;
-    const width = Math.min(360, Math.max(280, Math.min(viewportWidth - 20, rect.width + 282)));
-    const left = Math.min(Math.max(10, rect.right - width), Math.max(10, viewportWidth - width - 10));
-    const below = viewportHeight - rect.bottom - 10;
-    const above = rect.top - 10;
-    const openUp = below < 180 && above > below;
-    const maxHeight = Math.max(140, Math.min(280, openUp ? above : below));
-    setMenuStyle({
-      left,
-      top: openUp ? Math.max(10, rect.top - maxHeight - 7) : rect.bottom + 7,
-      width,
-      maxHeight,
-    });
-  }
-
-  useEffect(() => {
-    if (!open) return;
-    updateMenuPosition();
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target as Node | null;
-      if (target && (triggerRef.current?.contains(target) || menuRef.current?.contains(target))) return;
-      setOpen(false);
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    window.addEventListener("pointerdown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", updateMenuPosition);
-    window.addEventListener("scroll", updateMenuPosition, true);
-    return () => {
-      window.removeEventListener("pointerdown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", updateMenuPosition);
-      window.removeEventListener("scroll", updateMenuPosition, true);
-    };
-  }, [open]);
-
-  const menu = open && typeof document !== "undefined" ? createPortal(
-    <div
-      ref={menuRef}
-      className="library-tag-filter-menu"
-      role="menu"
-      aria-label={ariaLabel}
-      style={menuStyle}
-      onPointerDown={(event) => event.stopPropagation()}
-      onMouseDown={(event) => event.stopPropagation()}
-      onClick={(event) => event.stopPropagation()}
-    >
+  const menu = (
+    <AppScrollArea className="library-tag-filter-menu__scroll" viewportClassName="library-tag-filter-menu__viewport">
       {menuContentBefore}
-      <button
+      <Button
         type="button"
+        variant={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length && !tagFilter.untaggedOnly ? "default" : "ghost"}
         role="menuitemcheckbox"
         aria-checked={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length && !tagFilter.untaggedOnly}
         className={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length && !tagFilter.untaggedOnly ? "active" : ""}
@@ -115,7 +65,7 @@ export function LibraryTagFilterButton({ tags, tagFilter, tagCounts, allLabel, a
         }}
       >
         {allLabel}
-      </button>
+      </Button>
       {tags.map((tag) => {
         const included = includeTagSet.has(tag.id);
         const excluded = excludeTagSet.has(tag.id);
@@ -123,68 +73,76 @@ export function LibraryTagFilterButton({ tags, tagFilter, tagCounts, allLabel, a
         const count = tagCounts?.[tag.id] || 0;
         const disabled = tagCounts !== undefined && count <= 0 && !selected;
         return (
-          <button
+          <div
             key={tag.id}
-            type="button"
-            role="menuitemcheckbox"
-            aria-checked={selected}
-            aria-disabled={disabled || undefined}
             className={`library-tag-filter-menu__tag${included ? " library-tag-filter-menu__tag--include" : ""}${excluded ? " library-tag-filter-menu__tag--exclude" : ""}${disabled ? " library-tag-filter-menu__tag--empty" : ""}`}
-            disabled={disabled}
-            onClick={() => {
-              toggleIncludeTag(tag.id);
-            }}
           >
-            <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
-            <span>{tag.name}</span>
-            <span className="library-tag-filter-menu__count">{count}</span>
-            <span
-              role="button"
-              tabIndex={disabled ? -1 : 0}
+            <Button
+              type="button"
+              variant="ghost"
+              role="menuitemcheckbox"
+              aria-checked={selected}
+              className="library-tag-filter-menu__include"
+              disabled={disabled}
+              onClick={() => toggleIncludeTag(tag.id)}
+            >
+              <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
+              <span>{tag.name}</span>
+              <span className="library-tag-filter-menu__count">{count}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              disabled={disabled}
               className="library-tag-filter-menu__exclude"
-              aria-label={`排除 ${tag.name}`}
-              aria-disabled={disabled || undefined}
-              title={`排除 ${tag.name}`}
+              aria-label={t("common:labels.excludeTag", { name: tag.name })}
+              title={t("common:labels.excludeTag", { name: tag.name })}
               onClick={(event) => {
-                event.preventDefault();
                 event.stopPropagation();
-                if (disabled) return;
-                toggleExcludeTag(tag.id);
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                event.stopPropagation();
-                if (disabled) return;
                 toggleExcludeTag(tag.id);
               }}
             >
-              <Ban size={12} aria-hidden="true" />
-            </span>
-          </button>
+              <Ban aria-hidden="true" />
+            </Button>
+          </div>
         );
       })}
       {!tags.length ? <div className="library-tag-filter-menu__empty">{allLabel}</div> : null}
-    </div>,
-    document.body,
-  ) : null;
+    </AppScrollArea>
+  );
 
   return (
-    <>
-      <button
-        ref={triggerRef}
-        type="button"
-        className={joinClassNames("library-tag-filter-trigger", (active ?? Boolean(tagFilter.includeTagIds.length || tagFilter.excludeTagIds.length || tagFilter.untaggedOnly)) && "active", className)}
-        aria-label={activeTagNames.length ? `${ariaLabel}: ${activeTagNames.join(", ")}` : ariaLabel}
-        title={activeTagNames.length ? activeTagNames.join(", ") : ariaLabel}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-pressed={active ?? Boolean(tagFilter.includeTagIds.length || tagFilter.excludeTagIds.length || tagFilter.untaggedOnly)}
-        onClick={() => setOpen((current) => !current)}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className={joinClassNames("library-tag-filter-trigger", (active ?? Boolean(tagFilter.includeTagIds.length || tagFilter.excludeTagIds.length || tagFilter.untaggedOnly)) && "active", className)}
+          aria-label={activeTagNames.length ? `${ariaLabel}: ${activeTagNames.join(", ")}` : ariaLabel}
+          title={activeTagNames.length ? activeTagNames.join(", ") : ariaLabel}
+          aria-haspopup="menu"
+          aria-pressed={active ?? Boolean(tagFilter.includeTagIds.length || tagFilter.excludeTagIds.length || tagFilter.untaggedOnly)}
+        >
+          <ListFilter aria-hidden="true" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="library-tag-filter-menu"
+        side="bottom"
+        sideOffset={7}
+        align="end"
+        collisionPadding={10}
+        role="menu"
+        aria-label={ariaLabel}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
       >
-        <ListFilter size={17} aria-hidden="true" />
-      </button>
-      {menu}
-    </>
+        {menu}
+      </PopoverContent>
+    </Popover>
   );
 }

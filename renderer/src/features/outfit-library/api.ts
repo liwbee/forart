@@ -1,6 +1,6 @@
 import { apiRequest } from "../../lib/apiClient";
 import { EMPTY_LIBRARY_TAG_FILTER, libraryTagFilterKey, type LibraryTagFilter } from "../library-tags";
-import { AssetUploadPayload, LibraryBulkEntriesPayload, LibraryBulkEntriesResult, OutfitEntry, OutfitFilters, OutfitImportEntry, OutfitImportResult, OutfitProject, OutfitTag, StorageSettings } from "./types";
+import { LibraryBulkEntriesPayload, LibraryBulkEntriesResult, OutfitEntry, OutfitFilters, OutfitImportEntry, OutfitImportResult, OutfitProject, OutfitTag, StorageSettings } from "./types";
 
 export const outfitLibraryKeys = {
   projects: ["outfitProjects"] as const,
@@ -53,13 +53,6 @@ export function deleteOutfitProject(projectId: string) {
   });
 }
 
-export function uploadOutfitProjectCover(projectId: string, payload: AssetUploadPayload) {
-  return apiRequest<OutfitProject>(`/api/outfit-projects/${encodeURIComponent(projectId)}/cover/upload`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
 export function listOutfits({ projectId, tagFilter = EMPTY_LIBRARY_TAG_FILTER }: OutfitFilters) {
   return apiRequest<{ outfits: OutfitEntry[] }>(
     `/api/outfit-projects/${encodeURIComponent(projectId)}/outfits${queryString({ tag_id: tagFilter.includeTagIds, exclude_tag_id: tagFilter.excludeTagIds, untagged: tagFilter.untaggedOnly ? "1" : "" })}`
@@ -88,13 +81,6 @@ export function deleteOutfit(outfitId: string) {
 
 export function bulkOutfitEntries(payload: LibraryBulkEntriesPayload) {
   return apiRequest<LibraryBulkEntriesResult>("/api/libraries/outfit/entries/bulk", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export function replaceOutfitImage(outfitId: string, payload: AssetUploadPayload) {
-  return apiRequest<OutfitEntry>(`/api/outfits/${encodeURIComponent(outfitId)}/image/upload`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

@@ -1,7 +1,6 @@
-export interface FreeCanvasShapeBase {
+interface FreeCanvasShapeBase {
   id: string;
   type: "image" | "text";
-  assetId: string;
   name: string;
   x: number;
   y: number;

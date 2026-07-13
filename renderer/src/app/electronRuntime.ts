@@ -13,8 +13,3 @@ export function missingElectronBridgeNames() {
   if (!window.forartConfig) missing.push("forartConfig");
   return missing;
 }
-
-export function requireElectronBridge<T>(value: T | undefined, name: string): T {
-  if (!value) throw new Error(`${name} bridge is unavailable. Use the Forart desktop app.`);
-  return value;
-}

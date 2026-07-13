@@ -7,7 +7,7 @@ export interface LibraryAssetUploadPayload {
 function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.onerror = () => reject(new Error(i18n.t("common:errors.fileReadFailed")));
     reader.onload = () => resolve(String(reader.result || ""));
     reader.readAsDataURL(file);
   });
@@ -22,3 +22,4 @@ export async function createLibraryAssetUploadPayload(file: File): Promise<Libra
     data: base64,
   };
 }
+import { i18n } from "../../i18n";

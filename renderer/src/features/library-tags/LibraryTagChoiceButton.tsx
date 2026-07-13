@@ -1,67 +1,71 @@
 import { Ban } from "lucide-react";
+import { Button } from "../../components/ui/button";
 import { normalizeLibraryTagColor, type LibraryTagColor } from "./tagColors";
 
-interface LibraryTagChoiceButtonProps {
+interface LibraryTagChoiceButtonBaseProps {
   name: string;
   color?: LibraryTagColor | string | null;
   count?: number;
-  included: boolean;
-  excluded: boolean;
-  onToggleInclude: () => void;
-  onToggleExclude: () => void;
   role?: string;
 }
 
-export function LibraryTagChoiceButton({
-  name,
-  color,
-  count,
-  included,
-  excluded,
-  onToggleInclude,
-  onToggleExclude,
-  role,
-}: LibraryTagChoiceButtonProps) {
+type LibraryTagChoiceButtonProps = LibraryTagChoiceButtonBaseProps & (
+  | {
+      mode?: "filter";
+      included: boolean;
+      excluded: boolean;
+      onToggleInclude: () => void;
+      onToggleExclude: () => void;
+    }
+  | {
+      mode: "select";
+      selected: boolean;
+      onToggleSelect: () => void;
+    }
+);
+
+export function LibraryTagChoiceButton(props: LibraryTagChoiceButtonProps) {
+  const { name, color, count, role } = props;
+  const selectMode = props.mode === "select";
+  const included = selectMode ? props.selected : props.included;
+  const excluded = selectMode ? false : props.excluded;
   const selected = included || excluded;
   const disabled = count !== undefined && count <= 0 && !selected;
+  const togglePrimary = selectMode ? props.onToggleSelect : props.onToggleInclude;
 
   return (
-    <button
-      className={`library-tag-choice${included ? " library-tag-choice--include" : ""}${excluded ? " library-tag-choice--exclude" : ""}${disabled ? " library-tag-choice--empty" : ""}`}
-      type="button"
-      role={role}
-      aria-pressed={role ? undefined : selected}
-      aria-checked={role ? selected : undefined}
-      aria-disabled={disabled || undefined}
-      disabled={disabled}
-      onClick={onToggleInclude}
-    >
-      <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(color)}`} aria-hidden="true" />
-      <span>{name}</span>
-      {count !== undefined ? <span className="library-tag-choice__count">{count}</span> : null}
-      <span
-        role="button"
-        tabIndex={disabled ? -1 : 0}
-        className="library-tag-choice__exclude"
-        aria-label={`排除 ${name}`}
-        aria-disabled={disabled || undefined}
-        title={`排除 ${name}`}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          if (disabled) return;
-          onToggleExclude();
-        }}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" && event.key !== " ") return;
-          event.preventDefault();
-          event.stopPropagation();
-          if (disabled) return;
-          onToggleExclude();
-        }}
+    <div className={`library-tag-choice${selectMode ? " library-tag-choice--select" : ""}${included ? " library-tag-choice--include" : ""}${excluded ? " library-tag-choice--exclude" : ""}${disabled ? " library-tag-choice--empty" : ""}`}>
+      <Button
+        className="library-tag-choice__include"
+        type="button"
+        variant="ghost"
+        role={role}
+        aria-pressed={role ? undefined : selected}
+        aria-checked={role ? selected : undefined}
+        disabled={disabled}
+        onClick={togglePrimary}
       >
-        <Ban size={12} aria-hidden="true" />
-      </span>
-    </button>
+        <span className={`library-tag-color-dot library-tag-choice__color-dot library-tag-color-dot--${normalizeLibraryTagColor(color)}`} aria-hidden="true" />
+        <span className="library-tag-choice__label">{name}</span>
+        {count !== undefined ? <span className="library-tag-choice__count">{count}</span> : null}
+      </Button>
+      {!selectMode ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          disabled={disabled}
+          className="library-tag-choice__exclude"
+          aria-label={`${name}: exclude`}
+          title={`${name}: exclude`}
+          onClick={(event) => {
+            event.stopPropagation();
+            props.onToggleExclude();
+          }}
+        >
+          <Ban aria-hidden="true" />
+        </Button>
+      ) : null}
+    </div>
   );
 }

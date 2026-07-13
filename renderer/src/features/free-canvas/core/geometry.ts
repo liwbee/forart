@@ -35,7 +35,7 @@ export function screenToCanvasPoint(
   };
 }
 
-export function canvasPointToStagePoint(
+function canvasPointToStagePoint(
   point: { x: number; y: number },
   stageSize: FreeCanvasSize,
   canvasSize: FreeCanvasSize,
@@ -49,7 +49,7 @@ export function canvasPointToStagePoint(
   };
 }
 
-export function getItemBounds(item: FreeCanvasEditorItem) {
+function getItemBounds(item: FreeCanvasEditorItem) {
   return {
     x: item.x,
     y: item.y,
@@ -60,7 +60,7 @@ export function getItemBounds(item: FreeCanvasEditorItem) {
   };
 }
 
-export function pointInItem(item: FreeCanvasEditorItem, point: { x: number; y: number }, margin = 0) {
+function pointInItem(item: FreeCanvasEditorItem, point: { x: number; y: number }, margin = 0) {
   const bounds = getItemBounds(item);
   const radians = -(item.rotation * Math.PI) / 180;
   const dx = point.x - bounds.centerX;

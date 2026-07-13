@@ -167,7 +167,3 @@ export const libraryUpdateActionPayloadSchema = z.object({
 export const libraryImportEntriesPayloadSchema = z.object({
   entries: z.array(z.any()).min(1, "No rows selected for import"),
 }).strict();
-
-export const libraryActionImportPreviewPayloadSchema = z.object({
-  source_path: z.string().transform((value) => String(value || "").trim()).pipe(z.string().min(1, "source_path is required")),
-}).strict();

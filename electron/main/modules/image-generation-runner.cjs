@@ -7,6 +7,10 @@ function joinApiPath(baseUrl, pathName) {
   return `${String(baseUrl || '').replace(/\/+$/, '')}/${String(pathName || '').replace(/^\/+/, '')}`;
 }
 
+function isHttpUrl(value) {
+  return /^https?:\/\/\S+/i.test(String(value || '').trim());
+}
+
 function imageGenerationsUrl(baseUrl) {
   const normalized = String(baseUrl || '').replace(/\/+$/, '');
   if (/\/images\/generations$/i.test(normalized)) return normalized;
@@ -32,6 +36,14 @@ function providerEndpointUrl(provider, key, defaultPath) {
     return joinApiPath(baseUrl, override);
   }
   const normalizedDefault = String(defaultPath || '').replace(/^\/+/, '');
+  const defaultWithoutVersion = normalizedDefault.replace(/^(?:api\/)?v\d+(?:beta)?\//i, '');
+  const trailingVersion = baseUrl.match(/\/(?:api\/)?v\d+(?:beta)?$/i);
+  if (trailingVersion && defaultWithoutVersion !== normalizedDefault) {
+    if (String(provider?.protocol || '').toLowerCase() === 'gemini') {
+      return `${baseUrl.slice(0, trailingVersion.index)}/${normalizedDefault}`;
+    }
+    return joinApiPath(baseUrl, defaultWithoutVersion);
+  }
   if (normalizedDefault && baseUrl.toLowerCase().endsWith(`/${normalizedDefault.toLowerCase()}`)) return baseUrl;
   if (/\/images\/generations$/i.test(baseUrl) && /\/images\/generations$/i.test(defaultPath)) return baseUrl;
   if (/\/images\/edits$/i.test(baseUrl) && /\/images\/edits$/i.test(defaultPath)) return baseUrl;
@@ -75,14 +87,7 @@ function taskUrlCandidates(baseUrl, taskId) {
     joinApiPath(normalized, imageTaskPath),
     joinApiPath(normalized, imageGenerationPath),
   ];
-  if (!/\/v\d(?:beta)?$/i.test(normalized) && !/\/api\/v\d$/i.test(normalized)) {
-    candidates.push(
-      joinApiPath(normalized, `v1/${taskPath}`),
-      joinApiPath(normalized, `v1/${imageTaskPath}`),
-      joinApiPath(normalized, `v1/${imageGenerationPath}`),
-    );
-  }
-  return [...new Set(candidates)];
+  return [...new Set(candidates)].filter(isHttpUrl);
 }
 
 function firstString(...values) {
@@ -90,7 +95,7 @@ function firstString(...values) {
 }
 
 function isHttpImageUrl(value) {
-  return /^https?:\/\/\S+/i.test(String(value || '').trim());
+  return isHttpUrl(value);
 }
 
 function valueToImage(value) {
@@ -101,13 +106,33 @@ function valueToImage(value) {
   return null;
 }
 
-function findImageInPayload(payload) {
-  const queue = [payload];
+function findImagesInPayload(payload) {
+  const record = payload && typeof payload === 'object' ? payload : null;
+  const data = record?.data;
+  const dataRecord = data && typeof data === 'object' && !Array.isArray(data) ? data : null;
+  const preferredOutput = dataRecord?.result?.images
+    || record?.result?.images
+    || dataRecord?.images
+    || record?.images
+    || (Array.isArray(data) ? data : null);
+  const queue = [preferredOutput || payload];
   const seen = new Set();
+  const imageKeys = new Set();
+  const images = [];
+  const addImage = (image) => {
+    if (!image) return;
+    const key = String(image.url || image.dataUrl || '').trim();
+    if (!key || imageKeys.has(key)) return;
+    imageKeys.add(key);
+    images.push({ ...image, fileName: `generated-image-${images.length + 1}.png` });
+  };
   while (queue.length) {
     const value = queue.shift();
     const image = valueToImage(value);
-    if (image) return image;
+    if (image) {
+      addImage(image);
+      continue;
+    }
     if (!value || typeof value !== 'object' || seen.has(value)) continue;
     seen.add(value);
     if (Array.isArray(value)) {
@@ -115,35 +140,19 @@ function findImageInPayload(payload) {
       continue;
     }
     const imageUrl = value.image_url;
-    if (typeof imageUrl === 'string' && isHttpImageUrl(imageUrl)) return { url: imageUrl, fileName: 'generated-image.png' };
+    if (typeof imageUrl === 'string' && isHttpImageUrl(imageUrl)) addImage({ url: imageUrl });
     if (imageUrl && typeof imageUrl === 'object') {
       const nestedUrl = firstString(imageUrl.url);
-      if (nestedUrl && isHttpImageUrl(nestedUrl)) return { url: nestedUrl, fileName: 'generated-image.png' };
-    }
-    Object.values(value).forEach((childValue) => queue.push(childValue));
-  }
-  return null;
-}
-
-function findBase64ImageInPayload(payload) {
-  const queue = [payload];
-  const seen = new Set();
-  while (queue.length) {
-    const value = queue.shift();
-    if (!value || typeof value !== 'object' || seen.has(value)) continue;
-    seen.add(value);
-    if (Array.isArray(value)) {
-      value.forEach((item) => queue.push(item));
-      continue;
+      if (nestedUrl && isHttpImageUrl(nestedUrl)) addImage({ url: nestedUrl });
     }
     const b64 = firstString(value.b64_json, value.base64, value.image_base64, value.imageBase64);
     if (b64) {
       const mimeType = firstString(value.mime_type, value.mimeType) || 'image/png';
-      return { dataUrl: `data:${mimeType};base64,${b64}`, fileName: 'generated-image.png' };
+      addImage({ dataUrl: `data:${mimeType};base64,${b64}` });
     }
     Object.values(value).forEach((childValue) => queue.push(childValue));
   }
-  return null;
+  return images;
 }
 
 function findGeminiImageInPayload(payload) {
@@ -181,7 +190,7 @@ function readTaskId(payload) {
   const data = Array.isArray(record?.data) ? record.data : record?.data;
   if (Array.isArray(data)) {
     const first = data.find((item) => item && typeof item === 'object');
-    return firstString(first?.task_id, first?.taskId, first?.taskID, first?.task, first?.id, first?.request_id, first?.submit_id, first?.submitId);
+    return firstString(first?.task_id, first?.taskId, first?.taskID, first?.task, first?.request_id, first?.submit_id, first?.submitId);
   }
   const dataRecord = data && typeof data === 'object' ? data : null;
   return firstString(
@@ -189,7 +198,6 @@ function readTaskId(payload) {
     dataRecord?.taskId,
     dataRecord?.taskID,
     dataRecord?.task,
-    dataRecord?.id,
     dataRecord?.request_id,
     dataRecord?.submit_id,
     dataRecord?.submitId,
@@ -197,7 +205,6 @@ function readTaskId(payload) {
     record?.taskId,
     record?.taskID,
     record?.task,
-    record?.id,
     record?.request_id,
     record?.submit_id,
     record?.submitId,
@@ -206,13 +213,17 @@ function readTaskId(payload) {
 
 function readTaskStatus(payload) {
   const record = payload && typeof payload === 'object' ? payload : null;
-  const data = record?.data && typeof record.data === 'object' ? record.data : null;
+  const data = Array.isArray(record?.data)
+    ? record.data.find((item) => item && typeof item === 'object') || null
+    : record?.data && typeof record.data === 'object' ? record.data : null;
   return firstString(data?.status, data?.state, data?.task_status, data?.taskStatus, record?.status, record?.state, record?.task_status, record?.taskStatus);
 }
 
 function readTaskError(payload) {
   const record = payload && typeof payload === 'object' ? payload : null;
-  const data = record?.data && typeof record.data === 'object' ? record.data : null;
+  const data = Array.isArray(record?.data)
+    ? record.data.find((item) => item && typeof item === 'object') || null
+    : record?.data && typeof record.data === 'object' ? record.data : null;
   const error = data?.error && typeof data.error === 'object' ? data.error : null;
   const topError = record?.error && typeof record.error === 'object' ? record.error : null;
   return firstString(error?.message, topError?.message, data?.error, record?.error, data?.message, record?.message);
@@ -232,17 +243,25 @@ async function readErrorMessage(response) {
 
 async function requestJson(net, url, init) {
   const response = await net.fetch(url, init);
-  if (!response.ok) throw new Error(await readErrorMessage(response));
+  if (!response.ok) {
+    const error = new Error(await readErrorMessage(response));
+    error.status = response.status;
+    error.url = url;
+    throw error;
+  }
   return response.json();
 }
 
 async function requestFirstJson(net, urls, init) {
+  if (!urls.length) throw new Error('Image task polling URL must be an absolute http(s) URL.');
   let lastError;
-  for (const url of urls) {
+  for (let index = 0; index < urls.length; index += 1) {
+    const url = urls[index];
     try {
       return await requestJson(net, url, init);
     } catch (error) {
       lastError = error;
+      if (![404, 405].includes(Number(error?.status)) || index === urls.length - 1) throw error;
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError || 'Request failed.'));
@@ -356,7 +375,12 @@ async function normalizeReferenceImages(context, baseUrl, uploadHeaders, referen
     if (/^https:\/\/upload\.apimart\.ai\//i.test(value)) {
       normalized.push(value);
     } else {
-      context.generationTaskStore.updateTask(taskId, { status: 'running', message: `Uploading reference image ${normalized.length + 1}...` });
+      context.generationTaskStore.updateTask(taskId, {
+        status: 'running',
+        message: '',
+        messageCode: 'image.referenceUploading',
+        messageParams: { current: normalized.length + 1, total: referenceImages.length },
+      });
       normalized.push(await uploadReferenceImage(context, imageUploadsUrl(baseUrl), uploadHeaders, value, normalized.length, signal));
     }
   }
@@ -378,7 +402,12 @@ async function normalizeReferenceImageDataUris(context, referenceImages, taskId,
       normalized.push(value);
       continue;
     }
-    context.generationTaskStore.updateTask(taskId, { status: 'running', message: `Preparing reference image ${normalized.length + 1}...` });
+    context.generationTaskStore.updateTask(taskId, {
+      status: 'running',
+      message: '',
+      messageCode: 'image.referencePreparing',
+      messageParams: { current: normalized.length + 1, total: referenceImages.length },
+    });
     normalized.push(await referenceImageToDataUri(context, value, signal));
   }
   return normalized;
@@ -438,14 +467,14 @@ async function generateGeminiImage(context, provider, model, prompt, referenceIm
       },
     }),
   });
-  const result = findGeminiImageInPayload(payload) || findBase64ImageInPayload(payload) || findImageInPayload(payload);
+  const result = findGeminiImageInPayload(payload) || findImagesInPayload(payload)[0];
   if (!result) throw new Error(`The Gemini response did not contain an image (${summarizePayloadShape(payload)}).`);
-  return saveOutputAsset(context, result);
+  return saveOutputAsset(context, result, taskId);
 }
 
 async function pollImageTask(context, baseUrl, headers, taskId, upstreamTaskId, initialPayload, signal) {
   let lastPayload = initialPayload;
-  context.generationTaskStore.updateTask(taskId, { status: 'running', message: 'Waiting for image result...' });
+  context.generationTaskStore.updateTask(taskId, { status: 'running', message: '', messageCode: 'image.waitingForResult', messageParams: null });
   await wait(3000, signal);
   for (let attempt = 0; attempt < 120; attempt += 1) {
     const current = context.generationTaskStore.getTask(taskId);
@@ -456,10 +485,10 @@ async function pollImageTask(context, baseUrl, headers, taskId, upstreamTaskId, 
       signal,
     });
     lastPayload = payload;
-    const result = findImageInPayload(payload) || findBase64ImageInPayload(payload);
-    if (result) return result;
+    const results = findImagesInPayload(payload);
+    if (results.length) return results;
     const status = readTaskStatus(payload).toLowerCase();
-    if (status) context.generationTaskStore.updateTask(taskId, { status: 'running', message: `Generating: ${status}` });
+    if (status) context.generationTaskStore.updateTask(taskId, { status: 'running', message: status, messageCode: '', messageParams: null });
     if (/(failure|failed|fail|error|errored|cancelled|canceled|rejected|expired|timeout)/i.test(status)) {
       throw new Error(readTaskError(payload) || `Image generation task failed (${summarizePayloadShape(payload)}).`);
     }
@@ -468,7 +497,12 @@ async function pollImageTask(context, baseUrl, headers, taskId, upstreamTaskId, 
   throw new Error(`Image generation task timed out (${summarizePayloadShape(lastPayload)}).`);
 }
 
-async function saveOutputAsset(context, result) {
+async function saveOutputAsset(context, result, taskId) {
+  if (taskId) {
+    const current = context.generationTaskStore.getTask(taskId);
+    if (!current || ['interrupted', 'superseded'].includes(current.status)) throw new Error('Interrupted');
+    context.generationTaskStore.updateTask(taskId, { status: 'running', message: '', messageCode: 'generation.resultProcessing', messageParams: null });
+  }
   const saved = await context.assetStore.saveAsset({
     url: result.url,
     dataUrl: result.dataUrl,
@@ -479,17 +513,64 @@ async function saveOutputAsset(context, result) {
     ...result,
     url: result.url || result.dataUrl || '',
     localUrl: saved.url,
+    thumbUrl: saved.thumbUrl || '',
     fileName: saved.fileName || result.fileName || 'generated-image.png',
   };
 }
 
-async function submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, size, signal) {
+async function saveOutputAssets(context, results, taskId) {
+  const candidates = Array.isArray(results) ? results.filter(Boolean) : [];
+  if (!candidates.length) throw new Error('The image response did not contain a usable result.');
+  const savedResults = [];
+  for (let index = 0; index < candidates.length; index += 1) {
+    savedResults.push(await saveOutputAsset(context, {
+      ...candidates[index],
+      fileName: candidates[index].fileName || `generated-image-${index + 1}.png`,
+    }, taskId));
+  }
+  return { ...savedResults[0], results: savedResults };
+}
+
+function updateTaskWithRemoteAnchor(context, taskId, patch) {
+  const current = context.generationTaskStore.getTask(taskId);
+  if (!current || ['interrupted', 'superseded'].includes(current.status)) throw new Error('Interrupted');
+  const task = context.generationTaskStore.updateTask(taskId, patch);
+  if (patch.upstreamTaskId && task.canvasId && task.target?.nodeId) {
+    if (task.target.type === 'actionFissionRow') {
+      context.canvasStore?.setActionFissionRowRemoteTaskId(task.canvasId, task.target.nodeId, task.target.rowId, patch.upstreamTaskId);
+    } else {
+      context.canvasStore?.setGenerationRemoteTaskId(task.canvasId, task.target.nodeId, patch.upstreamTaskId);
+    }
+  }
+  return task;
+}
+
+function writeTaskTerminalToCanvas(context, task, status, result, error) {
+  if (!task?.canvasId || !task.target?.nodeId) return;
+  const payload = {
+    canvasId: task.canvasId,
+    nodeId: task.target.nodeId,
+    taskId: task.id,
+    remoteTaskId: task.upstreamTaskId,
+    status,
+    result,
+    error,
+  };
+  if (task.target.type === 'actionFissionRow') {
+    context.canvasStore?.completeActionFissionRow({ ...payload, rowId: task.target.rowId });
+  } else {
+    context.canvasStore?.completeGenerationNode(payload);
+  }
+}
+
+async function submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, size, quality, imageCount, signal) {
   const formData = new FormData();
   formData.append('model', model);
   formData.append('prompt', prompt);
   formData.append('size', size);
   formData.append('response_format', 'url');
-  formData.append('n', '1');
+  formData.append('n', String(imageCount));
+  if (quality) formData.append('quality', quality);
   for (let index = 0; index < referenceImages.length; index += 1) {
     const file = await referenceToFile(context, referenceImages[index], index, signal);
     formData.append('image', file.blob, file.fileName);
@@ -511,6 +592,17 @@ async function executeImageTask(context, task, payload, signal) {
   const resolution = String(payload.resolution || task.resolution || '1k');
   const aspectRatio = String(payload.aspectRatio || task.aspectRatio || '1:1');
   const rule = payload.modelRule && typeof payload.modelRule === 'object' ? payload.modelRule : {};
+  const qualityOptions = Array.isArray(rule.qualityRule?.options) ? rule.qualityRule.options.map(String) : [];
+  const quality = qualityOptions.includes(String(payload.quality || task.quality || ''))
+    ? String(payload.quality || task.quality)
+    : String(rule.qualityRule?.defaultQuality || '');
+  const countOptions = Array.isArray(rule.imageCountRule?.options)
+    ? rule.imageCountRule.options.map(Number).filter((value) => Number.isInteger(value) && value > 0)
+    : [1];
+  const combinedLimit = Number(rule.imageCountRule?.maxCombinedWithReferences || 0);
+  const availableCounts = countOptions.filter((count) => !combinedLimit || referenceImages.length + count <= combinedLimit);
+  const requestedCount = Math.max(1, Math.round(Number(payload.imageCount || task.imageCount || rule.imageCountRule?.defaultCount || 1)));
+  const imageCount = availableCounts.includes(requestedCount) ? requestedCount : availableCounts[0] || 1;
   const baseUrl = String(provider.baseUrl || '').trim();
   const protocol = String(provider.protocol || 'openai').trim().toLowerCase();
   if (!baseUrl) throw new Error('API provider base URL is empty.');
@@ -521,12 +613,18 @@ async function executeImageTask(context, task, payload, signal) {
   };
   const uploadHeaders = String(provider.apiKey || '').trim() ? { Authorization: `Bearer ${String(provider.apiKey || '').trim()}` } : {};
   if (task.upstreamTaskId && payload.recoverOnly !== false) {
-    const polledResult = await pollImageTask(context, baseUrl, headers, task.id, task.upstreamTaskId, {}, signal);
-    return saveOutputAsset(context, polledResult);
+    const pollBaseUrl = providerEndpointUrl(provider, 'imageGenerationEndpoint', '/v1/images/generations');
+    const polledResults = await pollImageTask(context, pollBaseUrl, headers, task.id, task.upstreamTaskId, {}, signal);
+    return saveOutputAssets(context, polledResults, task.id);
   }
-  context.generationTaskStore.updateTask(task.id, { status: 'running', message: referenceImages.length ? 'Preparing reference images...' : 'Preparing text-to-image request...' });
+  context.generationTaskStore.updateTask(task.id, {
+    status: 'running',
+    message: '',
+    messageCode: referenceImages.length ? 'image.referencesPreparing' : 'image.textRequestPreparing',
+    messageParams: null,
+  });
   if (protocol === 'gemini') {
-    context.generationTaskStore.updateTask(task.id, { status: 'running', message: 'Submitting Gemini image generation...' });
+    context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.geminiSubmitting', messageParams: null });
     return generateGeminiImage(context, provider, model, prompt, referenceImages, resolution, aspectRatio, task.id, signal);
   }
 
@@ -535,39 +633,42 @@ async function executeImageTask(context, task, payload, signal) {
     const requestMode = provider.imageRequestMode === 'openai-json' ? 'openai-json' : 'openai';
     let submitPayload;
     if (referenceImages.length && requestMode === 'openai') {
-      context.generationTaskStore.updateTask(task.id, { status: 'running', message: 'Submitting image edit request...' });
+      context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.editSubmitting', messageParams: null });
       try {
-        submitPayload = await submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, requestSize, signal);
+        submitPayload = await submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, requestSize, quality, imageCount, signal);
       } catch (error) {
         if (isGptImage2Model(model)) throw error;
-        context.generationTaskStore.updateTask(task.id, { status: 'running', message: 'Retrying image generation with JSON references...' });
+        context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.jsonReferenceRetrying', messageParams: null });
       }
     }
     if (!submitPayload) {
       const refs = referenceImages.length ? await normalizeReferenceImageDataUris(context, referenceImages, task.id, signal) : [];
+      const submitUrl = providerEndpointUrl(provider, 'imageGenerationEndpoint', '/v1/images/generations');
       const requestBody = {
         model,
         prompt,
         size: requestSize,
         response_format: 'url',
-        n: 1,
+        n: imageCount,
+        ...(quality ? { quality } : {}),
         ...(refs.length ? { image: refs } : {}),
       };
-      context.generationTaskStore.updateTask(task.id, { status: 'running', message: 'Submitting image generation...' });
-      submitPayload = await requestJson(context.net, providerEndpointUrl(provider, 'imageGenerationEndpoint', '/v1/images/generations'), {
+      context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.generationSubmitting', messageParams: null });
+      submitPayload = await requestJson(context.net, submitUrl, {
         method: 'POST',
         headers,
         signal,
         body: JSON.stringify(requestBody),
       });
     }
-    const directResult = findImageInPayload(submitPayload) || findBase64ImageInPayload(submitPayload);
-    if (directResult) return saveOutputAsset(context, directResult);
+    const directResults = findImagesInPayload(submitPayload);
+    if (directResults.length) return saveOutputAssets(context, directResults, task.id);
     const upstreamTaskId = readTaskId(submitPayload);
     if (!upstreamTaskId) throw new Error(`The image API response did not contain an image or task_id (${summarizePayloadShape(submitPayload)}).`);
-    context.generationTaskStore.updateTask(task.id, { upstreamTaskId, status: 'running' });
-    const polledResult = await pollImageTask(context, baseUrl, headers, task.id, upstreamTaskId, submitPayload, signal);
-    return saveOutputAsset(context, polledResult);
+    updateTaskWithRemoteAnchor(context, task.id, { upstreamTaskId, status: 'running' });
+    const pollBaseUrl = providerEndpointUrl(provider, 'imageGenerationEndpoint', '/v1/images/generations');
+    const polledResults = await pollImageTask(context, pollBaseUrl, headers, task.id, upstreamTaskId, submitPayload, signal);
+    return saveOutputAssets(context, polledResults, task.id);
   }
 
   const requestFormat = rule.requestFormat || 'standard';
@@ -583,7 +684,6 @@ async function executeImageTask(context, task, payload, signal) {
     ? { size: requestSize }
     : {
       size: requestSize,
-      aspect_ratio: aspectRatio,
       ...(resolutionField === 'none' || !requestResolution ? {} : { resolution: requestResolution }),
     };
   const requestBody = requestFormat === 'openai-json-extra-body'
@@ -599,32 +699,44 @@ async function executeImageTask(context, task, payload, signal) {
     : {
       model,
       prompt,
-      n: 1,
+      n: imageCount,
+      ...(quality ? { quality } : {}),
       ...sizePayload,
       ...(refs.length ? { image_urls: refs } : {}),
     };
 
-  context.generationTaskStore.updateTask(task.id, { status: 'running', message: 'Submitting image generation...' });
-  const submitPayload = await requestJson(context.net, providerEndpointUrl(provider, 'imageGenerationEndpoint', '/v1/images/generations') || imageGenerationsUrl(baseUrl), {
+  context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.generationSubmitting', messageParams: null });
+  const submitUrl = providerEndpointUrl(provider, 'imageGenerationEndpoint', '/v1/images/generations') || imageGenerationsUrl(baseUrl);
+  const submitPayload = await requestJson(context.net, submitUrl, {
     method: 'POST',
     headers,
     signal,
     body: JSON.stringify(requestBody),
   });
-  const directResult = findImageInPayload(submitPayload) || findBase64ImageInPayload(submitPayload);
-  if (directResult) return saveOutputAsset(context, directResult);
+  const directResults = findImagesInPayload(submitPayload);
+  if (directResults.length) return saveOutputAssets(context, directResults, task.id);
   const upstreamTaskId = readTaskId(submitPayload);
   if (!upstreamTaskId) throw new Error(`The image API response did not contain an image or task_id (${summarizePayloadShape(submitPayload)}).`);
-  context.generationTaskStore.updateTask(task.id, { upstreamTaskId, status: 'running' });
-  const polledResult = await pollImageTask(context, baseUrl, headers, task.id, upstreamTaskId, submitPayload, signal);
-  return saveOutputAsset(context, polledResult);
+  updateTaskWithRemoteAnchor(context, task.id, { upstreamTaskId, status: 'running' });
+  const polledResults = await pollImageTask(context, submitUrl, headers, task.id, upstreamTaskId, submitPayload, signal);
+  return saveOutputAssets(context, polledResults, task.id);
 }
 
-function createImageGenerationRunner({ net, assetStore, generationTaskStore }) {
-  const context = { net, assetStore, generationTaskStore };
+function createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore }) {
+  const context = { net, assetStore, canvasStore, generationTaskStore };
 
   async function startTask(payload = {}) {
+    const supersededTaskIds = generationTaskStore.activeTaskIdsForTarget?.(payload.canvasId, payload.target) || [];
     const task = generationTaskStore.createTask({ ...payload, status: payload.status || 'submitting' });
+    if (task.target?.type === 'actionFissionRow') {
+      context.canvasStore?.setActionFissionRowTaskAnchor(task.canvasId, task.target.nodeId, task.target.rowId, { taskId: task.id });
+    }
+    supersededTaskIds.forEach((taskId) => {
+      const superseded = generationTaskStore.getTask(taskId);
+      activeControllers.get(taskId)?.abort();
+      activeControllers.delete(taskId);
+      writeTaskTerminalToCanvas(context, superseded, 'interrupted');
+    });
     if (activeControllers.has(task.id)) activeControllers.get(task.id)?.abort();
     const controller = new AbortController();
     activeControllers.set(task.id, controller);
@@ -633,19 +745,21 @@ function createImageGenerationRunner({ net, assetStore, generationTaskStore }) {
         const result = await executeImageTask(context, task, payload, controller.signal);
         const current = generationTaskStore.getTask(task.id);
         if (!current || current.status === 'interrupted' || current.status === 'superseded') return;
-        generationTaskStore.updateTask(task.id, {
+        const completed = generationTaskStore.updateTask(task.id, {
           status: 'succeeded',
           error: '',
           result,
         });
+        writeTaskTerminalToCanvas(context, completed, 'succeeded', result);
       } catch (error) {
         const current = generationTaskStore.getTask(task.id);
         if (!current || current.status === 'interrupted' || current.status === 'superseded') return;
         const interrupted = controller.signal.aborted || String(error?.message || error) === 'Interrupted';
-        generationTaskStore.updateTask(task.id, {
+        const completed = generationTaskStore.updateTask(task.id, {
           status: interrupted ? 'interrupted' : 'failed',
           error: interrupted ? 'Interrupted' : error instanceof Error ? error.message : String(error),
         });
+        writeTaskTerminalToCanvas(context, completed, completed.status, undefined, completed.error);
       } finally {
         activeControllers.delete(task.id);
       }
@@ -670,19 +784,21 @@ function createImageGenerationRunner({ net, assetStore, generationTaskStore }) {
         const result = await executeImageTask(context, task, { ...task, ...payload, recoverOnly: true }, controller.signal);
         const current = generationTaskStore.getTask(task.id);
         if (!current || current.status === 'interrupted' || current.status === 'superseded') return;
-        generationTaskStore.updateTask(task.id, {
+        const completed = generationTaskStore.updateTask(task.id, {
           status: 'succeeded',
           error: '',
           result,
         });
+        writeTaskTerminalToCanvas(context, completed, 'succeeded', result);
       } catch (error) {
         const current = generationTaskStore.getTask(task.id);
         if (!current || current.status === 'interrupted' || current.status === 'superseded') return;
         const interrupted = controller.signal.aborted || String(error?.message || error) === 'Interrupted';
-        generationTaskStore.updateTask(task.id, {
+        const completed = generationTaskStore.updateTask(task.id, {
           status: interrupted ? 'interrupted' : 'failed',
           error: interrupted ? 'Interrupted' : error instanceof Error ? error.message : String(error),
         });
+        writeTaskTerminalToCanvas(context, completed, completed.status, undefined, completed.error);
       } finally {
         activeControllers.delete(task.id);
       }
@@ -694,7 +810,140 @@ function createImageGenerationRunner({ net, assetStore, generationTaskStore }) {
     activeControllers.get(taskId)?.abort();
     activeControllers.delete(taskId);
     const task = generationTaskStore.getTask(taskId);
-    return generationTaskStore.stopTask(taskId);
+    if (!task) return null;
+    const stopped = generationTaskStore.stopTask(taskId);
+    writeTaskTerminalToCanvas(context, stopped, 'interrupted');
+    return stopped;
+  }
+
+  function getTask(taskId) {
+    return generationTaskStore.getTask(taskId);
+  }
+
+  async function recoverTask(payload = {}) {
+    const canvasId = String(payload.canvasId || '').trim();
+    const nodeId = String(payload.nodeId || '').trim();
+    const upstreamTaskId = String(payload.upstreamTaskId || payload.remoteTaskId || '').trim();
+    if (!canvasId || !nodeId || !upstreamTaskId) throw new Error('Generation recovery target is incomplete.');
+    const target = payload.target?.type === 'actionFissionRow'
+      ? { type: 'actionFissionRow', nodeId, rowId: String(payload.target.rowId || payload.rowId || '').trim() }
+      : { type: 'imageGenerator', nodeId };
+    if (target.type === 'actionFissionRow' && !target.rowId) throw new Error('Generation recovery row target is incomplete.');
+    const existingId = generationTaskStore.activeTaskIdsForTarget?.(canvasId, target)?.[0];
+    const existing = existingId ? generationTaskStore.getTask(existingId) : null;
+    if (existing?.upstreamTaskId === upstreamTaskId) return existing;
+    if (existing) stopTask(existing.id);
+    const anchoredTaskId = String(payload.taskId || '').trim();
+    const safeRemoteId = upstreamTaskId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 120);
+    const taskId = anchoredTaskId || `gen_recover_${safeRemoteId || Date.now().toString(36)}`;
+    return resumeTask(taskId, {
+      ...payload,
+      id: taskId,
+      canvasId,
+      nodeId,
+      target,
+      upstreamTaskId,
+      status: 'running',
+    });
+  }
+
+  async function recoverCanvasTasks(payload = {}) {
+    const providers = Array.isArray(payload.providers) ? payload.providers : [];
+    const providersById = new Map(providers.map((provider) => [String(provider?.id || ''), provider]));
+    const recovered = [];
+    const errors = [];
+    for (const anchor of canvasStore?.listGenerationTaskAnchors?.() || []) {
+      const provider = providersById.get(anchor.providerId);
+      if (!provider) continue;
+      try {
+        const existing = anchor.taskId ? generationTaskStore.getTask(anchor.taskId) : null;
+        if (existing) {
+          recovered.push(existing);
+          continue;
+        }
+        if (!anchor.remoteTaskId) {
+          if (anchor.target?.type === 'actionFissionRow') {
+            canvasStore?.completeActionFissionRow({
+              canvasId: anchor.canvasId,
+              nodeId: anchor.nodeId,
+              rowId: anchor.target.rowId,
+              taskId: anchor.taskId,
+              status: 'interrupted',
+            });
+          }
+          continue;
+        }
+        recovered.push(await recoverTask({
+          canvasId: anchor.canvasId,
+          nodeId: anchor.nodeId,
+          rowId: anchor.rowId,
+          target: anchor.target,
+          taskId: anchor.taskId,
+          upstreamTaskId: anchor.remoteTaskId,
+          providerId: anchor.providerId,
+          provider,
+          model: anchor.model,
+        }));
+      } catch (error) {
+        errors.push({
+          canvasId: anchor.canvasId,
+          nodeId: anchor.nodeId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return { ok: true, tasks: recovered, errors };
+  }
+
+  function reconcileCanvasPayload(canvasId, payload = {}) {
+    if (!Array.isArray(payload.nodes)) return payload;
+    return {
+      ...payload,
+      nodes: payload.nodes.map((node) => {
+        const data = node?.data && typeof node.data === 'object' ? { ...node.data } : {};
+        delete data.generationTask;
+        const nodeId = String(node?.id || '');
+        if (data.actionFission && typeof data.actionFission === 'object' && Array.isArray(data.actionFission.rows)) {
+          data.actionFission = {
+            ...data.actionFission,
+            rows: data.actionFission.rows.map((sourceRow) => {
+              const row = sourceRow && typeof sourceRow === 'object' ? { ...sourceRow } : {};
+              delete row.generationTask;
+              const rowId = String(row.id || '');
+              const rowTask = generationTaskStore.latestTaskForTarget?.(canvasId, { type: 'actionFissionRow', nodeId, rowId });
+              if (rowTask && ['queued', 'submitting', 'running'].includes(rowTask.status)) {
+                row.generationTaskId = rowTask.id;
+                if (rowTask.upstreamTaskId) row.generationRemoteTaskId = rowTask.upstreamTaskId;
+              } else if (rowTask && ['succeeded', 'failed', 'interrupted', 'superseded'].includes(rowTask.status)) {
+                delete row.generationTaskId;
+                delete row.generationRemoteTaskId;
+                if (rowTask.status === 'succeeded' && rowTask.result?.localUrl) {
+                  row.resultUrl = rowTask.result.localUrl;
+                  row.resultFileName = rowTask.result.fileName || row.selectedActionName || 'Generated image';
+                  row.resultWidth = Number(rowTask.result.width || 0) || undefined;
+                  row.resultHeight = Number(rowTask.result.height || 0) || undefined;
+                  row.resultDownloadState = 'pending';
+                  delete row.resultDownloadedAt;
+                  row.error = '';
+                } else if (rowTask.status === 'failed') {
+                  row.error = rowTask.error || 'Image generation failed.';
+                } else {
+                  row.error = '';
+                }
+              }
+              return row;
+            }),
+          };
+        }
+        const task = generationTaskStore.latestTaskForTarget?.(canvasId, { type: 'imageGenerator', nodeId });
+        if (task && ['queued', 'submitting', 'running'].includes(task.status) && task.upstreamTaskId) {
+          data.generationRemoteTaskId = task.upstreamTaskId;
+        } else if (task && ['succeeded', 'failed', 'interrupted', 'superseded'].includes(task.status)) {
+          delete data.generationRemoteTaskId;
+        }
+        return { ...node, data };
+      }),
+    };
   }
 
   function abortTasks(taskIds = []) {
@@ -707,22 +956,29 @@ function createImageGenerationRunner({ net, assetStore, generationTaskStore }) {
   function stopTasksForTarget(canvasId, target) {
     const result = generationTaskStore.stopTasksForTarget(canvasId, target);
     abortTasks(result.taskIds);
+    result.tasks.forEach((task) => writeTaskTerminalToCanvas(context, task, 'interrupted'));
     return result;
   }
 
   function stopTasksForNode(canvasId, nodeId) {
     const result = generationTaskStore.stopTasksForNode(canvasId, nodeId);
     abortTasks(result.taskIds);
+    result.tasks.forEach((task) => writeTaskTerminalToCanvas(context, task, 'interrupted'));
     return result;
   }
 
   function stopTasksForCanvas(canvasId) {
     const result = generationTaskStore.stopTasksForCanvas(canvasId);
     abortTasks(result.taskIds);
+    result.tasks.forEach((task) => writeTaskTerminalToCanvas(context, task, 'interrupted'));
     return result;
   }
 
   return {
+    getTask,
+    reconcileCanvasPayload,
+    recoverCanvasTasks,
+    recoverTask,
     resumeTask,
     startTask,
     stopTask,

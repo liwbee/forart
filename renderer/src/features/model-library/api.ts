@@ -54,24 +54,10 @@ export function deleteModelProject(projectId: string) {
   });
 }
 
-export function uploadModelProjectCover(projectId: string, payload: AssetUploadPayload) {
-  return apiRequest<ModelProject>(`/api/model-projects/${encodeURIComponent(projectId)}/cover/upload`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
 export function listModels({ projectId, tagFilter = EMPTY_LIBRARY_TAG_FILTER, gender = "" }: ModelFilters) {
   return apiRequest<{ models: ModelEntry[] }>(
     `/api/model-projects/${encodeURIComponent(projectId)}/models${queryString({ tag_id: tagFilter.includeTagIds, exclude_tag_id: tagFilter.excludeTagIds, untagged: tagFilter.untaggedOnly ? "1" : "", gender })}`
   );
-}
-
-export function createModel(projectId: string, payload: Pick<ModelEntry, "name" | "gender">) {
-  return apiRequest<ModelEntry>(`/api/model-projects/${encodeURIComponent(projectId)}/models`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
 }
 
 export function importModelEntries(projectId: string, entries: ModelImportEntry[]) {
@@ -131,13 +117,6 @@ export function listModelImages(modelId: string) {
 
 export function uploadModelImage(modelId: string, payload: AssetUploadPayload) {
   return apiRequest<{ image: ModelImage; asset: { id: string } }>(`/api/models/${encodeURIComponent(modelId)}/images/upload`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export function addModelImage(modelId: string, payload: Pick<ModelImage, "asset_id" | "caption" | "sort_order">) {
-  return apiRequest<ModelImage>(`/api/models/${encodeURIComponent(modelId)}/images`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

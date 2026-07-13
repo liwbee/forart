@@ -16,6 +16,8 @@ export const zhCN = {
   tagManagerDescription: "标签用于动作筛选和图片归类。",
   title: "动作库",
   requestFailed: "动作库请求失败：{{message}}",
+  importFailed: "导入失败",
+  importBridgeUnavailable: "动作导入桌面连接不可用。",
   storageUnavailable: "资源库存储目录暂不可用，请检查服务器数据目录配置。",
   noActionTags: "还没有标签。",
   modelImage: "模特图片"
@@ -77,6 +79,8 @@ export const enUS = {
   tagManagerDescription: "Tags are used for action filtering and image grouping.",
   title: "Action Library",
   requestFailed: "Action library request failed: {{message}}",
+  importFailed: "Import failed",
+  importBridgeUnavailable: "The action import desktop bridge is unavailable.",
   storageUnavailable: "Asset library storage is unavailable. Check the server data directory configuration.",
   noActionTags: "No tags yet.",
   modelImage: "Model image",

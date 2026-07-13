@@ -1,7 +1,7 @@
-export type ImageGenerationMode = "text_to_image" | "image_to_image";
-export type ImageModelResolutionField = "resolution" | "size" | "none";
+type ImageGenerationMode = "text_to_image" | "image_to_image";
+type ImageModelResolutionField = "resolution" | "size" | "none";
 
-export interface ImageModelSizeRule {
+interface ImageModelSizeRule {
   aspectRatios: string[];
   resolutions: string[];
   defaultAspectRatio: string;
@@ -11,7 +11,18 @@ export interface ImageModelSizeRule {
   resolutionField: ImageModelResolutionField;
 }
 
-export type ImageModelRuleId =
+interface ImageModelQualityRule {
+  options: readonly string[];
+  defaultQuality: string;
+}
+
+interface ImageModelImageCountRule {
+  options: readonly number[];
+  defaultCount: number;
+  maxCombinedWithReferences?: number;
+}
+
+type ImageModelRuleId =
   | "generic-image"
   | "agnes-image"
   | "gpt-image-2"
@@ -24,6 +35,7 @@ export type ImageModelRuleId =
   | "seedream-4"
   | "seedream-4.5"
   | "seedream-5-lite"
+  | "seedream-5-pro"
   | "qwen-image"
   | "z-image-turbo"
   | "imagen-4"
@@ -34,6 +46,7 @@ export type ImageModelRuleId =
 export interface ImageModelRule {
   id: ImageModelRuleId;
   label: string;
+  labelKey?: "genericImageRule";
   modes: ImageGenerationMode[];
   supportsReferenceImages: boolean;
   requiresPrompt: boolean;
@@ -44,6 +57,8 @@ export interface ImageModelRule {
   sizeMode: "ratio" | "pixel";
   requestFormat: "standard" | "openai-json-extra-body";
   sizeRule: ImageModelSizeRule;
+  qualityRule?: ImageModelQualityRule;
+  imageCountRule: ImageModelImageCountRule;
 }
 
 interface RuleMatcher {
@@ -64,6 +79,23 @@ const SEEDREAM_ASPECT_RATIOS = ["auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:
 const SEEDREAM_5_LITE_ASPECT_RATIOS = ["auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"];
 const IMAGEN_4_ASPECT_RATIOS = ["1:1", "4:3", "3:4", "16:9", "9:16"];
 const GROK_ASPECT_RATIOS = ["1:1", "16:9", "9:16", "3:2", "2:3"];
+const GPT_QUALITY_RULE: ImageModelQualityRule = {
+  options: ["auto", "low", "medium", "high"],
+  defaultQuality: "auto",
+};
+const SINGLE_IMAGE_COUNT_RULE: ImageModelImageCountRule = {
+  options: [1],
+  defaultCount: 1,
+};
+const STANDARD_IMAGE_COUNT_RULE: ImageModelImageCountRule = {
+  options: [1, 2, 4],
+  defaultCount: 1,
+};
+const SEEDREAM_IMAGE_COUNT_RULE: ImageModelImageCountRule = {
+  options: [1, 2, 4],
+  defaultCount: 1,
+  maxCombinedWithReferences: 15,
+};
 
 const GENERIC_SIZE_RULE: ImageModelSizeRule = {
   aspectRatios: BASIC_ASPECT_RATIOS,
@@ -80,7 +112,8 @@ function sizeRule(overrides: Partial<ImageModelSizeRule>): ImageModelSizeRule {
 export const IMAGE_MODEL_RULES: ImageModelRule[] = [
   {
     id: "generic-image",
-    label: "Generic Image",
+    label: "",
+    labelKey: "genericImageRule",
     modes: ["text_to_image", "image_to_image"],
     supportsReferenceImages: true,
     requiresPrompt: true,
@@ -91,6 +124,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     sizeMode: "ratio",
     requestFormat: "standard",
     sizeRule: GENERIC_SIZE_RULE,
+    imageCountRule: SINGLE_IMAGE_COUNT_RULE,
   },
   {
     id: "agnes-image",
@@ -104,6 +138,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "lower",
     sizeMode: "pixel",
     requestFormat: "openai-json-extra-body",
+    imageCountRule: SINGLE_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: BASIC_ASPECT_RATIOS,
       resolutions: ["1k", "2k", "4k"],
@@ -122,6 +157,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "lower",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: STANDARD_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: GPT_IMAGE_2_ASPECT_RATIOS,
       resolutions: ["1k", "2k", "4k"],
@@ -141,6 +177,8 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "lower",
     sizeMode: "ratio",
     requestFormat: "standard",
+    qualityRule: GPT_QUALITY_RULE,
+    imageCountRule: STANDARD_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: GPT_IMAGE_2_ASPECT_RATIOS,
       resolutions: ["1k", "2k", "4k"],
@@ -160,6 +198,8 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "lower",
     sizeMode: "ratio",
     requestFormat: "standard",
+    qualityRule: GPT_QUALITY_RULE,
+    imageCountRule: STANDARD_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: GPT_IMAGE_1_ASPECT_RATIOS,
       resolutions: [],
@@ -179,6 +219,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: SINGLE_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: GEMINI_EXTREME_ASPECT_RATIOS,
       resolutions: ["1K", "2K", "4K"],
@@ -198,6 +239,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: STANDARD_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: GEMINI_ASPECT_RATIOS,
       resolutions: ["1K"],
@@ -217,6 +259,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: SINGLE_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: GEMINI_ASPECT_RATIOS,
       resolutions: ["1K", "2K", "4K"],
@@ -236,6 +279,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: SINGLE_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: GEMINI_ASPECT_RATIOS,
       resolutions: ["1K"],
@@ -255,6 +299,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: SEEDREAM_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: SEEDREAM_ASPECT_RATIOS,
       resolutions: ["1K", "2K", "4K"],
@@ -274,6 +319,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: SEEDREAM_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: SEEDREAM_ASPECT_RATIOS,
       resolutions: ["2K", "4K"],
@@ -293,9 +339,30 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: SEEDREAM_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: SEEDREAM_5_LITE_ASPECT_RATIOS,
       resolutions: ["2K", "3K", "4K"],
+      allowAutoAspectRatio: true,
+      defaultResolution: "2K",
+    }),
+  },
+  {
+    id: "seedream-5-pro",
+    label: "Seedream 5 Pro",
+    modes: ["text_to_image", "image_to_image"],
+    supportsReferenceImages: true,
+    requiresPrompt: true,
+    requiresReferenceImages: false,
+    maxReferenceImages: 10,
+    referenceImageInput: "url",
+    resolutionCase: "upper",
+    sizeMode: "ratio",
+    requestFormat: "standard",
+    imageCountRule: SINGLE_IMAGE_COUNT_RULE,
+    sizeRule: sizeRule({
+      aspectRatios: SEEDREAM_5_LITE_ASPECT_RATIOS,
+      resolutions: ["1K", "2K"],
       allowAutoAspectRatio: true,
       defaultResolution: "2K",
     }),
@@ -312,6 +379,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: STANDARD_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: BASIC_ASPECT_RATIOS,
       resolutions: ["1K", "2K"],
@@ -330,6 +398,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: SINGLE_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: BASIC_ASPECT_RATIOS,
       resolutions: ["1K", "2K"],
@@ -348,6 +417,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: SINGLE_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: IMAGEN_4_ASPECT_RATIOS,
       resolutions: [],
@@ -368,6 +438,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "lower",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: STANDARD_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: GROK_ASPECT_RATIOS,
       resolutions: [],
@@ -387,6 +458,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: STANDARD_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: BASIC_ASPECT_RATIOS,
       resolutions: ["1K", "2K"],
@@ -407,6 +479,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
+    imageCountRule: STANDARD_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: BASIC_ASPECT_RATIOS,
       resolutions: ["1K", "2K", "4K"],
@@ -425,6 +498,7 @@ const RULE_MATCHERS: RuleMatcher[] = [
   { ruleId: "gpt-image-2", priority: 110, all: ["gpt", "image"], any: [["2", "v2"]], none: ["video", "audio"], regex: /gpt[-_. ]?image[-_. ]?(?:v)?2/i },
   { ruleId: "gpt-image-1", priority: 100, all: ["gpt", "image"], any: [["1", "v1", "1.5"]], none: ["video", "audio"] },
   { ruleId: "seedream-4.5", priority: 97, any: [["seedream", "seeddream", "doubao"], ["4.5"]], none: ["video", "seedance"], regex: /(?:seedream|seeddream|doubao).*4[-_. ]?5/i },
+  { ruleId: "seedream-5-pro", priority: 96, all: ["seedream", "pro"], any: [["5", "5.0", "v5"]], none: ["video"] },
   { ruleId: "seedream-5-lite", priority: 95, all: ["seedream", "lite"], any: [["5", "5.0", "v5"]], none: ["video"] },
   { ruleId: "seedream-4", priority: 90, any: [["seedream", "seeddream", "doubao"]], none: ["video", "seedance"] },
   { ruleId: "gemini-3.1-flash-lite", priority: 89, all: ["gemini", "flash", "lite"], any: [["3.1"]], none: ["video", "chat"] },
@@ -438,8 +512,9 @@ const RULE_MATCHERS: RuleMatcher[] = [
   { ruleId: "wan-image-pro", priority: 56, all: ["image", "pro"], any: [["wan", "wan2.7", "2.7", "27"]], none: ["video"], regex: /wan[-_. ]?2\.?7[-_. ]?image[-_. ]?pro/i },
   { ruleId: "wan-image", priority: 55, all: ["image"], any: [["wan", "wan2.7", "2.7", "27"]], none: ["video"], regex: /wan[-_. ]?2\.?7[-_. ]?image/i },
 ];
+const SORTED_RULE_MATCHERS = [...RULE_MATCHERS].sort((left, right) => right.priority - left.priority);
 
-export function tokenizeModelId(modelId: string) {
+function tokenizeModelId(modelId: string) {
   const normalized = modelId.toLowerCase();
   const tokens = new Set<string>();
   normalized.match(/\d+(?:\.\d+)+/g)?.forEach((token) => tokens.add(token));
@@ -469,18 +544,12 @@ function matchesRule(modelId: string, tokens: Set<string>, matcher: RuleMatcher)
 
 export function detectImageModelRuleId(modelId: string): ImageModelRuleId {
   const tokens = tokenizeModelId(modelId);
-  const match = [...RULE_MATCHERS]
-    .sort((a, b) => b.priority - a.priority)
-    .find((matcher) => matchesRule(modelId, tokens, matcher));
+  const match = SORTED_RULE_MATCHERS.find((matcher) => matchesRule(modelId, tokens, matcher));
   return match?.ruleId || "generic-image";
 }
 
 export function getImageModelRule(ruleId: string | undefined): ImageModelRule {
   return RULE_BY_ID.get(normalizeImageModelRuleId(ruleId))!;
-}
-
-export function getImageModelSizeRule(ruleId: string | undefined): ImageModelSizeRule {
-  return getImageModelRule(ruleId).sizeRule;
 }
 
 export function normalizeImageModelSizeSelection(rule: ImageModelRule, resolution: string | undefined, aspectRatio: string | undefined) {
@@ -491,8 +560,29 @@ export function normalizeImageModelSizeSelection(rule: ImageModelRule, resolutio
   };
 }
 
-export function imageModelRuleSupportsReferenceImages(ruleId: string | undefined) {
-  return getImageModelRule(ruleId).supportsReferenceImages;
+export function imageModelImageCountOptions(rule: ImageModelRule, referenceCount = 0) {
+  const combinedLimit = rule.imageCountRule.maxCombinedWithReferences;
+  return rule.imageCountRule.options.filter((count) => (
+    combinedLimit === undefined || Math.max(0, referenceCount) + count <= combinedLimit
+  ));
+}
+
+export function normalizeImageModelGenerationSelection(
+  rule: ImageModelRule,
+  quality: string | undefined,
+  imageCount: number | undefined,
+  referenceCount = 0,
+) {
+  const qualityOptions = rule.qualityRule?.options || [];
+  const countOptions = imageModelImageCountOptions(rule, referenceCount);
+  return {
+    quality: qualityOptions.includes(quality || "")
+      ? quality || ""
+      : rule.qualityRule?.defaultQuality || "",
+    imageCount: countOptions.includes(Number(imageCount))
+      ? Number(imageCount)
+      : countOptions[0] || rule.imageCountRule.defaultCount,
+  };
 }
 
 export function normalizeImageModelRuleId(ruleId: unknown): ImageModelRuleId {

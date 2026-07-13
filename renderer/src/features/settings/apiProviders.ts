@@ -1,15 +1,18 @@
-export type ApiProviderProtocol = "openai" | "compatible" | "gemini";
-export type ApiProviderImageRequestMode = "openai" | "openai-json";
+type ApiProviderProtocol = "openai" | "compatible" | "gemini";
+type ApiProviderImageRequestMode = "openai" | "openai-json";
 export type ApiModelKind = "image" | "chat" | "video";
-export type ApiProviderOrderItem = { type: "provider"; id: string; provider: ApiProvider } | { type: "libtv"; id: "libtv" };
+type ApiProviderOrderItem =
+  | { type: "provider"; id: string; provider: ApiProvider }
+  | { type: "apimart"; id: "apimart"; provider: ApiProvider }
+  | { type: "libtv"; id: "libtv" };
 
-export interface ApiModelAliases {
+interface ApiModelAliases {
   image: Record<string, string>;
   chat: Record<string, string>;
   video: Record<string, string>;
 }
 
-export interface ApiModelRules {
+interface ApiModelRules {
   image: Record<string, string>;
 }
 
@@ -32,6 +35,15 @@ export interface ApiProvider {
 }
 
 export const API_PROVIDER_CHANGED_EVENT = "forart-api-providers-changed";
+export const APIMART_PROVIDER_ID = "apimart";
+export const APIMART_BASE_URLS = [
+  "https://api.apimart.ai/v1",
+  "https://api.apib.ai/v1",
+  "https://api.aiuxu.com/v1",
+  "https://api.aishuch.com/v1",
+] as const;
+
+const APIMART_HOST_TO_BASE_URL = new Map(APIMART_BASE_URLS.map((baseUrl) => [new URL(baseUrl).host, baseUrl]));
 
 export interface ApiSettings {
   providers: ApiProvider[];
@@ -46,7 +58,7 @@ let apiSettingsCache: ApiSettings = {
 };
 let apiSettingsCacheLoaded = false;
 
-export function notifyApiProvidersChanged() {
+function notifyApiProvidersChanged() {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(API_PROVIDER_CHANGED_EVENT));
 }
@@ -75,7 +87,7 @@ function normalizeAliasBucket(input: unknown) {
   }, {});
 }
 
-export function normalizeModelAliases(input: unknown): ApiModelAliases {
+function normalizeModelAliases(input: unknown): ApiModelAliases {
   const record = input && typeof input === "object" ? input as Partial<ApiModelAliases> : {};
   return {
     image: normalizeAliasBucket(record.image),
@@ -94,7 +106,7 @@ function normalizeRuleBucket(input: unknown) {
   }, {});
 }
 
-export function normalizeModelRules(input: unknown): ApiModelRules {
+function normalizeModelRules(input: unknown): ApiModelRules {
   const record = input && typeof input === "object" ? input as Partial<ApiModelRules> : {};
   return {
     image: normalizeRuleBucket(record.image),
@@ -106,7 +118,7 @@ export function getModelDisplayName(provider: ApiProvider | null | undefined, ki
   return alias || model;
 }
 
-export function createProviderId(name: string, providers: ApiProvider[]) {
+function createProviderId(name: string, providers: ApiProvider[]) {
   const base = (name || "custom-api")
     .trim()
     .toLowerCase()
@@ -142,7 +154,62 @@ export function createApiProvider(providers: ApiProvider[]): ApiProvider {
   };
 }
 
+function getApimartBaseUrl(value: unknown) {
+  try {
+    return APIMART_HOST_TO_BASE_URL.get(new URL(String(value || "").trim()).host.toLowerCase()) || "";
+  } catch {
+    return "";
+  }
+}
+
+function isApimartProvider(input: Partial<ApiProvider>) {
+  return String(input.id || "").trim().toLowerCase() === APIMART_PROVIDER_ID
+    || String(input.name || "").trim().toLowerCase() === APIMART_PROVIDER_ID
+    || Boolean(getApimartBaseUrl(input.baseUrl));
+}
+
+function createApimartProvider(input: Partial<ApiProvider> = {}): ApiProvider {
+  return {
+    id: APIMART_PROVIDER_ID,
+    name: "APImart",
+    baseUrl: getApimartBaseUrl(input.baseUrl) || APIMART_BASE_URLS[0],
+    apiKey: String(input.apiKey || ""),
+    accessKey: "",
+    secretKey: "",
+    protocol: "compatible",
+    imageRequestMode: "openai",
+    imageGenerationEndpoint: "",
+    imageEditEndpoint: "",
+    imageModels: Array.isArray(input.imageModels) ? uniqueModels(input.imageModels.map(String)) : [],
+    chatModels: Array.isArray(input.chatModels) ? uniqueModels(input.chatModels.map(String)) : [],
+    videoModels: Array.isArray(input.videoModels) ? uniqueModels(input.videoModels.map(String)) : [],
+    modelAliases: normalizeModelAliases(input.modelAliases),
+    modelRules: normalizeModelRules(input.modelRules),
+  };
+}
+
+function mergeApimartProviders(inputs: Partial<ApiProvider>[]) {
+  return inputs.reduce<ApiProvider>((result, input) => {
+    const next = createApimartProvider(input);
+    return createApimartProvider({
+      ...result,
+      baseUrl: getApimartBaseUrl(input.baseUrl) || result.baseUrl,
+      apiKey: next.apiKey || result.apiKey,
+      imageModels: uniqueModels([...result.imageModels, ...next.imageModels]),
+      chatModels: uniqueModels([...result.chatModels, ...next.chatModels]),
+      videoModels: uniqueModels([...result.videoModels, ...next.videoModels]),
+      modelAliases: {
+        image: { ...result.modelAliases.image, ...next.modelAliases.image },
+        chat: { ...result.modelAliases.chat, ...next.modelAliases.chat },
+        video: { ...result.modelAliases.video, ...next.modelAliases.video },
+      },
+      modelRules: { image: { ...result.modelRules.image, ...next.modelRules.image } },
+    });
+  }, createApimartProvider());
+}
+
 export function normalizeApiProvider(input: Partial<ApiProvider>, providers: ApiProvider[]): ApiProvider {
+  if (isApimartProvider(input)) return createApimartProvider(input);
   const name = String(input.name || "API").trim() || "API";
   return {
     id: String(input.id || createProviderId(name, providers)).trim(),
@@ -155,28 +222,31 @@ export function normalizeApiProvider(input: Partial<ApiProvider>, providers: Api
     imageRequestMode: input.imageRequestMode === "openai-json" ? "openai-json" : "openai",
     imageGenerationEndpoint: String(input.imageGenerationEndpoint || "").trim(),
     imageEditEndpoint: String(input.imageEditEndpoint || "").trim(),
-    imageModels: Array.isArray(input.imageModels) ? input.imageModels.map(String).filter(Boolean) : [],
-    chatModels: Array.isArray(input.chatModels) ? input.chatModels.map(String).filter(Boolean) : [],
-    videoModels: Array.isArray(input.videoModels) ? input.videoModels.map(String).filter(Boolean) : [],
+    imageModels: Array.isArray(input.imageModels) ? uniqueModels(input.imageModels.map(String)) : [],
+    chatModels: Array.isArray(input.chatModels) ? uniqueModels(input.chatModels.map(String)) : [],
+    videoModels: Array.isArray(input.videoModels) ? uniqueModels(input.videoModels.map(String)) : [],
     modelAliases: normalizeModelAliases(input.modelAliases),
     modelRules: normalizeModelRules(input.modelRules),
   };
 }
 
 function normalizeApiSettings(input: Partial<ApiSettings>): ApiSettings {
-  const providers = Array.isArray(input.providers) ? input.providers.reduce<ApiProvider[]>((result, item) => {
+  const rawProviders = Array.isArray(input.providers) ? input.providers : [];
+  const apimartInputs = rawProviders.filter(isApimartProvider);
+  const apimartSourceIds = new Set(apimartInputs.map((provider) => String(provider.id || "").trim()).filter(Boolean));
+  const customProviders = rawProviders.filter((provider) => !isApimartProvider(provider)).reduce<ApiProvider[]>((result, item) => {
     const next = normalizeApiProvider(item, result);
     return result.some((provider) => provider.id === next.id) ? result : [...result, next];
-  }, []) : [];
-  const defaultImageProviderId = providers.some((provider) => provider.id === input.defaultImageProviderId) ? String(input.defaultImageProviderId) : "";
-  const validOrderIds = new Set(["libtv", ...providers.map((provider) => provider.id)]);
-  const providerOrder = Array.isArray(input.providerOrder)
-    ? uniqueModels(input.providerOrder.map(String)).filter((id) => validOrderIds.has(id))
+  }, []);
+  const providers = [mergeApimartProviders(apimartInputs), ...customProviders];
+  const requestedDefaultProviderId = apimartSourceIds.has(String(input.defaultImageProviderId || ""))
+    ? APIMART_PROVIDER_ID
+    : String(input.defaultImageProviderId || "");
+  const defaultImageProviderId = providers.some((provider) => provider.id === requestedDefaultProviderId) ? requestedDefaultProviderId : "";
+  const requestedOrder = Array.isArray(input.providerOrder)
+    ? input.providerOrder.map((id) => apimartSourceIds.has(String(id)) ? APIMART_PROVIDER_ID : String(id))
     : [];
-  providers.forEach((provider) => {
-    if (!providerOrder.includes(provider.id)) providerOrder.push(provider.id);
-  });
-  if (!providerOrder.includes("libtv")) providerOrder.unshift("libtv");
+  const providerOrder = normalizeApiProviderOrder(requestedOrder, providers);
   return { providers, defaultImageProviderId, providerOrder };
 }
 
@@ -187,12 +257,29 @@ function setApiSettingsCache(settings: Partial<ApiSettings>) {
   return apiSettingsCache;
 }
 
-export function readApiProviders(): ApiProvider[] {
-  return apiSettingsCache.providers;
-}
-
 export function readApiSettings(): ApiSettings {
   return apiSettingsCache;
+}
+
+export function normalizeApiProviderOrder(order: string[] | undefined, providers: ApiProvider[]) {
+  const validIds = new Set(["libtv", APIMART_PROVIDER_ID, ...providers.map((provider) => provider.id)]);
+  const next = uniqueModels((order || []).map(String)).filter((id) => validIds.has(id));
+  providers.forEach((provider) => {
+    if (!next.includes(provider.id)) next.push(provider.id);
+  });
+  if (!next.includes("libtv")) next.unshift("libtv");
+  if (providers.some((provider) => provider.id === APIMART_PROVIDER_ID) && !next.includes(APIMART_PROVIDER_ID)) {
+    next.unshift(APIMART_PROVIDER_ID);
+  }
+  return next;
+}
+
+export function isImageProviderConfigured(provider: ApiProvider) {
+  return Boolean(
+    provider.baseUrl.trim()
+    && provider.apiKey.trim()
+    && provider.imageModels.length,
+  );
 }
 
 export function orderedApiProviders(providers: ApiProvider[], providerOrder: string[] | undefined = []) {
@@ -211,12 +298,17 @@ export function orderedApiProviderItems(providers: ApiProvider[], providerOrder:
   const result = (providerOrder || []).reduce<ApiProviderOrderItem[]>((items, id) => {
     if (id === "libtv") return [...items, { type: "libtv", id: "libtv" }];
     const provider = byId.get(id);
-    return provider ? [...items, { type: "provider", id, provider }] : items;
+    if (!provider) return items;
+    return provider.id === APIMART_PROVIDER_ID
+      ? [...items, { type: "apimart", id: APIMART_PROVIDER_ID, provider }]
+      : [...items, { type: "provider", id, provider }];
   }, []);
   if (!result.some((item) => item.type === "libtv")) result.unshift({ type: "libtv", id: "libtv" });
   providers.forEach((provider) => {
-    if (!result.some((item) => item.type === "provider" && item.id === provider.id)) {
-      result.push({ type: "provider", id: provider.id, provider });
+    if (!result.some((item) => item.id === provider.id)) {
+      result.push(provider.id === APIMART_PROVIDER_ID
+        ? { type: "apimart", id: APIMART_PROVIDER_ID, provider }
+        : { type: "provider", id: provider.id, provider });
     }
   });
   return result;
@@ -231,7 +323,7 @@ export async function loadApiSettings(): Promise<ApiSettings> {
 }
 
 export async function saveApiSettings(settings: ApiSettings): Promise<ApiSettings> {
-  const normalized = setApiSettingsCache(settings);
+  const normalized = normalizeApiSettings(settings);
   if (window.forartConfig?.saveApiSettings) {
     const result = await window.forartConfig.saveApiSettings({
       ...normalized,
@@ -240,5 +332,5 @@ export async function saveApiSettings(settings: ApiSettings): Promise<ApiSetting
     });
     return setApiSettingsCache(normalizeApiSettings(result.apiSettings as Partial<ApiSettings>));
   }
-  return normalized;
+  return setApiSettingsCache(normalized);
 }

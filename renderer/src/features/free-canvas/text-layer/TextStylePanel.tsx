@@ -1,7 +1,10 @@
 import type { CSSProperties } from "react";
+import { PopoverContent } from "../../../components/ui/popover";
+import { Slider } from "../../../components/ui/slider";
+import { ToggleGroup, ToggleGroupItem } from "../../../components/ui/toggle-group";
 import type { FreeCanvasTextItem } from "../types";
 
-export const TEXT_COLOR_SWATCHES = [
+const TEXT_COLOR_SWATCHES = [
   "#111827",
   "#ffffff",
   "#ef4444",
@@ -32,21 +35,31 @@ export function FontSizePanel({
   onFontSizeChange,
 }: FontSizePanelProps) {
   return (
-    <div className="free-canvas-editor__tool-panel" onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+    <PopoverContent
+      className="free-canvas-editor__tool-panel"
+      side="top"
+      sideOffset={12}
+      collisionPadding={16}
+      onOpenAutoFocus={(event) => event.preventDefault()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
       <label className="free-canvas-editor__field">
         <span>
           {fontSizeLabel}
           <strong>{Math.round(item.fontSize)}</strong>
         </span>
-        <input
-          type="range"
-          min="18"
-          max="180"
-          value={item.fontSize}
-          onChange={(event) => onFontSizeChange(Number(event.target.value))}
+        <Slider
+          aria-label={fontSizeLabel}
+          min={18}
+          max={180}
+          step={1}
+          value={[item.fontSize]}
+          onValueChange={(values) => onFontSizeChange(values[0])}
         />
       </label>
-    </div>
+    </PopoverContent>
   );
 }
 
@@ -56,23 +69,42 @@ export function TextColorPanel({
   onColorChange,
 }: TextColorPanelProps) {
   return (
-    <div className="free-canvas-editor__tool-panel free-canvas-editor__color-panel" onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+    <PopoverContent
+      className="free-canvas-editor__tool-panel free-canvas-editor__color-panel"
+      side="top"
+      sideOffset={12}
+      collisionPadding={16}
+      onOpenAutoFocus={(event) => event.preventDefault()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
       <div className="free-canvas-editor__field">
         <span>{textColorLabel}</span>
-        <div className="free-canvas-editor__color-grid">
+        <ToggleGroup
+          className="free-canvas-editor__color-grid"
+          type="single"
+          variant="outline"
+          size="sm"
+          spacing={8}
+          value={item.color.toLowerCase()}
+          aria-label={textColorLabel}
+          onValueChange={(color) => {
+            if (color) onColorChange(color);
+          }}
+        >
           {TEXT_COLOR_SWATCHES.map((color) => (
-            <button
+            <ToggleGroupItem
               key={color}
-              type="button"
-              className={item.color.toLowerCase() === color.toLowerCase() ? "active" : ""}
+              className="free-canvas-editor__color-swatch"
+              value={color}
               aria-label={`${textColorLabel} ${color}`}
               title={color}
               style={{ "--free-canvas-text-color": color } as CSSProperties}
-              onClick={() => onColorChange(color)}
             />
           ))}
-        </div>
+        </ToggleGroup>
       </div>
-    </div>
+    </PopoverContent>
   );
 }

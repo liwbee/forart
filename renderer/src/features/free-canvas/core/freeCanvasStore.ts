@@ -6,10 +6,8 @@ import { normalizeLayerOrder, sortedBackToFront } from "./geometry";
 type StateUpdater<T> = T | ((current: T) => T);
 
 interface FreeCanvasStore extends FreeCanvasDocument {
-  itemIds: string[];
   itemLookup: Map<string, FreeCanvasEditorItem>;
   setItems: (updater: StateUpdater<FreeCanvasEditorItem[]>) => void;
-  setItemsWithoutHistory: (updater: StateUpdater<FreeCanvasEditorItem[]>) => void;
   addItem: (item: FreeCanvasEditorItem) => void;
   patchItem: (itemId: string, patch: Partial<FreeCanvasEditorItem>) => void;
   patchItemWithoutHistory: (itemId: string, patch: Partial<FreeCanvasEditorItem>) => void;
@@ -17,7 +15,7 @@ interface FreeCanvasStore extends FreeCanvasDocument {
   clearItems: () => void;
   moveLayer: (itemId: string, direction: "up" | "down") => void;
   moveLayerToEdge: (itemId: string, edge: "front" | "back") => void;
-  reorderLayer: (draggedItemId: string, targetItemId: string, position: "before" | "after") => void;
+  reorderLayers: (topToBottomItemIds: string[]) => void;
 }
 
 function resolveUpdater<T>(updater: StateUpdater<T>, current: T) {
@@ -26,7 +24,6 @@ function resolveUpdater<T>(updater: StateUpdater<T>, current: T) {
 
 function createIndexes(items: FreeCanvasEditorItem[]) {
   return {
-    itemIds: items.map((item) => item.id),
     itemLookup: new Map(items.map((item) => [item.id, item])),
   };
 }
@@ -38,23 +35,17 @@ function withIndexes(items: FreeCanvasEditorItem[]) {
   };
 }
 
-function idsEqual(items: FreeCanvasEditorItem[], ids: string[]) {
-  return items.length === ids.length && items.every((item, index) => item.id === ids[index]);
-}
-
 function isDocumentEqual(a: FreeCanvasDocument, b: FreeCanvasDocument) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function setItemsState(
   currentItems: FreeCanvasEditorItem[],
-  currentIds: string[],
   updater: StateUpdater<FreeCanvasEditorItem[]>,
 ) {
   const items = resolveUpdater(updater, currentItems);
   return {
     items,
-    itemIds: idsEqual(items, currentIds) ? currentIds : items.map((item) => item.id),
     itemLookup: new Map(items.map((item) => [item.id, item])),
   };
 }
@@ -64,13 +55,7 @@ export const useFreeCanvasStore = create<FreeCanvasStore>()(
     (set) => ({
       ...withIndexes([]),
       setItems: (updater) => {
-        set((state) => setItemsState(state.items, state.itemIds, updater));
-      },
-      setItemsWithoutHistory: (updater) => {
-        const temporalState = useFreeCanvasStore.temporal.getState();
-        temporalState.pause();
-        set((state) => setItemsState(state.items, state.itemIds, updater));
-        temporalState.resume();
+        set((state) => setItemsState(state.items, updater));
       },
       addItem: (item) => {
         set((state) => {
@@ -115,18 +100,13 @@ export const useFreeCanvasStore = create<FreeCanvasStore>()(
           return withIndexes(normalizeLayerOrder(orderedItems));
         });
       },
-      reorderLayer: (draggedItemId, targetItemId, position) => {
+      reorderLayers: (topToBottomItemIds) => {
         set((state) => {
-          if (draggedItemId === targetItemId) return state;
-          const topToBottomItems = [...state.items].sort((left, right) => right.zIndex - left.zIndex);
-          const draggedItem = topToBottomItems.find((item) => item.id === draggedItemId);
-          if (!draggedItem) return state;
-          const remainingItems = topToBottomItems.filter((item) => item.id !== draggedItemId);
-          const targetIndex = remainingItems.findIndex((item) => item.id === targetItemId);
-          if (targetIndex < 0) return state;
-          const insertIndex = position === "before" ? targetIndex : targetIndex + 1;
-          remainingItems.splice(insertIndex, 0, draggedItem);
-          return withIndexes(normalizeLayerOrder([...remainingItems].reverse()));
+          if (!topToBottomItemIds.length) return state;
+          const byId = new Map(state.items.map((item) => [item.id, item]));
+          const orderedTopToBottom = topToBottomItemIds.map((id) => byId.get(id)).filter((item): item is FreeCanvasEditorItem => Boolean(item));
+          if (orderedTopToBottom.length !== state.items.length) return state;
+          return withIndexes(normalizeLayerOrder([...orderedTopToBottom].reverse()));
         });
       },
     }),

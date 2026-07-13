@@ -24,7 +24,7 @@
   z-index: 4;
   max-width: min(260px, 100%);
   border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--border-subtle));
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 6px 10px;
   background: color-mix(in srgb, var(--danger-soft) 94%, var(--surface-card));
   color: var(--danger);
@@ -33,44 +33,6 @@
   line-height: 1.35;
   box-shadow: var(--shadow-md);
   pointer-events: none;
-}
-
-.library-button {
-  min-height: var(--button-functional-min-height);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  border: 1px solid var(--button-functional-border);
-  border-radius: var(--button-functional-radius);
-  padding: 0 var(--space-4);
-  background: var(--button-functional-bg);
-  color: var(--button-functional-text);
-  font-weight: var(--font-weight-semibold);
-  transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease;
-}
-
-.library-button:hover {
-  border-color: var(--button-functional-hover-border);
-  background: var(--button-functional-hover-bg);
-}
-
-.library-button.danger {
-  border-color: color-mix(in srgb, var(--danger) 34%, transparent);
-  background: var(--button-functional-bg);
-  color: var(--danger);
-}
-
-.library-button.danger:hover {
-  border-color: color-mix(in srgb, var(--danger) 52%, transparent);
-  background: var(--danger-soft);
-}
-
-.library-button.danger.confirming {
-  background: var(--danger-soft);
 }
 
 .library-modal-tags {
@@ -84,7 +46,7 @@
   min-width: 32px;
   max-width: 100%;
   border: 1px solid var(--border-subtle);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 12px;
   background: var(--surface-control);
   color: var(--text-secondary);

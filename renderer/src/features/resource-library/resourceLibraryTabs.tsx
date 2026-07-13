@@ -1,5 +1,8 @@
-import { lazy, type ComponentType } from "react";
+import type { ComponentType } from "react";
 import { Images, PersonStanding, Users, type LucideIcon } from "lucide-react";
+import { ActionLibraryPage } from "../action-library/ActionLibraryPage";
+import { ModelLibraryPage } from "../model-library/ModelLibraryPage";
+import { OutfitLibraryPage } from "../outfit-library/OutfitLibraryPage";
 
 export type ResourceLibraryTab = "models" | "actions" | "outfits";
 
@@ -13,10 +16,6 @@ interface ResourceLibraryTabConfig {
   icon: LucideIcon;
   Page: ComponentType<ResourceLibraryTabPageProps>;
 }
-
-const ModelLibraryPage = lazy(() => import("../model-library/ModelLibraryPage").then((module) => ({ default: module.ModelLibraryPage })));
-const ActionLibraryPage = lazy(() => import("../action-library/ActionLibraryPage").then((module) => ({ default: module.ActionLibraryPage })));
-const OutfitLibraryPage = lazy(() => import("../outfit-library/OutfitLibraryPage").then((module) => ({ default: module.OutfitLibraryPage })));
 
 export const resourceLibraryTabs: ResourceLibraryTabConfig[] = [
   { id: "models", labelKey: "resourceLibrary:models", icon: Users, Page: ModelLibraryPage },

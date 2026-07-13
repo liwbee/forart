@@ -1,10 +1,17 @@
-import { PointerEvent, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type WheelEvent as ReactWheelEvent } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { PointerEvent, forwardRef, memo, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type MutableRefObject, type WheelEvent as ReactWheelEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleHelp, Flag, FolderOpen, ImageOff, RefreshCw, Save, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, CircleHelp, FolderOpen, ImageOff, RefreshCw } from "lucide-react";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
-
-type ImageGroupKey = "model" | "detail";
+import { SearchInput } from "../../components/SearchInput";
+import { VirtualList, type VirtualListController } from "../../components/VirtualList";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
+import { Empty, EmptyDescription, EmptyMedia } from "../../components/ui/empty";
+import { Field, FieldLabel } from "../../components/ui/field";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "../../components/ui/hover-card";
+import { Input } from "../../components/ui/input";
+import { Skeleton } from "../../components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 
 interface ReviewImage {
   id: string;
@@ -20,7 +27,6 @@ interface ReviewProduct {
   hasModelImages: boolean;
   modelImages: ReviewImage[];
   detailImages: ReviewImage[];
-  unknownImages: ReviewImage[];
 }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
@@ -33,6 +39,8 @@ const THUMB_WHEEL_STOP_VELOCITY = 0.02;
 const PRODUCT_ROW_HEIGHT = 80;
 const PRODUCT_COLUMN_WIDTH = 208;
 const THUMB_ITEM_WIDTH = 66;
+const FOLDER_RULE_DEBOUNCE_MS = 450;
+const THUMB_SKELETON_COUNT = 5;
 
 type ThumbScrollMomentum = {
   frame: number;
@@ -45,6 +53,17 @@ type VirtualAxis = "vertical" | "horizontal";
 type ProductImagePaneHandle = {
   goImages: (direction: -1 | 1) => void;
 };
+
+function useDebouncedValue<TValue>(value: TValue, delay: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedValue(value), delay);
+    return () => window.clearTimeout(timeout);
+  }, [delay, value]);
+
+  return debouncedValue;
+}
 
 function sortImages(images: ReviewImage[]) {
   return [...images].sort((a, b) => collator.compare(a.relativePath || a.name, b.relativePath || b.name));
@@ -71,13 +90,13 @@ function formatResolution(width: number, height: number) {
   return `${width} x ${height}`;
 }
 
-function listReviewProducts(modelFolderValue: string, reviewRootPath: string) {
-  if (!window.forartReview?.products) return Promise.reject(new Error("Image review bridge is not available."));
+function listReviewProducts(modelFolderValue: string, reviewRootPath: string, bridgeUnavailableMessage: string) {
+  if (!window.forartReview?.products) return Promise.reject(new Error(bridgeUnavailableMessage));
   return window.forartReview.products({ root: reviewRootPath, modelFolders: modelFolderValue }).then((payload) => sortProducts(payload.products));
 }
 
-function loadProductImages(productId: string, modelFolderValue: string, detailFolderValue: string, reviewRootPath: string) {
-  if (!window.forartReview?.productImages) return Promise.reject(new Error("Image review bridge is not available."));
+function loadProductImages(productId: string, modelFolderValue: string, detailFolderValue: string, reviewRootPath: string, bridgeUnavailableMessage: string) {
+  if (!window.forartReview?.productImages) return Promise.reject(new Error(bridgeUnavailableMessage));
   return window.forartReview.productImages({
     root: reviewRootPath,
     productId,
@@ -87,18 +106,7 @@ function loadProductImages(productId: string, modelFolderValue: string, detailFo
     ...payload.product,
     modelImages: sortImages(payload.product.modelImages),
     detailImages: sortImages(payload.product.detailImages),
-    unknownImages: sortImages(payload.product.unknownImages),
   }));
-}
-
-function saveReviewIssue(image: ReviewImage, issue: string, reviewRootPath: string) {
-  if (!window.forartReview?.saveIssue) return Promise.reject(new Error("Image review bridge is not available."));
-  return window.forartReview.saveIssue({ root: reviewRootPath, path: image.relativePath, issue });
-}
-
-function loadReviewIssue(image: ReviewImage, reviewRootPath: string) {
-  if (!window.forartReview?.loadIssue) return Promise.reject(new Error("Image review bridge is not available."));
-  return window.forartReview.loadIssue({ root: reviewRootPath, path: image.relativePath }).then((payload) => payload.issue);
 }
 
 function reviewRootDisplayName(path: string) {
@@ -130,17 +138,29 @@ function RootFolderPicker({
         {displayName || t("imageReview:choosePathFirst")}
       </span>
       <div className="review-folder-actions">
-        <button className="review-folder-icon-button" type="button" disabled={loading} onClick={onChoose} aria-label={t("imageReview:choose")} title={t("imageReview:choose")}>
-          <FolderOpen size={18} aria-hidden="true" />
-        </button>
-        <button className={`review-folder-icon-button${loading ? " is-spinning" : ""}`} type="button" disabled={loading || !selectedRoot} onClick={onScan} aria-label={t("imageReview:refresh")} title={t("imageReview:refresh")}>
-          <RefreshCw size={18} aria-hidden="true" />
-        </button>
-        <div className="review-folder-guide">
-          <button className="button secondary review-folder-guide-button" type="button" aria-label={t("imageReview:pathGuideTitle")}>
-            <CircleHelp size={18} aria-hidden="true" />
-          </button>
-          <div className="review-folder-guide-popover" role="tooltip">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button className="review-folder-icon-button" type="button" variant="ghost" size="icon" disabled={loading} onClick={onChoose} aria-label={t("imageReview:choose")}>
+              <FolderOpen aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("imageReview:choose")}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button className={`review-folder-icon-button${loading ? " is-spinning" : ""}`} type="button" variant="ghost" size="icon" disabled={loading || !selectedRoot} onClick={onScan} aria-label={t("imageReview:refresh")}>
+              <RefreshCw aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("imageReview:refresh")}</TooltipContent>
+        </Tooltip>
+        <HoverCard openDelay={200} closeDelay={100}>
+          <HoverCardTrigger asChild>
+            <Button className="review-folder-guide-button" type="button" variant="ghost" size="icon" aria-label={t("imageReview:pathGuideTitle")}>
+              <CircleHelp aria-hidden="true" />
+            </Button>
+          </HoverCardTrigger>
+          <HoverCardContent className="review-folder-guide-popover" side="bottom" sideOffset={10} align="end" collisionPadding={16}>
             <div className="review-folder-guide-tree" aria-label={t("imageReview:pathGuideStructureLabel")}>
               <div className="review-folder-guide-node review-folder-guide-node--root">
                 <span>{t("imageReview:pathGuideRootFolder")}</span>
@@ -159,8 +179,8 @@ function RootFolderPicker({
                 </div>
               </div>
             </div>
-          </div>
-        </div>
+          </HoverCardContent>
+        </HoverCard>
       </div>
     </div>
   );
@@ -181,21 +201,13 @@ const ProductList = memo(function ProductList({
 }) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement | null>(null);
+  const productVirtualizerRef = useRef<VirtualListController | null>(null);
   const [virtualAxis, setVirtualAxis] = useState<VirtualAxis>("vertical");
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
   const filteredProducts = normalizedQuery
     ? products.filter((product) => product.id.toLocaleLowerCase().includes(normalizedQuery))
     : products;
   const itemSize = virtualAxis === "vertical" ? PRODUCT_ROW_HEIGHT : PRODUCT_COLUMN_WIDTH;
-  const virtualizer = useVirtualizer({
-    count: filteredProducts.length,
-    getScrollElement: () => listRef.current,
-    estimateSize: () => itemSize,
-    horizontal: virtualAxis === "horizontal",
-    overscan: 5,
-    getItemKey: (index) => filteredProducts[index]?.id || index,
-  });
-  const virtualItems = virtualizer.getVirtualItems();
 
   useEffect(() => {
     const list = listRef.current;
@@ -215,62 +227,60 @@ const ProductList = memo(function ProductList({
 
   useEffect(() => {
     const index = filteredProducts.findIndex((product) => product.id === activeProductId);
-    if (index >= 0) virtualizer.scrollToIndex(index, { align: "auto" });
-  }, [activeProductId, filteredProducts, itemSize, virtualAxis, virtualizer]);
+    if (index >= 0) productVirtualizerRef.current?.scrollToIndex(index, { align: "auto" });
+  }, [activeProductId, filteredProducts, itemSize, virtualAxis]);
 
   return (
     <aside className="review-product-list" aria-label={t("imageReview:productList")}>
-      <div className="review-product-search">
-        <Search size={17} aria-hidden="true" />
-        <input value={searchQuery} onChange={(event) => onSearchChange(event.target.value)} placeholder={t("imageReview:searchProductId")} aria-label={t("imageReview:searchProductId")} />
-        {searchQuery ? (
-          <button type="button" aria-label={t("imageReview:clearSearch")} onClick={() => onSearchChange("")}>
-            <X size={15} aria-hidden="true" />
-          </button>
-        ) : null}
-      </div>
+      <SearchInput
+        className="review-product-search"
+        value={searchQuery}
+        onChange={onSearchChange}
+        placeholder={t("imageReview:searchProductId")}
+        clearLabel={t("imageReview:clearSearch")}
+      />
 
       <div className="review-product-list-head">
         <strong>{t("imageReview:productId")}</strong>
-        <span>{filteredProducts.length} / {products.length}</span>
+        <Badge variant="outline">{filteredProducts.length} / {products.length}</Badge>
       </div>
 
-      <div className={`review-product-items scrollbar-thin-stable${filteredProducts.length ? "" : " is-empty"}`} ref={listRef}>
-        {filteredProducts.length ? (
-          <div
-            className="review-product-items__spacer"
-            style={virtualAxis === "vertical" ? { height: virtualizer.getTotalSize() } : { width: virtualizer.getTotalSize() }}
-          >
-            <div
-              className="review-product-items__virtual"
-              style={virtualAxis === "vertical"
-                ? { transform: `translateY(${virtualItems[0]?.start || 0}px)` }
-                : { transform: `translateX(${virtualItems[0]?.start || 0}px)` }}
+      <VirtualList
+        items={filteredProducts}
+        estimateSize={itemSize}
+        getItemKey={(product) => product.id}
+        renderItem={(product) => {
+          const isActive = product.id === activeProductId;
+          const missingModel = !product.hasModelImages;
+          return (
+            <Button
+              className="review-product-item"
+              type="button"
+              variant={isActive ? "default" : "outline"}
+              aria-current={isActive ? "true" : undefined}
+              onClick={() => onSelectProduct(product.id)}
             >
-          {virtualItems.map((virtualItem) => {
-            const product = filteredProducts[virtualItem.index];
-            if (!product) return null;
-            const isActive = product.id === activeProductId;
-            const missingModel = !product.hasModelImages;
-            return (
-              <button
-                key={virtualItem.key}
-                className={isActive ? "active" : ""}
-                type="button"
-                aria-current={isActive ? "true" : undefined}
-                onClick={() => onSelectProduct(product.id)}
-              >
-                <strong>{product.id}</strong>
-                {missingModel ? <em>{t("imageReview:missingModelImage")}</em> : null}
-              </button>
-            );
-          })}
-            </div>
-          </div>
-        ) : (
-          <div className="review-pair-empty">{products.length ? t("imageReview:noMatchingProductIds") : t("imageReview:mountReviewFolders")}</div>
+              <strong>{product.id}</strong>
+              {missingModel ? <Badge className="review-product-missing-badge" variant="destructive">{t("imageReview:missingModelImage")}</Badge> : null}
+            </Button>
+          );
+        }}
+        className={`review-product-items${filteredProducts.length ? "" : " is-empty"}`}
+        viewportClassName="review-product-items__viewport"
+        viewportRef={listRef}
+        virtualizerRef={productVirtualizerRef}
+        axis={virtualAxis}
+        itemMode="flow"
+        overscan={5}
+        spacerClassName="review-product-items__spacer"
+        trackClassName="review-product-items__virtual"
+        scrollbars={virtualAxis === "horizontal" ? "horizontal" : "vertical"}
+        empty={(
+          <Empty className="review-product-empty">
+            <EmptyDescription>{products.length ? t("imageReview:noMatchingProductIds") : t("imageReview:mountReviewFolders")}</EmptyDescription>
+          </Empty>
         )}
-      </div>
+      />
     </aside>
   );
 });
@@ -278,6 +288,7 @@ const ProductList = memo(function ProductList({
 const ReviewThumbNav = memo(function ReviewThumbNav({
   title,
   images,
+  loading,
   activeIndex,
   thumbStripRef,
   onSelectImage,
@@ -286,6 +297,7 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
 }: {
   title: string;
   images: ReviewImage[];
+  loading: boolean;
   activeIndex: number;
   thumbStripRef: MutableRefObject<HTMLDivElement | null>;
   onSelectImage: (index: number) => void;
@@ -293,108 +305,105 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
   onWheel: (event: ReactWheelEvent<HTMLDivElement>) => void;
 }) {
   const { t } = useTranslation();
-  const virtualizer = useVirtualizer({
-    count: images.length,
-    getScrollElement: () => thumbStripRef.current,
-    estimateSize: () => THUMB_ITEM_WIDTH,
-    horizontal: true,
-    overscan: 8,
-    getItemKey: (index) => images[index]?.id || index,
-  });
-  const virtualItems = virtualizer.getVirtualItems();
+  const thumbVirtualizerRef = useRef<VirtualListController | null>(null);
 
   useEffect(() => {
-    if (activeIndex >= 0) virtualizer.scrollToIndex(activeIndex, { align: "auto" });
-  }, [activeIndex, virtualizer]);
+    if (activeIndex >= 0) thumbVirtualizerRef.current?.scrollToIndex(activeIndex, { align: "auto" });
+  }, [activeIndex]);
 
   return (
     <div className="review-thumb-nav">
-      <button
-        className="review-thumb-nav-button"
-        type="button"
-        aria-label={t("imageReview:scrollThumbsLeft")}
-        disabled={!images.length}
-        onClick={() => onScrollStrip(-1)}
-      >
-        <ChevronLeft size={24} aria-hidden="true" />
-      </button>
-      <div
-        className="review-thumb-strip scrollbar-thin"
-        ref={(node) => { thumbStripRef.current = node; }}
-        aria-label={t("imageReview:thumbsLabel", { title })}
-        onWheel={onWheel}
-      >
-        <div className="review-thumb-strip__spacer" style={{ width: virtualizer.getTotalSize() }}>
-          <div className="review-thumb-strip__virtual" style={{ transform: `translateX(${virtualItems[0]?.start || 0}px)` }}>
-        {virtualItems.map((virtualItem) => {
-          const index = virtualItem.index;
-          const item = images[index];
-          if (!item) return null;
-          return (
-            <button
-              key={virtualItem.key}
-              className={index === activeIndex ? "active" : ""}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button className="review-thumb-nav-button" type="button" variant="ghost" size="icon" aria-label={t("imageReview:scrollThumbsLeft")} disabled={loading || !images.length} onClick={() => onScrollStrip(-1)}>
+            <ChevronLeft aria-hidden="true" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t("imageReview:scrollThumbsLeft")}</TooltipContent>
+      </Tooltip>
+      {loading ? (
+        <div className="review-thumb-loading" role="status" aria-live="polite" aria-label={t("common:states.loading")}>
+          {Array.from({ length: THUMB_SKELETON_COUNT }, (_, index) => (
+            <Skeleton className="review-thumb-skeleton" aria-hidden="true" key={index} />
+          ))}
+        </div>
+      ) : (
+        <VirtualList
+          items={images}
+          estimateSize={THUMB_ITEM_WIDTH}
+          getItemKey={(image) => image.id}
+          renderItem={(item, index) => (
+            <Button
+              className={`review-thumb-button${index === activeIndex ? " active" : ""}`}
               type="button"
+              variant="outline"
+              size="icon"
               aria-label={t("imageReview:viewImage", { name: item.name })}
               aria-current={index === activeIndex ? "true" : undefined}
               onClick={() => onSelectImage(index)}
             >
               <img src={item.url} alt="" loading={index === activeIndex ? "eager" : "lazy"} decoding="async" draggable={false} />
-            </button>
-          );
-        })}
-          </div>
-        </div>
-        {!images.length ? <div className="review-thumb-empty">{t("imageReview:noImages")}</div> : null}
-      </div>
-      <button
-        className="review-thumb-nav-button"
-        type="button"
-        aria-label={t("imageReview:scrollThumbsRight")}
-        disabled={!images.length}
-        onClick={() => onScrollStrip(1)}
-      >
-        <ChevronRight size={24} aria-hidden="true" />
-      </button>
+            </Button>
+          )}
+          className="review-thumb-strip"
+          viewportClassName="review-thumb-strip__viewport"
+          viewportRef={(node) => { thumbStripRef.current = node; }}
+          virtualizerRef={thumbVirtualizerRef}
+          axis="horizontal"
+          itemMode="flow"
+          overscan={8}
+          spacerClassName="review-thumb-strip__spacer"
+          trackClassName="review-thumb-strip__virtual"
+          scrollbars="horizontal"
+          ariaLabel={t("imageReview:thumbsLabel", { title })}
+          onWheel={onWheel}
+          empty={(
+            <Empty className="review-thumb-empty">
+              <EmptyDescription>{t("imageReview:noImages")}</EmptyDescription>
+            </Empty>
+          )}
+        />
+      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button className="review-thumb-nav-button" type="button" variant="ghost" size="icon" aria-label={t("imageReview:scrollThumbsRight")} disabled={loading || !images.length} onClick={() => onScrollStrip(1)}>
+            <ChevronRight aria-hidden="true" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t("imageReview:scrollThumbsRight")}</TooltipContent>
+      </Tooltip>
     </div>
   );
 }, (previous, next) =>
   previous.title === next.title &&
   previous.images === next.images &&
+  previous.loading === next.loading &&
   previous.activeIndex === next.activeIndex
 );
 
 const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   title: string;
-  group: ImageGroupKey;
   folderValue: string;
   images: ReviewImage[];
+  loading: boolean;
   resetKey: string;
   onFolderValueChange: (value: string) => void;
-  onReportIssue: (image: ReviewImage, issue: string) => Promise<void>;
-  onLoadIssue: (image: ReviewImage) => Promise<string>;
 }>(function ProductImagePane({
   title,
-  group,
   folderValue,
   images,
+  loading,
   resetKey,
   onFolderValueChange,
-  onReportIssue,
-  onLoadIssue,
 }, ref) {
   const { t } = useTranslation();
+  const folderInputId = useId();
   const [activeIndex, setActiveIndex] = useState(0);
   const image = images[activeIndex] || null;
   const [transform, setTransform] = useState({ scale: 1, x: 0, y: 0 });
   const [dragStart, setDragStart] = useState<{ pointerId: number; x: number; y: number; panX: number; panY: number } | null>(null);
-  const [issueEditorOpen, setIssueEditorOpen] = useState(false);
-  const [issueText, setIssueText] = useState("");
-  const [issueError, setIssueError] = useState("");
-  const [issueSaving, setIssueSaving] = useState(false);
   const [imageResolution, setImageResolution] = useState({ width: 0, height: 0 });
   const frameRef = useRef<HTMLDivElement | null>(null);
-  const checkPanelRef = useRef<HTMLDivElement | null>(null);
   const thumbStripRef = useRef<HTMLDivElement | null>(null);
   const thumbMomentumRef = useRef<ThumbScrollMomentum>({ frame: 0, lastTime: 0, velocity: 0 });
   const isZoomed = transform.scale > 1.01;
@@ -428,28 +437,6 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
     setDragStart(null);
     setImageResolution({ width: 0, height: 0 });
   }, [image?.id]);
-
-  useEffect(() => {
-    setIssueEditorOpen(false);
-    setIssueText("");
-    setIssueError("");
-    setIssueSaving(false);
-  }, [image?.id]);
-
-  useEffect(() => {
-    if (!issueEditorOpen) return;
-
-    function handleOutsidePointerDown(event: globalThis.PointerEvent) {
-      if (issueSaving) return;
-      const target = event.target as Node | null;
-      if (target && checkPanelRef.current?.contains(target)) return;
-      setIssueEditorOpen(false);
-      setIssueError("");
-    }
-
-    document.addEventListener("pointerdown", handleOutsidePointerDown);
-    return () => document.removeEventListener("pointerdown", handleOutsidePointerDown);
-  }, [issueEditorOpen, issueSaving]);
 
   useEffect(() => () => stopThumbMomentum(), []);
 
@@ -532,7 +519,8 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   }
 
   function handleThumbWheel(event: ReactWheelEvent<HTMLDivElement>) {
-    const strip = event.currentTarget;
+    const strip = thumbStripRef.current;
+    if (!strip) return;
     const horizontalDelta = Math.abs(event.deltaX);
     const verticalDelta = Math.abs(event.deltaY);
     if (event.ctrlKey || (horizontalDelta > 0 && horizontalDelta > verticalDelta * 1.2)) return;
@@ -556,8 +544,6 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   }
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
-    const target = event.target as Node | null;
-    if (target && checkPanelRef.current?.contains(target)) return;
     if (!image || !isZoomed) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -581,66 +567,18 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
     }
   }
 
-  async function openIssueEditor() {
-    if (!image) return;
-    setIssueError("");
-    setIssueEditorOpen(true);
-    try {
-      const existingIssue = await onLoadIssue(image);
-      setIssueText(existingIssue === t("imageReview:pass") ? "" : existingIssue);
-    } catch {
-      setIssueText("");
-      setIssueError(t("imageReview:loadExistingIssueFailed"));
-    }
-  }
-
-  async function saveCurrentIssue(issue: string) {
-    if (!image) return;
-    const nextIssue = issue.trim();
-    if (!nextIssue) {
-      setIssueError(t("imageReview:issueRequired"));
-      return;
-    }
-
-    setIssueSaving(true);
-    setIssueError("");
-    try {
-      await onReportIssue(image, nextIssue);
-      setIssueEditorOpen(false);
-      setIssueText(nextIssue);
-    } catch {
-      setIssueError(t("imageReview:saveFailed"));
-    } finally {
-      setIssueSaving(false);
-    }
-  }
-
-  async function approveCurrentImage() {
-    if (!image) return;
-    setIssueSaving(true);
-    setIssueError("");
-    try {
-      await onReportIssue(image, t("imageReview:pass"));
-      setIssueEditorOpen(false);
-      setIssueText("");
-      if (activeIndex < images.length - 1) setActiveIndex(activeIndex + 1);
-    } catch {
-      setIssueError(t("imageReview:saveFailed"));
-    } finally {
-      setIssueSaving(false);
-    }
-  }
-
   return (
-    <section className="review-image-pane" aria-label={title}>
+    <section className="review-image-pane" aria-label={title} aria-busy={loading}>
       <div className="review-pane-head">
-        <label className="review-pane-folder-rule">
-          <input
+        <Field className="review-pane-folder-rule">
+          <FieldLabel className="sr-only" htmlFor={folderInputId}>{title}</FieldLabel>
+          <Input
+            id={folderInputId}
             value={folderValue}
             onChange={(event) => onFolderValueChange(event.target.value)}
             placeholder={t("imageReview:examplePlaceholder", { title })}
           />
-        </label>
+        </Field>
       </div>
       <div
         className={`review-image-stage${isZoomed ? " zoomed" : ""}${dragStart ? " dragging" : ""}`}
@@ -652,7 +590,9 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
         onPointerCancel={handlePointerUp}
       >
         <div className="review-image-frame" ref={frameRef}>
-          {image ? (
+          {loading ? (
+            <Skeleton className="review-image-skeleton" role="status" aria-live="polite" aria-label={t("common:states.loading")} />
+          ) : image ? (
             <img
               src={image.url}
               alt={image.name}
@@ -668,54 +608,17 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
               style={{ transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})` }}
             />
           ) : (
-            <div className="review-empty-image">
-              <ImageOff size={34} aria-hidden="true" />
-              <span>{t("imageReview:noProductImage", { title })}</span>
-            </div>
+            <Empty className="review-empty-image">
+              <EmptyMedia><ImageOff size={34} aria-hidden="true" /></EmptyMedia>
+              <EmptyDescription>{t("imageReview:noProductImage", { title })}</EmptyDescription>
+            </Empty>
           )}
         </div>
-        {group === "model" ? (
-          <div className="review-check-panel" ref={checkPanelRef}>
-            {issueEditorOpen ? (
-              <div className="review-issue-editor">
-                <textarea
-                  value={issueText}
-                  onChange={(event) => {
-                    setIssueText(event.target.value);
-                    if (issueError) setIssueError("");
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-                    event.preventDefault();
-                    if (!issueSaving) void saveCurrentIssue(issueText);
-                  }}
-                  autoFocus
-                  rows={3}
-                  placeholder={t("imageReview:issuePlaceholder")}
-                />
-                <button className="review-issue-save-button" type="button" disabled={!image || issueSaving} onClick={() => saveCurrentIssue(issueText)}>
-                  <Save size={14} aria-hidden="true" />
-                  <span>{issueSaving ? t("common:states.saving") : t("common:actions.save")}</span>
-                </button>
-              </div>
-            ) : null}
-            {issueError ? <ErrorCopyLine className="review-report-error" text={issueError} /> : null}
-            <div className="review-check-actions">
-              <button className="button review-check-button review-check-button--issue" type="button" disabled={!image || issueSaving} onClick={openIssueEditor}>
-                <Flag size={15} aria-hidden="true" />
-                <span>{t("imageReview:reportIssue")}</span>
-              </button>
-              <button className="button review-check-button review-check-button--approve" type="button" disabled={!image || issueSaving} onClick={approveCurrentImage}>
-                <CircleCheck size={15} aria-hidden="true" />
-                <span>{t("imageReview:approve")}</span>
-              </button>
-            </div>
-          </div>
-        ) : null}
       </div>
       <ReviewThumbNav
         title={title}
         images={images}
+        loading={loading}
         activeIndex={activeIndex}
         thumbStripRef={thumbStripRef}
         onSelectImage={selectImage}
@@ -750,6 +653,9 @@ export function ImageReviewPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [modelFolderValue, setModelFolderValue] = useState(() => t("imageReview:defaultModelFolder"));
   const [detailFolderValue, setDetailFolderValue] = useState(() => t("imageReview:defaultDetailFolder"));
+  const [scannedModelFolderValue, setScannedModelFolderValue] = useState(() => t("imageReview:defaultModelFolder"));
+  const initialModelFolderRef = useRef(modelFolderValue);
+  const initialDetailFolderRef = useRef(detailFolderValue);
   const [folderLoading, setFolderLoading] = useState(false);
   const [productImagesLoading, setProductImagesLoading] = useState(false);
   const [folderError, setFolderError] = useState("");
@@ -758,6 +664,8 @@ export function ImageReviewPage() {
   const settingsLoadedRef = useRef(false);
   const hasSavedFolderSettingsRef = useRef(false);
   const folderSettingsDirtyRef = useRef(false);
+  const debouncedModelFolderValue = useDebouncedValue(modelFolderValue, FOLDER_RULE_DEBOUNCE_MS);
+  const debouncedDetailFolderValue = useDebouncedValue(detailFolderValue, FOLDER_RULE_DEBOUNCE_MS);
 
   const activeProduct = useMemo(
     () => products.find((product) => product.id === activeProductId) || products[0] || null,
@@ -787,18 +695,11 @@ export function ImageReviewPage() {
       return;
     }
     setFolderLoading(true);
-    setProducts((currentProducts) =>
-      currentProducts.map((product) => ({
-        ...product,
-        hasModelImages: false,
-        modelImages: [],
-        detailImages: [],
-        unknownImages: [],
-      })),
-    );
     try {
-      const nextProducts = await listReviewProducts(modelFolderValue, rootPath);
+      const nextProducts = await listReviewProducts(debouncedModelFolderValue, rootPath, t("imageReview:bridgeUnavailable"));
+      setProductImagesLoading(Boolean(nextProducts.length));
       setProducts(nextProducts);
+      setScannedModelFolderValue(debouncedModelFolderValue);
       setActiveProductId((currentProductId) => (nextProducts.some((product) => product.id === currentProductId) ? currentProductId : nextProducts[0]?.id || ""));
       setSearchQuery("");
       setProductListVersion((version) => version + 1);
@@ -807,7 +708,7 @@ export function ImageReviewPage() {
     } finally {
       setFolderLoading(false);
     }
-  }, [modelFolderValue, selectedReviewRoot]);
+  }, [debouncedModelFolderValue, selectedReviewRoot, t]);
   const goProduct = useCallback((direction: -1 | 1) => {
     if (!products.length || activeProductIndex < 0) return;
     const nextIndex = Math.max(0, Math.min(products.length - 1, activeProductIndex + direction));
@@ -827,8 +728,9 @@ export function ImageReviewPage() {
       const savedDetailFolders = String(settings?.detailFolders || "").trim();
       hasSavedFolderSettingsRef.current = Boolean(savedModelFolders || savedDetailFolders);
       folderSettingsDirtyRef.current = false;
-      setModelFolderValue(savedModelFolders || t("imageReview:defaultModelFolder"));
-      setDetailFolderValue(savedDetailFolders || t("imageReview:defaultDetailFolder"));
+      setModelFolderValue(savedModelFolders || initialModelFolderRef.current);
+      setScannedModelFolderValue(savedModelFolders || initialModelFolderRef.current);
+      setDetailFolderValue(savedDetailFolders || initialDetailFolderRef.current);
       settingsLoadedRef.current = true;
     }
 
@@ -841,24 +743,22 @@ export function ImageReviewPage() {
 
   useEffect(() => {
     if (!settingsLoadedRef.current || hasSavedFolderSettingsRef.current) return;
-    setModelFolderValue(t("imageReview:defaultModelFolder"));
+    const defaultModelFolder = t("imageReview:defaultModelFolder");
+    setModelFolderValue(defaultModelFolder);
+    setScannedModelFolderValue(defaultModelFolder);
     setDetailFolderValue(t("imageReview:defaultDetailFolder"));
   }, [i18n.language, t]);
 
   useEffect(() => {
     if (!settingsLoadedRef.current || !folderSettingsDirtyRef.current) return;
-    const timeout = window.setTimeout(() => {
-      const imageReview = {
-        modelFolders: modelFolderValue.trim(),
-        detailFolders: detailFolderValue.trim(),
-      };
-      void window.forartConfig?.saveImageReviewSettings?.(imageReview).then(() => {
-        hasSavedFolderSettingsRef.current = Boolean(imageReview.modelFolders || imageReview.detailFolders);
-      });
-    }, 450);
-
-    return () => window.clearTimeout(timeout);
-  }, [detailFolderValue, modelFolderValue]);
+    const imageReview = {
+      modelFolders: debouncedModelFolderValue.trim(),
+      detailFolders: debouncedDetailFolderValue.trim(),
+    };
+    void window.forartConfig?.saveImageReviewSettings?.(imageReview).then(() => {
+      hasSavedFolderSettingsRef.current = Boolean(imageReview.modelFolders || imageReview.detailFolders);
+    });
+  }, [debouncedDetailFolderValue, debouncedModelFolderValue, t]);
 
   useEffect(() => {
     if (!selectedReviewRoot) return;
@@ -907,7 +807,7 @@ export function ImageReviewPage() {
     if (!activeProductId) return;
     let ignore = false;
     setProductImagesLoading(true);
-    loadProductImages(activeProductId, modelFolderValue, detailFolderValue, selectedReviewRoot)
+    loadProductImages(activeProductId, scannedModelFolderValue, debouncedDetailFolderValue, selectedReviewRoot, t("imageReview:bridgeUnavailable"))
       .then((loadedProduct) => {
         if (ignore) return;
         setProducts((currentProducts) => currentProducts.map((product) => (product.id === loadedProduct.id ? loadedProduct : product)));
@@ -922,7 +822,7 @@ export function ImageReviewPage() {
     return () => {
       ignore = true;
     };
-  }, [activeProductId, detailFolderValue, modelFolderValue, productListVersion, selectedReviewRoot]);
+  }, [activeProductId, debouncedDetailFolderValue, productListVersion, scannedModelFolderValue, selectedReviewRoot, t]);
 
   function selectReviewRoot(rootPath: string) {
     setSelectedReviewRoot(rootPath);
@@ -935,7 +835,7 @@ export function ImageReviewPage() {
   async function chooseReviewRoot() {
     setFolderError("");
     try {
-      const result = await window.forartConfig?.chooseDirectory({ title: t("imageReview:chooseDirectory") });
+      const result = await window.forartReview?.chooseRoot?.({ title: t("imageReview:chooseDirectory") });
       if (!result || result.canceled || !result.path) return;
       selectReviewRoot(result.path);
     } catch (error) {
@@ -943,22 +843,12 @@ export function ImageReviewPage() {
     }
   }
 
-  const reportIssue = useCallback(async (image: ReviewImage, issue: string) => {
-    await saveReviewIssue(image, issue, selectedReviewRoot);
-  }, [selectedReviewRoot]);
-
-  const loadIssue = useCallback(async (image: ReviewImage) => {
-    return loadReviewIssue(image, selectedReviewRoot);
-  }, [selectedReviewRoot]);
-
   return (
     <section className="image-review-page" aria-labelledby="image-review-title">
       <div className="image-review-header">
-        <div>
-          <h1 id="image-review-title" className="library-title">
-            {t("imageReview:title")}
-          </h1>
-        </div>
+        <h1 id="image-review-title" className="library-title image-review-title">
+          {t("imageReview:title")}
+        </h1>
         <RootFolderPicker
           selectedRoot={selectedReviewRoot}
           loading={folderLoading}
@@ -970,60 +860,42 @@ export function ImageReviewPage() {
         {folderError ? <ErrorCopyLine className="review-directory-error" text={folderError} /> : null}
       </div>
 
-      <div className="image-review-shell">
-        <div className="review-main review-main--products">
-          <ProductList
-            products={products}
-            activeProductId={productListActiveId}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            onSelectProduct={setActiveProductId}
-          />
+      <div className="review-main review-main--products">
+        <ProductList
+          products={products}
+          activeProductId={productListActiveId}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onSelectProduct={setActiveProductId}
+        />
 
-          <div className="review-product-workspace">
-            <div className="review-product-head">
-              <div>
-                <span>{t("imageReview:currentProduct")}</span>
-                <strong>{activeProduct?.id || t("common:labels.notSelected")}</strong>
-              </div>
-            </div>
-
-            <div className="review-compare">
-              <ProductImagePane
-                ref={modelPaneRef}
-                title={t("imageReview:modelPaneTitle")}
-                group="model"
-                folderValue={modelFolderValue}
-                images={modelImages}
-                resetKey={`${activeProduct?.id || ""}:model:${productListVersion}:${productImagesLoading ? "loading" : "ready"}`}
-                onFolderValueChange={changeModelFolderValue}
-                onReportIssue={reportIssue}
-                onLoadIssue={loadIssue}
-              />
-              <ProductImagePane
-                title={t("imageReview:detailPaneTitle")}
-                group="detail"
-                folderValue={detailFolderValue}
-                images={detailImages}
-                resetKey={`${activeProduct?.id || ""}:detail:${productListVersion}:${productImagesLoading ? "loading" : "ready"}`}
-                onFolderValueChange={changeDetailFolderValue}
-                onReportIssue={reportIssue}
-                onLoadIssue={loadIssue}
-              />
+        <div className="review-product-workspace">
+          <div className="review-product-head">
+            <div>
+              <span>{t("imageReview:currentProduct")}</span>
+              <strong>{activeProduct?.id || t("common:labels.notSelected")}</strong>
             </div>
           </div>
-        </div>
 
-        <div className="review-bottom-bar">
-          <button className="button secondary" type="button" disabled={!activeProduct || activeProductIndex <= 0} onClick={() => goProduct(-1)}>
-            <ChevronUp size={18} aria-hidden="true" />
-            <span>{t("imageReview:previousProduct")}</span>
-          </button>
-          <span className="review-key-hint">{t("imageReview:keyHint")}</span>
-          <button className="button primary" type="button" disabled={!activeProduct || activeProductIndex >= products.length - 1} onClick={() => goProduct(1)}>
-            <span>{t("imageReview:nextProduct")}</span>
-            <ChevronDown size={18} aria-hidden="true" />
-          </button>
+          <div className="review-compare">
+            <ProductImagePane
+              ref={modelPaneRef}
+              title={t("imageReview:modelPaneTitle")}
+              folderValue={modelFolderValue}
+              images={modelImages}
+              loading={productImagesLoading}
+              resetKey={`${activeProduct?.id || ""}:model:${productListVersion}:${productImagesLoading ? "loading" : "ready"}`}
+              onFolderValueChange={changeModelFolderValue}
+            />
+            <ProductImagePane
+              title={t("imageReview:detailPaneTitle")}
+              folderValue={detailFolderValue}
+              images={detailImages}
+              loading={productImagesLoading}
+              resetKey={`${activeProduct?.id || ""}:detail:${productListVersion}:${productImagesLoading ? "loading" : "ready"}`}
+              onFolderValueChange={changeDetailFolderValue}
+            />
+          </div>
         </div>
       </div>
     </section>

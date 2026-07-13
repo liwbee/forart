@@ -36,7 +36,7 @@
 .scrollbar-thin-stable::-webkit-scrollbar-thumb,
 .scrollbar-thin::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--scrollbar-thumb, var(--canvas-node-muted, var(--text-muted))) 42%, transparent);
   background-clip: padding-box;
 }
@@ -66,6 +66,27 @@
 }
 
 .scrollbar-menu::-webkit-scrollbar-thumb {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--scrollbar-thumb, var(--canvas-node-muted, var(--text-muted))) 38%, transparent);
+}
+
+[data-slot="select-viewport"].scrollbar-menu[data-radix-select-viewport] {
+  overflow-y: auto !important;
+  scrollbar-width: thin !important;
+  -ms-overflow-style: auto !important;
+}
+
+[data-slot="select-viewport"].scrollbar-menu[data-radix-select-viewport]::-webkit-scrollbar {
+  width: 6px !important;
+  height: 6px !important;
+  display: block !important;
+}
+
+[data-slot="select-viewport"].scrollbar-menu[data-radix-select-viewport]::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+[data-slot="select-viewport"].scrollbar-menu[data-radix-select-viewport]::-webkit-scrollbar-thumb {
+  border-radius: var(--radius-pill) !important;
+  background: color-mix(in srgb, var(--scrollbar-thumb, var(--canvas-node-muted, var(--text-muted))) 38%, transparent) !important;
 }

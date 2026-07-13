@@ -11,6 +11,12 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
+import { AppScrollArea } from "../../components/AppScrollArea";
+import { ConfirmingDeleteButton } from "../../components/ConfirmingDeleteButton";
+import { DraggableList } from "../../components/DraggableList";
+import { Button, type ButtonProps } from "../../components/ui/button";
+import { Popover, PopoverTrigger } from "../../components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import {
   ArrowDown,
   ArrowUp,
@@ -18,6 +24,7 @@ import {
   ChevronsUp,
   Copy,
   Download,
+  GripVertical,
   Image as ImageIcon,
   Layers,
   Palette,
@@ -25,9 +32,9 @@ import {
   Trash2,
   Type,
   Upload,
-  X,
 } from "lucide-react";
 import { SizePresetPicker } from "../../components/SizePresetPicker";
+import { cacheBustedLibraryImageUrl } from "../../lib/libraryImageActions";
 import { LibraryAssetPickerRail } from "../library-asset-picker/LibraryAssetPickerRail";
 import type { LibraryAssetSelection } from "../library-asset-picker/types";
 import {
@@ -49,7 +56,7 @@ import {
 } from "./core/geometry";
 import type { FreeCanvasEditorItem, FreeCanvasImageItem, FreeCanvasSize, FreeCanvasTextItem, FreeCanvasViewport } from "./types";
 import { FreeCanvasTextLayer } from "./text-layer/FreeCanvasTextLayer";
-import { measureTextLayer } from "./text-layer/measureTextLayer";
+import { measureTextLayer, TEXT_LAYER_LINE_HEIGHT } from "./text-layer/measureTextLayer";
 import { FontSizePanel, TextColorPanel } from "./text-layer/TextStylePanel";
 
 const CANVAS_PRESETS = [
@@ -141,12 +148,12 @@ type StageInteraction =
     didDrag: boolean;
   };
 
-function loadImage(src: string) {
+function loadImage(src: string, errorMessage: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
     image.crossOrigin = "anonymous";
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Image failed to load"));
+    image.onerror = () => reject(new Error(errorMessage));
     image.src = src;
   });
 }
@@ -156,7 +163,7 @@ function drawImageItem(ctx: CanvasRenderingContext2D, image: HTMLImageElement, i
 }
 
 function drawTextItem(ctx: CanvasRenderingContext2D, item: FreeCanvasTextItem) {
-  const lineHeight = item.fontSize * 1.25;
+  const lineHeight = item.fontSize * TEXT_LAYER_LINE_HEIGHT;
   ctx.fillStyle = item.color;
   ctx.font = `${item.fontWeight} ${item.fontSize}px ${item.fontFamily}`;
   ctx.textBaseline = "top";
@@ -205,7 +212,6 @@ function hasImageFileDrag(dataTransfer: DataTransfer) {
 function createImageItem({
   id,
   name,
-  assetId,
   src,
   canvasSize,
   point,
@@ -213,7 +219,6 @@ function createImageItem({
 }: {
   id: string;
   name: string;
-  assetId: string;
   src: string;
   canvasSize: FreeCanvasSize;
   point?: { x: number; y: number };
@@ -224,7 +229,6 @@ function createImageItem({
   return {
     id,
     type: "image",
-    assetId,
     name,
     src,
     x: clamp((point?.x ?? canvasSize.width / 2) - width / 2, 0, Math.max(0, canvasSize.width - width)),
@@ -240,7 +244,7 @@ function textDefaults() {
   return {
     text: "",
     fontSize: 72,
-    fontFamily: "Arial, sans-serif",
+    fontFamily: "\"Noto Sans SC\", sans-serif",
     fontWeight: 700,
     color: "#111827",
     align: "left" as const,
@@ -255,6 +259,17 @@ function constrainMovedItemPosition(item: FreeCanvasEditorItem, x: number, y: nu
   };
 }
 
+function CanvasIconButton({ label, ...props }: ButtonProps & { label: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button aria-label={label} {...props} />
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function FreeCanvasEditor() {
   const { t } = useTranslation();
   const items = useFreeCanvasStore((state) => state.items);
@@ -266,7 +281,7 @@ export function FreeCanvasEditor() {
   const clearItems = useFreeCanvasStore((state) => state.clearItems);
   const moveLayer = useFreeCanvasStore((state) => state.moveLayer);
   const moveLayerToEdge = useFreeCanvasStore((state) => state.moveLayerToEdge);
-  const reorderLayer = useFreeCanvasStore((state) => state.reorderLayer);
+  const reorderLayers = useFreeCanvasStore((state) => state.reorderLayers);
   const [selectedItemId, setSelectedItemId] = useState("");
   const [exporting, setExporting] = useState(false);
   const [copying, setCopying] = useState(false);
@@ -274,8 +289,6 @@ export function FreeCanvasEditor() {
   const [activeTextTool, setActiveTextTool] = useState<{ itemId: string; tool: ActiveTextTool } | null>(null);
   const [activeCanvasTool, setActiveCanvasTool] = useState<ActiveCanvasTool>("select");
   const [editingTextItemId, setEditingTextItemId] = useState("");
-  const [draggingLayerId, setDraggingLayerId] = useState("");
-  const [layerDropTarget, setLayerDropTarget] = useState<{ itemId: string; position: "before" | "after" } | null>(null);
   const [canvasAspectKey, setCanvasAspectKey] = useState<string>(CANVAS_PRESETS[0].key);
   const [canvasSizeKey, setCanvasSizeKey] = useState<string>(CANVAS_PRESETS[0].sizes[0].key);
   const [isCanvasSizePanelOpen, setIsCanvasSizePanelOpen] = useState(false);
@@ -294,6 +307,8 @@ export function FreeCanvasEditor() {
   const canvasPreset = CANVAS_PRESETS.find((preset) => preset.key === canvasAspectKey) || CANVAS_PRESETS[0];
   const canvasSize = canvasPreset.sizes.find((size) => size.key === canvasSizeKey) || canvasPreset.sizes[0];
   const selectedItem = items.find((item) => item.id === selectedItemId) || null;
+  const fontSizeToolOpen = selectedItem?.type === "text" && activeTextTool?.itemId === selectedItem.id && activeTextTool.tool === "fontSize";
+  const colorToolOpen = selectedItem?.type === "text" && activeTextTool?.itemId === selectedItem.id && activeTextTool.tool === "color";
   const sortedItems = useMemo(() => sortedBackToFront(items), [items]);
   const layerItems = useMemo(() => sortedFrontToBack(items), [items]);
   const canvasFitScale = (() => {
@@ -346,12 +361,11 @@ export function FreeCanvasEditor() {
 
   function addAsset(selection: LibraryAssetSelection, point?: { x: number; y: number }) {
     if (editingTextItemId) stopTextEditing();
-    const src = selection.url ? `${selection.url}?t=${encodeURIComponent(selection.updatedAt || selection.assetId || selection.entryId)}` : "";
+    const src = cacheBustedLibraryImageUrl(selection.url, selection.updatedAt || selection.assetId || selection.entryId);
     if (!src) return;
     const maxZIndex = Math.max(...items.map((item) => item.zIndex), 0);
     const item = createImageItem({
       id: `${selection.kind}-${selection.entryId}-${Date.now()}`,
-      assetId: selection.assetId || selection.entryId,
       name: selection.name || "Library image",
       src,
       canvasSize,
@@ -391,7 +405,6 @@ export function FreeCanvasEditor() {
     const item: FreeCanvasTextItem = {
       id: `text-${Date.now()}`,
       type: "text",
-      assetId: "text",
       name: t("freeCanvasEditor:defaultTextLayer"),
       text,
       x: clamp(origin.x, 0, Math.max(0, canvasSize.width - textSize.width)),
@@ -425,7 +438,6 @@ export function FreeCanvasEditor() {
       const offsetPoint = point ? { x: point.x + index * 28, y: point.y + index * 28 } : undefined;
       return createImageItem({
         id: `local-${Date.now()}-${index}`,
-        assetId: file.name || `local-${index}`,
         name: file.name || t("freeCanvasEditor:droppedImage"),
         src,
         canvasSize,
@@ -522,6 +534,13 @@ export function FreeCanvasEditor() {
     setSelectedItemId("");
     setEditingTextItemId("");
     setActiveTextTool(null);
+  }
+
+  function changeTextToolOpen(itemId: string, tool: ActiveTextTool, open: boolean) {
+    setActiveTextTool((currentTool) => {
+      if (open) return { itemId, tool };
+      return currentTool?.itemId === itemId && currentTool.tool === tool ? null : currentTool;
+    });
   }
 
   function handleStagePointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -803,6 +822,11 @@ export function FreeCanvasEditor() {
   function handleEditorKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       if (editingTextItemId) return;
+      if (activeTextTool) {
+        event.preventDefault();
+        setActiveTextTool(null);
+        return;
+      }
       if (activeCanvasTool !== "select") {
         event.preventDefault();
         setActiveCanvasTool("select");
@@ -839,7 +863,7 @@ export function FreeCanvasEditor() {
     canvas.width = canvasSize.width;
     canvas.height = canvasSize.height;
     const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Canvas context unavailable");
+    if (!ctx) throw new Error(t("freeCanvasEditor:canvasContextUnavailable"));
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     for (const item of sortedBackToFront(items)) {
@@ -850,14 +874,14 @@ export function FreeCanvasEditor() {
       ctx.rotate((item.rotation * Math.PI) / 180);
       ctx.translate(-centerX, -centerY);
       if (item.type === "image") {
-        drawImageItem(ctx, await loadImage(item.src), item);
+        drawImageItem(ctx, await loadImage(item.src, t("freeCanvasEditor:imageLoadFailed")), item);
       } else {
         drawTextItem(ctx, item);
       }
       ctx.restore();
     }
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-    if (!blob) throw new Error("Canvas export failed");
+    if (!blob) throw new Error(t("freeCanvasEditor:canvasExportUnavailable"));
     return blob;
   }
 
@@ -894,15 +918,6 @@ export function FreeCanvasEditor() {
     }
   }
 
-  function updateLayerDropTarget(event: DragEvent<HTMLDivElement>, targetItemId: string) {
-    if (!draggingLayerId || draggingLayerId === targetItemId) {
-      setLayerDropTarget(null);
-      return;
-    }
-    const rect = event.currentTarget.getBoundingClientRect();
-    setLayerDropTarget({ itemId: targetItemId, position: event.clientY < rect.top + rect.height / 2 ? "before" : "after" });
-  }
-
   return (
     <div className="free-canvas-editor" onKeyDown={handleEditorKeyDown}>
       <main className="free-canvas-editor__stage-wrap">
@@ -923,16 +938,18 @@ export function FreeCanvasEditor() {
               triggerClassName="free-canvas-editor__canvas-size-trigger"
               panelClassName="free-canvas-editor__canvas-size-panel"
               aspectRatioClassName="free-canvas-editor__canvas-ratios"
-              formatTrigger={() => `${canvasSize.label} / ${canvasPreset.label}`}
+              panelSide="bottom"
+              formatTrigger={() => `${canvasSize.label} • ${canvasPreset.label}`}
               onOpenChange={setIsCanvasSizePanelOpen}
               onResolutionChange={changeCanvasSize}
               onAspectRatioChange={changeCanvasAspect}
             />
-            <button
-              className={`button secondary free-canvas-editor__icon-button${activeCanvasTool === "text" ? " active" : ""}`}
+            <CanvasIconButton
+              className="free-canvas-editor__icon-button"
               type="button"
-              aria-label={t("freeCanvasEditor:addText")}
-              title={t("freeCanvasEditor:addText")}
+              label={t("freeCanvasEditor:addText")}
+              variant={activeCanvasTool === "text" ? "default" : "outline"}
+              size="icon"
               aria-pressed={activeCanvasTool === "text"}
               onClick={() => {
                 if (editingTextItemId) stopTextEditing();
@@ -940,38 +957,39 @@ export function FreeCanvasEditor() {
                 setActiveTextTool(null);
               }}
             >
-              <Type size={18} aria-hidden="true" />
-            </button>
-            <button className="button secondary free-canvas-editor__icon-button" type="button" aria-label={t("freeCanvasEditor:uploadLocalImage")} title={t("freeCanvasEditor:uploadLocalImage")} onClick={() => fileInputRef.current?.click()}>
-              <Upload size={18} aria-hidden="true" />
-            </button>
+              <Type aria-hidden="true" />
+            </CanvasIconButton>
+            <CanvasIconButton className="free-canvas-editor__icon-button" type="button" label={t("freeCanvasEditor:uploadLocalImage")} variant="outline" size="icon" onClick={() => fileInputRef.current?.click()}>
+              <Upload aria-hidden="true" />
+            </CanvasIconButton>
             <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => handleLocalImageInput(event.currentTarget.files)} />
           </div>
           <div className="free-canvas-editor__stage-actions">
-            <button className="button secondary" type="button" onClick={resetViewport}>
-              <RotateCcw size={16} aria-hidden="true" />
+            <Button variant="outline" type="button" onClick={resetViewport}>
+              <RotateCcw data-icon="inline-start" aria-hidden="true" />
               <span>{Math.round(viewport.scale * 100)}%</span>
-            </button>
-            <button
-              className="button secondary"
-              type="button"
+            </Button>
+            <ConfirmingDeleteButton
               disabled={!items.length}
-              onClick={() => {
+              label={t("freeCanvasEditor:clear")}
+              confirmLabel={t("freeCanvasEditor:confirmClear")}
+              cancelLabel={t("common:actions.cancel")}
+              resetKey={items.length}
+              onDelete={() => {
                 clearItems();
                 setSelectedItemId("");
+                setEditingTextItemId("");
+                setActiveTextTool(null);
               }}
-            >
-              <X size={18} aria-hidden="true" />
-              <span>{t("freeCanvasEditor:clear")}</span>
-            </button>
-            <button className="button secondary free-canvas-editor__copy-button" type="button" disabled={!items.length || copying} onClick={copyCanvasImage}>
-              <Copy size={18} aria-hidden="true" />
+            />
+            <Button className="free-canvas-editor__copy-button" variant="outline" type="button" disabled={!items.length || copying} onClick={copyCanvasImage}>
+              <Copy data-icon="inline-start" aria-hidden="true" />
               <span>{copying ? t("freeCanvasEditor:copying") : t("freeCanvasEditor:copyImage")}</span>
-            </button>
-            <button className="button primary free-canvas-editor__export-button" type="button" disabled={!items.length || exporting} onClick={exportCanvas}>
-              <Download size={18} aria-hidden="true" />
+            </Button>
+            <Button className="free-canvas-editor__export-button" type="button" disabled={!items.length || exporting} onClick={exportCanvas}>
+              <Download data-icon="inline-start" aria-hidden="true" />
               <span>{exporting ? t("freeCanvasEditor:exporting") : t("freeCanvasEditor:exportPng")}</span>
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -1096,48 +1114,54 @@ export function FreeCanvasEditor() {
             >
               {selectedItem.type === "text" ? (
                 <>
-                  <button
-                    type="button"
-                    className={activeTextTool?.itemId === selectedItem.id && activeTextTool.tool === "fontSize" ? "active" : ""}
-                    aria-label={t("freeCanvasEditor:fontSize")}
-                    title={t("freeCanvasEditor:fontSize")}
-                    onClick={() => setActiveTextTool((currentTool) => (currentTool?.itemId === selectedItem.id && currentTool.tool === "fontSize" ? null : { itemId: selectedItem.id, tool: "fontSize" }))}
-                  >
-                    <Type size={16} aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    className={`free-canvas-editor__color-tool${activeTextTool?.itemId === selectedItem.id && activeTextTool.tool === "color" ? " active" : ""}`}
-                    aria-label={t("freeCanvasEditor:textColor")}
-                    title={t("freeCanvasEditor:textColor")}
-                    onClick={() => setActiveTextTool((currentTool) => (currentTool?.itemId === selectedItem.id && currentTool.tool === "color" ? null : { itemId: selectedItem.id, tool: "color" }))}
-                  >
-                    <Palette size={16} aria-hidden="true" />
-                    <span className="free-canvas-editor__toolbar-color" style={{ "--free-canvas-text-color": selectedItem.color } as CSSProperties} />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <Popover open={fontSizeToolOpen} onOpenChange={(open) => changeTextToolOpen(selectedItem.id, "fontSize", open)}>
+                          <PopoverTrigger asChild>
+                            <Button type="button" variant={fontSizeToolOpen ? "default" : "ghost"} size="icon-sm" aria-label={t("freeCanvasEditor:fontSize")} aria-pressed={fontSizeToolOpen}>
+                              <Type aria-hidden="true" />
+                            </Button>
+                          </PopoverTrigger>
+                          <FontSizePanel item={selectedItem} fontSizeLabel={t("freeCanvasEditor:fontSize")} onFontSizeChange={(fontSize) => updateTextFontSize(selectedItem.id, fontSize)} />
+                        </Popover>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("freeCanvasEditor:fontSize")}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <Popover open={colorToolOpen} onOpenChange={(open) => changeTextToolOpen(selectedItem.id, "color", open)}>
+                          <PopoverTrigger asChild>
+                            <Button className="free-canvas-editor__color-tool" type="button" variant={colorToolOpen ? "default" : "ghost"} size="icon-sm" aria-label={t("freeCanvasEditor:textColor")} aria-pressed={colorToolOpen}>
+                              <Palette aria-hidden="true" />
+                              <span className="free-canvas-editor__toolbar-color" style={{ "--free-canvas-text-color": selectedItem.color } as CSSProperties} />
+                            </Button>
+                          </PopoverTrigger>
+                          <TextColorPanel item={selectedItem} textColorLabel={t("freeCanvasEditor:textColor")} onColorChange={(color) => updateTextItem(selectedItem.id, { color })} />
+                        </Popover>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("freeCanvasEditor:textColor")}</TooltipContent>
+                  </Tooltip>
                 </>
               ) : null}
-              <button type="button" aria-label={t("freeCanvasEditor:moveLayerUp")} title={t("freeCanvasEditor:moveLayerUp")} onClick={() => moveLayer(selectedItem.id, "up")}>
-                <ArrowUp size={16} aria-hidden="true" />
-              </button>
-              <button type="button" aria-label={t("freeCanvasEditor:moveLayerDown")} title={t("freeCanvasEditor:moveLayerDown")} onClick={() => moveLayer(selectedItem.id, "down")}>
-                <ArrowDown size={16} aria-hidden="true" />
-              </button>
-              <button type="button" aria-label={t("freeCanvasEditor:bringToFront")} title={t("freeCanvasEditor:bringToFront")} onClick={() => moveLayerToEdge(selectedItem.id, "front")}>
-                <ChevronsUp size={16} aria-hidden="true" />
-              </button>
-              <button type="button" aria-label={t("freeCanvasEditor:sendToBack")} title={t("freeCanvasEditor:sendToBack")} onClick={() => moveLayerToEdge(selectedItem.id, "back")}>
-                <ChevronsDown size={16} aria-hidden="true" />
-              </button>
-              <button className="danger" type="button" aria-label={t("freeCanvasEditor:deleteLayer")} title={t("freeCanvasEditor:deleteLayer")} onClick={removeSelectedItem}>
-                <Trash2 size={16} aria-hidden="true" />
-              </button>
-              {selectedItem.type === "text" && activeTextTool?.itemId === selectedItem.id && activeTextTool.tool === "fontSize" ? (
-                <FontSizePanel item={selectedItem} fontSizeLabel={t("freeCanvasEditor:fontSize")} onFontSizeChange={(fontSize) => updateTextFontSize(selectedItem.id, fontSize)} />
-              ) : null}
-              {selectedItem.type === "text" && activeTextTool?.itemId === selectedItem.id && activeTextTool.tool === "color" ? (
-                <TextColorPanel item={selectedItem} textColorLabel={t("freeCanvasEditor:textColor")} onColorChange={(color) => updateTextItem(selectedItem.id, { color })} />
-              ) : null}
+              <CanvasIconButton type="button" label={t("freeCanvasEditor:moveLayerUp")} variant="ghost" size="icon-sm" onClick={() => moveLayer(selectedItem.id, "up")}>
+                <ArrowUp aria-hidden="true" />
+              </CanvasIconButton>
+              <CanvasIconButton type="button" label={t("freeCanvasEditor:moveLayerDown")} variant="ghost" size="icon-sm" onClick={() => moveLayer(selectedItem.id, "down")}>
+                <ArrowDown aria-hidden="true" />
+              </CanvasIconButton>
+              <CanvasIconButton type="button" label={t("freeCanvasEditor:bringToFront")} variant="ghost" size="icon-sm" onClick={() => moveLayerToEdge(selectedItem.id, "front")}>
+                <ChevronsUp aria-hidden="true" />
+              </CanvasIconButton>
+              <CanvasIconButton type="button" label={t("freeCanvasEditor:sendToBack")} variant="ghost" size="icon-sm" onClick={() => moveLayerToEdge(selectedItem.id, "back")}>
+                <ChevronsDown aria-hidden="true" />
+              </CanvasIconButton>
+              <CanvasIconButton type="button" label={t("freeCanvasEditor:deleteLayer")} variant="destructive" size="icon-sm" onClick={removeSelectedItem}>
+                <Trash2 aria-hidden="true" />
+              </CanvasIconButton>
             </div>
           ) : null}
 
@@ -1146,58 +1170,38 @@ export function FreeCanvasEditor() {
               <Layers size={16} aria-hidden="true" />
               <strong>{t("freeCanvasEditor:layers")}</strong>
             </div>
-            <div className="free-canvas-editor__layer-list">
-              {layerItems.map((item) => {
-                const Icon = item.type === "text" ? Type : ImageIcon;
-                return (
-                  <div
-                    key={item.id}
-                    className={`free-canvas-editor__layer-row${selectedItemId === item.id ? " active" : ""}${draggingLayerId === item.id ? " dragging" : ""}${layerDropTarget?.itemId === item.id ? ` drop-${layerDropTarget.position}` : ""}`}
-                    draggable
-                    onDragStart={(event) => {
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", item.id);
-                      setDraggingLayerId(item.id);
-                      setSelectedItemId(item.id);
-                    }}
-                    onDragEnter={(event) => {
-                      event.preventDefault();
-                      updateLayerDropTarget(event, item.id);
-                    }}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                      updateLayerDropTarget(event, item.id);
-                    }}
-                    onDragLeave={() => setLayerDropTarget((currentTarget) => (currentTarget?.itemId === item.id ? null : currentTarget))}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const draggedItemId = event.dataTransfer.getData("text/plain") || draggingLayerId;
-                      reorderLayer(draggedItemId, item.id, layerDropTarget?.itemId === item.id ? layerDropTarget.position : "before");
-                      setDraggingLayerId("");
-                      setLayerDropTarget(null);
-                    }}
-                    onDragEnd={() => {
-                      setDraggingLayerId("");
-                      setLayerDropTarget(null);
-                    }}
-                  >
-                    <button type="button" className="free-canvas-editor__layer-select" onClick={() => setSelectedItemId(item.id)}>
-                      <Icon size={15} aria-hidden="true" />
-                      <span>{item.name || (item.type === "text" ? t("freeCanvasEditor:textLayer") : t("freeCanvasEditor:imageLayer"))}</span>
-                    </button>
-                    <div className="free-canvas-editor__layer-order-actions" aria-label={t("freeCanvasEditor:layerActions")}>
-                      <button type="button" aria-label={t("freeCanvasEditor:moveLayerUp")} title={t("freeCanvasEditor:moveLayerUp")} onClick={() => moveLayer(item.id, "up")}>
-                        <ArrowUp size={14} aria-hidden="true" />
-                      </button>
-                      <button type="button" aria-label={t("freeCanvasEditor:moveLayerDown")} title={t("freeCanvasEditor:moveLayerDown")} onClick={() => moveLayer(item.id, "down")}>
-                        <ArrowDown size={14} aria-hidden="true" />
-                      </button>
+            <AppScrollArea className="free-canvas-editor__layer-scroll" viewportClassName="free-canvas-editor__layer-scroll-viewport">
+              <DraggableList
+                items={layerItems}
+                getId={(item) => item.id}
+                onReorder={(nextItems) => reorderLayers(nextItems.map((item) => item.id))}
+                className="free-canvas-editor__layer-list"
+                renderItem={(item, { dragHandleProps }) => {
+                  const Icon = item.type === "text" ? Type : ImageIcon;
+                  return (
+                    <div
+                      className={`free-canvas-editor__layer-row${selectedItemId === item.id ? " active" : ""}`}
+                    >
+                      <span className="free-canvas-editor__layer-drag-handle" aria-hidden="true" {...dragHandleProps}>
+                        <GripVertical size={13} />
+                      </span>
+                      <Button type="button" variant="ghost" size="sm" className="free-canvas-editor__layer-select w-full min-w-0 justify-start" onClick={() => setSelectedItemId(item.id)}>
+                        <Icon data-icon="inline-start" aria-hidden="true" />
+                        <span>{item.name || (item.type === "text" ? t("freeCanvasEditor:textLayer") : t("freeCanvasEditor:imageLayer"))}</span>
+                      </Button>
+                      <div className="free-canvas-editor__layer-order-actions" aria-label={t("freeCanvasEditor:layerActions")}>
+                        <CanvasIconButton type="button" label={t("freeCanvasEditor:moveLayerUp")} variant="ghost" size="icon-sm" onClick={() => moveLayer(item.id, "up")}>
+                          <ArrowUp aria-hidden="true" />
+                        </CanvasIconButton>
+                        <CanvasIconButton type="button" label={t("freeCanvasEditor:moveLayerDown")} variant="ghost" size="icon-sm" onClick={() => moveLayer(item.id, "down")}>
+                          <ArrowDown aria-hidden="true" />
+                        </CanvasIconButton>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                }}
+              />
+            </AppScrollArea>
           </aside>
         </div>
         {exportError ? <ErrorCopyLine className="free-canvas-editor__error" text={t("freeCanvasEditor:exportFailed", { message: exportError })} /> : null}

@@ -43,7 +43,6 @@ let activeActionService = null;
 let activeActionServiceKey = '';
 let activeActionFolderImportService = null;
 let activeActionFolderImportServiceKey = '';
-let activeActionImportPreview = null;
 
 function libraryRuntimeModule() {
   if (!runtimeModulePromise) {
@@ -111,16 +110,7 @@ async function getLibraryRuntime({ configStore, app, dataRoot }) {
   const runtimeKey = [localLibraryPath, databaseDir, dataRoot, language].join('|');
   if (activeRuntime && activeRuntimeKey === runtimeKey) return { config, runtime: activeRuntime };
 
-  activeRuntime?.close?.();
-  activeModelService = null;
-  activeModelServiceKey = '';
-  activeOutfitService = null;
-  activeOutfitServiceKey = '';
-  activeActionService = null;
-  activeActionServiceKey = '';
-  activeActionFolderImportService = null;
-  activeActionFolderImportServiceKey = '';
-  activeActionImportPreview = null;
+  closeActiveRuntime();
   const { createLibraryRuntime } = await libraryRuntimeModule();
   activeRuntime = createLibraryRuntime({
     dataDir: localLibraryPath,
@@ -130,6 +120,20 @@ async function getLibraryRuntime({ configStore, app, dataRoot }) {
   });
   activeRuntimeKey = runtimeKey;
   return { config, runtime: activeRuntime };
+}
+
+function closeActiveRuntime() {
+  activeRuntime?.close?.();
+  activeRuntime = null;
+  activeRuntimeKey = '';
+  activeModelService = null;
+  activeModelServiceKey = '';
+  activeOutfitService = null;
+  activeOutfitServiceKey = '';
+  activeActionService = null;
+  activeActionServiceKey = '';
+  activeActionFolderImportService = null;
+  activeActionFolderImportServiceKey = '';
 }
 
 function localLibraryAssetUrl(assetId) {
@@ -180,27 +184,6 @@ async function getActionFolderImportService(runtime) {
   activeActionFolderImportService = createActionFolderImportService(runtime, actionService);
   activeActionFolderImportServiceKey = activeRuntimeKey;
   return activeActionFolderImportService;
-}
-
-function registerActionImportPreview(preview) {
-  if (!preview) return null;
-  const rows = new Map();
-  for (const row of preview?.rows || []) {
-    if (row?.id && row.image_path) rows.set(String(row.id), row.image_path);
-  }
-  activeActionImportPreview = {
-    id: String(preview?.preview_id || ''),
-    rows,
-  };
-  return {
-    ...preview,
-    rows: (preview?.rows || []).map((row) => ({
-      ...row,
-      thumbnail_url: row.image_path && preview?.preview_id
-        ? `forart-asset://action-import-preview/${encodeURIComponent(preview.preview_id)}/${encodeURIComponent(row.id)}`
-        : '',
-    })),
-  };
 }
 
 function success(body, status = 200) {
@@ -459,15 +442,6 @@ async function dispatchActionLibraryRoute({ method, url, body, runtime }) {
       return notFoundIfNull(await importService.importActionEntries(projectId, parsed.value), 'Action project not found');
     }
 
-    const importPreviewMatch = pathname.match(/^\/api\/action-projects\/([^/]+)\/actions\/import-folder\/preview$/);
-    if (importPreviewMatch && method === 'POST') {
-      const projectId = decodeURIComponent(importPreviewMatch[1]);
-      const importService = await getActionFolderImportService(runtime);
-      const parsed = await parseLibraryRoutePayload('libraryActionImportPreviewPayloadSchema', body || {});
-      if (!parsed.ok) return parsed;
-      return notFoundIfNull(registerActionImportPreview(importService.previewActionFolderImport(projectId, parsed.value)), 'Action project not found');
-    }
-
     const projectMatch = pathname.match(/^\/api\/action-projects\/([^/]+)(?:\/(cover\/upload|actions))?$/);
     if (projectMatch) {
       const projectId = decodeURIComponent(projectMatch[1]);
@@ -616,6 +590,7 @@ function registerLocalApiIpc({ ipcMain, configStore, app, dataRoot }) {
   });
 
   return {
+    close: closeActiveRuntime,
     async resolveAssetUrl(source) {
       let parsed;
       try {
@@ -632,22 +607,6 @@ function registerLocalApiIpc({ ipcMain, configStore, app, dataRoot }) {
       if (!asset?.path) return '';
       const target = nodePath.isAbsolute(asset.path) ? asset.path : nodePath.join(runtime.storageRoot, asset.path);
       if (!isInside(runtime.storageRoot, target) || !fs.existsSync(target)) return '';
-      return target;
-    },
-    resolveActionImportPreviewUrl(source) {
-      let parsed;
-      try {
-        parsed = new URL(String(source || ''));
-      } catch {
-        return '';
-      }
-      if (parsed.protocol !== 'forart-asset:' || parsed.host !== 'action-import-preview') return '';
-      const parts = parsed.pathname.split('/').filter(Boolean).map((part) => decodeURIComponent(part));
-      const previewId = parts[0] || '';
-      const rowId = parts[1] || '';
-      if (!previewId || !rowId || previewId !== activeActionImportPreview?.id) return '';
-      const target = activeActionImportPreview.rows.get(rowId) || '';
-      if (!target || !fs.existsSync(target)) return '';
       return target;
     },
     async resolveAssetThumbnailUrl(source) {

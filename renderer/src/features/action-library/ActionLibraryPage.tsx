@@ -1,10 +1,16 @@
-import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, ChevronRight, Copy, Download, Eye, FolderPlus, ImagePlus, MoreHorizontal, Tags, Trash2 } from "lucide-react";
-import { createPortal } from "react-dom";
+import { ArrowLeft, Copy, Download, Eye, FolderPlus, ImagePlus, MoreHorizontal, Tags, Trash2 } from "lucide-react";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
+import { AppScrollArea } from "../../components/AppScrollArea";
 import { LazyImage } from "../../components/LazyImage";
+import { Button } from "../../components/ui/button";
+import { Empty, EmptyDescription } from "../../components/ui/empty";
+import { Input } from "../../components/ui/input";
+import { Skeleton } from "../../components/ui/skeleton";
+import { Textarea } from "../../components/ui/textarea";
+import { ConfirmingDropdownMenuItem, DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu";
 import { CollapsibleTagFilterRow } from "../library-tags";
 import { LibraryTagChoiceButton } from "../library-tags";
 import { ImageViewer } from "../../lib/ImageViewer";
@@ -14,8 +20,10 @@ import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySor
 import { LibraryImageDropZone } from "../resource-library/LibraryImageDropZone";
 import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
 import { VirtualLibraryCardGrid } from "../resource-library/VirtualLibraryCardGrid";
-import { LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
+import { createUniqueLibraryProjectName, LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
+import { getChangedProjectOrder, setOptimisticProjectOrder, type LibraryProjectsQueryData } from "../library-layout/projectReorder";
 import { LibraryTagManagerDialog } from "../library-tags/LibraryTagManagerDialog";
+import { getChangedTagOrder, setOptimisticTagOrder, type LibraryTagsQueryData } from "../library-tags/tagReorder";
 import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
 import { createLibraryAssetUploadPayload } from "../resource-library/createLibraryAssetUploadPayload";
 import { normalizeTags, toggleTag } from "../library-tags/tagUtils";
@@ -54,7 +62,8 @@ function normalizeLibraryName(value: string) {
 function isSafeLibraryFileName(value: string) {
   return Boolean(value)
     && value.length <= 80
-    && !/[<>:"/\\|?*\x00-\x1f]/.test(value)
+    && !/[<>:"/\\|?*]/.test(value)
+    && Array.from(value).every((character) => character.charCodeAt(0) >= 32)
     && value !== "."
     && value !== ".."
     && !/[ .]$/.test(value);
@@ -92,14 +101,14 @@ function ActionToolbar({
         <LibraryBulkManageButton disabled={false} onClick={selectionMode ? onExitSelectionMode : onEnterSelectionMode} />
         <span className="library-filter-label">{t("common:labels.tags")}</span>
         <div className="library-tag-controls">
-          <CollapsibleTagFilterRow expandLabel="展开标签" collapseLabel="收起标签">
+          <CollapsibleTagFilterRow expandLabel={t("common:labels.expandTags")} collapseLabel={t("common:labels.collapseTags")}>
             <div className="library-tag-filter">
-              <button className={hasLibraryTagFilter(tagFilter) ? "" : "active"} type="button" onClick={onTagClear}>
+              <Button className={hasLibraryTagFilter(tagFilter) ? "" : "active"} variant={hasLibraryTagFilter(tagFilter) ? "ghost" : "default"} type="button" onClick={onTagClear}>
                 {t("common:labels.all")}
-              </button>
-              <button className={tagFilter.untaggedOnly ? "active" : ""} type="button" onClick={onUntaggedToggle}>
+              </Button>
+              <Button className={tagFilter.untaggedOnly ? "active" : ""} variant={tagFilter.untaggedOnly ? "default" : "ghost"} type="button" onClick={onUntaggedToggle}>
                 {t("common:labels.untagged")}
-              </button>
+              </Button>
               {tags.map((tag) => (
                 <LibraryTagChoiceButton
                   key={tag.id}
@@ -132,14 +141,14 @@ function AddActionCard({ disabled, busy, onCreate, onOpenBulkImport }: { disable
 
   return (
     <div className="outfit-add-card action-add-card">
-      <button className="outfit-add-button action-add-card__button" type="button" disabled={disabled} onClick={() => inputRef.current?.click()}>
-        <ImagePlus size={24} aria-hidden="true" />
+      <Button className="outfit-add-button action-add-card__button" type="button" variant="ghost" disabled={disabled} onClick={() => inputRef.current?.click()}>
+        <ImagePlus aria-hidden="true" />
         <strong>{busy ? t("common:states.uploading") : t("actionLibrary:addAction")}</strong>
-      </button>
-      <button className="outfit-add-button action-add-card__button" type="button" disabled={disabled} onClick={onOpenBulkImport}>
-        <FolderPlus size={24} aria-hidden="true" />
+      </Button>
+      <Button className="outfit-add-button action-add-card__button" type="button" variant="ghost" disabled={disabled} onClick={onOpenBulkImport}>
+        <FolderPlus aria-hidden="true" />
         <strong>{t("actionLibrary:bulkImportButton")}</strong>
-      </button>
+      </Button>
       <input ref={inputRef} type="file" accept="image/*" onChange={handleFileChange} hidden />
     </div>
   );
@@ -149,7 +158,6 @@ function ActionCard({
   action,
   tags,
   tagsByName,
-  deleteConfirmActionId,
   isDeleting,
   selectionMode,
   selected,
@@ -164,21 +172,19 @@ function ActionCard({
   action: ActionEntry;
   tags: ActionTag[];
   tagsByName: Map<string, LibraryTagNameColorLike>;
-  deleteConfirmActionId: string;
   isDeleting: boolean;
   selectionMode: boolean;
   selected: boolean;
   onToggleTag: (actionId: string, tagName: string) => void;
   onToggleSelected: (actionId: string) => void;
   onUpdateDetails: (actionId: string, patch: Partial<Pick<ActionEntry, "name" | "prompt">>) => boolean;
-  onDelete: (actionId: string, isConfirming: boolean) => void;
+  onDelete: (actionId: string) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
   renameError: string;
   onClearRenameError: (actionId: string) => void;
 }) {
   const { t } = useTranslation();
-  const [menuState, setMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
-  const [tagMenuState, setTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
+  const [menuOpen, setMenuOpen] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [promptOpen, setPromptOpen] = useState(false);
   const [draftName, setDraftName] = useState(action.name || "");
@@ -204,73 +210,21 @@ function ActionCard({
   }, [promptOpen]);
 
   useEffect(() => {
-    if (selectionMode) setPromptOpen(false);
+    if (selectionMode) {
+      setPromptOpen(false);
+      setMenuOpen(false);
+    }
   }, [selectionMode]);
-
-  useEffect(() => {
-    if (!menuState.open && !tagMenuState.open) return;
-    function closeMenu() {
-      setMenuState({ open: false, x: 0, y: 0 });
-      setTagMenuState({ open: false, x: 0, y: 0 });
-    }
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") closeMenu();
-    }
-    window.addEventListener("pointerdown", closeMenu);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", closeMenu);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [menuState.open, tagMenuState.open]);
-
-  function openMenu(event: MouseEvent<HTMLButtonElement>) {
-    event.stopPropagation();
-    const rect = event.currentTarget.getBoundingClientRect();
-    const menuWidth = 184;
-    const menuMaxHeight = 320;
-    const pad = 8;
-    const preferredX = rect.right + 8;
-    const preferredY = rect.top;
-    const x = preferredX + menuWidth <= window.innerWidth - pad ? preferredX : rect.left - menuWidth - 8;
-    setMenuState({
-      open: true,
-      x: Math.max(pad, Math.min(x, window.innerWidth - menuWidth - pad)),
-      y: Math.max(pad, Math.min(preferredY, window.innerHeight - menuMaxHeight - pad)),
-    });
-    setTagMenuState({ open: false, x: 0, y: 0 });
-  }
-
-  function toggleTagMenu(event: MouseEvent<HTMLButtonElement>) {
-    event.stopPropagation();
-    if (tagMenuState.open) {
-      setTagMenuState({ open: false, x: 0, y: 0 });
-      return;
-    }
-    const rect = event.currentTarget.getBoundingClientRect();
-    const menuWidth = 184;
-    const menuMaxHeight = 280;
-    const pad = 8;
-    const preferredX = rect.right + 8;
-    const x = preferredX + menuWidth <= window.innerWidth - pad ? preferredX : rect.left - menuWidth - 8;
-    setTagMenuState({
-      open: true,
-      x: Math.max(pad, Math.min(x, window.innerWidth - menuWidth - pad)),
-      y: Math.max(pad, Math.min(rect.top, window.innerHeight - menuMaxHeight - pad)),
-    });
-  }
 
   function handleViewImage() {
     if (!assetUrl) return;
-    setMenuState({ open: false, x: 0, y: 0 });
-    setTagMenuState({ open: false, x: 0, y: 0 });
+    setMenuOpen(false);
     setViewerOpen(true);
   }
 
   async function handleCopyImage() {
     if (!assetUrl) return;
-    setMenuState({ open: false, x: 0, y: 0 });
-    setTagMenuState({ open: false, x: 0, y: 0 });
+    setMenuOpen(false);
     onImageActionStatus("busy", t("common:states.copyingImage"));
     try {
       await copyLibraryImage(assetUrl);
@@ -282,8 +236,7 @@ function ActionCard({
 
   async function handleDownloadOriginalImage() {
     if (!assetUrl) return;
-    setMenuState({ open: false, x: 0, y: 0 });
-    setTagMenuState({ open: false, x: 0, y: 0 });
+    setMenuOpen(false);
     onImageActionStatus("busy", t("common:states.downloadingImage"));
     try {
       await downloadLibraryOriginalImage(assetUrl, action.name || `action-${action.id}`);
@@ -363,12 +316,12 @@ function ActionCard({
           ) : null}
         </div>
         <div className="action-card__face action-card__face--back" aria-hidden={!promptOpen}>
-          <button className="action-card__back-button" type="button" tabIndex={promptOpen ? 0 : -1} aria-label={t("actionLibrary:backToImage")} title={t("common:actions.back")} onClick={closePromptEditor}>
-            <ArrowLeft size={18} aria-hidden="true" />
-          </button>
+          <Button className="action-card__back-button" type="button" variant="ghost" size="icon-sm" tabIndex={promptOpen ? 0 : -1} aria-label={t("actionLibrary:backToImage")} title={t("common:actions.back")} onClick={closePromptEditor}>
+            <ArrowLeft aria-hidden="true" />
+          </Button>
           <label className="action-card__name-field">
             {renameError ? <span className="library-rename-error-popover">{renameError}</span> : null}
-            <input
+            <Input
               ref={nameInputRef}
               className={renameError ? "library-rename-input--error" : undefined}
               value={draftName}
@@ -395,7 +348,7 @@ function ActionCard({
             />
           </label>
           <label className="action-card__prompt-field">
-            <textarea
+            <Textarea
               ref={textareaRef}
               value={draftPrompt}
               maxLength={4000}
@@ -413,85 +366,69 @@ function ActionCard({
           </label>
         </div>
       </div>
-      <button className="outfit-card__menu-button" type="button" aria-label={t("actionLibrary:actionActions")} aria-expanded={menuState.open} onClick={openMenu}>
-        <MoreHorizontal size={18} aria-hidden="true" />
-      </button>
-      {menuState.open
-        ? createPortal(
-            <div
-              className="outfit-card-menu"
-              role="menu"
-              style={{ left: menuState.x, top: menuState.y }}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              <button
-                className={tagMenuState.open ? "active" : ""}
-                type="button"
-                role="menuitem"
-                aria-haspopup="menu"
-                aria-expanded={tagMenuState.open}
-                onClick={toggleTagMenu}
-              >
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenuTrigger asChild>
+          <Button className="outfit-card__menu-button" type="button" variant="outline" size="icon-lg" aria-label={t("actionLibrary:actionActions")} onClick={(event) => event.stopPropagation()}>
+            <MoreHorizontal aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="right" align="start" sideOffset={8}>
+          <DropdownMenuGroup>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
                 <Tags size={16} aria-hidden="true" />
                 <span>{t("common:labels.tags")}</span>
-                <ChevronRight className="outfit-card-menu__chevron" size={15} aria-hidden="true" />
-              </button>
-              <button type="button" role="menuitem" disabled={!assetUrl} onClick={handleViewImage}>
-                <Eye size={16} aria-hidden="true" />
-                <span>{t("common:actions.viewImage")}</span>
-              </button>
-              <button type="button" role="menuitem" disabled={!assetUrl} onClick={() => void handleDownloadOriginalImage()}>
-                <Download size={16} aria-hidden="true" />
-                <span>{t("common:actions.downloadOriginalImage")}</span>
-              </button>
-              <button type="button" role="menuitem" disabled={!assetUrl} onClick={() => void handleCopyImage()}>
-                <Copy size={16} aria-hidden="true" />
-                <span>{t("common:actions.copyImage")}</span>
-              </button>
-              <button
-                className={deleteConfirmActionId === action.id ? "danger confirming" : "danger"}
-                type="button"
-                role="menuitem"
-                disabled={isDeleting}
-                onClick={() => onDelete(action.id, deleteConfirmActionId === action.id)}
-              >
-                <Trash2 size={16} aria-hidden="true" />
-                <span>{deleteConfirmActionId === action.id ? t("common:confirm.delete") : t("common:actions.delete")}</span>
-              </button>
-            </div>,
-            document.body,
-          )
-        : null}
-      {tagMenuState.open
-        ? createPortal(
-            <div
-              className="outfit-tag-menu outfit-tag-menu--submenu"
-              role="menu"
-              aria-label={t("actionLibrary:chooseTags")}
-              style={{ left: tagMenuState.x, top: tagMenuState.y }}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              {tags.length ? (
-                tags.map((tag) => (
-                  <button
-                    key={tag.id}
-                    className={action.tags.includes(tag.name) ? "selected" : ""}
-                    type="button"
-                    role="menuitemcheckbox"
-                    aria-checked={action.tags.includes(tag.name)}
-                    onClick={() => onToggleTag(action.id, tag.name)}
-                  >
-                    <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
-                    <span>{tag.name}</span>
-                  </button>
-                ))
-              ) : (
-                <div className="outfit-tag-menu__empty">{t("actionLibrary:noTags")}</div>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="max-h-72 min-w-44 !overflow-y-auto">
+                {tags.length ? (
+                  tags.map((tag) => (
+                    <DropdownMenuCheckboxItem
+                      key={tag.id}
+                      className="library-tag-dropdown-item"
+                      checked={action.tags.includes(tag.name)}
+                      indicatorSide="right"
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        onToggleTag(action.id, tag.name);
+                      }}
+                      >
+                        <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
+                        <span className="library-tag-dropdown-item__label">{tag.name}</span>
+                      </DropdownMenuCheckboxItem>
+                  ))
+                ) : (
+                  <div className="px-2 py-1.5 text-sm text-muted-foreground">{t("actionLibrary:noTags")}</div>
+                )}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuItem disabled={!assetUrl} onSelect={handleViewImage}>
+              <Eye size={16} aria-hidden="true" />
+              <span>{t("common:actions.viewImage")}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!assetUrl} onSelect={() => void handleDownloadOriginalImage()}>
+              <Download size={16} aria-hidden="true" />
+              <span>{t("common:actions.downloadOriginalImage")}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!assetUrl} onSelect={() => void handleCopyImage()}>
+              <Copy size={16} aria-hidden="true" />
+              <span>{t("common:actions.copyImage")}</span>
+            </DropdownMenuItem>
+            <ConfirmingDropdownMenuItem
+              disabled={isDeleting}
+              onConfirm={() => onDelete(action.id)}
+              confirmChildren={(
+                <>
+                  <Trash2 size={16} aria-hidden="true" />
+                  <span>{t("common:confirm.delete")}</span>
+                </>
               )}
-            </div>,
-            document.body,
-          )
-        : null}
+            >
+              <Trash2 size={16} aria-hidden="true" />
+              <span>{t("common:actions.delete")}</span>
+            </ConfirmingDropdownMenuItem>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
       {viewerOpen && assetUrl ? <ImageViewer src={assetUrl} alt={imageAlt} onClose={() => setViewerOpen(false)} /> : null}
     </div>
   );
@@ -500,9 +437,9 @@ function ActionCard({
 function ActionGrid({
   actions,
   tags,
+  scrollElementRef,
   creating,
   deletingActionId,
-  deleteConfirmActionId,
   selectionMode,
   selectedIds,
   onCreate,
@@ -517,9 +454,9 @@ function ActionGrid({
 }: {
   actions: ActionEntry[];
   tags: ActionTag[];
+  scrollElementRef: { current: HTMLElement | null };
   creating: boolean;
   deletingActionId: string;
-  deleteConfirmActionId: string;
   selectionMode: boolean;
   selectedIds: Set<string>;
   onCreate: (file: File) => void;
@@ -527,12 +464,12 @@ function ActionGrid({
   onToggleTag: (actionId: string, tagName: string) => void;
   onToggleSelected: (actionId: string) => void;
   onUpdateDetails: (actionId: string, patch: Partial<Pick<ActionEntry, "name" | "prompt">>) => boolean;
-  onDelete: (actionId: string, isConfirming: boolean) => void;
+  onDelete: (actionId: string) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
   renameErrors: Record<string, string>;
   onClearRenameError: (actionId: string) => void;
 }) {
-  const cardSize = useLibraryCardSize("action");
+  const cardSize = useLibraryCardSize();
   const librarySort = useLibrarySort();
   const tagsByName = useMemo(() => createLibraryTagsByName(tags), [tags]);
   return (
@@ -540,6 +477,7 @@ function ActionGrid({
       <VirtualLibraryCardGrid
         items={actions}
         getItemKey={(action) => action.id}
+        scrollElementRef={scrollElementRef}
         style={cardSize.gridStyle}
         itemAspectRatio={4 / 3}
         renderLeadingItem={!selectionMode ? () => (
@@ -551,7 +489,6 @@ function ActionGrid({
             action={action}
             tags={tags}
             tagsByName={tagsByName}
-            deleteConfirmActionId={deleteConfirmActionId}
             isDeleting={deletingActionId === action.id}
             selectionMode={selectionMode}
             selected={selectedIds.has(action.id)}
@@ -580,72 +517,12 @@ function ActionGrid({
   );
 }
 
-function CreateProjectDialog({
-  isOpen,
-  isCreating,
-  onClose,
-  onSubmit,
-}: {
-  isOpen: boolean;
-  isCreating: boolean;
-  onClose: () => void;
-  onSubmit: (name: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [name, setName] = useState("");
-
-  useEffect(() => {
-    if (isOpen) setName("");
-  }, [isOpen]);
-
-  if (!isOpen) return null;
-
-  function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    onSubmit(name);
-  }
-
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <form
-        className="dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="create-action-project-title"
-        onSubmit={handleSubmit}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="dialog__head">
-          <h2 id="create-action-project-title">{t("common:labels.newProject")}</h2>
-          <p>{t("actionLibrary:createProjectDescription")}</p>
-        </div>
-        <label className="dialog-field">
-          <span>{t("common:labels.projectName")}</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} autoFocus maxLength={120} placeholder={t("actionLibrary:projectPlaceholder")} />
-        </label>
-        <div className="dialog__actions">
-          <button className="button secondary" type="button" onClick={onClose} disabled={isCreating}>
-            {t("common:actions.cancel")}
-          </button>
-          <button className="button primary" type="submit" disabled={isCreating}>
-            {isCreating ? t("common:states.creating") : t("common:actions.create")}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState("");
-  const [deleteConfirmProjectId, setDeleteConfirmProjectId] = useState("");
-  const [deleteConfirmActionId, setDeleteConfirmActionId] = useState("");
-  const [deleteConfirmTagId, setDeleteConfirmTagId] = useState("");
   const [actionRenameErrors, setActionRenameErrors] = useState<Record<string, string>>({});
   const [closeMenuToken, setCloseMenuToken] = useState(0);
   const { toast: imageActionToast, showToast: showImageActionToast } = useLibraryImageActionToast();
@@ -725,12 +602,11 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         prompt: "",
         warnings: [],
       }]);
-      if (!result.imported[0]) throw new Error(result.failed[0]?.errors?.[0]?.message || t("actionLibrary:requestFailed", { message: "Import failed" }));
+      if (!result.imported[0]) throw new Error(result.failed[0]?.errors?.[0]?.message || t("actionLibrary:requestFailed", { message: t("actionLibrary:importFailed") }));
       return result.imported[0];
     },
     onSuccess: async () => {
       if (hasLibraryTagFilter(activeTagFilter)) setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER);
-      setDeleteConfirmActionId("");
       await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.projects });
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
@@ -740,7 +616,6 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const deleteActionMutation = useMutation({
     mutationFn: deleteAction,
     onSuccess: async () => {
-      setDeleteConfirmActionId("");
       await queryClient.invalidateQueries({ queryKey: ["actions", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.projects });
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? actionLibraryKeys.tags(activeProjectId) : actionLibraryKeys.tagRoot });
@@ -801,7 +676,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     onSuccess: async (project) => {
       await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.projects });
       setActiveProjectId(project.id);
-      setCreateProjectOpen(false);
+      setRenamingProjectId(project.id);
     },
   });
 
@@ -817,11 +692,23 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     },
   });
 
+  const reorderProjectsMutation = useMutation({
+    mutationFn: async (nextProjects: ActionProject[]) => {
+      await Promise.all(getChangedProjectOrder(nextProjects).map((project) => updateActionProject(project.id, { sort_order: project.sort_order })));
+    },
+    onMutate: (nextProjects) => setOptimisticProjectOrder(queryClient, actionLibraryKeys.projects, nextProjects),
+    onError: (_error, _nextProjects, previous) => {
+      if (previous) queryClient.setQueryData<LibraryProjectsQueryData<ActionProject>>(actionLibraryKeys.projects, previous);
+    },
+    onSettled: async (_data, error) => {
+      await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.projects, refetchType: error ? "active" : "none" });
+    },
+  });
+
   const deleteProjectMutation = useMutation({
     mutationFn: deleteActionProject,
     onSuccess: async (_result, projectId) => {
       const remaining = projects.filter((project) => project.id !== projectId);
-      setDeleteConfirmProjectId("");
       setCloseMenuToken((token) => token + 1);
       if (activeProjectId === projectId) setActiveProjectId(remaining[0]?.id || "");
       await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.projects });
@@ -854,13 +741,25 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     },
   });
 
+  const reorderTagsMutation = useMutation({
+    mutationFn: async ({ projectId, tags: nextTags }: { projectId: string; tags: ActionTag[] }) => {
+      await Promise.all(getChangedTagOrder(nextTags).map((tag) => updateActionTag(projectId, tag.id, { sort_order: tag.sort_order })));
+    },
+    onMutate: ({ projectId, tags: nextTags }) => setOptimisticTagOrder(queryClient, actionLibraryKeys.tags(projectId), nextTags),
+    onError: (_error, { projectId }, previous) => {
+      if (previous) queryClient.setQueryData<LibraryTagsQueryData<ActionTag>>(actionLibraryKeys.tags(projectId), previous);
+    },
+    onSettled: async (_data, error, { projectId }) => {
+      await queryClient.invalidateQueries({ queryKey: actionLibraryKeys.tags(projectId), refetchType: error ? "active" : "none" });
+    },
+  });
+
   const deleteTagMutation = useMutation({
     mutationFn: (tagId: string) => {
       if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
       return deleteActionTag(activeProjectId, tagId);
     },
     onSuccess: async (_result, tagId) => {
-      setDeleteConfirmTagId("");
       if (activeTagFilter.includeTagIds.includes(tagId) || activeTagFilter.excludeTagIds.includes(tagId)) {
         setActiveTagFilter(createLibraryTagFilter(
           activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId),
@@ -883,27 +782,14 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   }
 
   function handleReorderProjects(nextProjects: ActionProject[]) {
-    nextProjects.forEach((project, index) => {
-      const nextSortOrder = index + 1;
-      if (project.sort_order !== nextSortOrder) {
-        renameProjectMutation.mutate({ projectId: project.id, sort_order: nextSortOrder });
-      }
-    });
+    reorderProjectsMutation.mutate(nextProjects);
   }
 
-  function handleProjectDelete(projectId: string, isConfirming: boolean) {
-    if (!isConfirming) {
-      setDeleteConfirmProjectId(projectId);
-      return;
-    }
+  function handleProjectDelete(projectId: string) {
     deleteProjectMutation.mutate(projectId);
   }
 
-  function handleActionDelete(actionId: string, isConfirming: boolean) {
-    if (!isConfirming) {
-      setDeleteConfirmActionId(actionId);
-      return;
-    }
+  function handleActionDelete(actionId: string) {
     deleteActionMutation.mutate(actionId);
   }
 
@@ -968,12 +854,8 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   }
 
   function handleReorderTags(nextTags: ActionTag[]) {
-    nextTags.forEach((tag, index) => {
-      const nextSortOrder = index + 1;
-      if (tag.sort_order !== nextSortOrder) {
-        updateTagMutation.mutate({ tagId: tag.id, sort_order: nextSortOrder });
-      }
-    });
+    if (!activeProjectId) return;
+    reorderTagsMutation.mutate({ projectId: activeProjectId, tags: nextTags });
   }
 
   function handleToggleTagFilter(tagId: string) {
@@ -993,11 +875,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     setActiveTagFilter(activeTagFilter.untaggedOnly ? EMPTY_LIBRARY_TAG_FILTER : createLibraryTagFilter([], [], true));
   }
 
-  function handleDeleteTag(tagId: string, isConfirming: boolean) {
-    if (!isConfirming) {
-      setDeleteConfirmTagId(tagId);
-      return;
-    }
+  function handleDeleteTag(tagId: string) {
     deleteTagMutation.mutate(tagId);
   }
 
@@ -1046,11 +924,14 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     bulkActionEntriesMutation.error,
     createProjectMutation.error,
     renameProjectMutation.error,
+    reorderProjectsMutation.error,
     deleteProjectMutation.error,
     createTagMutation.error,
     updateTagMutation.error,
+    reorderTagsMutation.error,
     deleteTagMutation.error,
   ]);
+  const libraryBodyViewportRef = useRef<HTMLDivElement | null>(null);
 
   return (
     <section className="library-page action-library-page" aria-label={t("actionLibrary:title")}>
@@ -1059,17 +940,14 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
           projects={projects}
           activeProjectId={activeProjectId}
           renamingProjectId={renamingProjectId}
-          deleteConfirmProjectId={deleteConfirmProjectId}
           ariaLabel={t("actionLibrary:projectRail")}
           projectActionsLabel={(name) => t("actionLibrary:projectActions", { name })}
           onSelect={(projectId) => {
-            setDeleteConfirmProjectId("");
             setRenamingProjectId("");
             setActiveProjectId(projectId);
           }}
-          onCreateProject={() => setCreateProjectOpen(true)}
+          onCreateProject={() => createProjectMutation.mutate(createUniqueLibraryProjectName(projects, t("common:labels.newProject")))}
           onRenameStart={(projectId) => {
-            setDeleteConfirmProjectId("");
             setRenamingProjectId(projectId);
           }}
           onRenameCancel={() => setRenamingProjectId("")}
@@ -1077,6 +955,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
           onDeleteProject={handleProjectDelete}
           onReorderProjects={handleReorderProjects}
           closeMenuToken={closeMenuToken}
+          creatingProject={createProjectMutation.isPending}
         />
 
         <main className="library-content-pane">
@@ -1095,11 +974,15 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
             />
           </div>
 
-          <div className="library-body scrollbar-thin-stable">
+          <AppScrollArea className="library-body" viewportRef={libraryBodyViewportRef}>
             {errorMessage ? <ErrorCopyLine className="library-error" text={t("actionLibrary:requestFailed", { message: errorMessage })} /> : null}
-            {storageSettingsQuery.isLoading || projectsQuery.isLoading ? <div className="library-empty">{t("common:states.loadingProjects")}</div> : null}
-            {!storageConfigured ? <div className="library-empty">{t("actionLibrary:storageUnavailable")}</div> : null}
-            {storageConfigured && !projectsQuery.isLoading && !projects.length ? <div className="library-empty">{t("common:empty.noProjects")}</div> : null}
+            {storageSettingsQuery.isLoading || projectsQuery.isLoading ? (
+              <Empty className="library-empty" aria-label={t("common:states.loadingProjects")}>
+                <Skeleton className="h-4 w-36" />
+              </Empty>
+            ) : null}
+            {!storageConfigured ? <Empty className="library-empty"><EmptyDescription>{t("actionLibrary:storageUnavailable")}</EmptyDescription></Empty> : null}
+            {storageConfigured && !projectsQuery.isLoading && !projects.length ? <Empty className="library-empty"><EmptyDescription>{t("common:empty.noProjects")}</EmptyDescription></Empty> : null}
             {activeProject ? (
               <LibraryImageDropZone
                 disabled={!storageConfigured || createActionMutation.isPending}
@@ -1109,9 +992,9 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
                 <ActionGrid
                   actions={filteredActions}
                   tags={tags}
+                  scrollElementRef={libraryBodyViewportRef}
                   creating={createActionMutation.isPending}
                   deletingActionId={deleteActionMutation.isPending ? deleteActionMutation.variables || "" : ""}
-                  deleteConfirmActionId={deleteConfirmActionId}
                   selectionMode={bulkSelection.selectionMode}
                   selectedIds={bulkSelection.selectedIds}
                   onCreate={(file) => createActionMutation.mutate(file)}
@@ -1126,21 +1009,14 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
                 />
               </LibraryImageDropZone>
             ) : null}
-          </div>
+          </AppScrollArea>
         </main>
       </div>
 
-      <CreateProjectDialog
-        isOpen={createProjectOpen}
-        isCreating={createProjectMutation.isPending}
-        onClose={() => setCreateProjectOpen(false)}
-        onSubmit={(name) => createProjectMutation.mutate(name)}
-      />
       <LibraryTagManagerDialog<ActionTag>
         isOpen={tagManagerOpen}
         tags={tags}
         isCreating={createTagMutation.isPending}
-        deleteConfirmTagId={deleteConfirmTagId}
         titleId="action-tag-manager-title"
         description={t("actionLibrary:tagManagerDescription")}
         emptyText={t("actionLibrary:noTags")}

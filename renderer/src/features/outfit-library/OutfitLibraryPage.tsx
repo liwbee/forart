@@ -1,10 +1,14 @@
-import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, Copy, Download, Eye, ImagePlus, MoreHorizontal, Tags, Trash2 } from "lucide-react";
-import { createPortal } from "react-dom";
+import { Copy, Download, Eye, ImagePlus, MoreHorizontal, Tags, Trash2 } from "lucide-react";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
+import { AppScrollArea } from "../../components/AppScrollArea";
 import { LazyImage } from "../../components/LazyImage";
+import { Button } from "../../components/ui/button";
+import { Empty, EmptyDescription } from "../../components/ui/empty";
+import { Skeleton } from "../../components/ui/skeleton";
+import { ConfirmingDropdownMenuItem, DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu";
 import { CollapsibleTagFilterRow } from "../library-tags";
 import { LibraryTagChoiceButton } from "../library-tags";
 import { ImageViewer } from "../../lib/ImageViewer";
@@ -14,8 +18,10 @@ import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySor
 import { LibraryImageDropZone } from "../resource-library/LibraryImageDropZone";
 import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
 import { VirtualLibraryCardGrid } from "../resource-library/VirtualLibraryCardGrid";
-import { LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
+import { createUniqueLibraryProjectName, LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
+import { getChangedProjectOrder, setOptimisticProjectOrder, type LibraryProjectsQueryData } from "../library-layout/projectReorder";
 import { LibraryTagManagerDialog } from "../library-tags/LibraryTagManagerDialog";
+import { getChangedTagOrder, setOptimisticTagOrder, type LibraryTagsQueryData } from "../library-tags/tagReorder";
 import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
 import { createLibraryAssetUploadPayload } from "../resource-library/createLibraryAssetUploadPayload";
 import {
@@ -78,14 +84,14 @@ function OutfitToolbar({
         <LibraryBulkManageButton disabled={false} onClick={selectionMode ? onExitSelectionMode : onEnterSelectionMode} />
         <span className="library-filter-label">{t("common:labels.tags")}</span>
         <div className="library-tag-controls">
-          <CollapsibleTagFilterRow expandLabel="展开标签" collapseLabel="收起标签">
+          <CollapsibleTagFilterRow expandLabel={t("common:labels.expandTags")} collapseLabel={t("common:labels.collapseTags")}>
             <div className="library-tag-filter">
-              <button className={hasLibraryTagFilter(tagFilter) ? "" : "active"} type="button" onClick={onTagClear}>
+              <Button className={hasLibraryTagFilter(tagFilter) ? "" : "active"} variant={hasLibraryTagFilter(tagFilter) ? "ghost" : "default"} type="button" onClick={onTagClear}>
                 {t("common:labels.all")}
-              </button>
-              <button className={tagFilter.untaggedOnly ? "active" : ""} type="button" onClick={onUntaggedToggle}>
+              </Button>
+              <Button className={tagFilter.untaggedOnly ? "active" : ""} variant={tagFilter.untaggedOnly ? "default" : "ghost"} type="button" onClick={onUntaggedToggle}>
                 {t("common:labels.untagged")}
-              </button>
+              </Button>
               {tags.map((tag) => (
                 <LibraryTagChoiceButton
                   key={tag.id}
@@ -118,10 +124,10 @@ function AddOutfitCard({ disabled, busy, onCreate }: { disabled: boolean; busy: 
 
   return (
     <div className="outfit-add-card">
-      <button className="outfit-add-button" type="button" disabled={disabled} onClick={() => inputRef.current?.click()}>
-        <ImagePlus size={28} aria-hidden="true" />
+      <Button className="outfit-add-button" type="button" variant="ghost" disabled={disabled} onClick={() => inputRef.current?.click()}>
+        <ImagePlus aria-hidden="true" />
         <strong>{busy ? t("common:states.uploading") : t("outfitLibrary:addOutfit")}</strong>
-      </button>
+      </Button>
       <input ref={inputRef} type="file" accept="image/*" onChange={handleFileChange} hidden />
     </div>
   );
@@ -131,7 +137,6 @@ function OutfitCard({
   outfit,
   tags,
   tagsByName,
-  deleteConfirmOutfitId,
   isDeleting,
   selectionMode,
   selected,
@@ -143,87 +148,34 @@ function OutfitCard({
   outfit: OutfitEntry;
   tags: OutfitTag[];
   tagsByName: Map<string, LibraryTagNameColorLike>;
-  deleteConfirmOutfitId: string;
   isDeleting: boolean;
   selectionMode: boolean;
   selected: boolean;
   onToggleTag: (outfitId: string, tagName: string) => void;
   onToggleSelected: (outfitId: string) => void;
-  onDelete: (outfitId: string, isConfirming: boolean) => void;
+  onDelete: (outfitId: string) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
 }) {
   const { t } = useTranslation();
-  const [menuState, setMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
-  const [tagMenuState, setTagMenuState] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 });
+  const [menuOpen, setMenuOpen] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const assetUrl = cacheBustedLibraryImageUrl(outfit.asset_url || "", outfit.asset_id);
   const displayUrl = cacheBustedLibraryImageUrl(outfit.thumbnail_url || outfit.asset_url || "", outfit.asset_id);
   const imageAlt = outfit.name || t("outfitLibrary:outfitImage");
 
   useEffect(() => {
-    if (!menuState.open && !tagMenuState.open) return;
-    function closeMenu() {
-      setMenuState({ open: false, x: 0, y: 0 });
-      setTagMenuState({ open: false, x: 0, y: 0 });
-    }
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") closeMenu();
-    }
-    window.addEventListener("pointerdown", closeMenu);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", closeMenu);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [menuState.open, tagMenuState.open]);
-
-  function openMenu(event: MouseEvent<HTMLButtonElement>) {
-    event.stopPropagation();
-    const rect = event.currentTarget.getBoundingClientRect();
-    const menuWidth = 184;
-    const menuMaxHeight = 320;
-    const pad = 8;
-    const preferredX = rect.right + 8;
-    const preferredY = rect.top;
-    const x = preferredX + menuWidth <= window.innerWidth - pad ? preferredX : rect.left - menuWidth - 8;
-    setMenuState({
-      open: true,
-      x: Math.max(pad, Math.min(x, window.innerWidth - menuWidth - pad)),
-      y: Math.max(pad, Math.min(preferredY, window.innerHeight - menuMaxHeight - pad)),
-    });
-    setTagMenuState({ open: false, x: 0, y: 0 });
-  }
-
-  function toggleTagMenu(event: MouseEvent<HTMLButtonElement>) {
-    event.stopPropagation();
-    if (tagMenuState.open) {
-      setTagMenuState({ open: false, x: 0, y: 0 });
-      return;
-    }
-    const rect = event.currentTarget.getBoundingClientRect();
-    const menuWidth = 184;
-    const menuMaxHeight = 280;
-    const pad = 8;
-    const preferredX = rect.right + 8;
-    const x = preferredX + menuWidth <= window.innerWidth - pad ? preferredX : rect.left - menuWidth - 8;
-    setTagMenuState({
-      open: true,
-      x: Math.max(pad, Math.min(x, window.innerWidth - menuWidth - pad)),
-      y: Math.max(pad, Math.min(rect.top, window.innerHeight - menuMaxHeight - pad)),
-    });
-  }
+    if (selectionMode) setMenuOpen(false);
+  }, [selectionMode]);
 
   function handleViewImage() {
     if (!assetUrl) return;
-    setMenuState({ open: false, x: 0, y: 0 });
-    setTagMenuState({ open: false, x: 0, y: 0 });
+    setMenuOpen(false);
     setViewerOpen(true);
   }
 
   async function handleCopyImage() {
     if (!assetUrl) return;
-    setMenuState({ open: false, x: 0, y: 0 });
-    setTagMenuState({ open: false, x: 0, y: 0 });
+    setMenuOpen(false);
     onImageActionStatus("busy", t("common:states.copyingImage"));
     try {
       await copyLibraryImage(assetUrl);
@@ -235,8 +187,7 @@ function OutfitCard({
 
   async function handleDownloadOriginalImage() {
     if (!assetUrl) return;
-    setMenuState({ open: false, x: 0, y: 0 });
-    setTagMenuState({ open: false, x: 0, y: 0 });
+    setMenuOpen(false);
     onImageActionStatus("busy", t("common:states.downloadingImage"));
     try {
       await downloadLibraryOriginalImage(assetUrl, outfit.name || `outfit-${outfit.id}`);
@@ -292,85 +243,67 @@ function OutfitCard({
           ))}
         </div>
       ) : null}
-      <button className="outfit-card__menu-button" type="button" aria-label={t("outfitLibrary:outfitActions")} aria-expanded={menuState.open} disabled={selectionMode} onClick={openMenu}>
-        <MoreHorizontal size={18} aria-hidden="true" />
-      </button>
-      {menuState.open
-        ? createPortal(
-            <div
-              className="outfit-card-menu"
-              role="menu"
-              style={{ left: menuState.x, top: menuState.y }}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              <button
-                className={tagMenuState.open ? "active" : ""}
-                type="button"
-                role="menuitem"
-                aria-haspopup="menu"
-                aria-expanded={tagMenuState.open}
-                onClick={toggleTagMenu}
-              >
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenuTrigger asChild>
+          <Button className="outfit-card__menu-button" type="button" variant="outline" size="icon-lg" aria-label={t("outfitLibrary:outfitActions")} disabled={selectionMode} onClick={(event) => event.stopPropagation()}>
+            <MoreHorizontal aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="right" align="start" sideOffset={8}>
+          <DropdownMenuGroup>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
                 <Tags size={16} aria-hidden="true" />
                 <span>{t("common:labels.tags")}</span>
-                <ChevronRight className="outfit-card-menu__chevron" size={15} aria-hidden="true" />
-              </button>
-              <button type="button" role="menuitem" disabled={!assetUrl} onClick={handleViewImage}>
-                <Eye size={16} aria-hidden="true" />
-                <span>{t("common:actions.viewImage")}</span>
-              </button>
-              <button type="button" role="menuitem" disabled={!assetUrl} onClick={() => void handleDownloadOriginalImage()}>
-                <Download size={16} aria-hidden="true" />
-                <span>{t("common:actions.downloadOriginalImage")}</span>
-              </button>
-              <button type="button" role="menuitem" disabled={!assetUrl} onClick={() => void handleCopyImage()}>
-                <Copy size={16} aria-hidden="true" />
-                <span>{t("common:actions.copyImage")}</span>
-              </button>
-              <button
-                className={deleteConfirmOutfitId === outfit.id ? "danger confirming" : "danger"}
-                type="button"
-                role="menuitem"
-                disabled={isDeleting}
-                onClick={() => onDelete(outfit.id, deleteConfirmOutfitId === outfit.id)}
-              >
-                <Trash2 size={16} aria-hidden="true" />
-                <span>{deleteConfirmOutfitId === outfit.id ? t("common:confirm.delete") : t("common:actions.delete")}</span>
-              </button>
-            </div>,
-            document.body,
-          )
-        : null}
-      {tagMenuState.open
-        ? createPortal(
-            <div
-              className="outfit-tag-menu outfit-tag-menu--submenu"
-              role="menu"
-              aria-label={t("outfitLibrary:chooseTags")}
-              style={{ left: tagMenuState.x, top: tagMenuState.y }}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              {tags.length ? (
-                tags.map((tag) => (
-                  <button
-                    key={tag.id}
-                    className={outfit.tags.includes(tag.name) ? "selected" : ""}
-                    type="button"
-                    role="menuitemcheckbox"
-                    aria-checked={outfit.tags.includes(tag.name)}
-                    onClick={() => onToggleTag(outfit.id, tag.name)}
-                  >
-                    <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
-                    <span>{tag.name}</span>
-                  </button>
-                ))
-              ) : (
-                <div className="outfit-tag-menu__empty">{t("outfitLibrary:noTags")}</div>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="max-h-72 min-w-44 !overflow-y-auto">
+                {tags.length ? (
+                  tags.map((tag) => (
+                    <DropdownMenuCheckboxItem
+                      key={tag.id}
+                      checked={outfit.tags.includes(tag.name)}
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        onToggleTag(outfit.id, tag.name);
+                      }}
+                    >
+                      <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
+                      <span>{tag.name}</span>
+                    </DropdownMenuCheckboxItem>
+                  ))
+                ) : (
+                  <div className="px-2 py-1.5 text-sm text-muted-foreground">{t("outfitLibrary:noTags")}</div>
+                )}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuItem disabled={!assetUrl} onSelect={handleViewImage}>
+              <Eye size={16} aria-hidden="true" />
+              <span>{t("common:actions.viewImage")}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!assetUrl} onSelect={() => void handleDownloadOriginalImage()}>
+              <Download size={16} aria-hidden="true" />
+              <span>{t("common:actions.downloadOriginalImage")}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!assetUrl} onSelect={() => void handleCopyImage()}>
+              <Copy size={16} aria-hidden="true" />
+              <span>{t("common:actions.copyImage")}</span>
+            </DropdownMenuItem>
+            <ConfirmingDropdownMenuItem
+              disabled={isDeleting}
+              onConfirm={() => onDelete(outfit.id)}
+              confirmChildren={(
+                <>
+                  <Trash2 size={16} aria-hidden="true" />
+                  <span>{t("common:confirm.delete")}</span>
+                </>
               )}
-            </div>,
-            document.body,
-          )
-        : null}
+            >
+              <Trash2 size={16} aria-hidden="true" />
+              <span>{t("common:actions.delete")}</span>
+            </ConfirmingDropdownMenuItem>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
       {viewerOpen && assetUrl ? <ImageViewer src={assetUrl} alt={imageAlt} onClose={() => setViewerOpen(false)} /> : null}
     </div>
   );
@@ -379,9 +312,9 @@ function OutfitCard({
 function OutfitGrid({
   outfits,
   tags,
+  scrollElementRef,
   creating,
   deletingOutfitId,
-  deleteConfirmOutfitId,
   selectionMode,
   selectedIds,
   onCreate,
@@ -392,18 +325,18 @@ function OutfitGrid({
 }: {
   outfits: OutfitEntry[];
   tags: OutfitTag[];
+  scrollElementRef: { current: HTMLElement | null };
   creating: boolean;
   deletingOutfitId: string;
-  deleteConfirmOutfitId: string;
   selectionMode: boolean;
   selectedIds: Set<string>;
   onCreate: (file: File) => void;
   onToggleTag: (outfitId: string, tagName: string) => void;
   onToggleSelected: (outfitId: string) => void;
-  onDelete: (outfitId: string, isConfirming: boolean) => void;
+  onDelete: (outfitId: string) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
 }) {
-  const cardSize = useLibraryCardSize("outfit");
+  const cardSize = useLibraryCardSize();
   const librarySort = useLibrarySort();
   const tagsByName = useMemo(() => createLibraryTagsByName(tags), [tags]);
   return (
@@ -411,6 +344,7 @@ function OutfitGrid({
       <VirtualLibraryCardGrid
         items={outfits}
         getItemKey={(outfit) => outfit.id}
+        scrollElementRef={scrollElementRef}
         style={cardSize.gridStyle}
         renderLeadingItem={!selectionMode ? () => (
           <AddOutfitCard disabled={creating} busy={creating} onCreate={onCreate} />
@@ -421,7 +355,6 @@ function OutfitGrid({
             outfit={outfit}
             tags={tags}
             tagsByName={tagsByName}
-            deleteConfirmOutfitId={deleteConfirmOutfitId}
             isDeleting={deletingOutfitId === outfit.id}
             selectionMode={selectionMode}
             selected={selectedIds.has(outfit.id)}
@@ -447,71 +380,11 @@ function OutfitGrid({
   );
 }
 
-function CreateProjectDialog({
-  isOpen,
-  isCreating,
-  onClose,
-  onSubmit,
-}: {
-  isOpen: boolean;
-  isCreating: boolean;
-  onClose: () => void;
-  onSubmit: (name: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [name, setName] = useState("");
-
-  useEffect(() => {
-    if (isOpen) setName("");
-  }, [isOpen]);
-
-  if (!isOpen) return null;
-
-  function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    onSubmit(name);
-  }
-
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <form
-        className="dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="create-outfit-project-title"
-        onSubmit={handleSubmit}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="dialog__head">
-          <h2 id="create-outfit-project-title">{t("common:labels.newProject")}</h2>
-          <p>{t("outfitLibrary:createProjectDescription")}</p>
-        </div>
-        <label className="dialog-field">
-          <span>{t("common:labels.projectName")}</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} autoFocus maxLength={120} placeholder={t("outfitLibrary:projectPlaceholder")} />
-        </label>
-        <div className="dialog__actions">
-          <button className="button secondary" type="button" onClick={onClose} disabled={isCreating}>
-            {t("common:actions.cancel")}
-          </button>
-          <button className="button primary" type="submit" disabled={isCreating}>
-            {isCreating ? t("common:states.creating") : t("common:actions.create")}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState("");
-  const [deleteConfirmProjectId, setDeleteConfirmProjectId] = useState("");
-  const [deleteConfirmOutfitId, setDeleteConfirmOutfitId] = useState("");
-  const [deleteConfirmTagId, setDeleteConfirmTagId] = useState("");
   const [closeMenuToken, setCloseMenuToken] = useState(0);
   const { toast: imageActionToast, showToast: showImageActionToast } = useLibraryImageActionToast();
   const activeProjectId = useOutfitLibraryStore((state) => state.activeProjectId);
@@ -583,12 +456,11 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         data: payload.data,
         warnings: [],
       }]);
-      if (!result.imported[0]) throw new Error(result.failed[0]?.errors?.[0]?.message || t("outfitLibrary:requestFailed", { message: "Import failed" }));
+      if (!result.imported[0]) throw new Error(result.failed[0]?.errors?.[0]?.message || t("outfitLibrary:requestFailed", { message: t("outfitLibrary:importFailed") }));
       return result.imported[0];
     },
     onSuccess: async () => {
       if (hasLibraryTagFilter(activeTagFilter)) setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER);
-      setDeleteConfirmOutfitId("");
       await queryClient.invalidateQueries({ queryKey: ["outfits", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.projects });
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : outfitLibraryKeys.tagRoot });
@@ -598,7 +470,6 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const deleteOutfitMutation = useMutation({
     mutationFn: deleteOutfit,
     onSuccess: async () => {
-      setDeleteConfirmOutfitId("");
       await queryClient.invalidateQueries({ queryKey: ["outfits", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.projects });
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? outfitLibraryKeys.tags(activeProjectId) : outfitLibraryKeys.tagRoot });
@@ -640,7 +511,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     onSuccess: async (project) => {
       await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.projects });
       setActiveProjectId(project.id);
-      setCreateProjectOpen(false);
+      setRenamingProjectId(project.id);
     },
   });
 
@@ -656,11 +527,23 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     },
   });
 
+  const reorderProjectsMutation = useMutation({
+    mutationFn: async (nextProjects: OutfitProject[]) => {
+      await Promise.all(getChangedProjectOrder(nextProjects).map((project) => updateOutfitProject(project.id, { sort_order: project.sort_order })));
+    },
+    onMutate: (nextProjects) => setOptimisticProjectOrder(queryClient, outfitLibraryKeys.projects, nextProjects),
+    onError: (_error, _nextProjects, previous) => {
+      if (previous) queryClient.setQueryData<LibraryProjectsQueryData<OutfitProject>>(outfitLibraryKeys.projects, previous);
+    },
+    onSettled: async (_data, error) => {
+      await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.projects, refetchType: error ? "active" : "none" });
+    },
+  });
+
   const deleteProjectMutation = useMutation({
     mutationFn: deleteOutfitProject,
     onSuccess: async (_result, projectId) => {
       const remaining = projects.filter((project) => project.id !== projectId);
-      setDeleteConfirmProjectId("");
       setCloseMenuToken((token) => token + 1);
       if (activeProjectId === projectId) setActiveProjectId(remaining[0]?.id || "");
       await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.projects });
@@ -693,13 +576,25 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     },
   });
 
+  const reorderTagsMutation = useMutation({
+    mutationFn: async ({ projectId, tags: nextTags }: { projectId: string; tags: OutfitTag[] }) => {
+      await Promise.all(getChangedTagOrder(nextTags).map((tag) => updateOutfitTag(projectId, tag.id, { sort_order: tag.sort_order })));
+    },
+    onMutate: ({ projectId, tags: nextTags }) => setOptimisticTagOrder(queryClient, outfitLibraryKeys.tags(projectId), nextTags),
+    onError: (_error, { projectId }, previous) => {
+      if (previous) queryClient.setQueryData<LibraryTagsQueryData<OutfitTag>>(outfitLibraryKeys.tags(projectId), previous);
+    },
+    onSettled: async (_data, error, { projectId }) => {
+      await queryClient.invalidateQueries({ queryKey: outfitLibraryKeys.tags(projectId), refetchType: error ? "active" : "none" });
+    },
+  });
+
   const deleteTagMutation = useMutation({
     mutationFn: (tagId: string) => {
       if (!activeProjectId) throw new Error(t("common:labels.selectProjectFirst"));
       return deleteOutfitTag(activeProjectId, tagId);
     },
     onSuccess: async (_result, tagId) => {
-      setDeleteConfirmTagId("");
       if (activeTagFilter.includeTagIds.includes(tagId) || activeTagFilter.excludeTagIds.includes(tagId)) {
         setActiveTagFilter(createLibraryTagFilter(
           activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId),
@@ -722,27 +617,14 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   }
 
   function handleReorderProjects(nextProjects: OutfitProject[]) {
-    nextProjects.forEach((project, index) => {
-      const nextSortOrder = index + 1;
-      if (project.sort_order !== nextSortOrder) {
-        renameProjectMutation.mutate({ projectId: project.id, sort_order: nextSortOrder });
-      }
-    });
+    reorderProjectsMutation.mutate(nextProjects);
   }
 
-  function handleProjectDelete(projectId: string, isConfirming: boolean) {
-    if (!isConfirming) {
-      setDeleteConfirmProjectId(projectId);
-      return;
-    }
+  function handleProjectDelete(projectId: string) {
     deleteProjectMutation.mutate(projectId);
   }
 
-  function handleOutfitDelete(outfitId: string, isConfirming: boolean) {
-    if (!isConfirming) {
-      setDeleteConfirmOutfitId(outfitId);
-      return;
-    }
+  function handleOutfitDelete(outfitId: string) {
     deleteOutfitMutation.mutate(outfitId);
   }
 
@@ -779,12 +661,8 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   }
 
   function handleReorderTags(nextTags: OutfitTag[]) {
-    nextTags.forEach((tag, index) => {
-      const nextSortOrder = index + 1;
-      if (tag.sort_order !== nextSortOrder) {
-        updateTagMutation.mutate({ tagId: tag.id, sort_order: nextSortOrder });
-      }
-    });
+    if (!activeProjectId) return;
+    reorderTagsMutation.mutate({ projectId: activeProjectId, tags: nextTags });
   }
 
   function handleToggleTagFilter(tagId: string) {
@@ -804,11 +682,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     setActiveTagFilter(activeTagFilter.untaggedOnly ? EMPTY_LIBRARY_TAG_FILTER : createLibraryTagFilter([], [], true));
   }
 
-  function handleDeleteTag(tagId: string, isConfirming: boolean) {
-    if (!isConfirming) {
-      setDeleteConfirmTagId(tagId);
-      return;
-    }
+  function handleDeleteTag(tagId: string) {
     deleteTagMutation.mutate(tagId);
   }
 
@@ -849,11 +723,14 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     bulkOutfitEntriesMutation.error,
     createProjectMutation.error,
     renameProjectMutation.error,
+    reorderProjectsMutation.error,
     deleteProjectMutation.error,
     createTagMutation.error,
     updateTagMutation.error,
+    reorderTagsMutation.error,
     deleteTagMutation.error,
   ]);
+  const libraryBodyViewportRef = useRef<HTMLDivElement | null>(null);
 
   return (
     <section className="library-page outfit-library-page" aria-label={t("outfitLibrary:title")}>
@@ -863,17 +740,14 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
           activeProjectId={activeProjectId}
           canManageProjects={true}
           renamingProjectId={renamingProjectId}
-          deleteConfirmProjectId={deleteConfirmProjectId}
           ariaLabel={t("outfitLibrary:projectRail")}
           projectActionsLabel={(name) => t("outfitLibrary:projectActions", { name })}
           onSelect={(projectId) => {
-            setDeleteConfirmProjectId("");
             setRenamingProjectId("");
             setActiveProjectId(projectId);
           }}
-          onCreateProject={() => setCreateProjectOpen(true)}
+          onCreateProject={() => createProjectMutation.mutate(createUniqueLibraryProjectName(projects, t("common:labels.newProject")))}
           onRenameStart={(projectId) => {
-            setDeleteConfirmProjectId("");
             setRenamingProjectId(projectId);
           }}
           onRenameCancel={() => setRenamingProjectId("")}
@@ -881,6 +755,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
           onDeleteProject={handleProjectDelete}
           onReorderProjects={handleReorderProjects}
           closeMenuToken={closeMenuToken}
+          creatingProject={createProjectMutation.isPending}
         />
 
         <main className="library-content-pane">
@@ -899,11 +774,15 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
             />
           </div>
 
-          <div className="library-body scrollbar-thin-stable">
+          <AppScrollArea className="library-body" viewportRef={libraryBodyViewportRef}>
             {errorMessage ? <ErrorCopyLine className="library-error" text={t("outfitLibrary:requestFailed", { message: errorMessage })} /> : null}
-            {storageSettingsQuery.isLoading || projectsQuery.isLoading ? <div className="library-empty">{t("common:states.loadingProjects")}</div> : null}
-            {!storageConfigured ? <div className="library-empty">{t("outfitLibrary:storageUnavailable")}</div> : null}
-            {storageConfigured && !projectsQuery.isLoading && !projects.length ? <div className="library-empty">{t("common:empty.noProjects")}</div> : null}
+            {storageSettingsQuery.isLoading || projectsQuery.isLoading ? (
+              <Empty className="library-empty" aria-label={t("common:states.loadingProjects")}>
+                <Skeleton className="h-4 w-36" />
+              </Empty>
+            ) : null}
+            {!storageConfigured ? <Empty className="library-empty"><EmptyDescription>{t("outfitLibrary:storageUnavailable")}</EmptyDescription></Empty> : null}
+            {storageConfigured && !projectsQuery.isLoading && !projects.length ? <Empty className="library-empty"><EmptyDescription>{t("common:empty.noProjects")}</EmptyDescription></Empty> : null}
             {activeProject ? (
               <LibraryImageDropZone
                 disabled={!storageConfigured || createOutfitMutation.isPending}
@@ -913,9 +792,9 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
                 <OutfitGrid
                   outfits={filteredOutfits}
                   tags={tags}
+                  scrollElementRef={libraryBodyViewportRef}
                   creating={createOutfitMutation.isPending}
                   deletingOutfitId={deleteOutfitMutation.isPending ? deleteOutfitMutation.variables || "" : ""}
-                  deleteConfirmOutfitId={deleteConfirmOutfitId}
                   selectionMode={bulkSelection.selectionMode}
                   selectedIds={bulkSelection.selectedIds}
                   onCreate={(file) => createOutfitMutation.mutate(file)}
@@ -926,21 +805,14 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
                 />
               </LibraryImageDropZone>
             ) : null}
-          </div>
+          </AppScrollArea>
         </main>
       </div>
 
-      <CreateProjectDialog
-        isOpen={createProjectOpen}
-        isCreating={createProjectMutation.isPending}
-        onClose={() => setCreateProjectOpen(false)}
-        onSubmit={(name) => createProjectMutation.mutate(name)}
-      />
       <LibraryTagManagerDialog<OutfitTag>
         isOpen={tagManagerOpen}
         tags={tags}
         isCreating={createTagMutation.isPending}
-        deleteConfirmTagId={deleteConfirmTagId}
         titleId="outfit-tag-manager-title"
         description={t("outfitLibrary:tagManagerDescription")}
         emptyText={t("outfitLibrary:noTags")}

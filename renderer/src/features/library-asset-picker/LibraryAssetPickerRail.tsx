@@ -1,22 +1,14 @@
 import { LibraryAssetPickerContent } from "./LibraryAssetPickerContent";
-import type { LibraryAssetSelection, LibraryAssetTab } from "./types";
+import type { LibraryAssetSelection } from "./types";
 
 interface LibraryAssetPickerRailProps {
   onSelect: (selection: LibraryAssetSelection) => void;
-  sources?: readonly LibraryAssetTab[];
-  initialTab?: LibraryAssetTab;
-  className?: string;
 }
 
-export function LibraryAssetPickerRail({
-  onSelect,
-  sources,
-  initialTab = "outfits",
-  className = "",
-}: LibraryAssetPickerRailProps) {
+export function LibraryAssetPickerRail({ onSelect }: LibraryAssetPickerRailProps) {
   return (
-    <aside className={`library-asset-picker library-asset-picker--rail${className ? ` ${className}` : ""}`}>
-      <LibraryAssetPickerContent sources={sources} initialTab={initialTab} onSelect={onSelect} variant="rail" />
+    <aside className="library-asset-picker library-asset-picker--rail">
+      <LibraryAssetPickerContent onSelect={onSelect} />
     </aside>
   );
 }

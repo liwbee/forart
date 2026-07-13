@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from "../data-source/runtime";
+import { i18n } from "../i18n";
 
 export function resolveLibraryImageUrl(url: string) {
   const source = String(url || "").trim();
@@ -35,7 +36,7 @@ function fileNameWithExtension(fileName: string, extension: string) {
 
 async function fetchImageBlob(url: string) {
   const response = await fetch(resolveLibraryImageUrl(url));
-  if (!response.ok) throw new Error(`Failed to read image: ${response.status}`);
+  if (!response.ok) throw new Error(i18n.t("common:errors.imageReadFailedWithStatus", { status: response.status }));
   return response.blob();
 }
 
@@ -46,12 +47,12 @@ async function convertBlobToPng(blob: Blob) {
     canvas.width = bitmap.width;
     canvas.height = bitmap.height;
     const context = canvas.getContext("2d");
-    if (!context) throw new Error("Canvas is not available");
+    if (!context) throw new Error(i18n.t("common:errors.canvasUnavailable"));
     context.drawImage(bitmap, 0, 0);
     return await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob((pngBlob) => {
         if (pngBlob) resolve(pngBlob);
-        else reject(new Error("Failed to prepare image for clipboard"));
+        else reject(new Error(i18n.t("common:errors.clipboardImagePrepareFailed")));
       }, "image/png");
     });
   } finally {

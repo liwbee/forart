@@ -1,7 +1,12 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { Layers3, LayoutTemplate, LibraryBig, ScanSearch, Settings, type LucideIcon } from "lucide-react";
+import { FreeCanvasPage } from "../features/free-canvas/FreeCanvasPage";
+import { ImageReviewPage } from "../features/image-review/ImageReviewPage";
+import { ResourceLibraryPage } from "../features/resource-library/ResourceLibraryPage";
+import { SettingsPage } from "../features/settings/SettingsPage";
 import type { ForartAppConfig } from "./appConfig";
 import type { AppView } from "./appStore";
+import { CanvasPageSkeleton } from "./WorkspacePageSkeletons";
 
 interface WorkspaceRouteRenderProps {
   appConfig: ForartAppConfig;
@@ -17,14 +22,10 @@ interface WorkspaceRoute {
   render: (props: WorkspaceRouteRenderProps) => ReactNode;
 }
 
-const ResourceLibraryPage = lazy(() => import("../features/resource-library/ResourceLibraryPage").then((module) => ({ default: module.ResourceLibraryPage })));
-const FreeCanvasPage = lazy(() => import("../features/free-canvas/FreeCanvasPage").then((module) => ({ default: module.FreeCanvasPage })));
-const ImageReviewPage = lazy(() => import("../features/image-review/ImageReviewPage").then((module) => ({ default: module.ImageReviewPage })));
-const SettingsPage = lazy(() => import("../features/settings/SettingsPage").then((module) => ({ default: module.SettingsPage })));
-const CanvasPage = lazy(() => import("../features/infinite-canvas/CanvasPage"));
+const CanvasPage = lazy(() => import("../features/infinite-canvas/CanvasPageEntry"));
 
-function LazyWorkspacePage({ children, fallback }: { children: ReactNode; fallback: string }) {
-  return <Suspense fallback={<div className="view-loading">{fallback}</div>}>{children}</Suspense>;
+function LazyWorkspacePage({ children, fallback }: { children: ReactNode; fallback: ReactNode }) {
+  return <Suspense fallback={fallback}>{children}</Suspense>;
 }
 
 export const workspaceRoutes: WorkspaceRoute[] = [
@@ -33,11 +34,7 @@ export const workspaceRoutes: WorkspaceRoute[] = [
     labelKey: "nav:library",
     shortKey: "nav:short.library",
     icon: LibraryBig,
-    render: () => (
-      <LazyWorkspacePage fallback="Loading library...">
-        <ResourceLibraryPage />
-      </LazyWorkspacePage>
-    ),
+    render: () => <ResourceLibraryPage />,
   },
   {
     id: "free-canvas",
@@ -45,22 +42,14 @@ export const workspaceRoutes: WorkspaceRoute[] = [
     shortKey: "nav:short.freeCanvas",
     icon: LayoutTemplate,
     keepAlive: true,
-    render: () => (
-      <LazyWorkspacePage fallback="Loading free canvas...">
-        <FreeCanvasPage />
-      </LazyWorkspacePage>
-    ),
+    render: () => <FreeCanvasPage />,
   },
   {
     id: "image-review",
     labelKey: "nav:imageReview",
     shortKey: "nav:short.imageReview",
     icon: ScanSearch,
-    render: () => (
-      <LazyWorkspacePage fallback="Loading image review...">
-        <ImageReviewPage />
-      </LazyWorkspacePage>
-    ),
+    render: () => <ImageReviewPage />,
   },
   {
     id: "canvas",
@@ -69,8 +58,12 @@ export const workspaceRoutes: WorkspaceRoute[] = [
     icon: Layers3,
     keepAlive: true,
     render: ({ appConfig }) => (
-      <LazyWorkspacePage fallback="Loading canvas...">
-        <CanvasPage imageDownloadPath={appConfig.imageDownloadPath} />
+      <LazyWorkspacePage fallback={<CanvasPageSkeleton />}>
+        <CanvasPage
+          imageDownloadPath={appConfig.imageDownloadPath}
+          serverUrl={appConfig.mode === "remote" ? appConfig.serverUrl : ""}
+          sharedCanvasesEnabled={appConfig.mode === "remote"}
+        />
       </LazyWorkspacePage>
     ),
   },
@@ -79,11 +72,7 @@ export const workspaceRoutes: WorkspaceRoute[] = [
     labelKey: "nav:settings",
     shortKey: "nav:short.settings",
     icon: Settings,
-    render: ({ appConfig, onConfigChange }) => (
-      <LazyWorkspacePage fallback="Loading settings...">
-        <SettingsPage config={appConfig} onConfigChange={onConfigChange} />
-      </LazyWorkspacePage>
-    ),
+    render: ({ appConfig, onConfigChange }) => <SettingsPage config={appConfig} onConfigChange={onConfigChange} />,
   },
 ];
 

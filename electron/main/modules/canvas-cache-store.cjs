@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 
 const IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.heic', '.heif', '.jpg', '.jpeg', '.png', '.svg', '.webp']);
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 function isRecord(value) {
   return value && typeof value === 'object' && !Array.isArray(value);
@@ -286,8 +285,6 @@ function createCanvasCacheStore({ rootDir, assetStore, canvasStore, shell }) {
 
   function deleteAssets(payload = {}) {
     const ids = new Set(Array.isArray(payload.ids) ? payload.ids.map(formatAssetId) : []);
-    const olderThanDays = Number(payload.olderThanDays || 0);
-    const cutoff = olderThanDays > 0 ? Date.now() - olderThanDays * DAY_MS : 0;
     const current = scan();
     const byId = new Map(current.assets.map((asset) => [asset.id, asset]));
     let deletedCount = 0;
@@ -305,10 +302,6 @@ function createCanvasCacheStore({ rootDir, assetStore, canvasStore, shell }) {
       try {
         const stats = fs.existsSync(asset.filePath) ? fs.statSync(asset.filePath) : null;
         if (!stats) {
-          skippedCount += 1;
-          continue;
-        }
-        if (cutoff && stats.mtimeMs >= cutoff) {
           skippedCount += 1;
           continue;
         }

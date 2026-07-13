@@ -1,0 +1,106 @@
+:root {
+  color-scheme: light;
+  --background: oklch(0.928 0.0042 236.4993);
+  --foreground: oklch(0.3211 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.3211 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.3211 0 0);
+  --primary: oklch(0.33 0.006 235);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.90 0.004 236);
+  --secondary-foreground: oklch(0.30 0.006 235);
+  --muted: oklch(0.9846 0.0017 247.8389);
+  --muted-foreground: oklch(0.5510 0.0234 264.3637);
+  --accent: oklch(0.895 0.004 235);
+  --accent-foreground: oklch(0.30 0.006 235);
+  --destructive: oklch(0.6368 0.2078 25.3313);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.8452 0 0);
+  --input: oklch(0.9700 0.0029 264.5420);
+  --ring: oklch(0.54 0.008 235);
+  --chart-1: oklch(0.33 0.006 235);
+  --chart-2: oklch(0.38 0.004 236);
+  --chart-3: oklch(0.52 0.004 236);
+  --chart-4: oklch(0.68 0.004 236);
+  --chart-5: oklch(0.82 0.004 236);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.9030 0.0046 258.3257);
+  --sidebar-foreground: oklch(0.3211 0 0);
+  --sidebar-primary: oklch(0.33 0.006 235);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.895 0.004 235);
+  --sidebar-accent-foreground: oklch(0.30 0.006 235);
+  --sidebar-border: oklch(0.9276 0.0058 264.5313);
+  --sidebar-ring: oklch(0.54 0.008 235);
+  --font-sans: Outfit, sans-serif;
+  --font-serif: Merriweather, serif;
+  --font-mono: "Fira Code", monospace;
+  --tracking-normal: 0em;
+  --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
+  --tracking-tight: calc(var(--tracking-normal) - 0.025em);
+  --tracking-wide: calc(var(--tracking-normal) + 0.025em);
+  --tracking-wider: calc(var(--tracking-normal) + 0.05em);
+  --tracking-widest: calc(var(--tracking-normal) + 0.1em);
+  --spacing: 0.25rem;
+  --shadow-color: #1a1a1a;
+  --shadow-opacity: 0.1;
+  --shadow-blur: 3px;
+  --shadow-spread: 0px;
+  --shadow-offset-x: 0px;
+  --shadow-offset-y: 1px;
+  --shadow-2xs: 0px 1px 3px 0px hsl(0 0% 10.1961% / 0.05);
+  --shadow-xs: 0px 1px 3px 0px hsl(0 0% 10.1961% / 0.05);
+  --shadow-sm: 0px 1px 3px 0px hsl(0 0% 10.1961% / 0.10), 0px 1px 2px -1px hsl(0 0% 10.1961% / 0.10);
+  --shadow: 0px 1px 3px 0px hsl(0 0% 10.1961% / 0.10), 0px 1px 2px -1px hsl(0 0% 10.1961% / 0.10);
+  --shadow-md: 0px 1px 3px 0px hsl(0 0% 10.1961% / 0.10), 0px 2px 4px -1px hsl(0 0% 10.1961% / 0.10);
+  --shadow-lg: 0px 1px 3px 0px hsl(0 0% 10.1961% / 0.10), 0px 4px 6px -1px hsl(0 0% 10.1961% / 0.10);
+  --shadow-xl: 0px 1px 3px 0px hsl(0 0% 10.1961% / 0.10), 0px 8px 10px -1px hsl(0 0% 10.1961% / 0.10);
+  --shadow-2xl: 0px 1px 3px 0px hsl(0 0% 10.1961% / 0.25);
+}
+
+:root.theme-dark,
+:root.dark,
+.theme-dark,
+.dark {
+  color-scheme: dark;
+  --background: oklch(0.208 0 0);
+  --foreground: oklch(0.9219 0 0);
+  --card: oklch(0.2435 0 0);
+  --card-foreground: oklch(0.9219 0 0);
+  --popover: oklch(0.2435 0 0);
+  --popover-foreground: oklch(0.9219 0 0);
+  --primary: oklch(0.88 0.004 236);
+  --primary-foreground: oklch(0.18 0.004 70);
+  --secondary: oklch(0.30 0.004 236);
+  --secondary-foreground: oklch(0.92 0.004 236);
+  --muted: oklch(0.2850 0 0);
+  --muted-foreground: oklch(0.5999 0 0);
+  --accent: oklch(0.32 0.004 236);
+  --accent-foreground: oklch(0.92 0.004 236);
+  --destructive: oklch(0.6368 0.2078 25.3313);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.3290 0 0);
+  --input: oklch(0.3092 0 0);
+  --ring: oklch(0.62 0.004 236);
+  --chart-1: oklch(0.88 0.004 236);
+  --chart-2: oklch(0.74 0.004 236);
+  --chart-3: oklch(0.60 0.004 236);
+  --chart-4: oklch(0.46 0.004 236);
+  --chart-5: oklch(0.34 0.004 236);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.2393 0 0);
+  --sidebar-foreground: oklch(0.9219 0 0);
+  --sidebar-primary: oklch(0.88 0.004 236);
+  --sidebar-primary-foreground: oklch(0.18 0.004 70);
+  --sidebar-accent: oklch(0.32 0.004 236);
+  --sidebar-accent-foreground: oklch(0.92 0.004 236);
+  --sidebar-border: oklch(0.3290 0 0);
+  --sidebar-ring: oklch(0.62 0.004 236);
+}
+
+@layer base {
+  body {
+    letter-spacing: var(--tracking-normal);
+  }
+}

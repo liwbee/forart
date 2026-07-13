@@ -1,4 +1,4 @@
-import { KeyboardEvent, type FocusEvent, useEffect, useLayoutEffect, useRef } from "react";
+import { KeyboardEvent, type FocusEvent, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { FreeCanvasTextItem } from "../types";
 import { measureTextLayer, TEXT_LAYER_LINE_HEIGHT } from "./measureTextLayer";
 
@@ -31,18 +31,18 @@ export function FreeCanvasTextLayer({
     whiteSpace: item.autoSize ? "pre" : "pre-wrap",
   };
 
-  function publishMeasuredSize() {
+  const publishMeasuredSize = useCallback(() => {
     const measuredSize = measureTextLayer(item);
     const nextWidth = measuredSize.width;
     const nextHeight = measuredSize.height;
     if (Math.abs(nextWidth - item.width) > 0.5 || Math.abs(nextHeight - item.height) > 0.5) {
       onMeasureChange({ width: nextWidth, height: nextHeight });
     }
-  }
+  }, [item, onMeasureChange]);
 
   useLayoutEffect(() => {
     publishMeasuredSize();
-  }, [editing, item.text, item.fontSize, item.fontFamily, item.fontWeight, item.autoSize, item.width]);
+  }, [editing, item.text, item.fontSize, item.fontFamily, item.fontWeight, item.autoSize, item.width, publishMeasuredSize]);
 
   useEffect(() => {
     if (!editing) return;
@@ -51,7 +51,7 @@ export function FreeCanvasTextLayer({
     editor.focus();
     editor.setSelectionRange(editor.value.length, editor.value.length);
     publishMeasuredSize();
-  }, [editing]);
+  }, [editing, publishMeasuredSize]);
 
   function handleEditorInput(text: string) {
     onTextChange(text);

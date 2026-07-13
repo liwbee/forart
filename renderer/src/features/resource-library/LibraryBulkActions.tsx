@@ -1,7 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { CheckSquare, Settings, Tags, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { normalizeLibraryTagColor, type LibraryTagColor } from "../library-tags";
+import { AppScrollArea } from "../../components/AppScrollArea";
+import { ConfirmingDeleteButton } from "../../components/ConfirmingDeleteButton";
+import { Button } from "../../components/ui/button";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
+import { LibraryTagChoiceButton, type LibraryTagColor } from "../library-tags";
 
 export interface LibraryBulkTag {
   id: string;
@@ -40,20 +44,12 @@ export function LibraryBulkActions({
 }) {
   const { t } = useTranslation();
   const [tagDialogMode, setTagDialogMode] = useState<BulkTagMode | null>(null);
-  const [deleteConfirming, setDeleteConfirming] = useState(false);
 
   useEffect(() => {
     if (!selectionMode) {
       setTagDialogMode(null);
-      setDeleteConfirming(false);
     }
   }, [selectionMode]);
-
-  useEffect(() => {
-    if (!deleteConfirming) return;
-    const timeout = window.setTimeout(() => setDeleteConfirming(false), 3000);
-    return () => window.clearTimeout(timeout);
-  }, [deleteConfirming]);
 
   if (!selectionMode) return null;
 
@@ -65,46 +61,37 @@ export function LibraryBulkActions({
           <span>{t("common:bulk.matchingCount", { count: totalMatchingCount })}</span>
         </div>
         <div className="library-bulk-bar__actions">
-          <button type="button" disabled={isBusy || !totalMatchingCount} onClick={onSelectMatching}>
-            <CheckSquare size={17} aria-hidden="true" />
+          <Button type="button" variant="default" disabled={isBusy || !totalMatchingCount} onClick={onSelectMatching}>
+            <CheckSquare data-icon="inline-start" aria-hidden="true" />
             <span>{t("common:bulk.selectMatching")}</span>
-          </button>
-          <button type="button" disabled={isBusy || !selectedCount} onClick={onClearSelection}>
-            <X size={17} aria-hidden="true" />
+          </Button>
+          <Button type="button" variant="default" disabled={isBusy || !selectedCount} onClick={onClearSelection}>
+            <X data-icon="inline-start" aria-hidden="true" />
             <span>{t("common:bulk.clearSelection")}</span>
-          </button>
-          <button type="button" disabled={isBusy || !selectedCount || !tags.length} onClick={() => setTagDialogMode("add")}>
-            <Tags size={17} aria-hidden="true" />
+          </Button>
+          <Button type="button" variant="default" disabled={isBusy || !selectedCount || !tags.length} onClick={() => setTagDialogMode("add")}>
+            <Tags data-icon="inline-start" aria-hidden="true" />
             <span>{t("common:bulk.addTags")}</span>
-          </button>
-          <button type="button" disabled={isBusy || !selectedCount || !tags.length} onClick={() => setTagDialogMode("remove")}>
-            <Tags size={17} aria-hidden="true" />
+          </Button>
+          <Button type="button" variant="default" disabled={isBusy || !selectedCount || !tags.length} onClick={() => setTagDialogMode("remove")}>
+            <Tags data-icon="inline-start" aria-hidden="true" />
             <span>{t("common:bulk.removeTags")}</span>
-          </button>
-          <button type="button" disabled={isBusy} onClick={onOpenTagManager}>
-            <Settings size={17} aria-hidden="true" />
+          </Button>
+          <Button type="button" variant="default" disabled={isBusy} onClick={onOpenTagManager}>
+            <Settings data-icon="inline-start" aria-hidden="true" />
             <span>{t("common:labels.manageTags")}</span>
-          </button>
-          <button
-            className={`danger${deleteConfirming ? " confirming" : ""}`}
-            type="button"
+          </Button>
+          <ConfirmingDeleteButton
             disabled={isBusy || !selectedCount}
-            onClick={() => {
-              if (!deleteConfirming) {
-                setDeleteConfirming(true);
-                return;
-              }
-              setDeleteConfirming(false);
-              onDeleteSelected();
-            }}
-          >
-            <Trash2 size={17} aria-hidden="true" />
-            <span>{deleteConfirming ? t("common:bulk.confirmDelete") : t("common:bulk.deleteSelected")}</span>
-          </button>
-          <button type="button" disabled={isBusy} onClick={onExitSelectionMode}>
-            <X size={17} aria-hidden="true" />
-            <span>{t("common:actions.close")}</span>
-          </button>
+            icon={<Trash2 size={17} aria-hidden="true" />}
+            label={t("common:bulk.deleteSelected")}
+            confirmLabel={t("common:bulk.confirmDelete")}
+            resetKey={`${selectionMode}-${selectedCount}`}
+            onDelete={onDeleteSelected}
+          />
+          <Button className="library-bulk-bar__close" type="button" variant="ghost" size="icon" disabled={isBusy} onClick={onExitSelectionMode} aria-label={t("common:actions.close")} title={t("common:actions.close")}>
+            <X aria-hidden="true" />
+          </Button>
         </div>
       </div>
 
@@ -133,16 +120,18 @@ export function LibraryBulkManageButton({
 }) {
   const { t } = useTranslation();
   return (
-    <button
+    <Button
       className="library-bulk-manage-button"
       type="button"
+      variant="default"
+      size="icon"
       disabled={disabled}
       onClick={onClick}
       aria-label={t("common:bulk.manage")}
       title={t("common:bulk.manage")}
     >
-      <Settings size={18} aria-hidden="true" />
-    </button>
+      <Settings aria-hidden="true" />
+    </Button>
   );
 }
 
@@ -169,66 +158,61 @@ function BulkTagDialog({
     setSelectedTagNames(new Set());
   }, [mode]);
 
-  if (!mode) return null;
-
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!selectedTagNameList.length) return;
+    if (isBusy || !selectedTagNameList.length) return;
     onSubmit(selectedTagNameList);
   }
 
+  const title = mode === "add" ? t("common:bulk.addTags") : t("common:bulk.removeTags");
+
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <form
-        className="library-bulk-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="library-bulk-tag-dialog-title"
-        onSubmit={handleSubmit}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="dialog__head">
-          <h2 id="library-bulk-tag-dialog-title">
-            {mode === "add" ? t("common:bulk.addTags") : t("common:bulk.removeTags")}
-          </h2>
-          <p>{t("common:bulk.selectedCount", { count: selectedCount })}</p>
-        </div>
-        <div className="library-bulk-tag-list" aria-label={t("common:labels.tagList")}>
-          {tags.map((tag) => {
-            const selected = selectedTagNames.has(tag.name);
-            return (
-              <button
-                key={tag.id}
-                className={selected ? "selected" : ""}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => {
-                  setSelectedTagNames((current) => {
-                    const next = new Set(current);
-                    if (next.has(tag.name)) {
-                      next.delete(tag.name);
-                    } else {
-                      next.add(tag.name);
-                    }
-                    return next;
-                  });
-                }}
-              >
-                <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
-                <span>{tag.name}</span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="dialog__actions">
-          <button className="button" type="button" disabled={isBusy} onClick={onClose}>
-            {t("common:actions.cancel")}
-          </button>
-          <button className="button primary" type="submit" disabled={isBusy || !selectedTagNameList.length}>
-            {mode === "add" ? t("common:bulk.addTags") : t("common:bulk.removeTags")}
-          </button>
-        </div>
-      </form>
-    </div>
+    <Dialog open={mode !== null} onOpenChange={(open) => {
+      if (!open) onClose();
+    }}>
+      <DialogContent asChild className="library-bulk-dialog overflow-hidden">
+        <form onSubmit={handleSubmit}>
+          <DialogHeader className="text-left">
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>{t("common:bulk.selectedCount", { count: selectedCount })}</DialogDescription>
+          </DialogHeader>
+          <AppScrollArea className="library-bulk-tag-list" viewportClassName="library-bulk-tag-list__viewport" aria-label={t("common:labels.tagList")}>
+            {tags.map((tag) => {
+              const selected = selectedTagNames.has(tag.name);
+              return (
+                <LibraryTagChoiceButton
+                  key={tag.id}
+                  mode="select"
+                  name={tag.name}
+                  color={tag.color}
+                  selected={selected}
+                  onToggleSelect={() => {
+                    setSelectedTagNames((current) => {
+                      const next = new Set(current);
+                      if (next.has(tag.name)) {
+                        next.delete(tag.name);
+                      } else {
+                        next.add(tag.name);
+                      }
+                      return next;
+                    });
+                  }}
+                />
+              );
+            })}
+          </AppScrollArea>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="ghost" type="button">
+                {t("common:actions.cancel")}
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={isBusy || !selectedTagNameList.length}>
+              {title}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

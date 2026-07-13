@@ -12,22 +12,11 @@ interface VirtualLibraryCardGridProps<TItem> {
   renderLeadingItem?: () => ReactNode;
   style?: CSSProperties;
   itemAspectRatio?: number;
+  scrollElementRef?: { current: HTMLElement | null };
 }
 
 const DEFAULT_CARD_WIDTH = 220;
 const DEFAULT_GRID_GAP = 20;
-
-function findScrollParent(element: HTMLElement | null) {
-  let parent = element?.parentElement || null;
-  while (parent && parent !== document.body) {
-    const styles = window.getComputedStyle(parent);
-    if (/(auto|scroll|overlay)/.test(styles.overflowY)) {
-      return parent;
-    }
-    parent = parent.parentElement;
-  }
-  return null;
-}
 
 function readSpaceValue(name: string, fallback: number) {
   const root = window.getComputedStyle(document.documentElement).getPropertyValue(name);
@@ -42,9 +31,9 @@ export function VirtualLibraryCardGrid<TItem>({
   renderLeadingItem,
   style,
   itemAspectRatio = 1,
+  scrollElementRef,
 }: VirtualLibraryCardGridProps<TItem>) {
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
   const [layout, setLayout] = useState({
     columnCount: 1,
     rowHeight: DEFAULT_CARD_WIDTH * itemAspectRatio,
@@ -69,7 +58,7 @@ export function VirtualLibraryCardGrid<TItem>({
 
   const virtualizer = useVirtualizer({
     count: rows.length,
-    getScrollElement: () => scrollElement,
+    getScrollElement: () => scrollElementRef?.current ?? null,
     estimateSize: () => layout.rowSize,
     overscan: 4,
   });
@@ -78,8 +67,6 @@ export function VirtualLibraryCardGrid<TItem>({
     const gridElement = rootRef.current;
     if (!gridElement) return undefined;
     const measuredElement: HTMLDivElement = gridElement;
-
-    setScrollElement(findScrollParent(measuredElement));
 
     function updateLayout() {
       const width = measuredElement.clientWidth;
@@ -106,7 +93,7 @@ export function VirtualLibraryCardGrid<TItem>({
       resizeObserver?.disconnect();
       window.removeEventListener("resize", updateLayout);
     };
-  }, [itemAspectRatio]);
+  }, [itemAspectRatio, style]);
 
   useEffect(() => {
     virtualizer.measure();

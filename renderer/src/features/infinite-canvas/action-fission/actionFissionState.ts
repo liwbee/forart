@@ -1,13 +1,19 @@
-import type { CanvasNode } from "../types";
-import type { ActionFissionAspectRatio, ActionFissionResolution, ActionFissionRow, ActionFissionState } from "./actionFissionTypes";
-import { MAX_ACTION_FISSION_ROWS } from "./actionFissionTypes";
+import type { ActionEntry } from "../../action-library/types";
+import {
+  DEFAULT_ACTION_FISSION_ROWS,
+  MAX_ACTION_FISSION_ROWS,
+  type ActionFissionRow,
+  type ActionFissionState,
+} from "./actionFissionTypes";
 
-const createId = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 9)}_${Date.now().toString(36)}`;
+function createId() {
+  return `action_row_${crypto.randomUUID()}`;
+}
 
-export function createActionFissionRow(): ActionFissionRow {
+export function createActionFissionRow(actionProjectId = ""): ActionFissionRow {
   return {
-    id: createId("action_row"),
-    actionProjectId: "",
+    id: createId(),
+    actionProjectId,
     includeActionTagIds: [],
     excludeActionTagIds: [],
   };
@@ -15,53 +21,38 @@ export function createActionFissionRow(): ActionFissionRow {
 
 export function createDefaultActionFissionState(): ActionFissionState {
   return {
-    rows: [createActionFissionRow()],
+    rows: Array.from({ length: DEFAULT_ACTION_FISSION_ROWS }, () => createActionFissionRow()),
+    layout: "grid",
     apiType: "third-party-api",
     resolution: "1k",
-    aspectRatio: "1:1",
+    aspectRatio: "3:4",
   };
 }
 
 export function normalizeActionFissionState(state: ActionFissionState | undefined): ActionFissionState {
-  const rows = state?.rows?.length ? state.rows : [createActionFissionRow()];
-  const resolution = String(state?.resolution || "1k");
-  const aspectRatio = String(state?.aspectRatio || "1:1");
+  const fallback = createDefaultActionFissionState();
   return {
-    rows,
-    apiType: state?.apiType === "libtv-api" ? "libtv-api" : "third-party-api",
-    providerId: state?.providerId || "",
-    model: state?.model || "",
-    libtvWorkspaceId: state?.libtvWorkspaceId || "",
-    libtvWorkspaceName: state?.libtvWorkspaceName || "",
-    libtvModelName: state?.libtvModelName || "",
-    libtvProjectUuid: state?.libtvProjectUuid || "",
-    libtvProjectName: state?.libtvProjectName || "",
-    libtvGroupNodeId: state?.libtvGroupNodeId || "",
-    libtvGroupTitle: state?.libtvGroupTitle || "",
-    resolution: resolution as ActionFissionResolution,
-    aspectRatio: aspectRatio as ActionFissionAspectRatio,
-    running: Boolean(state?.running),
-    status: state?.status || "",
-    error: state?.error || "",
-  };
-}
-
-export function updateActionFissionState(node: CanvasNode, updater: (state: ActionFissionState) => ActionFissionState): ActionFissionState {
-  return updater(normalizeActionFissionState(node.actionFission));
-}
-
-export function updateActionFissionStateValue(state: ActionFissionState | undefined, updater: (state: ActionFissionState) => ActionFissionState): ActionFissionState {
-  return updater(normalizeActionFissionState(state));
-}
-
-export function patchActionFissionRow(state: ActionFissionState, rowId: string, patch: Partial<ActionFissionRow>): ActionFissionState {
-  return {
+    ...fallback,
     ...state,
-    rows: state.rows.map((row) => (row.id === rowId ? { ...row, ...patch } : row)),
+    rows: state?.rows?.length ? state.rows.slice(0, MAX_ACTION_FISSION_ROWS) : fallback.rows,
+    layout: state?.layout === "list" ? "list" : "grid",
+    aspectRatio: state?.aspectRatio || "3:4",
   };
 }
 
-export function clearSelectedAction(row: ActionFissionRow): ActionFissionRow {
+export function actionPatchFromEntry(action: ActionEntry) {
+  return {
+    selectedActionId: action.id,
+    selectedActionName: action.name,
+    selectedActionPrompt: action.prompt,
+    selectedActionTags: action.tags,
+    selectedActionAssetUrl: action.asset_url,
+    selectedActionThumbUrl: action.thumbnail_url || action.asset_url,
+    error: "",
+  } satisfies Partial<ActionFissionRow>;
+}
+
+function clearRowAction(row: ActionFissionRow) {
   return {
     ...row,
     selectedActionId: undefined,
@@ -69,56 +60,31 @@ export function clearSelectedAction(row: ActionFissionRow): ActionFissionRow {
     selectedActionPrompt: undefined,
     selectedActionTags: undefined,
     selectedActionAssetUrl: undefined,
+    selectedActionThumbUrl: undefined,
+    error: "",
   };
 }
 
-export function clearActionFissionRow(rowId?: string): ActionFissionRow {
-  return {
-    ...createActionFissionRow(),
-    id: rowId || createId("action_row"),
-  };
-}
-
-export function changeActionFissionRowProject(state: ActionFissionState, rowId: string, actionProjectId: string): ActionFissionState {
-  return {
-    ...state,
-    rows: state.rows.map((row) => (
-      row.id === rowId
-        ? clearSelectedAction({ ...row, actionProjectId, includeActionTagIds: [], excludeActionTagIds: [], error: "" })
-        : row
-    )),
-  };
-}
-
-export function changeActionFissionRowTags(state: ActionFissionState, rowId: string, includeActionTagIds: string[], excludeActionTagIds: string[]): ActionFissionState {
-  return {
-    ...state,
-    rows: state.rows.map((row) => (
-      row.id === rowId
-        ? clearSelectedAction({ ...row, includeActionTagIds, excludeActionTagIds, error: "" })
-        : row
-    )),
-  };
-}
-
-export function changeActionFissionRowFilter(
+export function configureActionFissionRow(
   state: ActionFissionState,
   rowId: string,
   actionProjectId: string,
   includeActionTagIds: string[],
   excludeActionTagIds: string[],
-): ActionFissionState {
+  selectedAction: ActionEntry | null,
+) {
   return {
     ...state,
-    rows: state.rows.map((row) => (
-      row.id === rowId
-        ? clearSelectedAction({ ...row, actionProjectId, includeActionTagIds, excludeActionTagIds, error: "" })
-        : row
-    )),
+    rows: state.rows.map((row) => row.id === rowId
+      ? {
+          ...clearRowAction({ ...row, actionProjectId, includeActionTagIds, excludeActionTagIds }),
+          ...(selectedAction ? actionPatchFromEntry(selectedAction) : {}),
+        }
+      : row),
   };
 }
 
-export function addActionFissionRow(state: ActionFissionState): ActionFissionState {
+export function addActionFissionRow(state: ActionFissionState) {
   if (state.rows.length >= MAX_ACTION_FISSION_ROWS) return state;
   return {
     ...state,
@@ -126,15 +92,7 @@ export function addActionFissionRow(state: ActionFissionState): ActionFissionSta
   };
 }
 
-export function removeActionFissionRow(state: ActionFissionState, rowId: string): ActionFissionState {
-  if (state.rows.length <= 1) {
-    return {
-      ...state,
-      rows: [clearActionFissionRow()],
-    };
-  }
-  return {
-    ...state,
-    rows: state.rows.filter((row) => row.id !== rowId),
-  };
+export function removeActionFissionRow(state: ActionFissionState, rowId: string) {
+  if (state.rows.length <= 1) return state;
+  return { ...state, rows: state.rows.filter((row) => row.id !== rowId) };
 }

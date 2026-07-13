@@ -29,7 +29,7 @@ function requestMethod(options: RequestInit) {
   return String(options.method || "GET").toUpperCase();
 }
 
-function shouldTryLocalIpc(path: string, options: RequestInit) {
+function shouldTryLocalIpc(path: string) {
   if (/^https?:\/\//i.test(path)) return false;
   if (!window.forartLocalApi?.request) return false;
   return getActiveForartConfig()?.mode === "local";
@@ -72,7 +72,7 @@ async function httpRequest<T>(path: string, options: RequestInit = {}): Promise<
 }
 
 export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  if (shouldTryLocalIpc(path, options)) {
+  if (shouldTryLocalIpc(path)) {
     const result = await window.forartLocalApi!.request({
       path,
       method: requestMethod(options),
@@ -83,19 +83,4 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   }
 
   return httpRequest<T>(path, options);
-}
-
-export async function fileToAssetPayload(file: File) {
-  const data = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
-    reader.onerror = () => reject(reader.error || new Error("Failed to read image"));
-    reader.readAsDataURL(file);
-  });
-
-  return {
-    filename: file.name || "image",
-    mime_type: file.type || "image/png",
-    data,
-  };
 }

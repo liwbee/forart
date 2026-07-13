@@ -1,4 +1,14 @@
-function registerImageReviewIpc({ ipcMain, imageReviewStore }) {
+function registerImageReviewIpc({ ipcMain, dialog, imageReviewStore }) {
+  ipcMain.handle('image-review:choose-root', async (_event, payload = {}) => {
+    const result = await dialog.showOpenDialog({
+      title: String(payload?.title || 'Choose image review folder'),
+      properties: ['openDirectory'],
+    });
+    const selectedPath = result.filePaths[0] || '';
+    if (result.canceled || !selectedPath) return { canceled: true, path: '' };
+    return { canceled: false, path: imageReviewStore.authorizeRoot(selectedPath) };
+  });
+
   ipcMain.handle('image-review:products', async (_event, payload = {}) => ({
     products: imageReviewStore.loadProducts({
       root: payload.root,
@@ -14,22 +24,6 @@ function registerImageReviewIpc({ ipcMain, imageReviewStore }) {
       detailFolders: payload.detailFolders,
     }),
   }));
-
-  ipcMain.handle('image-review:load-issue', async (_event, payload = {}) => ({
-    issue: imageReviewStore.findIssue({
-      root: payload.root,
-      path: payload.path,
-    }),
-  }));
-
-  ipcMain.handle('image-review:save-issue', async (_event, payload = {}) => {
-    imageReviewStore.saveIssue({
-      root: payload.root,
-      path: payload.path,
-      issue: payload.issue,
-    });
-    return { ok: true };
-  });
 }
 
 module.exports = { registerImageReviewIpc };

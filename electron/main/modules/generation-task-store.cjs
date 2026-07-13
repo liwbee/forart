@@ -41,11 +41,25 @@ function normalizeInterruptReason(reason) {
   return '';
 }
 
+function normalizeResult(input) {
+  if (!input || typeof input !== 'object') return undefined;
+  return {
+    url: safeString(input.url),
+    localUrl: safeString(input.localUrl),
+    thumbUrl: safeString(input.thumbUrl),
+    fileName: safeString(input.fileName),
+    width: Number.isFinite(Number(input.width)) ? Number(input.width) : undefined,
+    height: Number.isFinite(Number(input.height)) ? Number(input.height) : undefined,
+  };
+}
+
 function normalizeTask(input = {}, fallback = {}) {
   const timestamp = nowMs();
   const target = normalizeTarget(input.target || fallback.target);
   const result = input.result && typeof input.result === 'object' ? input.result : fallback.result;
   const startedAt = Number(input.startedAt || fallback.startedAt || timestamp);
+  const status = normalizeStatus(input.status || fallback.status || 'queued');
+  const runningAt = Number(input.runningAt || fallback.runningAt || (status === 'running' ? timestamp : 0)) || undefined;
   const completedAt = Number(input.completedAt || fallback.completedAt || 0) || undefined;
   const durationMs = Number(input.durationMs || fallback.durationMs || 0) || undefined;
   return {
@@ -56,8 +70,9 @@ function normalizeTask(input = {}, fallback = {}) {
     providerId: safeString(input.providerId || fallback.providerId),
     model: safeString(input.model || fallback.model),
     upstreamTaskId: safeString(input.upstreamTaskId || fallback.upstreamTaskId),
-    status: normalizeStatus(input.status || fallback.status || 'queued'),
+    status,
     startedAt,
+    runningAt,
     updatedAt: Number(input.updatedAt || fallback.updatedAt || timestamp),
     completedAt,
     durationMs,
@@ -67,15 +82,18 @@ function normalizeTask(input = {}, fallback = {}) {
       : Array.isArray(fallback.referenceImages) ? fallback.referenceImages.map(String).filter(Boolean) : [],
     resolution: safeString(input.resolution || fallback.resolution),
     aspectRatio: safeString(input.aspectRatio || fallback.aspectRatio),
+    quality: safeString(input.quality || fallback.quality),
+    imageCount: Math.max(1, Math.round(Number(input.imageCount || fallback.imageCount || 1))),
     message: input.message !== undefined ? String(input.message || '') : fallback.message,
+    messageCode: input.messageCode !== undefined ? String(input.messageCode || '') : fallback.messageCode,
+    messageParams: input.messageParams !== undefined
+      ? input.messageParams && typeof input.messageParams === 'object' ? { ...input.messageParams } : undefined
+      : fallback.messageParams && typeof fallback.messageParams === 'object' ? { ...fallback.messageParams } : undefined,
     error: input.error !== undefined ? String(input.error || '') : fallback.error,
     interruptReason: normalizeInterruptReason(input.interruptReason || fallback.interruptReason),
     result: result && typeof result === 'object' ? {
-      url: safeString(result.url),
-      localUrl: safeString(result.localUrl),
-      fileName: safeString(result.fileName),
-      width: Number.isFinite(Number(result.width)) ? Number(result.width) : undefined,
-      height: Number.isFinite(Number(result.height)) ? Number(result.height) : undefined,
+      ...normalizeResult(result),
+      results: Array.isArray(result.results) ? result.results.map(normalizeResult).filter(Boolean) : undefined,
     } : undefined,
   };
 }
@@ -149,6 +167,26 @@ function createGenerationTaskStore() {
     return { ok: true, tasks: stopped, taskIds: stopped.map((task) => task.id) };
   }
 
+  function activeTaskIdsForTarget(canvasId, target) {
+    const safeCanvasId = safeString(canvasId);
+    const safeTargetKey = targetKey(target);
+    return [...tasks.values()]
+      .filter((task) => (
+        task.canvasId === safeCanvasId
+        && targetKey(task.target) === safeTargetKey
+        && !TERMINAL_STATUSES.has(task.status)
+      ))
+      .map((task) => task.id);
+  }
+
+  function latestTaskForTarget(canvasId, target) {
+    const safeCanvasId = safeString(canvasId);
+    const safeTargetKey = targetKey(target);
+    return [...tasks.values()]
+      .filter((task) => task.canvasId === safeCanvasId && targetKey(task.target) === safeTargetKey)
+      .sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0))[0] || null;
+  }
+
   function stopTasksForTarget(canvasId, target) {
     const safeCanvasId = safeString(canvasId);
     const safeTargetKey = targetKey(target);
@@ -167,8 +205,10 @@ function createGenerationTaskStore() {
   }
 
   return {
+    activeTaskIdsForTarget,
     createTask,
     getTask,
+    latestTaskForTarget,
     stopTask,
     stopTasksForCanvas,
     stopTasksForNode,

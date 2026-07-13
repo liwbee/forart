@@ -58,7 +58,14 @@ function createAssetStore({ rootDir, net }) {
   function assetUrl(filePath) {
     const assetRoot = canvasAssetsRoot();
     const relative = path.relative(assetRoot, filePath).replace(/\\/g, '/');
-    return 'forart-asset://canvas/' + relative.split('/').map(encodeURIComponent).join('/');
+    let version = '';
+    try {
+      version = String(Math.trunc(fs.statSync(filePath).mtimeMs || 0));
+    } catch {
+      version = '';
+    }
+    const url = 'forart-asset://canvas/' + relative.split('/').map(encodeURIComponent).join('/');
+    return version ? `${url}?v=${encodeURIComponent(version)}` : url;
   }
 
   const thumbnailStore = createCanvasAssetThumbnailStore({

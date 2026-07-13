@@ -11,7 +11,7 @@ import { applySameColorSingleIncludeFilter, cleanLibraryTagFilter, countLibraryT
 import { cacheBustedLibraryImageUrl } from "../../lib/libraryImageActions";
 import type { LibraryAssetItem, LibraryAssetTab } from "./types";
 
-export const defaultLibraryAssetTabs: LibraryAssetTab[] = ["models", "outfits", "actions"];
+const LIBRARY_ASSET_TABS: LibraryAssetTab[] = ["models", "outfits", "actions"];
 
 export function cacheBustedLibraryAssetUrl(url: string, stamp?: string) {
   return cacheBustedLibraryImageUrl(url, stamp);
@@ -23,23 +23,9 @@ function getRequestError(errors: unknown[]) {
   return first instanceof Error ? first.message : String(first);
 }
 
-function normalizeTabs(tabs?: readonly LibraryAssetTab[]) {
-  const normalized = (tabs?.length ? tabs : defaultLibraryAssetTabs).filter((tab, index, list) => list.indexOf(tab) === index);
-  return normalized.length ? normalized : defaultLibraryAssetTabs;
-}
-
-export function useLibraryAssetPickerData({
-  enabled,
-  sources,
-  initialTab = "outfits",
-}: {
-  enabled: boolean;
-  sources?: readonly LibraryAssetTab[];
-  initialTab?: LibraryAssetTab;
-}) {
+export function useLibraryAssetPickerData() {
   const queryClient = useQueryClient();
-  const availableTabs = useMemo(() => normalizeTabs(sources), [sources]);
-  const [activeTab, setActiveTabState] = useState<LibraryAssetTab>(() => (availableTabs.includes(initialTab) ? initialTab : availableTabs[0]));
+  const [activeTab, setActiveTab] = useState<LibraryAssetTab>("outfits");
   const [modelChoiceFor, setModelChoiceFor] = useState<LibraryAssetItem | null>(null);
   const activeOutfitProjectId = useOutfitLibraryStore((state) => state.activeProjectId);
   const setActiveOutfitProjectId = useOutfitLibraryStore((state) => state.setActiveProjectId);
@@ -57,42 +43,27 @@ export function useLibraryAssetPickerData({
   const setActiveActionTagFilter = useActionLibraryStore((state) => state.setActiveTagFilter);
   const sameColorSingleFilter = useLibraryTagSettingsStore((state) => state.sameColorSingleFilter);
 
-  useEffect(() => {
-    if (!availableTabs.includes(activeTab)) {
-      setActiveTabState(availableTabs[0]);
-    }
-  }, [activeTab, availableTabs]);
-
-  function setActiveTab(tab: LibraryAssetTab) {
-    if (!availableTabs.includes(tab)) return;
-    setActiveTabState(tab);
-  }
-
   const storageSettingsQuery = useQuery({
     queryKey: outfitLibraryKeys.storageSettings,
     queryFn: getStorageSettings,
-    enabled,
   });
   const storageConfigured = Boolean(storageSettingsQuery.data?.configured);
-  const canQuery = enabled && storageConfigured;
-  const hasModels = availableTabs.includes("models");
-  const hasOutfits = availableTabs.includes("outfits");
-  const hasActions = availableTabs.includes("actions");
+  const canQuery = storageConfigured;
 
   const outfitProjectsQuery = useQuery({
     queryKey: outfitLibraryKeys.projects,
     queryFn: listOutfitProjects,
-    enabled: canQuery && hasOutfits,
+    enabled: canQuery,
   });
   const modelProjectsQuery = useQuery({
     queryKey: modelLibraryKeys.projects,
     queryFn: listModelProjects,
-    enabled: canQuery && hasModels,
+    enabled: canQuery,
   });
   const actionProjectsQuery = useQuery({
     queryKey: actionLibraryKeys.projects,
     queryFn: listActionProjects,
-    enabled: canQuery && hasActions,
+    enabled: canQuery,
   });
 
   const outfitProjects = useMemo(() => outfitProjectsQuery.data?.projects || [], [outfitProjectsQuery.data?.projects]);
@@ -100,7 +71,6 @@ export function useLibraryAssetPickerData({
   const actionProjects = useMemo(() => actionProjectsQuery.data?.projects || [], [actionProjectsQuery.data?.projects]);
 
   useEffect(() => {
-    if (!enabled || !hasOutfits) return;
     if (!outfitProjects.length) {
       if (activeOutfitProjectId) setActiveOutfitProjectId("");
       return;
@@ -108,10 +78,9 @@ export function useLibraryAssetPickerData({
     if (!activeOutfitProjectId || !outfitProjects.some((project) => project.id === activeOutfitProjectId)) {
       setActiveOutfitProjectId(outfitProjects[0]?.id || "");
     }
-  }, [activeOutfitProjectId, enabled, hasOutfits, outfitProjects, setActiveOutfitProjectId]);
+  }, [activeOutfitProjectId, outfitProjects, setActiveOutfitProjectId]);
 
   useEffect(() => {
-    if (!enabled || !hasModels) return;
     if (!modelProjects.length) {
       if (activeModelProjectId) setActiveModelProjectId("");
       return;
@@ -119,10 +88,9 @@ export function useLibraryAssetPickerData({
     if (!activeModelProjectId || !modelProjects.some((project) => project.id === activeModelProjectId)) {
       setActiveModelProjectId(modelProjects[0]?.id || "");
     }
-  }, [activeModelProjectId, enabled, hasModels, modelProjects, setActiveModelProjectId]);
+  }, [activeModelProjectId, modelProjects, setActiveModelProjectId]);
 
   useEffect(() => {
-    if (!enabled || !hasActions) return;
     if (!actionProjects.length) {
       if (activeActionProjectId) setActiveActionProjectId("");
       return;
@@ -130,7 +98,7 @@ export function useLibraryAssetPickerData({
     if (!activeActionProjectId || !actionProjects.some((project) => project.id === activeActionProjectId)) {
       setActiveActionProjectId(actionProjects[0]?.id || "");
     }
-  }, [activeActionProjectId, actionProjects, enabled, hasActions, setActiveActionProjectId]);
+  }, [activeActionProjectId, actionProjects, setActiveActionProjectId]);
 
   const outfitTagsQuery = useQuery({
     queryKey: activeOutfitProjectId ? outfitLibraryKeys.tags(activeOutfitProjectId) : ["outfitTags", "empty"],
@@ -209,7 +177,7 @@ export function useLibraryAssetPickerData({
   const modelChoicesQuery = useQuery({
     queryKey: modelChoiceFor ? modelLibraryKeys.images(modelChoiceFor.id) : ["modelImages", "empty"],
     queryFn: () => listModelImages(modelChoiceFor!.id),
-    enabled: enabled && Boolean(modelChoiceFor),
+    enabled: Boolean(modelChoiceFor),
   });
 
   const activeProjects = activeTab === "models" ? modelProjects : activeTab === "actions" ? actionProjects : outfitProjects;
@@ -295,7 +263,7 @@ export function useLibraryAssetPickerData({
   return {
     activeTab,
     setActiveTab,
-    availableTabs,
+    availableTabs: LIBRARY_ASSET_TABS,
     modelChoiceFor,
     setModelChoiceFor,
     modelChoicesQuery,

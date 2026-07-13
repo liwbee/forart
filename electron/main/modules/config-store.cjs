@@ -1,6 +1,15 @@
 const path = require('path');
 const fs = require('fs');
 
+const APIMART_PROVIDER_ID = 'apimart';
+const APIMART_BASE_URLS = [
+  'https://api.apimart.ai/v1',
+  'https://api.apib.ai/v1',
+  'https://api.aiuxu.com/v1',
+  'https://api.aishuch.com/v1',
+];
+const APIMART_HOST_TO_BASE_URL = new Map(APIMART_BASE_URLS.map((baseUrl) => [new URL(baseUrl).host, baseUrl]));
+
 function normalizeConfig(payload = {}) {
   const mode = payload.mode === 'remote' ? 'remote' : 'local';
   return {
@@ -20,6 +29,7 @@ function normalizeImageReviewSettings(payload = {}) {
 }
 
 function normalizeApiProvider(input = {}, providers = []) {
+  if (isApimartProvider(input)) return createApimartProvider(input);
   const name = String(input.name || 'API').trim() || 'API';
   const base = (String(input.id || name || 'custom-api')
     .trim()
@@ -49,6 +59,64 @@ function normalizeApiProvider(input = {}, providers = []) {
     modelAliases: normalizeModelAliases(input.modelAliases),
     modelRules: normalizeModelRules(input.modelRules),
   };
+}
+
+function getApimartBaseUrl(value) {
+  try {
+    return APIMART_HOST_TO_BASE_URL.get(new URL(String(value || '').trim()).host.toLowerCase()) || '';
+  } catch {
+    return '';
+  }
+}
+
+function isApimartProvider(input = {}) {
+  return String(input.id || '').trim().toLowerCase() === APIMART_PROVIDER_ID
+    || String(input.name || '').trim().toLowerCase() === APIMART_PROVIDER_ID
+    || Boolean(getApimartBaseUrl(input.baseUrl));
+}
+
+function uniqueStrings(values = []) {
+  return [...new Set(values.map((value) => String(value).trim()).filter(Boolean))];
+}
+
+function createApimartProvider(input = {}) {
+  return {
+    id: APIMART_PROVIDER_ID,
+    name: 'APImart',
+    baseUrl: getApimartBaseUrl(input.baseUrl) || APIMART_BASE_URLS[0],
+    apiKey: String(input.apiKey || ''),
+    accessKey: '',
+    secretKey: '',
+    protocol: 'compatible',
+    imageRequestMode: 'openai',
+    imageGenerationEndpoint: '',
+    imageEditEndpoint: '',
+    imageModels: Array.isArray(input.imageModels) ? uniqueStrings(input.imageModels) : [],
+    chatModels: Array.isArray(input.chatModels) ? uniqueStrings(input.chatModels) : [],
+    videoModels: Array.isArray(input.videoModels) ? uniqueStrings(input.videoModels) : [],
+    modelAliases: normalizeModelAliases(input.modelAliases),
+    modelRules: normalizeModelRules(input.modelRules),
+  };
+}
+
+function mergeApimartProviders(inputs = []) {
+  return inputs.reduce((result, input) => {
+    const next = createApimartProvider(input);
+    return createApimartProvider({
+      ...result,
+      baseUrl: getApimartBaseUrl(input.baseUrl) || result.baseUrl,
+      apiKey: next.apiKey || result.apiKey,
+      imageModels: uniqueStrings([...result.imageModels, ...next.imageModels]),
+      chatModels: uniqueStrings([...result.chatModels, ...next.chatModels]),
+      videoModels: uniqueStrings([...result.videoModels, ...next.videoModels]),
+      modelAliases: {
+        image: { ...result.modelAliases.image, ...next.modelAliases.image },
+        chat: { ...result.modelAliases.chat, ...next.modelAliases.chat },
+        video: { ...result.modelAliases.video, ...next.modelAliases.video },
+      },
+      modelRules: { image: { ...result.modelRules.image, ...next.modelRules.image } },
+    });
+  }, createApimartProvider());
 }
 
 function normalizeAliasBucket(input = {}) {
@@ -86,18 +154,25 @@ function normalizeModelRules(input = {}) {
 }
 
 function normalizeApiSettings(payload = {}) {
-  const providers = Array.isArray(payload.providers)
-    ? payload.providers.reduce((result, item) => {
+  const rawProviders = Array.isArray(payload.providers) ? payload.providers : [];
+  const apimartInputs = rawProviders.filter(isApimartProvider);
+  const apimartSourceIds = new Set(apimartInputs.map((provider) => String(provider.id || '').trim()).filter(Boolean));
+  const customProviders = rawProviders
+    .filter((provider) => !isApimartProvider(provider))
+    .reduce((result, item) => {
       const provider = normalizeApiProvider(item, result);
       return result.some((current) => current.id === provider.id) ? result : [...result, provider];
-    }, [])
-    : [];
-  const defaultImageProviderId = providers.some((provider) => provider.id === payload.defaultImageProviderId)
-    ? String(payload.defaultImageProviderId)
+    }, []);
+  const providers = [mergeApimartProviders(apimartInputs), ...customProviders];
+  const requestedDefaultProviderId = apimartSourceIds.has(String(payload.defaultImageProviderId || ''))
+    ? APIMART_PROVIDER_ID
+    : String(payload.defaultImageProviderId || '');
+  const defaultImageProviderId = providers.some((provider) => provider.id === requestedDefaultProviderId)
+    ? requestedDefaultProviderId
     : '';
   const validOrderIds = new Set(['libtv', ...providers.map((provider) => provider.id)]);
   const providerOrder = Array.isArray(payload.providerOrder)
-    ? [...new Set(payload.providerOrder.map(String))].filter((id) => validOrderIds.has(id))
+    ? [...new Set(payload.providerOrder.map((id) => apimartSourceIds.has(String(id)) ? APIMART_PROVIDER_ID : String(id)))].filter((id) => validOrderIds.has(id))
     : [];
   providers.forEach((provider) => {
     if (!providerOrder.includes(provider.id)) providerOrder.push(provider.id);
@@ -124,8 +199,19 @@ function createConfigStore({ app, rootDir }) {
   }
 
   function writeRaw(payload) {
-    fs.mkdirSync(path.dirname(configPath()), { recursive: true });
-    fs.writeFileSync(configPath(), `${JSON.stringify(payload || {}, null, 2)}\n`, 'utf8');
+    const targetPath = configPath();
+    const targetDir = path.dirname(targetPath);
+    const temporaryPath = path.join(targetDir, `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.tmp`);
+    fs.mkdirSync(targetDir, { recursive: true });
+    try {
+      fs.writeFileSync(temporaryPath, `${JSON.stringify(payload || {}, null, 2)}\n`, 'utf8');
+      fs.renameSync(temporaryPath, targetPath);
+    } catch (error) {
+      try {
+        fs.rmSync(temporaryPath, { force: true });
+      } catch {}
+      throw error;
+    }
   }
 
   function load() {
@@ -162,17 +248,9 @@ function createConfigStore({ app, rootDir }) {
     return apiSettings;
   }
 
-  function getProvider(providerId) {
-    const settings = loadApiSettings();
-    return settings.providers.find((provider) => provider.id === providerId) || null;
-  }
-
-  return { getProvider, load, loadApiSettings, loadImageReviewSettings, readRaw, save, saveApiSettings, saveImageReviewSettings, writeRaw };
+  return { load, loadApiSettings, loadImageReviewSettings, save, saveApiSettings, saveImageReviewSettings };
 }
 
 module.exports = {
   createConfigStore,
-  normalizeApiSettings,
-  normalizeConfig,
-  normalizeImageReviewSettings,
 };

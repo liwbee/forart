@@ -1,11 +1,16 @@
-import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Copy, Download, Eye, MoreHorizontal, Star, Trash2, Upload, X } from "lucide-react";
-import { createPortal } from "react-dom";
-import { Fragment } from "react";
+import { ConfirmingDeleteButton } from "../../components/ConfirmingDeleteButton";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
+import { AppScrollArea } from "../../components/AppScrollArea";
 import { LazyImage } from "../../components/LazyImage";
+import { Button } from "../../components/ui/button";
+import { Empty, EmptyDescription } from "../../components/ui/empty";
+import { Input } from "../../components/ui/input";
+import { Skeleton } from "../../components/ui/skeleton";
+import { ConfirmingDropdownMenuItem, DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu";
 import { ImageViewer } from "../../lib/ImageViewer";
 import { CollapsibleTagFilterRow } from "../library-tags";
 import { LibraryTagChoiceButton } from "../library-tags";
@@ -13,8 +18,10 @@ import { LibraryImageActionToast, useLibraryImageActionToast, type LibraryImageA
 import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalImage, resolveLibraryImageUrl } from "../../lib/libraryImageActions";
 import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
 import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
-import { LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
+import { createUniqueLibraryProjectName, LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
+import { getChangedProjectOrder, setOptimisticProjectOrder, type LibraryProjectsQueryData } from "../library-layout/projectReorder";
 import { LibraryTagManagerDialog } from "../library-tags/LibraryTagManagerDialog";
+import { getChangedTagOrder, setOptimisticTagOrder, type LibraryTagsQueryData } from "../library-tags/tagReorder";
 import { useLibraryBulkSelection } from "../resource-library/useLibraryBulkSelection";
 import { createLibraryAssetUploadPayload } from "../resource-library/createLibraryAssetUploadPayload";
 import { EMPTY_LIBRARY_TAG_FILTER, applySameColorSingleIncludeFilter, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, createLibraryTagsByName, hasLibraryTagFilter, normalizeLibraryTagColor, toggleLibraryTagFilterInclude, useLibraryTagSettingsStore, type LibraryTagColor, type LibraryTagFilter, type LibraryTagNameColorLike } from "../library-tags";
@@ -40,7 +47,7 @@ import {
 } from "./api";
 import { useModelLibraryStore } from "./modelLibraryStore";
 import { normalizeTags, toggleTag } from "../library-tags/tagUtils";
-import { ModelEntry, ModelGender, ModelImage, ModelProject, ModelTag } from "./types";
+import { ModelEntry, ModelImage, ModelProject, ModelTag } from "./types";
 
 function getRequestError(errors: unknown[]) {
   const first = errors.find(Boolean);
@@ -55,7 +62,8 @@ function normalizeLibraryName(value: string) {
 function isSafeLibraryFileName(value: string) {
   return Boolean(value)
     && value.length <= 80
-    && !/[<>:"/\\|?*\x00-\x1f]/.test(value)
+    && !/[<>:"/\\|?*]/.test(value)
+    && Array.from(value).every((character) => character.charCodeAt(0) >= 32)
     && value !== "."
     && value !== ".."
     && !/[ .]$/.test(value);
@@ -96,24 +104,26 @@ function ModelToolbar({
     <div className="library-toolbar">
       <div className="library-gender-filter" aria-label={t("modelLibrary:genderCategory")}>
         <span className="library-filter-label">{t("modelLibrary:gender")}</span>
-        <button
+        <Button
           className={`gender-icon-filter female${activeGender === "female" ? " active" : ""}`}
           type="button"
+          variant={activeGender === "female" ? "default" : "ghost"}
           aria-label={t("modelLibrary:femaleModel")}
           title={t("modelLibrary:femaleModel")}
           onClick={() => onGenderToggle("female")}
         >
           <GenderSymbol gender="female" className="gender-symbol-icon" />
-        </button>
-        <button
+        </Button>
+        <Button
           className={`gender-icon-filter male${activeGender === "male" ? " active" : ""}`}
           type="button"
+          variant={activeGender === "male" ? "default" : "ghost"}
           aria-label={t("modelLibrary:maleModel")}
           title={t("modelLibrary:maleModel")}
           onClick={() => onGenderToggle("male")}
         >
           <GenderSymbol gender="male" className="gender-symbol-icon" />
-        </button>
+        </Button>
       </div>
 
       <div className="library-filter-divider" aria-hidden="true" />
@@ -122,14 +132,14 @@ function ModelToolbar({
         <LibraryBulkManageButton disabled={false} onClick={selectionMode ? onExitSelectionMode : onEnterSelectionMode} />
         <span className="library-filter-label">{t("common:labels.tags")}</span>
         <div className="library-tag-controls">
-          <CollapsibleTagFilterRow expandLabel="展开标签" collapseLabel="收起标签">
+          <CollapsibleTagFilterRow expandLabel={t("common:labels.expandTags")} collapseLabel={t("common:labels.collapseTags")}>
             <div className="library-tag-filter">
-              <button className={hasLibraryTagFilter(tagFilter) ? "" : "active"} type="button" onClick={onTagClear}>
+              <Button className={hasLibraryTagFilter(tagFilter) ? "" : "active"} variant={hasLibraryTagFilter(tagFilter) ? "ghost" : "default"} type="button" onClick={onTagClear}>
                 {t("common:labels.all")}
-              </button>
-              <button className={tagFilter.untaggedOnly ? "active" : ""} type="button" onClick={onUntaggedToggle}>
+              </Button>
+              <Button className={tagFilter.untaggedOnly ? "active" : ""} variant={tagFilter.untaggedOnly ? "default" : "ghost"} type="button" onClick={onUntaggedToggle}>
                 {t("common:labels.untagged")}
-              </button>
+              </Button>
               {tags.map((tag) => (
                 <LibraryTagChoiceButton
                   key={tag.id}
@@ -174,14 +184,14 @@ function AddModelCard({ disabled, busy, onCreate }: { disabled: boolean; busy: b
   const { t } = useTranslation();
   return (
     <div className="model-add-card model-add-gender-card">
-      <button className="model-add-gender-option female" type="button" disabled={disabled} onClick={() => onCreate("female")}>
+      <Button className="model-add-gender-option female" type="button" variant="ghost" disabled={disabled} onClick={() => onCreate("female")}>
         <GenderSymbol gender="female" className="model-add-gender-icon" />
         <strong>{busy ? t("common:states.adding") : t("modelLibrary:addFemaleModel")}</strong>
-      </button>
-      <button className="model-add-gender-option male" type="button" disabled={disabled} onClick={() => onCreate("male")}>
+      </Button>
+      <Button className="model-add-gender-option male" type="button" variant="ghost" disabled={disabled} onClick={() => onCreate("male")}>
         <GenderSymbol gender="male" className="model-add-gender-icon" />
         <strong>{busy ? t("common:states.adding") : t("modelLibrary:addMaleModel")}</strong>
-      </button>
+      </Button>
     </div>
   );
 }
@@ -292,7 +302,6 @@ function ModelInlineEditor({
   images,
   isSaving,
   isDeleting,
-  isConfirmingDelete,
   onSaveName,
   onClose,
   onDelete,
@@ -309,10 +318,9 @@ function ModelInlineEditor({
   images: ModelImage[];
   isSaving: boolean;
   isDeleting: boolean;
-  isConfirmingDelete: boolean;
   onSaveName: (modelId: string, name: string) => void;
   onClose: () => void;
-  onDelete: (modelId: string, isConfirming: boolean) => void;
+  onDelete: (modelId: string) => void;
   onToggleTag: (modelId: string, tagName: string) => void;
   onUploadImage: (modelId: string, file: File) => void;
   onDeleteImage: (imageId: string) => void;
@@ -323,12 +331,7 @@ function ModelInlineEditor({
 }) {
   const { t } = useTranslation();
   const [draftName, setDraftName] = useState(model.name || "");
-  const [openImageMenuState, setOpenImageMenuState] = useState<{ imageId: string; x: number; y: number }>({
-    imageId: "",
-    x: 0,
-    y: 0,
-  });
-  const [deleteConfirmImageId, setDeleteConfirmImageId] = useState("");
+  const [openImageMenuId, setOpenImageMenuId] = useState("");
   const [openImageViewerState, setOpenImageViewerState] = useState<{
     src: string;
     alt: string;
@@ -344,8 +347,7 @@ function ModelInlineEditor({
   }, [model.id, model.name]);
 
   useEffect(() => {
-    setOpenImageMenuState({ imageId: "", x: 0, y: 0 });
-    setDeleteConfirmImageId("");
+    setOpenImageMenuId("");
     setOpenImageViewerState(null);
     setIsImageDropActive(false);
     imageDropDepthRef.current = 0;
@@ -363,23 +365,6 @@ function ModelInlineEditor({
       window.cancelAnimationFrame(nextFrame);
     };
   }, [model.id, images.length]);
-
-  useEffect(() => {
-    if (!openImageMenuState.imageId) return;
-    function closeMenu() {
-      setOpenImageMenuState({ imageId: "", x: 0, y: 0 });
-      setDeleteConfirmImageId("");
-    }
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") closeMenu();
-    }
-    window.addEventListener("pointerdown", closeMenu);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", closeMenu);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [openImageMenuState.imageId]);
 
   function submitName() {
     const nextName = normalizeLibraryName(draftName);
@@ -449,32 +434,13 @@ function ModelInlineEditor({
 
   function openImageViewer(src: string, alt: string) {
     if (!src) return;
-    setOpenImageMenuState({ imageId: "", x: 0, y: 0 });
-    setDeleteConfirmImageId("");
+    setOpenImageMenuId("");
     setOpenImageViewerState({ src, alt });
-  }
-
-  function openImageMenu(imageId: string, event: MouseEvent<HTMLButtonElement>) {
-    event.stopPropagation();
-    const rect = event.currentTarget.getBoundingClientRect();
-    const menuWidth = 176;
-    const menuHeight = 232;
-    const pad = 8;
-    const preferredX = rect.right + 8;
-    const preferredY = rect.top;
-    const x = preferredX + menuWidth <= window.innerWidth - pad ? preferredX : rect.left - menuWidth - 8;
-    const y = Math.max(pad, Math.min(preferredY, window.innerHeight - menuHeight - pad));
-    setOpenImageMenuState({
-      imageId,
-      x: Math.max(pad, Math.min(x, window.innerWidth - menuWidth - pad)),
-      y,
-    });
   }
 
   async function handleCopyImage(src: string) {
     if (!src) return;
-    setOpenImageMenuState({ imageId: "", x: 0, y: 0 });
-    setDeleteConfirmImageId("");
+    setOpenImageMenuId("");
     onImageActionStatus("busy", t("common:states.copyingImage"));
     try {
       await copyLibraryImage(src);
@@ -486,8 +452,7 @@ function ModelInlineEditor({
 
   async function handleDownloadOriginalImage(src: string, defaultName: string) {
     if (!src) return;
-    setOpenImageMenuState({ imageId: "", x: 0, y: 0 });
-    setDeleteConfirmImageId("");
+    setOpenImageMenuId("");
     onImageActionStatus("busy", t("common:states.downloadingImage"));
     try {
       await downloadLibraryOriginalImage(src, defaultName);
@@ -499,15 +464,15 @@ function ModelInlineEditor({
 
   return (
     <section ref={editorRef} className="model-inline-editor" aria-label={t("modelLibrary:inlineEditor", { name: model.name })}>
-      <button className="model-inline-close-button" type="button" onClick={onClose} aria-label={t("modelLibrary:closeEditor")}>
-        <X size={14} aria-hidden="true" />
-      </button>
+      <Button className="model-inline-close-button" variant="ghost" size="icon-sm" type="button" onClick={onClose} aria-label={t("modelLibrary:closeEditor")}>
+        <X aria-hidden="true" />
+      </Button>
       <div className="model-inline-editor-head">
         <div className="model-inline-title-area">
           <label className="model-inline-name-field">
             <span>{t("modelLibrary:modelName")}</span>
             {renameError ? <span className="library-rename-error-popover">{renameError}</span> : null}
-            <input
+            <Input
               className={`library-entry-title-input${renameError ? " library-rename-input--error" : ""}`}
               type="text"
               value={draftName}
@@ -522,15 +487,17 @@ function ModelInlineEditor({
             />
           </label>
           <div className="model-inline-summary" aria-label={t("modelLibrary:assetOverview")}>
-            <button
-              className={`library-button danger model-delete-confirm-button${isConfirmingDelete ? " confirming" : ""}`}
-              type="button"
+            <ConfirmingDeleteButton
+              className="model-delete-confirm-button"
               disabled={isDeleting}
-              onClick={() => onDelete(model.id, isConfirmingDelete)}
-              aria-label={isConfirmingDelete ? t("modelLibrary:confirmDeleteModel") : t("modelLibrary:deleteModel")}
-            >
-              {isDeleting ? t("modelLibrary:deleting") : isConfirmingDelete ? t("modelLibrary:finalConfirmDelete") : t("common:actions.delete")}
-            </button>
+              isBusy={isDeleting}
+              label={t("common:actions.delete")}
+              confirmLabel={t("modelLibrary:finalConfirmDelete")}
+              busyLabel={t("modelLibrary:deleting")}
+              resetKey={model.id}
+              aria-label={t("modelLibrary:deleteModel")}
+              onDelete={() => onDelete(model.id)}
+            />
             <span>{t("modelLibrary:tagCount", { count: model.tags.length || 0 })}</span>
             <span>{t("modelLibrary:imageCount", { count: images.length || 0 })}</span>
           </div>
@@ -549,15 +516,14 @@ function ModelInlineEditor({
               tags.map((tag) => {
                 const selected = model.tags.includes(tag.name);
                 return (
-                  <button
+                  <LibraryTagChoiceButton
                     key={tag.id}
-                    className={selected ? "selected" : ""}
-                    type="button"
-                    onClick={() => onToggleTag(model.id, tag.name)}
-                  >
-                    <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
-                    <span>{tag.name}</span>
-                  </button>
+                    mode="select"
+                    name={tag.name}
+                    color={tag.color}
+                    selected={selected}
+                    onToggleSelect={() => onToggleTag(model.id, tag.name)}
+                  />
                 );
               })
             ) : (
@@ -577,10 +543,10 @@ function ModelInlineEditor({
               <span className="model-inline-section-label">{t("modelLibrary:images")}</span>
               <p>{images.length ? t("modelLibrary:assetCount", { count: images.length }) : t("modelLibrary:noAssets")}</p>
             </div>
-            <button className="library-button" type="button" onClick={() => fileInputRef.current?.click()}>
-              <Upload size={16} aria-hidden="true" />
+            <Button type="button" onClick={() => fileInputRef.current?.click()}>
+              <Upload data-icon="inline-start" aria-hidden="true" />
               <span>{t("common:actions.uploadImage")}</span>
-            </button>
+            </Button>
             <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={handleFilesSelected} />
           </div>
           <div className="model-image-grid">
@@ -589,10 +555,16 @@ function ModelInlineEditor({
                 const isCover = model.cover_image_id === image.id;
                 const originalSrc = resolveLibraryImageUrl(image.asset_url || "");
                 const displaySrc = resolveLibraryImageUrl(image.thumbnail_url || image.asset_url || "");
-                const menuOpen = openImageMenuState.imageId === image.id;
+                const menuOpen = openImageMenuId === image.id;
                 const altText = image.caption || model.name || image.filename || t("modelLibrary:imagePreview");
                 return (
-                  <Fragment key={image.id}>
+                  <DropdownMenu
+                    key={image.id}
+                    open={menuOpen}
+                    onOpenChange={(open) => {
+                      setOpenImageMenuId(open ? image.id : "");
+                    }}
+                  >
                     <figure className={`model-image-tile${isCover ? " cover" : ""}`}>
                       <div
                         className="model-image-preview"
@@ -621,96 +593,65 @@ function ModelInlineEditor({
                         ) : (
                           <div className="placeholder">{t("common:empty.noImage")}</div>
                         )}
-                        <button
-                          className="model-image-menu-button"
-                          type="button"
-                          aria-label={t("modelLibrary:imageActions")}
-                          aria-expanded={menuOpen}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (menuOpen) {
-                              setOpenImageMenuState({ imageId: "", x: 0, y: 0 });
-                              setDeleteConfirmImageId("");
-                              return;
-                            }
-                            setDeleteConfirmImageId("");
-                            openImageMenu(image.id, event);
-                          }}
-                        >
-                          <MoreHorizontal size={18} aria-hidden="true" />
-                        </button>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            className="model-image-menu-button"
+                            type="button"
+                            variant="outline"
+                            size="icon-lg"
+                            aria-label={t("modelLibrary:imageActions")}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <MoreHorizontal aria-hidden="true" />
+                          </Button>
+                        </DropdownMenuTrigger>
                       </div>
                     </figure>
-                    {menuOpen
-                      ? createPortal(
-                          <div
-                            className="model-image-menu"
-                            role="menu"
-                            style={{ left: openImageMenuState.x, top: openImageMenuState.y }}
-                            onPointerDown={(event) => event.stopPropagation()}
-                          >
-                            <button
-                              type="button"
-                              role="menuitem"
-                              disabled={isCover}
-                              onClick={() => {
-                                setOpenImageMenuState({ imageId: "", x: 0, y: 0 });
-                                setDeleteConfirmImageId("");
-                                onSetCover(model.id, image.id);
-                              }}
-                            >
-                              <Star size={15} aria-hidden="true" />
-                              <span>{t("modelLibrary:setAsCover")}</span>
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              disabled={!originalSrc}
-                              onClick={() => openImageViewer(originalSrc, altText)}
-                            >
-                              <Eye size={15} aria-hidden="true" />
-                              <span>{t("common:actions.viewImage")}</span>
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              disabled={!originalSrc}
-                              onClick={() => void handleDownloadOriginalImage(originalSrc, image.filename || image.caption || `${model.name}-${image.id}`)}
-                            >
-                              <Download size={15} aria-hidden="true" />
-                              <span>{t("common:actions.downloadOriginalImage")}</span>
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              disabled={!originalSrc}
-                              onClick={() => void handleCopyImage(originalSrc)}
-                            >
-                              <Copy size={15} aria-hidden="true" />
-                              <span>{t("common:actions.copyImage")}</span>
-                            </button>
-                            <button
-                              className={deleteConfirmImageId === image.id ? "danger confirming" : "danger"}
-                              type="button"
-                              role="menuitem"
-                              onClick={() => {
-                                if (deleteConfirmImageId !== image.id) {
-                                  setDeleteConfirmImageId(image.id);
-                                  return;
-                                }
-                                setOpenImageMenuState({ imageId: "", x: 0, y: 0 });
-                                setDeleteConfirmImageId("");
-                                onDeleteImage(image.id);
-                              }}
-                            >
+                    <DropdownMenuContent side="right" align="start" sideOffset={8}>
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem
+                          disabled={isCover}
+                          onSelect={() => {
+                            setOpenImageMenuId("");
+                            onSetCover(model.id, image.id);
+                          }}
+                        >
+                          <Star size={15} aria-hidden="true" />
+                          <span>{t("modelLibrary:setAsCover")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem disabled={!originalSrc} onSelect={() => openImageViewer(originalSrc, altText)}>
+                          <Eye size={15} aria-hidden="true" />
+                          <span>{t("common:actions.viewImage")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={!originalSrc}
+                          onSelect={() => void handleDownloadOriginalImage(originalSrc, image.filename || image.caption || `${model.name}-${image.id}`)}
+                        >
+                          <Download size={15} aria-hidden="true" />
+                          <span>{t("common:actions.downloadOriginalImage")}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem disabled={!originalSrc} onSelect={() => void handleCopyImage(originalSrc)}>
+                          <Copy size={15} aria-hidden="true" />
+                          <span>{t("common:actions.copyImage")}</span>
+                        </DropdownMenuItem>
+                        <ConfirmingDropdownMenuItem
+                          onConfirm={() => {
+                            setOpenImageMenuId("");
+                            onDeleteImage(image.id);
+                          }}
+                          confirmChildren={(
+                            <>
                               <Trash2 size={15} aria-hidden="true" />
-                              <span>{deleteConfirmImageId === image.id ? t("common:confirm.delete") : t("common:actions.delete")}</span>
-                            </button>
-                          </div>,
-                          document.body,
-                        )
-                      : null}
-                  </Fragment>
+                              <span>{t("common:confirm.delete")}</span>
+                            </>
+                          )}
+                        >
+                          <Trash2 size={15} aria-hidden="true" />
+                          <span>{t("common:actions.delete")}</span>
+                        </ConfirmingDropdownMenuItem>
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 );
               })
             ) : (
@@ -735,7 +676,6 @@ function ModelGrid({
   creating,
   savingModelId,
   deletingModelId,
-  deleteConfirmModelId,
   tags,
   images,
   onCreate,
@@ -759,14 +699,13 @@ function ModelGrid({
   creating: boolean;
   savingModelId: string;
   deletingModelId: string;
-  deleteConfirmModelId: string;
   tags: ModelTag[];
   images: ModelImage[];
   onCreate: (gender: "female" | "male") => void;
   onOpenModel: (modelId: string) => void;
   onSaveModelName: (modelId: string, name: string) => void;
   onCloseEditor: () => void;
-  onDeleteModel: (modelId: string, isConfirming: boolean) => void;
+  onDeleteModel: (modelId: string) => void;
   onToggleTag: (modelId: string, tagName: string) => void;
   onUploadImage: (modelId: string, file: File) => void;
   onDeleteImage: (imageId: string) => void;
@@ -779,7 +718,7 @@ function ModelGrid({
   onToggleSelected: (modelId: string) => void;
 }) {
   const gridRef = useRef<HTMLDivElement | null>(null);
-  const cardSize = useLibraryCardSize("model");
+  const cardSize = useLibraryCardSize();
   const librarySort = useLibrarySort();
   const tagsByName = useMemo(() => createLibraryTagsByName(tags), [tags]);
   const [columnCount, setColumnCount] = useState(1);
@@ -830,7 +769,6 @@ function ModelGrid({
             images={images}
             savingModelId={savingModelId}
             deletingModelId={deletingModelId}
-            deleteConfirmModelId={deleteConfirmModelId}
             onOpenModel={onOpenModel}
             onSaveModelName={onSaveModelName}
             onCloseEditor={onCloseEditor}
@@ -873,7 +811,6 @@ function FragmentWithEditor({
   images,
   savingModelId,
   deletingModelId,
-  deleteConfirmModelId,
   onOpenModel,
   onSaveModelName,
   onCloseEditor,
@@ -898,11 +835,10 @@ function FragmentWithEditor({
   images: ModelImage[];
   savingModelId: string;
   deletingModelId: string;
-  deleteConfirmModelId: string;
   onOpenModel: (modelId: string) => void;
   onSaveModelName: (modelId: string, name: string) => void;
   onCloseEditor: () => void;
-  onDeleteModel: (modelId: string, isConfirming: boolean) => void;
+  onDeleteModel: (modelId: string) => void;
   onToggleTag: (modelId: string, tagName: string) => void;
   onUploadImage: (modelId: string, file: File) => void;
   onDeleteImage: (imageId: string) => void;
@@ -932,7 +868,6 @@ function FragmentWithEditor({
           images={images}
           isSaving={savingModelId === openModel.id}
           isDeleting={deletingModelId === openModel.id}
-          isConfirmingDelete={deleteConfirmModelId === openModel.id}
           onSaveName={onSaveModelName}
           onClose={onCloseEditor}
           onDelete={onDeleteModel}
@@ -949,72 +884,12 @@ function FragmentWithEditor({
   );
 }
 
-function CreateProjectDialog({
-  isOpen,
-  isCreating,
-  onClose,
-  onSubmit,
-}: {
-  isOpen: boolean;
-  isCreating: boolean;
-  onClose: () => void;
-  onSubmit: (name: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [name, setName] = useState("");
-
-  useEffect(() => {
-    if (isOpen) setName("");
-  }, [isOpen]);
-
-  if (!isOpen) return null;
-
-  function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    onSubmit(name);
-  }
-
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <form
-        className="dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="create-project-title"
-        onSubmit={handleSubmit}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="dialog__head">
-          <h2 id="create-project-title">{t("common:labels.newProject")}</h2>
-          <p>{t("modelLibrary:createProjectDescription")}</p>
-        </div>
-        <label className="dialog-field">
-          <span>{t("common:labels.projectName")}</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} autoFocus maxLength={120} placeholder={t("modelLibrary:projectPlaceholder")} />
-        </label>
-        <div className="dialog__actions">
-          <button className="button secondary" type="button" onClick={onClose} disabled={isCreating}>
-            {t("common:actions.cancel")}
-          </button>
-          <button className="button primary" type="submit" disabled={isCreating}>
-            {isCreating ? t("common:states.creating") : t("common:actions.create")}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState("");
-  const [deleteConfirmProjectId, setDeleteConfirmProjectId] = useState("");
   const [closeMenuToken, setCloseMenuToken] = useState(0);
-  const [deleteConfirmModelId, setDeleteConfirmModelId] = useState("");
-  const [deleteConfirmTagId, setDeleteConfirmTagId] = useState("");
   const [modelRenameErrors, setModelRenameErrors] = useState<Record<string, string>>({});
   const { toast: imageActionToast, showToast: showImageActionToast } = useLibraryImageActionToast();
   const activeProjectId = useModelLibraryStore((state) => state.activeProjectId);
@@ -1097,7 +972,6 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     onSuccess: async ({ model, gender }) => {
       if (activeGender && activeGender !== gender) toggleGender(gender);
       if (hasLibraryTagFilter(activeTagFilter)) setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER);
-      setDeleteConfirmModelId("");
       await queryClient.invalidateQueries({ queryKey: ["models", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
       openEditor(model.id);
@@ -1125,7 +999,6 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   const deleteModelMutation = useMutation({
     mutationFn: deleteModel,
     onSuccess: async () => {
-      setDeleteConfirmModelId("");
       closeEditor();
       await queryClient.invalidateQueries({ queryKey: ["models", activeProjectId] });
       await queryClient.invalidateQueries({ queryKey: activeProjectId ? modelLibraryKeys.tags(activeProjectId) : modelLibraryKeys.tagRoot });
@@ -1195,7 +1068,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     onSuccess: async (project) => {
       await queryClient.invalidateQueries({ queryKey: modelLibraryKeys.projects });
       setActiveProjectId(project.id);
-      setCreateProjectOpen(false);
+      setRenamingProjectId(project.id);
     },
   });
 
@@ -1229,7 +1102,6 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
       return deleteModelTag(activeProjectId, tagId);
     },
     onSuccess: async (result, tagId) => {
-      setDeleteConfirmTagId("");
       if (activeTagFilter.includeTagIds.includes(tagId) || activeTagFilter.excludeTagIds.includes(tagId)) {
         setActiveTagFilter(createLibraryTagFilter(
           activeTagFilter.includeTagIds.filter((activeTagId) => activeTagId !== tagId),
@@ -1252,11 +1124,36 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     },
   });
 
+  const reorderTagsMutation = useMutation({
+    mutationFn: async ({ projectId, tags: nextTags }: { projectId: string; tags: ModelTag[] }) => {
+      await Promise.all(getChangedTagOrder(nextTags).map((tag) => updateModelTag(projectId, tag.id, { sort_order: tag.sort_order })));
+    },
+    onMutate: ({ projectId, tags: nextTags }) => setOptimisticTagOrder(queryClient, modelLibraryKeys.tags(projectId), nextTags),
+    onError: (_error, { projectId }, previous) => {
+      if (previous) queryClient.setQueryData<LibraryTagsQueryData<ModelTag>>(modelLibraryKeys.tags(projectId), previous);
+    },
+    onSettled: async (_data, error, { projectId }) => {
+      await queryClient.invalidateQueries({ queryKey: modelLibraryKeys.tags(projectId), refetchType: error ? "active" : "none" });
+    },
+  });
+
+  const reorderProjectsMutation = useMutation({
+    mutationFn: async (nextProjects: ModelProject[]) => {
+      await Promise.all(getChangedProjectOrder(nextProjects).map((project) => updateModelProject(project.id, { sort_order: project.sort_order })));
+    },
+    onMutate: (nextProjects) => setOptimisticProjectOrder(queryClient, modelLibraryKeys.projects, nextProjects),
+    onError: (_error, _nextProjects, previous) => {
+      if (previous) queryClient.setQueryData<LibraryProjectsQueryData<ModelProject>>(modelLibraryKeys.projects, previous);
+    },
+    onSettled: async (_data, error) => {
+      await queryClient.invalidateQueries({ queryKey: modelLibraryKeys.projects, refetchType: error ? "active" : "none" });
+    },
+  });
+
   const deleteProjectMutation = useMutation({
     mutationFn: deleteModelProject,
     onSuccess: async (_result, projectId) => {
       const remaining = projects.filter((project) => project.id !== projectId);
-      setDeleteConfirmProjectId("");
       setCloseMenuToken((token) => token + 1);
       if (activeProjectId === projectId) setActiveProjectId(remaining[0]?.id || "");
       await queryClient.invalidateQueries({ queryKey: modelLibraryKeys.projects });
@@ -1276,19 +1173,10 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   }
 
   function handleReorderProjects(nextProjects: ModelProject[]) {
-    nextProjects.forEach((project, index) => {
-      const nextSortOrder = index + 1;
-      if (project.sort_order !== nextSortOrder) {
-        renameProjectMutation.mutate({ projectId: project.id, sort_order: nextSortOrder });
-      }
-    });
+    reorderProjectsMutation.mutate(nextProjects);
   }
 
-  function handleProjectDelete(projectId: string, isConfirming: boolean) {
-    if (!isConfirming) {
-      setDeleteConfirmProjectId(projectId);
-      return;
-    }
+  function handleProjectDelete(projectId: string) {
     deleteProjectMutation.mutate(projectId);
   }
 
@@ -1322,11 +1210,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     });
   }
 
-  function handleDeleteModel(modelId: string, isConfirming: boolean) {
-    if (!isConfirming) {
-      setDeleteConfirmModelId(modelId);
-      return;
-    }
+  function handleDeleteModel(modelId: string) {
     deleteModelMutation.mutate(modelId);
   }
 
@@ -1356,12 +1240,8 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   }
 
   function handleReorderTags(nextTags: ModelTag[]) {
-    nextTags.forEach((tag, index) => {
-      const nextSortOrder = index + 1;
-      if (tag.sort_order !== nextSortOrder) {
-        updateTagMutation.mutate({ tagId: tag.id, sort_order: nextSortOrder });
-      }
-    });
+    if (!activeProjectId) return;
+    reorderTagsMutation.mutate({ projectId: activeProjectId, tags: nextTags });
   }
 
   function handleToggleTagFilter(tagId: string) {
@@ -1381,11 +1261,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     setActiveTagFilter(activeTagFilter.untaggedOnly ? EMPTY_LIBRARY_TAG_FILTER : createLibraryTagFilter([], [], true));
   }
 
-  function handleDeleteTag(tagId: string, isConfirming: boolean) {
-    if (!isConfirming) {
-      setDeleteConfirmTagId(tagId);
-      return;
-    }
+  function handleDeleteTag(tagId: string) {
     deleteTagMutation.mutate(tagId);
   }
 
@@ -1439,6 +1315,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     createModelMutation.error,
     createProjectMutation.error,
     renameProjectMutation.error,
+    reorderProjectsMutation.error,
     deleteProjectMutation.error,
     deleteModelMutation.error,
     updateModelTagsMutation.error,
@@ -1448,6 +1325,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     setModelCoverMutation.error,
     createTagMutation.error,
     updateTagMutation.error,
+    reorderTagsMutation.error,
     deleteTagMutation.error,
   ]);
 
@@ -1458,17 +1336,14 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
           projects={projects}
           activeProjectId={activeProjectId}
           renamingProjectId={renamingProjectId}
-          deleteConfirmProjectId={deleteConfirmProjectId}
           ariaLabel={t("modelLibrary:projectRail")}
           projectActionsLabel={(name) => t("modelLibrary:projectActions", { name })}
           onSelect={(projectId) => {
-            setDeleteConfirmProjectId("");
             setRenamingProjectId("");
             setActiveProjectId(projectId);
           }}
-          onCreateProject={() => setCreateProjectOpen(true)}
+          onCreateProject={() => createProjectMutation.mutate(createUniqueLibraryProjectName(projects, t("common:labels.newProject")))}
           onRenameStart={(projectId) => {
-            setDeleteConfirmProjectId("");
             setRenamingProjectId(projectId);
           }}
           onRenameCancel={() => setRenamingProjectId("")}
@@ -1476,6 +1351,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
           onDeleteProject={handleProjectDelete}
           onReorderProjects={handleReorderProjects}
           closeMenuToken={closeMenuToken}
+          creatingProject={createProjectMutation.isPending}
         />
 
         <main className="library-content-pane">
@@ -1496,10 +1372,14 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
             />
           </div>
 
-          <div className="library-body scrollbar-thin-stable">
+          <AppScrollArea className="library-body">
             {errorMessage ? <ErrorCopyLine className="library-error" text={t("modelLibrary:requestFailed", { message: errorMessage })} /> : null}
-            {projectsQuery.isLoading ? <div className="library-empty">{t("common:states.loadingProjects")}</div> : null}
-            {!projectsQuery.isLoading && !projects.length ? <div className="library-empty">{t("common:empty.noProjects")}</div> : null}
+            {projectsQuery.isLoading ? (
+              <Empty className="library-empty" aria-label={t("common:states.loadingProjects")}>
+                <Skeleton className="h-4 w-36" />
+              </Empty>
+            ) : null}
+            {!projectsQuery.isLoading && !projects.length ? <Empty className="library-empty"><EmptyDescription>{t("common:empty.noProjects")}</EmptyDescription></Empty> : null}
             {activeProject ? (
               <>
                 <ModelGrid
@@ -1508,12 +1388,10 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
                   creating={createModelMutation.isPending}
                   savingModelId={updateModelNameMutation.isPending ? updateModelNameMutation.variables?.modelId || "" : ""}
                   deletingModelId={deleteModelMutation.isPending ? deleteModelMutation.variables || "" : ""}
-                  deleteConfirmModelId={deleteConfirmModelId}
                   tags={tags}
                   images={images}
                   onCreate={(gender) => createModelMutation.mutate(gender)}
                   onOpenModel={(modelId) => {
-                    setDeleteConfirmModelId("");
                     openEditor(modelId);
                   }}
                   onSaveModelName={handleSaveModelName}
@@ -1532,21 +1410,14 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
                 />
               </>
             ) : null}
-          </div>
+          </AppScrollArea>
         </main>
       </div>
 
-      <CreateProjectDialog
-        isOpen={createProjectOpen}
-        isCreating={createProjectMutation.isPending}
-        onClose={() => setCreateProjectOpen(false)}
-        onSubmit={(name) => createProjectMutation.mutate(name)}
-      />
       <LibraryTagManagerDialog<ModelTag>
         isOpen={tagManagerOpen}
         tags={tags}
         isCreating={createTagMutation.isPending}
-        deleteConfirmTagId={deleteConfirmTagId}
         titleId="tag-manager-title"
         description={t("modelLibrary:tagManagerDescription")}
         emptyText={t("common:empty.noTagsYet")}

@@ -1,21 +1,11 @@
 /* Action folder import dialog. */
-.action-folder-import-backdrop {
-  z-index: 320;
-}
-
 .action-folder-import {
   width: min(1040px, calc(100vw - 40px));
   height: min(760px, calc(100dvh - 40px));
-  min-height: 520px;
-  display: grid;
+  max-height: calc(100dvh - 40px);
   grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
   gap: var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: 18px;
   padding: var(--space-4);
-  background: var(--surface-card);
-  color: var(--state-hover-text);
-  box-shadow: var(--shadow-popover);
 }
 
 .action-folder-import__head,
@@ -43,28 +33,6 @@
   font-size: 13px;
 }
 
-.action-folder-import__icon-button {
-  width: 40px;
-  min-height: 40px;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid var(--button-functional-border);
-  border-radius: 10px;
-  background: var(--button-functional-bg);
-  color: var(--button-functional-muted-text);
-}
-
-.action-folder-import__icon-button:hover {
-  border-color: var(--button-functional-hover-border);
-  background: var(--button-functional-hover-bg);
-  color: var(--button-functional-text);
-}
-
-.action-folder-import__icon-button:disabled {
-  opacity: var(--state-disabled-opacity);
-  cursor: default;
-}
-
 .action-folder-import__icon-button.is-spinning svg {
   animation: side-version-spin 900ms linear infinite;
 }
@@ -78,7 +46,7 @@
   flex: 1;
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 9px 12px;
   background: var(--surface-control);
   color: var(--text-muted);
@@ -100,7 +68,7 @@
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--border-subtle);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 var(--space-3);
   background: var(--surface-control);
   color: var(--text-secondary);
@@ -115,9 +83,9 @@
 }
 
 .action-folder-import__summary span.is-warning {
-  border-color: color-mix(in srgb, #b7791f 40%, transparent);
-  background: color-mix(in srgb, #fef3c7 72%, var(--surface-card));
-  color: #8a5200;
+  border-color: var(--status-warning-border);
+  background: var(--status-warning-bg);
+  color: var(--status-warning-text);
 }
 
 .action-folder-import__actions {
@@ -132,17 +100,8 @@
   max-width: 320px;
   flex: 1 1 240px;
   height: 34px;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   font-size: 13px;
-}
-
-.action-folder-import__search:focus-within {
-  outline: 2px solid color-mix(in srgb, var(--state-active-border) 55%, transparent);
-  outline-offset: 2px;
-}
-
-.action-folder-import__search:has(input:disabled) {
-  opacity: var(--state-disabled-opacity);
 }
 
 .action-folder-import__selection-actions {
@@ -171,7 +130,7 @@
   width: 32px;
   height: 32px;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   display: inline-grid;
   place-items: center;
   background: var(--surface-control);
@@ -203,7 +162,7 @@
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--border-subtle);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 9px;
   background: var(--surface-control);
   color: var(--text-secondary);
@@ -225,12 +184,16 @@
 
 .action-folder-import__rows {
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   position: relative;
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  padding: var(--space-2);
-  background: color-mix(in srgb, var(--surface-card-muted) 45%, var(--surface-card));
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+}
+
+.action-folder-import__rows-viewport {
+  height: 100%;
+  padding: var(--space-2) calc(var(--space-2) + 12px) var(--space-2) var(--space-2);
 }
 
 .action-folder-import__virtual {
@@ -257,7 +220,7 @@
   align-items: center;
   gap: var(--space-3);
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: var(--space-2);
   background: var(--surface-card);
 }
@@ -271,7 +234,7 @@
 }
 
 .action-folder-import-row.is-warning {
-  border-color: color-mix(in srgb, #b7791f 36%, var(--border-subtle));
+  border-color: var(--status-warning-border);
 }
 
 .action-folder-import-row.is-muted {
@@ -279,7 +242,7 @@
 }
 
 .action-folder-import-row.is-imported {
-  border-color: color-mix(in srgb, #22c55e 45%, var(--border-subtle));
+  border-color: var(--status-success-border);
 }
 
 .action-folder-import-row.is-importing {
@@ -293,10 +256,9 @@
   place-items: center;
 }
 
-.action-folder-import-row__check input {
+.action-folder-import-row__check [data-slot="checkbox"] {
   width: 18px;
   height: 18px;
-  accent-color: var(--state-active-bg);
 }
 
 .action-folder-import-row__result-icon {
@@ -305,7 +267,7 @@
 
 .action-folder-import-row.is-imported .action-folder-import-row__result-icon,
 .action-folder-import-row.is-imported .action-folder-import-row__message {
-  color: #16a34a;
+  color: var(--status-success-text);
 }
 
 .action-folder-import-row.is-error .action-folder-import-row__result-icon {
@@ -327,7 +289,7 @@
   display: grid;
   place-items: center;
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: var(--state-hover-bg);
   color: var(--text-muted);
   font-size: 11px;
@@ -381,7 +343,7 @@
 }
 
 .action-folder-import-row.is-warning .action-folder-import-row__message {
-  color: #8a5200;
+  color: var(--status-warning-text);
 }
 
 .action-folder-import-row__status {
@@ -394,7 +356,7 @@
   justify-content: center;
   justify-self: end;
   border: 1px solid var(--border-subtle);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 var(--space-2);
   color: var(--text-secondary);
   font-size: 12px;
@@ -403,9 +365,9 @@
 }
 
 .action-folder-import-row.is-imported .action-folder-import-row__status {
-  border-color: color-mix(in srgb, #22c55e 45%, transparent);
-  background: color-mix(in srgb, #dcfce7 72%, var(--surface-card));
-  color: #15803d;
+  border-color: var(--status-success-border);
+  background: var(--status-success-bg);
+  color: var(--status-success-text);
 }
 
 .action-folder-import-row.is-importing .action-folder-import-row__status {

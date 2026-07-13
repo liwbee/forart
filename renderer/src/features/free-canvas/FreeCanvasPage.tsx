@@ -6,9 +6,7 @@ export function FreeCanvasPage() {
 
   return (
     <section className="library-page free-canvas-page" aria-label={t("freeCanvas:title")}>
-      <div className="free-canvas-body">
-        <FreeCanvasEditor />
-      </div>
+      <FreeCanvasEditor />
     </section>
   );
 }

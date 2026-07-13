@@ -1,9 +1,15 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('forartWindow', {
+  isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
   minimize: () => ipcRenderer.invoke('window:minimize'),
   toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
   close: () => ipcRenderer.invoke('window:close'),
+  onMaximizedChanged: (callback) => {
+    const listener = (_event, maximized) => callback(Boolean(maximized));
+    ipcRenderer.on('window:maximized-changed', listener);
+    return () => ipcRenderer.removeListener('window:maximized-changed', listener);
+  },
 });
 
 contextBridge.exposeInMainWorld('easyTool', {
@@ -37,6 +43,8 @@ contextBridge.exposeInMainWorld('easyTool', {
   createGenerationTask: (payload) => ipcRenderer.invoke('generation-tasks:create', payload),
   updateGenerationTask: (taskId, patch) => ipcRenderer.invoke('generation-tasks:update', taskId, patch),
   resumeGenerationTask: (taskId, payload) => ipcRenderer.invoke('generation-tasks:resume', taskId, payload),
+  recoverGenerationTask: (payload) => ipcRenderer.invoke('generation-tasks:recover', payload),
+  recoverCanvasGenerationTasks: (payload) => ipcRenderer.invoke('generation-tasks:recover-canvases', payload),
   stopGenerationTask: (taskId) => ipcRenderer.invoke('generation-tasks:stop', taskId),
   stopGenerationTasksForTarget: (canvasId, target) => ipcRenderer.invoke('generation-tasks:stop-for-target', canvasId, target),
   stopGenerationTasksForNode: (canvasId, nodeId) => ipcRenderer.invoke('generation-tasks:stop-for-node', canvasId, nodeId),
@@ -68,10 +76,9 @@ contextBridge.exposeInMainWorld('forartConfig', {
 });
 
 contextBridge.exposeInMainWorld('forartReview', {
+  chooseRoot: (payload) => ipcRenderer.invoke('image-review:choose-root', payload),
   products: (payload) => ipcRenderer.invoke('image-review:products', payload),
   productImages: (payload) => ipcRenderer.invoke('image-review:product-images', payload),
-  loadIssue: (payload) => ipcRenderer.invoke('image-review:load-issue', payload),
-  saveIssue: (payload) => ipcRenderer.invoke('image-review:save-issue', payload),
 });
 
 contextBridge.exposeInMainWorld('forartActionImport', {
@@ -116,6 +123,13 @@ contextBridge.exposeInMainWorld('libtv', {
   workspaces: (payload) => ipcRenderer.invoke('libtv:workspaces', payload),
   projects: (payload) => ipcRenderer.invoke('libtv:projects', payload),
   imageModels: () => ipcRenderer.invoke('libtv:image-models'),
+  imageModelSchema: (payload) => ipcRenderer.invoke('libtv:image-model-schema', payload),
+  startImageTask: (payload) => ipcRenderer.invoke('libtv:image-task-start', payload),
+  startImageTasks: (payloads) => ipcRenderer.invoke('libtv:image-tasks-start', payloads),
+  getImageTask: (taskId) => ipcRenderer.invoke('libtv:image-task-get', taskId),
+  recoverImageTask: (payload) => ipcRenderer.invoke('libtv:image-task-recover', payload),
+  recoverCanvasImageTasks: () => ipcRenderer.invoke('libtv:image-tasks-recover-canvases'),
+  stopImageTask: (taskId) => ipcRenderer.invoke('libtv:image-task-stop', taskId),
   ensureReadyProject: (payload) => ipcRenderer.invoke('libtv:ensure-ready-project', payload),
   generateImage: (payload) => ipcRenderer.invoke('libtv:generate-image', payload),
   generateBatch: (payload) => ipcRenderer.invoke('libtv:generate-batch', payload),
