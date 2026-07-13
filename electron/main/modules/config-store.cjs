@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const { normalizeLibtvMachineId } = require('./libtv-workspace.cjs');
 
 const APIMART_PROVIDER_ID = 'apimart';
 const APIMART_BASE_URLS = [
@@ -178,7 +179,12 @@ function normalizeApiSettings(payload = {}) {
     if (!providerOrder.includes(provider.id)) providerOrder.push(provider.id);
   });
   if (!providerOrder.includes('libtv')) providerOrder.unshift('libtv');
-  return { providers, defaultImageProviderId, providerOrder };
+  return {
+    providers,
+    defaultImageProviderId,
+    providerOrder,
+    libtvMachineId: normalizeLibtvMachineId(payload.libtvMachineId),
+  };
 }
 
 function createConfigStore({ app, rootDir }) {

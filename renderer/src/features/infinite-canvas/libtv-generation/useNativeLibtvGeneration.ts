@@ -148,7 +148,6 @@ export function useNativeLibtvGeneration({
       const task = await window.libtv.startImageTask({
         canvasId,
         nodeId,
-        workspaceName: "LibtvImage",
         prompt,
         modelName,
         count,

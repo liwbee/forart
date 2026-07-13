@@ -1460,6 +1460,13 @@ body {
   gap: 6px;
 }
 
+.settings-libtv-account-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.45fr);
+  align-items: end;
+  gap: var(--space-3);
+}
+
 .settings-libtv-account-switcher span {
   color: var(--text-muted);
   font-size: 11px;
@@ -1474,6 +1481,17 @@ body {
   padding: 0 32px 0 var(--space-3);
   color: var(--input-text);
   background-color: var(--input-bg);
+  font-weight: var(--font-weight-medium);
+}
+
+.settings-libtv-machine-id input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  padding: 0 var(--space-3);
+  color: var(--input-text);
+  background: var(--input-bg);
   font-weight: var(--font-weight-medium);
 }
 
@@ -1746,6 +1764,10 @@ body {
   .settings-libtv-brand-panel {
     border-right: 0;
     border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .settings-libtv-account-controls {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

@@ -328,7 +328,6 @@ export function useNativeActionFissionGeneration({
         nodeId: node.id,
         target: { type: "actionFissionRow" as const, nodeId: node.id, rowId: row.id },
         queueKey: `${canvasId}:${node.id}`,
-        workspaceName: "LibtvImage",
         prompt,
         modelName,
         count: 1,
@@ -393,7 +392,7 @@ export function useNativeActionFissionGeneration({
       if (nodeQueueControllersRef.current.get(runKey) === queueController) nodeQueueControllersRef.current.delete(runKey);
       patchState(nodeId, { status: "" });
     }
-  }, [edges, nodes, patchRow, patchState, runApiRows, runLibtvRows, t]);
+  }, [canvasId, edges, nodes, patchRow, patchState, runApiRows, runLibtvRows, t]);
 
   const stopActionFission = useCallback(async (nodeId: string, rowId?: string) => {
     if (!rowId) {

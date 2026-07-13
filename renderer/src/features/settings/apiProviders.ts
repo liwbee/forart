@@ -49,12 +49,14 @@ export interface ApiSettings {
   providers: ApiProvider[];
   defaultImageProviderId?: string;
   providerOrder?: string[];
+  libtvMachineId?: string;
 }
 
 let apiSettingsCache: ApiSettings = {
   providers: [],
   defaultImageProviderId: "",
   providerOrder: [],
+  libtvMachineId: "",
 };
 let apiSettingsCacheLoaded = false;
 
@@ -247,7 +249,12 @@ function normalizeApiSettings(input: Partial<ApiSettings>): ApiSettings {
     ? input.providerOrder.map((id) => apimartSourceIds.has(String(id)) ? APIMART_PROVIDER_ID : String(id))
     : [];
   const providerOrder = normalizeApiProviderOrder(requestedOrder, providers);
-  return { providers, defaultImageProviderId, providerOrder };
+  return {
+    providers,
+    defaultImageProviderId,
+    providerOrder,
+    libtvMachineId: String(input.libtvMachineId || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 32),
+  };
 }
 
 function setApiSettingsCache(settings: Partial<ApiSettings>) {

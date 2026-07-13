@@ -38,6 +38,7 @@ export interface ForartApiSettingsConfig {
   providers: ForartApiProviderConfig[];
   defaultImageProviderId: string;
   providerOrder?: string[];
+  libtvMachineId?: string;
 }
 
 export interface ForartImageReviewSettings {

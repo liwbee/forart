@@ -5,6 +5,13 @@ const os = require('node:os');
 const path = require('node:path');
 const { createConfigStore } = require('../electron/main/modules/config-store.cjs');
 const { registerConfigIpc } = require('../electron/main/ipc/config-ipc.cjs');
+const { createLibtvWorkspaceName, normalizeLibtvMachineId } = require('../electron/main/modules/libtv-workspace.cjs');
+
+test('LibTV machine ids stay alphanumeric and select an isolated workspace', () => {
+  assert.equal(normalizeLibtvMachineId(' PC-01_中文A '), 'PC01A');
+  assert.equal(createLibtvWorkspaceName(''), 'LibtvImage');
+  assert.equal(createLibtvWorkspaceName('PC01'), 'LibtvImage-PC01');
+});
 
 test('config sections preserve sibling data and use atomic replacement', (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-config-store-'));
@@ -20,14 +27,21 @@ test('config sections preserve sibling data and use atomic replacement', (t) => 
       providers: [{ id: 'custom', name: 'Custom', baseUrl: 'https://example.com/v1', apiKey: 'secret', imageModels: ['image-1'] }],
       defaultImageProviderId: 'custom',
       providerOrder: ['custom'],
+      libtvMachineId: 'PC01',
     },
   }), 'utf8');
 
   const store = createConfigStore({ app: { isPackaged: false }, rootDir: tempRoot });
+  const savedApiSettings = store.saveApiSettings({
+    ...store.loadApiSettings(),
+    libtvMachineId: ' PC-02_中文 ',
+  });
+  assert.equal(savedApiSettings.libtvMachineId, 'PC02');
   store.saveImageReviewSettings({ modelFolders: '模特图', detailFolders: '详情图' });
   let persisted = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   assert.deepEqual(persisted.legacyField, { keep: true });
   assert.equal(persisted.apiSettings.providers.find((provider) => provider.id === 'custom').apiKey, 'secret');
+  assert.equal(store.loadApiSettings().libtvMachineId, 'PC02');
   assert.deepEqual(persisted.imageReview, { modelFolders: '模特图', detailFolders: '详情图' });
 
   store.save({
@@ -40,6 +54,7 @@ test('config sections preserve sibling data and use atomic replacement', (t) => 
   persisted = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   assert.equal(persisted.serverUrl, 'http://127.0.0.1:6980');
   assert.equal(persisted.apiSettings.providers.find((provider) => provider.id === 'custom').apiKey, 'secret');
+  assert.equal(persisted.apiSettings.libtvMachineId, 'PC02');
   assert.deepEqual(persisted.legacyField, { keep: true });
   assert.deepEqual(fs.readdirSync(tempRoot).filter((name) => name.endsWith('.tmp')), []);
 });

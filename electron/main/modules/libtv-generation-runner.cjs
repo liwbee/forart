@@ -162,7 +162,7 @@ function stringifyDiagnostic(value, maxLength = 12000) {
   return `${text.slice(0, maxLength)}\n... [truncated ${text.length - maxLength} chars]`;
 }
 
-function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore }) {
+function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore, resolveWorkspaceName }) {
   const activeControllers = new Map();
   const queueTails = new Map();
 
@@ -356,7 +356,10 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
 
   async function executeImageTask(task, payload, signal) {
     const job = normalizeJobs(payload)[0];
-    const workspaceName = firstString(payload.workspaceName, 'LibtvImage');
+    const configuredWorkspaceName = typeof resolveWorkspaceName === 'function'
+      ? await resolveWorkspaceName()
+      : '';
+    const workspaceName = firstString(configuredWorkspaceName, payload.workspaceName, 'LibtvImage');
     taskStore.updateTask(task.id, { status: 'preparing', message: '', messageCode: 'libtv.workspacePreparing', messageParams: null });
     const ensuredWorkspace = await libtv.ensureNamedWorkspace({ name: workspaceName });
     const workspaceId = firstString(ensuredWorkspace.workspace?.id);

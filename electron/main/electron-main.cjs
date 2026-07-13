@@ -22,6 +22,7 @@ const { createImageReviewStore } = require('./modules/image-review-store.cjs');
 const { createLibtvAdapter } = require('./modules/libtv-adapter.cjs');
 const { createLibtvGenerationRunner } = require('./modules/libtv-generation-runner.cjs');
 const { createLibtvGenerationTaskStore } = require('./modules/libtv-generation-task-store.cjs');
+const { createLibtvWorkspaceName } = require('./modules/libtv-workspace.cjs');
 const { createPortableUpdater } = require('./modules/portable-updater.cjs');
 
 const isDev = !app.isPackaged;
@@ -54,7 +55,13 @@ const imageGenerationRunner = createImageGenerationRunner({ net, assetStore, can
 const imageReviewStore = createImageReviewStore();
 const libtv = createLibtvAdapter({ rootDir: appRootDir });
 const libtvGenerationTaskStore = createLibtvGenerationTaskStore();
-const libtvGenerationRunner = createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore: libtvGenerationTaskStore });
+const libtvGenerationRunner = createLibtvGenerationRunner({
+  libtv,
+  assetStore,
+  canvasStore,
+  taskStore: libtvGenerationTaskStore,
+  resolveWorkspaceName: () => createLibtvWorkspaceName(configStore.loadApiSettings().libtvMachineId),
+});
 const portableUpdater = createPortableUpdater({ app, rootDir: appRootDir, dataRoot: portableRootDir, net });
 let localApi = null;
 let mainWindow = null;

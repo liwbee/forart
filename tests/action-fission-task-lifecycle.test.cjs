@@ -246,8 +246,9 @@ test('LibTV queues rows per node, runs different nodes concurrently, and writes 
   let transientStartFailures = 1;
   let runAttempts = 0;
   const queueByRemoteNode = new Map();
+  const workspaceNames = [];
   const libtv = {
-    async ensureNamedWorkspace() { return { workspace: { id: 'workspace' } }; },
+    async ensureNamedWorkspace({ name }) { workspaceNames.push(name); return { workspace: { id: 'workspace' } }; },
     async ensureDailyProject() { return { project: { uuid: 'project', name: 'today' } }; },
     async waitForProjectReady(input) { return { project: { uuid: input.projectUuid, name: input.projectName } }; },
     async createImageNode(_project, payload) {
@@ -282,7 +283,13 @@ test('LibTV queues rows per node, runs different nodes concurrently, and writes 
       return { url: `forart-asset://output/${encodeURIComponent(payload.url)}.png`, fileName: 'libtv-result.png', filePath: 'result.png' };
     },
   };
-  const runner = createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore });
+  const runner = createLibtvGenerationRunner({
+    libtv,
+    assetStore,
+    canvasStore,
+    taskStore,
+    resolveWorkspaceName: () => 'LibtvImage-PC01',
+  });
   const payloads = ['node-a', 'node-b'].flatMap((nodeId) => [1, 2, 3].map((row) => ({
     canvasId: `canvas-${nodeId}`,
     nodeId,
@@ -302,6 +309,7 @@ test('LibTV queues rows per node, runs different nodes concurrently, and writes 
   assert.equal(maxByQueue.get('node-b'), 1);
   assert.equal(maxGlobalActive, 2);
   assert.equal(runAttempts, 7);
+  assert.deepEqual(new Set(workspaceNames), new Set(['LibtvImage-PC01']));
   assert.equal(canvasStore.terminals.filter((item) => item.backend === 'libtv' && item.status === 'succeeded').length, 6);
   assert.equal(new Set(canvasStore.terminals.map((item) => `${item.canvasId}:${item.nodeId}:${item.rowId}`)).size, 6);
 });

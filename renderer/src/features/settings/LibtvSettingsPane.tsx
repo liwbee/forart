@@ -12,6 +12,11 @@ interface LibtvAccountSummary {
   updatedAt: string;
 }
 
+interface LibtvSettingsPaneProps {
+  machineId: string;
+  onMachineIdChange: (machineId: string) => void;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
@@ -44,7 +49,7 @@ export function LibtvLogo() {
   );
 }
 
-export function LibtvSettingsPane() {
+export function LibtvSettingsPane({ machineId, onMachineIdChange }: LibtvSettingsPaneProps) {
   const { t } = useTranslation();
   const [action, setAction] = useState<LibtvAction>("");
   const [status, setStatus] = useState("");
@@ -150,10 +155,26 @@ export function LibtvSettingsPane() {
         </div>
       </div>
       <div className="settings-libtv-account-panel">
-        <label className="settings-libtv-account-switcher">
-          <span>{t("settings:libtvAccountName")}</span>
-          <Select value={activeAccountId} disabled={action !== "" || !accounts.length} onChange={(accountId) => void switchAccount(accountId)} options={accounts.length ? accounts.map((item) => ({ value: String(item.accountId ?? ""), label: `${item.accountName || item.accountId || "-"} · ${accountTypeLabel(item)}` })) : [{ value: "", label: t("settings:libtvNoAccounts") }]} ariaLabel={t("settings:libtvAccountName")} menuPlacement="bottom" />
-        </label>
+        <div className="settings-libtv-account-controls">
+          <label className="settings-libtv-account-switcher">
+            <span>{t("settings:libtvAccountName")}</span>
+            <Select value={activeAccountId} disabled={action !== "" || !accounts.length} onChange={(accountId) => void switchAccount(accountId)} options={accounts.length ? accounts.map((item) => ({ value: String(item.accountId ?? ""), label: `${item.accountName || item.accountId || "-"} · ${accountTypeLabel(item)}` })) : [{ value: "", label: t("settings:libtvNoAccounts") }]} ariaLabel={t("settings:libtvAccountName")} menuPlacement="bottom" />
+          </label>
+          <label className="settings-libtv-account-switcher settings-libtv-machine-id">
+            <span>{t("settings:libtvMachineId")}</span>
+            <input
+              value={machineId}
+              maxLength={32}
+              pattern="[A-Za-z0-9]*"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder={t("settings:libtvMachineIdPlaceholder")}
+              title={t("settings:libtvMachineIdDescription")}
+              onChange={(event) => onMachineIdChange(event.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 32))}
+            />
+          </label>
+        </div>
         <div className="settings-libtv-account-grid">
           <div className="settings-libtv-account-field"><span>{t("settings:libtvPlanInfo")}</span><strong>{account?.memberName || "-"}</strong></div>
           <div className="settings-libtv-account-field"><span>{t("settings:libtvAccountUpdatedAt")}</span><strong>{account?.updatedAt || "-"}</strong></div>

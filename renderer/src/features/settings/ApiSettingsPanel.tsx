@@ -70,6 +70,7 @@ export function ApiSettingsPanel() {
   const [providers, setProviders] = useState<ApiProvider[]>(initialSettings.providers);
   const [providerOrder, setProviderOrder] = useState<string[]>(() => normalizeApiProviderOrder(initialSettings.providerOrder, initialSettings.providers));
   const [defaultImageProviderId, setDefaultImageProviderId] = useState(initialSettings.defaultImageProviderId || "");
+  const [libtvMachineId, setLibtvMachineId] = useState(initialSettings.libtvMachineId || "");
   const [selectedProviderId, setSelectedProviderId] = useState(APIMART_PROVIDER_ID);
   const [activePane, setActivePane] = useState<ApiSettingsPane>("apimart");
   const [action, setAction] = useState<ApiAction>("");
@@ -99,6 +100,7 @@ export function ApiSettingsPanel() {
         setProviders(settings.providers);
         setProviderOrder(normalizeApiProviderOrder(settings.providerOrder, settings.providers));
         setDefaultImageProviderId(settings.defaultImageProviderId || "");
+        setLibtvMachineId(settings.libtvMachineId || "");
         setSelectedProviderId((current) => settings.providers.some((provider) => provider.id === current) ? current : APIMART_PROVIDER_ID);
         setSettingsLoaded(true);
       })
@@ -118,14 +120,14 @@ export function ApiSettingsPanel() {
       return;
     }
     const timeout = window.setTimeout(() => {
-      void saveApiSettings({ providers, defaultImageProviderId, providerOrder: nextOrder })
+      void saveApiSettings({ providers, defaultImageProviderId, providerOrder: nextOrder, libtvMachineId })
         .catch((error) => setStatus({
           tone: "error",
           text: t("settings:apiSaveFailed", { message: error instanceof Error ? error.message : String(error) }),
         }));
     }, 350);
     return () => window.clearTimeout(timeout);
-  }, [defaultImageProviderId, providerOrder, providers, settingsLoaded, t]);
+  }, [defaultImageProviderId, libtvMachineId, providerOrder, providers, settingsLoaded, t]);
 
   useEffect(() => {
     if (providers.length && !providers.some((provider) => provider.id === selectedProviderId)) setSelectedProviderId(providers[0].id);
@@ -389,7 +391,7 @@ export function ApiSettingsPanel() {
         </aside>
 
         <main className="settings-api-content">
-          {activePane === "libtv" ? <LibtvSettingsPane /> : activePane === "apimart" && selectedProvider?.id === APIMART_PROVIDER_ID ? (
+          {activePane === "libtv" ? <LibtvSettingsPane machineId={libtvMachineId} onMachineIdChange={setLibtvMachineId} /> : activePane === "apimart" && selectedProvider?.id === APIMART_PROVIDER_ID ? (
             <><ApimartSettingsPane provider={selectedProvider} fetchingModels={action === "fetch"} status={status} onProviderChange={patchSelectedProvider} onFetchModels={fetchModels} />{renderModelList("image")}{renderModelList("chat")}{renderModelList("video")}</>
           ) : selectedProvider ? (
             <>

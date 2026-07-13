@@ -30,7 +30,7 @@ From this directory:
 Build:
 
 ```powershell
-docker build -t liwbee/forart-server:0.1.30 -t liwbee/forart-server:latest .
+docker build -t liwbee/forart-server:0.1.31 -t liwbee/forart-server:latest .
 ```
 
 Run:
