@@ -9,6 +9,48 @@ function nowMs() {
   return Date.now();
 }
 
+function readJsonFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function atomicWriteJson(filePath, payload) {
+  const serialized = `${JSON.stringify(payload, null, 2)}\n`;
+  JSON.parse(serialized);
+  const temporaryPath = `${filePath}.tmp`;
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const descriptor = fs.openSync(temporaryPath, 'w');
+  try {
+    fs.writeFileSync(descriptor, serialized, 'utf8');
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  fs.renameSync(temporaryPath, filePath);
+}
+
+function readAtomicJson(filePath, revisionOf) {
+  const temporaryPath = `${filePath}.tmp`;
+  const primary = readJsonFile(filePath);
+  const temporary = readJsonFile(temporaryPath);
+  if (!temporary) {
+    if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+    return primary;
+  }
+  const primaryRevision = primary ? Number(revisionOf(primary) || 0) : -1;
+  const temporaryRevision = Number(revisionOf(temporary) || 0);
+  if (!primary || temporaryRevision > primaryRevision) {
+    fs.renameSync(temporaryPath, filePath);
+    return temporary;
+  }
+  fs.unlinkSync(temporaryPath);
+  return primary;
+}
+
 function newCanvasId() {
   return `canvas_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -35,6 +77,7 @@ function canvasRecord(canvas) {
     pinned: Boolean(canvas.pinned),
     createdAt: Number(canvas.createdAt || 0),
     updatedAt: Number(canvas.updatedAt || 0),
+    revision: Math.max(1, Number(canvas.revision || 1)),
     nodeCount: Array.isArray(canvas.nodes) ? canvas.nodes.length : 0,
   };
 }
@@ -51,6 +94,7 @@ function normalizeCanvasRecord(input, fallback = {}) {
     pinned: Boolean(input?.pinned || fallback.pinned),
     createdAt: Number(input?.createdAt || fallback.createdAt || timestamp),
     updatedAt: Number(input?.updatedAt || fallback.updatedAt || fallback.createdAt || timestamp),
+    revision: Math.max(1, Number(input?.revision || fallback.revision || 1)),
     nodeCount: Number(input?.nodeCount || fallback.nodeCount || 0),
   };
 }
@@ -114,6 +158,7 @@ function normalizeCanvasDocument(input, fallback = {}) {
     pinned: Boolean(input?.pinned || fallback.pinned),
     createdAt: Number(input?.createdAt || fallback.createdAt || timestamp),
     updatedAt: Number(input?.updatedAt || fallback.updatedAt || timestamp),
+    revision: Math.max(1, Number(input?.revision || fallback.revision || 1)),
     nodes: Array.isArray(input?.nodes) ? input.nodes : [],
     connections: Array.isArray(input?.connections) ? input.connections : [],
     groups: Array.isArray(input?.groups) ? input.groups : [],
@@ -150,47 +195,44 @@ function createCanvasStore({ rootDir }) {
 
   function readCanvas(canvasId) {
     const filePath = canvasPath(canvasId);
-    if (!filePath || !fs.existsSync(filePath)) return null;
-    try {
-      return normalizeCanvasDocument(JSON.parse(fs.readFileSync(filePath, 'utf8')), { id: canvasId });
-    } catch {
-      return null;
-    }
+    if (!filePath) return null;
+    const payload = readAtomicJson(filePath, (value) => value?.revision);
+    return payload ? normalizeCanvasDocument(payload, { id: canvasId }) : null;
   }
 
   function readIndexPayload() {
     const filePath = indexPath();
-    if (!fs.existsSync(filePath)) return { canvases: [], projects: ensureDefaultProject([]), valid: true };
-    try {
-      const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-      if (payload?.version !== 3) return { canvases: [], projects: [], valid: false };
-      const canvases = Array.isArray(payload?.canvases) ? payload.canvases : [];
-      const projects = ensureDefaultProject(Array.isArray(payload?.projects) ? payload.projects : []);
-      return {
-        canvases: canvases.map((record) => normalizeCanvasRecord(record)).filter((record) => record.id),
-        projects,
-        valid: true,
-      };
-    } catch {
-      return { canvases: [], projects: [], valid: false };
+    if (!fs.existsSync(filePath) && !fs.existsSync(`${filePath}.tmp`)) {
+      return { canvases: [], projects: ensureDefaultProject([]), revision: 0, valid: true };
     }
+    const payload = readAtomicJson(filePath, (value) => value?.revision || value?.updatedAt);
+    if (payload?.version !== 3) return { canvases: [], projects: [], revision: 0, valid: false };
+    const canvases = Array.isArray(payload?.canvases) ? payload.canvases : [];
+    const projects = ensureDefaultProject(Array.isArray(payload?.projects) ? payload.projects : []);
+    return {
+      canvases: canvases.map((record) => normalizeCanvasRecord(record)).filter((record) => record.id),
+      projects,
+      revision: Math.max(0, Number(payload.revision || 0)),
+      valid: true,
+    };
   }
 
   function writeIndexPayload(inputPayload) {
     const nextPayload = {
       version: 3,
+      revision: Math.max(0, Number(inputPayload.revision || 0)) + 1,
       updatedAt: nowMs(),
       canvases: sortCanvasRecords([...(inputPayload.canvases || [])]),
       projects: sortProjectRecords(ensureDefaultProject(inputPayload.projects || [])),
     };
-    fs.writeFileSync(indexPath(), JSON.stringify(nextPayload, null, 2) + '\n', 'utf8');
+    atomicWriteJson(indexPath(), nextPayload);
   }
 
   function canvasIdsFromDisk() {
-    return fs.readdirSync(jsonRoot())
-      .filter((fileName) => fileName.endsWith('.json'))
-      .map((fileName) => sanitizeCanvasId(path.basename(fileName, '.json')))
-      .filter(Boolean);
+    return [...new Set(fs.readdirSync(jsonRoot())
+      .filter((fileName) => fileName.endsWith('.json') || fileName.endsWith('.json.tmp'))
+      .map((fileName) => sanitizeCanvasId(fileName.replace(/\.json(?:\.tmp)?$/, '')))
+      .filter(Boolean))];
   }
 
   function indexMatchesDisk(payload, canvasIds) {
@@ -204,19 +246,13 @@ function createCanvasStore({ rootDir }) {
     const indexPayload = readIndexPayload();
     const projectById = new Map(indexPayload.projects.map((project) => [project.id, project]));
     const canvases = [];
-    for (const fileName of fs.readdirSync(jsonRoot())) {
-      if (!fileName.endsWith('.json')) continue;
-      try {
-        const parsed = JSON.parse(fs.readFileSync(path.join(jsonRoot(), fileName), 'utf8'));
-        const canvas = normalizeCanvasDocument(parsed, { id: path.basename(fileName, '.json') });
-        if (!canvas.id) continue;
-        canvases.push({
-          ...canvasRecord(canvas),
-          projectId: projectById.has(canvas.projectId) ? canvas.projectId : indexPayload.projects[0]?.id || DEFAULT_PROJECT_ID,
-        });
-      } catch {
-        // Skip malformed canvas files so one bad JSON does not hide the rest.
-      }
+    for (const canvasId of canvasIdsFromDisk()) {
+      const canvas = readCanvas(canvasId);
+      if (!canvas?.id) continue;
+      canvases.push({
+        ...canvasRecord(canvas),
+        projectId: projectById.has(canvas.projectId) ? canvas.projectId : indexPayload.projects[0]?.id || DEFAULT_PROJECT_ID,
+      });
     }
     writeIndexPayload({ canvases, projects: indexPayload.projects });
     return sortCanvasRecords(canvases);
@@ -249,8 +285,7 @@ function createCanvasStore({ rootDir }) {
   function writeCanvas(canvas) {
     const normalized = normalizeCanvasDocument(canvas);
     const filePath = canvasPath(normalized.id);
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(normalized, null, 2) + '\n', 'utf8');
+    atomicWriteJson(filePath, normalized);
     updateIndexCanvas(canvasRecord(normalized));
     return { canvas: normalized, filePath };
   }
@@ -259,8 +294,7 @@ function createCanvasStore({ rootDir }) {
     const canvasIds = canvasIdsFromDisk();
     const indexedPayload = readIndexPayload();
     if (!indexedPayload.valid) {
-      writeIndexPayload({ canvases: [], projects: [] });
-      return [];
+      return rebuildIndex();
     }
     if (indexMatchesDisk(indexedPayload, canvasIds)) return sortCanvasRecords(indexedPayload.canvases);
     return rebuildIndex();
@@ -282,6 +316,7 @@ function createCanvasStore({ rootDir }) {
       pinned: false,
       createdAt: timestamp,
       updatedAt: timestamp,
+      revision: 1,
       nodes: Array.isArray(payload?.nodes) ? payload.nodes : [],
       connections: Array.isArray(payload?.connections) ? payload.connections : [],
       groups: Array.isArray(payload?.groups) ? payload.groups : [],
@@ -293,6 +328,10 @@ function createCanvasStore({ rootDir }) {
   function saveCanvas(canvasId, payload = {}) {
     const existing = readCanvas(canvasId);
     if (!existing) throw new Error('Canvas not found.');
+    const nextNodes = Array.isArray(payload?.nodes) ? payload.nodes : existing.nodes;
+    if (existing.nodes.length > 0 && nextNodes.length === 0 && payload?.allowEmpty !== true) {
+      throw new Error('Refusing to replace a non-empty canvas with an unexpected empty canvas snapshot.');
+    }
     const result = writeCanvas({
       ...existing,
       ...(payload || {}),
@@ -303,6 +342,7 @@ function createCanvasStore({ rootDir }) {
       canvasType: 'forart',
       projectId: payload?.projectId !== undefined ? normalizeProjectId(payload.projectId) : existing.projectId,
       updatedAt: nowMs(),
+      revision: existing.revision + 1,
     });
     return { ok: true, canvas: result.canvas, record: canvasRecord(result.canvas), filePath: result.filePath };
   }
@@ -318,7 +358,7 @@ function createCanvasStore({ rootDir }) {
       return { ...node, data: updater(data) };
     });
     if (!matched) return { ok: false, reason: 'node_not_found' };
-    const result = writeCanvas({ ...existing, nodes, updatedAt: nowMs() });
+    const result = writeCanvas({ ...existing, nodes, updatedAt: nowMs(), revision: existing.revision + 1 });
     return { ok: true, canvas: result.canvas, record: canvasRecord(result.canvas), filePath: result.filePath };
   }
 
@@ -330,6 +370,41 @@ function createCanvasStore({ rootDir }) {
       generationRemoteTaskId: taskId,
       generationError: '',
     }));
+  }
+
+  function setGenerationTaskAnchor(canvasId, nodeId, payload = {}) {
+    const taskId = String(payload.taskId || '').trim();
+    if (!taskId) return { ok: false, reason: 'task_id_required' };
+    return updateGenerationNode(canvasId, nodeId, (data) => {
+      const next = {
+        ...data,
+        generationTaskId: taskId,
+        generationError: '',
+      };
+      const remoteTaskId = String(payload.remoteTaskId || '').trim();
+      if (remoteTaskId) next.generationRemoteTaskId = remoteTaskId;
+      else delete next.generationRemoteTaskId;
+      return next;
+    });
+  }
+
+  function setLibtvGenerationTaskAnchor(canvasId, nodeId, payload = {}) {
+    const taskId = String(payload.taskId || '').trim();
+    if (!taskId) return { ok: false, reason: 'task_id_required' };
+    return updateGenerationNode(canvasId, nodeId, (data) => {
+      const state = data.libtvImageGeneration && typeof data.libtvImageGeneration === 'object'
+        ? { ...data.libtvImageGeneration }
+        : {};
+      state.taskId = taskId;
+      const projectUuid = String(payload.projectUuid || '').trim();
+      const remoteNodeId = String(payload.remoteNodeId || '').trim();
+      if (projectUuid) state.projectUuid = projectUuid;
+      else delete state.projectUuid;
+      if (remoteNodeId) state.remoteNodeId = remoteNodeId;
+      else delete state.remoteNodeId;
+      state.error = '';
+      return { ...data, libtvImageGeneration: state };
+    });
   }
 
   function updateActionFissionRow(canvasId, nodeId, rowId, updater) {
@@ -421,11 +496,15 @@ function createCanvasStore({ rootDir }) {
   }
 
   function completeGenerationNode(payload = {}) {
+    const taskId = String(payload.taskId || '').trim();
     const remoteTaskId = String(payload.remoteTaskId || '').trim();
     return updateGenerationNode(payload.canvasId, payload.nodeId, (data) => {
+      const currentTaskId = String(data.generationTaskId || '').trim();
       const currentRemoteTaskId = String(data.generationRemoteTaskId || '').trim();
-      if (remoteTaskId && currentRemoteTaskId !== remoteTaskId) return data;
+      if (taskId && currentTaskId && currentTaskId !== taskId) return data;
+      if (remoteTaskId && currentRemoteTaskId && currentRemoteTaskId !== remoteTaskId) return data;
       const next = { ...data };
+      delete next.generationTaskId;
       delete next.generationRemoteTaskId;
       delete next.generationTask;
       if (payload.status === 'succeeded' && payload.result?.localUrl) {
@@ -465,6 +544,42 @@ function createCanvasStore({ rootDir }) {
     });
   }
 
+  function completeLibtvGenerationNode(payload = {}) {
+    const taskId = String(payload.taskId || '').trim();
+    return updateGenerationNode(payload.canvasId, payload.nodeId, (data) => {
+      const state = data.libtvImageGeneration && typeof data.libtvImageGeneration === 'object'
+        ? { ...data.libtvImageGeneration }
+        : {};
+      const currentTaskId = String(state.taskId || '').trim();
+      if (taskId && currentTaskId && currentTaskId !== taskId) return data;
+      delete state.task;
+      delete state.taskId;
+      delete state.projectUuid;
+      delete state.remoteNodeId;
+      state.error = payload.status === 'failed' ? String(payload.error || 'LibTV generation failed.') : '';
+      const next = { ...data, libtvImageGeneration: state };
+      if (payload.status === 'succeeded' && payload.result?.localUrl) {
+        next.generatedImages = [{
+          url: String(payload.result.url || ''),
+          localUrl: String(payload.result.localUrl || ''),
+          thumbUrl: String(payload.result.thumbUrl || ''),
+          fileName: String(payload.result.fileName || ''),
+          width: Number(payload.result.width || 0) || undefined,
+          height: Number(payload.result.height || 0) || undefined,
+          downloadState: 'pending',
+        }];
+        next.multiImageExpanded = false;
+        delete next.multiImageCollapsedSize;
+        delete next.imageUrl;
+        delete next.thumbUrl;
+        next.label = String(payload.result.fileName || next.label || 'Generated image');
+        delete next.outputDownloadState;
+        delete next.outputDownloadedAt;
+      }
+      return next;
+    });
+  }
+
   function listGenerationTaskAnchors() {
     return listCanvases().flatMap((record) => {
       const canvas = readCanvas(record.id);
@@ -475,8 +590,9 @@ function createCanvasStore({ rootDir }) {
         const providerId = String(data.imageProviderId || '').trim();
         const model = String(data.imageModel || '').trim();
         const nodeId = String(node.id || '');
-        const anchors = remoteTaskId && providerId && model
-          ? [{ canvasId: canvas.id, nodeId, target: { type: 'imageGenerator', nodeId }, remoteTaskId, providerId, model }]
+        const localTaskId = String(data.generationTaskId || '').trim();
+        const anchors = (localTaskId || remoteTaskId) && providerId && model
+          ? [{ canvasId: canvas.id, nodeId, target: { type: 'imageGenerator', nodeId }, taskId: localTaskId, remoteTaskId, providerId, model }]
           : [];
         const rows = Array.isArray(data.actionFission?.rows) ? data.actionFission.rows : [];
         for (const row of rows) {
@@ -506,21 +622,35 @@ function createCanvasStore({ rootDir }) {
       if (!canvas) return [];
       return canvas.nodes.flatMap((node) => {
         const data = node?.data && typeof node.data === 'object' ? node.data : {};
+        const nodeId = String(node.id || '');
+        const state = data.libtvImageGeneration && typeof data.libtvImageGeneration === 'object'
+          ? data.libtvImageGeneration
+          : {};
+        const nodeTaskId = String(state.taskId || '').trim();
+        const anchors = nodeTaskId ? [{
+          canvasId: canvas.id,
+          nodeId,
+          taskId: nodeTaskId,
+          target: { type: 'imageGenerator', nodeId },
+          projectUuid: String(state.projectUuid || '').trim(),
+          remoteNodeId: String(state.remoteNodeId || '').trim(),
+        }] : [];
         const rows = Array.isArray(data.actionFission?.rows) ? data.actionFission.rows : [];
-        return rows.flatMap((row) => {
+        anchors.push(...rows.flatMap((row) => {
           const taskId = String(row?.libtvTaskId || '').trim();
           const rowId = String(row?.id || '').trim();
           if (!taskId || !rowId) return [];
           return [{
             canvasId: canvas.id,
-            nodeId: String(node.id || ''),
+            nodeId,
             rowId,
             taskId,
-            target: { type: 'actionFissionRow', nodeId: String(node.id || ''), rowId },
+            target: { type: 'actionFissionRow', nodeId, rowId },
             projectUuid: String(row?.libtvProjectUuid || '').trim(),
             remoteNodeId: String(row?.libtvRemoteNodeId || '').trim(),
           }];
-        });
+        }));
+        return anchors;
       });
     });
   }
@@ -536,6 +666,7 @@ function createCanvasStore({ rootDir }) {
       color: patch?.color !== undefined ? String(patch.color || '') : existing.color,
       pinned: patch?.pinned !== undefined ? Boolean(patch.pinned) : existing.pinned,
       updatedAt: nowMs(),
+      revision: existing.revision + 1,
     });
     return { ok: true, canvas: result.canvas, record: canvasRecord(result.canvas), filePath: result.filePath };
   }
@@ -616,12 +747,15 @@ function createCanvasStore({ rootDir }) {
     moveCanvasToProject,
     readCanvas,
     saveCanvas,
+    setGenerationTaskAnchor,
     setGenerationRemoteTaskId,
+    setLibtvGenerationTaskAnchor,
     setActionFissionRowRemoteTaskId,
     setActionFissionRowTaskAnchor,
     setActionFissionRowLibtvAnchor,
     completeActionFissionRow,
     completeGenerationNode,
+    completeLibtvGenerationNode,
     updateCanvasMeta,
     updateProject,
     writeCanvas,

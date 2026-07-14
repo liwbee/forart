@@ -23,6 +23,7 @@ import {
   imageGenerationLaunchKey,
   useGenerationRuntimeStore,
 } from "./generationRuntimeStore";
+import { activateGenerationHook } from "./generationHookLifecycle";
 
 export const TERMINAL_TASK_STATUSES = new Set<NativeGenerationTaskStatus>([
   "succeeded",
@@ -154,11 +155,12 @@ export function useNativeImageGeneration({
   setNodeImage,
   t,
 }: UseNativeImageGenerationOptions) {
+  const mountedRef = useRef(true);
   const pollingControllersRef = useRef(new Map<string, AbortController>());
   const recoveringRemoteTasksRef = useRef(new Set<string>());
 
   const pollTask = useCallback(async (taskId: string, nodeId: string) => {
-    if (!window.easyTool?.getGenerationTask || pollingControllersRef.current.has(taskId)) return;
+    if (!mountedRef.current || !window.easyTool?.getGenerationTask || pollingControllersRef.current.has(taskId)) return;
     const controller = new AbortController();
     pollingControllersRef.current.set(taskId, controller);
     try {
@@ -178,6 +180,7 @@ export function useNativeImageGeneration({
               };
               patchNodeData(nodeId, {
                 generationTask: interruptedTask,
+                generationTaskId: undefined,
                 generationError: interruptedTask.error,
               });
               return;
@@ -196,6 +199,7 @@ export function useNativeImageGeneration({
             };
             patchNodeData(nodeId, {
               generationTask: interruptedTask,
+              generationTaskId: undefined,
               generationError: interruptedTask.error,
             });
             return;
@@ -211,6 +215,7 @@ export function useNativeImageGeneration({
         }
         patchNodeData(nodeId, {
           generationTask: task,
+          generationTaskId: TERMINAL_TASK_STATUSES.has(task.status) ? undefined : task.id,
           generationRemoteTaskId: TERMINAL_TASK_STATUSES.has(task.status)
             ? undefined
             : task.upstreamTaskId || nodes.find((node) => node.id === nodeId)?.data.generationRemoteTaskId,
@@ -245,6 +250,7 @@ export function useNativeImageGeneration({
             error: message,
             updatedAt: Date.now(),
           } : undefined,
+          generationTaskId: undefined,
           generationError: message,
         });
       }
@@ -277,7 +283,7 @@ export function useNativeImageGeneration({
         modelRule,
       }));
       if (!task) throw new Error(t("infiniteCanvas:generationInterruptedUnexpected"));
-      patchNodeData(nodeId, { generationTask: task, generationRemoteTaskId: remoteTaskId, generationError: "" });
+      patchNodeData(nodeId, { generationTask: task, generationTaskId: task.id, generationRemoteTaskId: remoteTaskId, generationError: "" });
       await pollTask(task.id, nodeId);
     } catch (error) {
       patchNodeData(nodeId, { generationError: error instanceof Error ? error.message : String(error) });
@@ -288,7 +294,7 @@ export function useNativeImageGeneration({
 
   const runImageGeneration = useCallback(async (nodeId: string, options?: { promptOverride?: string }) => {
     const node = nodes.find((item) => item.id === nodeId && item.data.kind === "imageGenerator");
-    if (!node || isNativeGenerationTaskActive(node.data.generationTask)) return;
+    if (!node || node.data.generationTaskId || isNativeGenerationTaskActive(node.data.generationTask)) return;
     if (!canvasId || !window.easyTool?.createGenerationTask) {
       patchNodeData(nodeId, { generationError: t("infiniteCanvas:canvasDesktopRequired") });
       return;
@@ -367,24 +373,28 @@ export function useNativeImageGeneration({
         status: "submitting",
       }));
       if (!task) throw new Error(t("infiniteCanvas:generationTaskCreateFailed"));
-      patchNodeData(nodeId, { generationTask: task, generationError: "" });
+      if (!mountedRef.current) return;
+      patchNodeData(nodeId, { generationTask: task, generationTaskId: task.id, generationError: "" });
       endGenerationLaunching([launchKey]);
       await pollTask(task.id, nodeId);
     } catch (error) {
-      patchNodeData(nodeId, { generationError: error instanceof Error ? error.message : String(error) });
+      if (mountedRef.current) patchNodeData(nodeId, { generationError: error instanceof Error ? error.message : String(error) });
     } finally {
       endGenerationLaunching([launchKey]);
     }
   }, [canvasId, edges, nodes, patchNodeData, pollTask, t]);
 
   const stopImageGeneration = useCallback(async (nodeId: string) => {
-    const task = nodes.find((node) => node.id === nodeId)?.data.generationTask;
-    if (!task || !isNativeGenerationTaskActive(task)) return;
-    pollingControllersRef.current.get(task.id)?.abort();
+    const data = nodes.find((node) => node.id === nodeId)?.data;
+    const task = data?.generationTask;
+    const taskId = task?.id || data?.generationTaskId;
+    if (!taskId || (task && !isNativeGenerationTaskActive(task))) return;
+    pollingControllersRef.current.get(taskId)?.abort();
     try {
-      const stopped = normalizeGenerationTask(await window.easyTool?.stopGenerationTask?.(task.id));
+      const stopped = normalizeGenerationTask(await window.easyTool?.stopGenerationTask?.(taskId));
       patchNodeData(nodeId, {
-        generationTask: stopped || { ...task, status: "interrupted", updatedAt: Date.now() },
+        generationTask: stopped || (task ? { ...task, status: "interrupted", updatedAt: Date.now() } : undefined),
+        generationTaskId: undefined,
         generationError: "",
       });
     } catch (error) {
@@ -397,17 +407,19 @@ export function useNativeImageGeneration({
       const task = node.data.generationTask;
       if (task?.canvasId === canvasId && isNativeGenerationTaskActive(task)) {
         void pollTask(task.id, node.id);
+      } else if (node.data.generationTaskId) {
+        void pollTask(node.data.generationTaskId, node.id);
       } else if (node.data.generationRemoteTaskId) {
         void recoverGenerationTask(node.id, node.data.generationRemoteTaskId);
       }
     });
   }, [canvasId, nodes, pollTask, recoverGenerationTask]);
 
-  useEffect(() => () => {
+  useEffect(() => activateGenerationHook(mountedRef, () => {
     pollingControllersRef.current.forEach((controller) => controller.abort());
     pollingControllersRef.current.clear();
     recoveringRemoteTasksRef.current.clear();
-  }, []);
+  }), []);
 
   return { runImageGeneration, stopImageGeneration };
 }

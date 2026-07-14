@@ -42,10 +42,21 @@ function createCanvasRecorder() {
     setActionFissionRowLibtvAnchor(canvasId, nodeId, rowId, payload) {
       anchors.push({ backend: 'libtv', canvasId, nodeId, rowId, ...payload });
     },
+    setGenerationTaskAnchor(canvasId, nodeId, payload) {
+      anchors.push({ backend: 'api', canvasId, nodeId, ...payload });
+    },
+    setLibtvGenerationTaskAnchor(canvasId, nodeId, payload) {
+      anchors.push({ backend: 'libtv', canvasId, nodeId, ...payload });
+    },
     completeActionFissionRow(payload) {
       terminals.push(payload);
     },
-    completeGenerationNode() {},
+    completeGenerationNode(payload) {
+      terminals.push(payload);
+    },
+    completeLibtvGenerationNode(payload) {
+      terminals.push({ backend: 'libtv', ...payload });
+    },
   };
 }
 
@@ -121,6 +132,47 @@ test('API action rows finish and reconcile stale renderer snapshots without rend
   assert.equal(row.generationTaskId, undefined);
 });
 
+test('API image nodes keep a local task anchor while preparation is still running', async () => {
+  const canvasStore = createCanvasRecorder();
+  const generationTaskStore = createGenerationTaskStore();
+  let releaseResponse;
+  const responseGate = new Promise((resolve) => { releaseResponse = resolve; });
+  const net = {
+    async fetch() {
+      await responseGate;
+      return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from('result').toString('base64') }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  };
+  const assetStore = {
+    async saveAsset() {
+      return { url: 'forart-asset://output/api-node.png', fileName: 'api-node.png' };
+    },
+  };
+  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore });
+  const task = await runner.startTask({
+    canvasId: 'canvas-api-node',
+    nodeId: 'node-api',
+    target: { type: 'imageGenerator', nodeId: 'node-api' },
+    providerId: 'provider',
+    provider: { id: 'provider', baseUrl: 'https://example.test/v1', apiKey: 'test', protocol: 'compatible' },
+    model: 'gpt-image-2',
+    prompt: 'test prompt',
+  });
+
+  assert.equal(canvasStore.anchors.some((anchor) => anchor.nodeId === 'node-api' && anchor.taskId === task.id), true);
+  const reconciled = runner.reconcileCanvasPayload('canvas-api-node', {
+    nodes: [{ id: 'node-api', data: { kind: 'imageGenerator' } }],
+  });
+  assert.equal(reconciled.nodes[0].data.generationTaskId, task.id);
+
+  releaseResponse();
+  await waitFor(() => generationTaskStore.getTask(task.id)?.status === 'succeeded');
+  assert.equal(canvasStore.terminals.some((terminal) => terminal.nodeId === 'node-api' && terminal.taskId === task.id), true);
+});
+
 test('API recovery reuses the canvas local task id and only polls the existing remote task', async () => {
   const canvasStore = createCanvasRecorder();
   const generationTaskStore = createGenerationTaskStore();
@@ -178,7 +230,7 @@ test('stopping an API action group prevents late responses from writing results'
     },
   };
   const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore });
-  const tasks = await Promise.all([1, 2, 3].map((row) => runner.startTask({
+  const tasks = await runner.startTasks([1, 2, 3].map((row) => ({
     canvasId: 'canvas-stop',
     nodeId: 'node-stop',
     target: { type: 'actionFissionRow', nodeId: 'node-stop', rowId: `row-${row}` },
@@ -312,6 +364,108 @@ test('LibTV queues rows per node, runs different nodes concurrently, and writes 
   assert.deepEqual(new Set(workspaceNames), new Set(['LibtvImage-PC01']));
   assert.equal(canvasStore.terminals.filter((item) => item.backend === 'libtv' && item.status === 'succeeded').length, 6);
   assert.equal(new Set(canvasStore.terminals.map((item) => `${item.canvasId}:${item.nodeId}:${item.rowId}`)).size, 6);
+});
+
+test('ordinary image node anchors survive canvas reloads and reject older terminal writes', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-image-node-attempt-'));
+  try {
+    const canvasStore = createCanvasStore({ rootDir });
+    const canvas = canvasStore.createCanvas({
+      nodes: [{
+        id: 'node-attempt',
+        data: {
+          kind: 'imageGenerator',
+          imageProviderId: 'provider',
+          imageModel: 'model',
+          libtvImageGeneration: {},
+        },
+      }],
+    }).canvas;
+
+    canvasStore.setGenerationTaskAnchor(canvas.id, 'node-attempt', { taskId: 'api-old' });
+    canvasStore.setGenerationTaskAnchor(canvas.id, 'node-attempt', { taskId: 'api-new' });
+    canvasStore.completeGenerationNode({
+      canvasId: canvas.id,
+      nodeId: 'node-attempt',
+      taskId: 'api-old',
+      status: 'succeeded',
+      result: { localUrl: 'forart-asset://output/api-old.png', fileName: 'api-old.png' },
+    });
+    let data = canvasStore.readCanvas(canvas.id).nodes[0].data;
+    assert.equal(data.generationTaskId, 'api-new');
+    assert.equal(data.generatedImages, undefined);
+    assert.equal(canvasStore.listGenerationTaskAnchors()[0].taskId, 'api-new');
+
+    canvasStore.setLibtvGenerationTaskAnchor(canvas.id, 'node-attempt', { taskId: 'libtv-old' });
+    canvasStore.setLibtvGenerationTaskAnchor(canvas.id, 'node-attempt', { taskId: 'libtv-new', projectUuid: 'project', remoteNodeId: 'remote' });
+    canvasStore.completeLibtvGenerationNode({
+      canvasId: canvas.id,
+      nodeId: 'node-attempt',
+      taskId: 'libtv-old',
+      status: 'succeeded',
+      result: { localUrl: 'forart-asset://output/libtv-old.png', fileName: 'libtv-old.png' },
+    });
+    data = canvasStore.readCanvas(canvas.id).nodes[0].data;
+    assert.equal(data.libtvImageGeneration.taskId, 'libtv-new');
+    assert.equal(data.generatedImages, undefined);
+    assert.equal(canvasStore.listLibtvTaskAnchors()[0].taskId, 'libtv-new');
+
+    canvasStore.completeLibtvGenerationNode({
+      canvasId: canvas.id,
+      nodeId: 'node-attempt',
+      taskId: 'libtv-new',
+      status: 'succeeded',
+      result: { localUrl: 'forart-asset://output/libtv-new.png', fileName: 'libtv-new.png' },
+    });
+    data = canvasStore.readCanvas(canvas.id).nodes[0].data;
+    assert.equal(data.libtvImageGeneration.taskId, undefined);
+    assert.equal(data.generatedImages[0].localUrl, 'forart-asset://output/libtv-new.png');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('LibTV image nodes keep anchors and write terminal results without renderer polling', async () => {
+  const canvasStore = createCanvasRecorder();
+  const taskStore = createLibtvGenerationTaskStore();
+  let releaseRun;
+  const runGate = new Promise((resolve) => { releaseRun = resolve; });
+  const libtv = {
+    async ensureNamedWorkspace() { return { workspace: { id: 'workspace' } }; },
+    async ensureDailyProject() { return { project: { uuid: 'project', name: 'today' } }; },
+    async createImageNode() { return { payload: { id: 'remote-node' }, stdout: '' }; },
+    async connectLeft() {},
+    async runNode() {
+      await runGate;
+      return { payload: { url: 'https://example.test/libtv-node.png' }, stdout: '' };
+    },
+    async queryNode() { return { payload: {}, stdout: '' }; },
+    async deleteNode() {},
+  };
+  const assetStore = {
+    resolveAssetUrl() { return ''; },
+    async saveAsset() { return { url: 'forart-asset://output/libtv-node.png', fileName: 'libtv-node.png' }; },
+  };
+  const runner = createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore });
+  const task = runner.startImageTask({
+    canvasId: 'canvas-libtv-node',
+    nodeId: 'node-libtv',
+    target: { type: 'imageGenerator', nodeId: 'node-libtv' },
+    prompt: 'test prompt',
+    modelName: 'Qwen Edit',
+    aspectRatio: '3:4',
+    nodeTitle: 'Node',
+  });
+
+  assert.equal(canvasStore.anchors.some((anchor) => anchor.nodeId === 'node-libtv' && anchor.taskId === task.id), true);
+  const reconciled = runner.reconcileCanvasPayload('canvas-libtv-node', {
+    nodes: [{ id: 'node-libtv', data: { kind: 'imageGenerator', libtvImageGeneration: {} } }],
+  });
+  assert.equal(reconciled.nodes[0].data.libtvImageGeneration.taskId, task.id);
+
+  releaseRun();
+  await waitFor(() => taskStore.getTask(task.id)?.status === 'succeeded');
+  assert.equal(canvasStore.terminals.some((terminal) => terminal.nodeId === 'node-libtv' && terminal.taskId === task.id), true);
 });
 
 test('stopping one queued LibTV row does not run it or block the following row', async () => {

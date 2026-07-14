@@ -21,6 +21,7 @@ import { actionLibraryKeys, listActionProjects, listActions, listActionTags } fr
 import type { ActionEntry, ActionProject } from "../../action-library/types";
 import {
   applySameColorSingleIncludeFilter,
+  countLibraryTags,
   LibraryTagChoiceButton,
   toggleLibraryTagFilterInclude,
   useLibraryTagSettingsStore,
@@ -83,6 +84,10 @@ export function ActionFissionRowSettingsDialog({
   const projects: ActionProject[] = projectsQuery.data?.projects || [];
   const draftTags = tagsQuery.data?.tags || [];
   const draftActions = actionsQuery.data?.actions || [];
+  const draftTagCounts = useMemo(
+    () => countLibraryTags(draftActions, draftTags),
+    [draftActions, draftTags],
+  );
   const includeTagSet = new Set(draftIncludeTagIds);
   const excludeTagSet = new Set(draftExcludeTagIds);
 
@@ -211,7 +216,7 @@ export function ActionFissionRowSettingsDialog({
                       key={tag.id}
                       name={tag.name}
                       color={tag.color}
-                      count={tag.usage_count}
+                      count={draftTagCounts[tag.id] || 0}
                       included={includeTagSet.has(tag.id)}
                       excluded={excludeTagSet.has(tag.id)}
                       onToggleInclude={() => {

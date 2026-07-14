@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 390" role="img" aria-labelledby="title">
+  <title id="title">Forart</title>
+  <rect x="10" y="10" width="370" height="370" rx="76" fill="#fff" />
+  <g fill="#000" transform="translate(39 39) scale(.8)">
+    <path d="M51 47H295L260 94H81V155H203L168 203H81V309C81 329 67 344 48 345H33V65C33 55 41 47 51 47Z" />
+    <path d="M235 155L372 345H340C321 345 307 337 297 323L235 236L153 345H94L235 155Z" />
+  </g>
+</svg>

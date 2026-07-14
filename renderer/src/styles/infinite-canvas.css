@@ -1046,6 +1046,12 @@
   gap: 8px;
 }
 
+@container (min-width: 1280px) {
+  .rf-action-fission-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
 .rf-action-fission-grid-card {
   position: relative;
   min-width: 0;
@@ -2218,6 +2224,74 @@
   left: 14px;
   bottom: 14px;
   z-index: 24;
+}
+
+.rf-canvas-save-status {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 24;
+  width: auto;
+  height: 24px;
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 3px 9px;
+  color: var(--text-secondary);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.rf-canvas-save-status:hover:not(:disabled),
+.rf-canvas-save-status:focus-visible {
+  border-color: var(--border-subtle);
+  background: var(--surface-card);
+}
+
+.rf-canvas-save-status:active:not(:disabled) {
+  transform: none;
+}
+
+.rf-canvas-save-status:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.rf-canvas-save-status__dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.rf-canvas-save-status--saved {
+  color: var(--status-success-text);
+}
+
+.rf-canvas-save-status--saved:hover:not(:disabled),
+.rf-canvas-save-status--saved:focus-visible {
+  color: var(--status-success-text);
+}
+
+.rf-canvas-save-status--unsaved,
+.rf-canvas-save-status--saving {
+  color: var(--status-warning-text);
+}
+
+.rf-canvas-save-status--unsaved:hover:not(:disabled),
+.rf-canvas-save-status--unsaved:focus-visible,
+.rf-canvas-save-status--saving:focus-visible {
+  color: var(--status-warning-text);
 }
 
 .rf-native-canvas--readonly .react-flow__node,

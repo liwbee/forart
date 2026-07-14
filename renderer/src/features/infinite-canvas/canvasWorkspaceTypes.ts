@@ -6,6 +6,7 @@ import {
   type NativeCanvasNode,
   type NativeCanvasNodeKind,
 } from "./nativeCanvas";
+import { canvasSnapshotForStorage } from "./canvasSnapshotSemantics";
 
 export interface CanvasRecord {
   id: string;
@@ -13,6 +14,7 @@ export interface CanvasRecord {
   projectId: string;
   createdAt: number;
   updatedAt: number;
+  revision: number;
   nodeCount: number;
 }
 
@@ -57,6 +59,7 @@ function recordOf(input: unknown): CanvasRecord | null {
     projectId: String(value.projectId || ""),
     createdAt: timestampOf(value.createdAt),
     updatedAt: timestampOf(value.updatedAt || value.uploadedAt || value.createdAt),
+    revision: Math.max(1, Number(value.revision || 1)),
     nodeCount: Number(value.nodeCount || 0),
   };
 }
@@ -172,12 +175,17 @@ function normalizeNode(input: unknown): NativeCanvasNode | null {
     imageNaturalWidth: Number(data.imageNaturalWidth || value.imageNaturalWidth || 0) || undefined,
     imageNaturalHeight: Number(data.imageNaturalHeight || value.imageNaturalHeight || 0) || undefined,
     generationError: String(data.generationError || value.generationError || "") || undefined,
+    generationTaskId: String(data.generationTaskId || "") || undefined,
     generationRemoteTaskId: String(
       data.generationRemoteTaskId
       || (data.generationTask && typeof data.generationTask === "object"
         ? (data.generationTask as Record<string, unknown>).upstreamTaskId
         : ""),
     ) || undefined,
+    imageGenerationBackend: data.imageGenerationBackend === "libtv" ? "libtv" : "api",
+    libtvImageGeneration: data.libtvImageGeneration && typeof data.libtvImageGeneration === "object"
+      ? data.libtvImageGeneration as NativeCanvasNode["data"]["libtvImageGeneration"]
+      : undefined,
     actionFission: (data.actionFission || value.actionFission) as NativeCanvasNode["data"]["actionFission"],
   });
   const width = Number(value.width ?? value.w ?? 0);
@@ -239,14 +247,5 @@ export function normalizeCanvasDocument(input: unknown): NativeCanvasDocument | 
 }
 
 export function snapshotForStorage(snapshot: NativeCanvasSnapshot) {
-  return {
-    nodes: snapshot.nodes.map((node) => {
-      const data = { ...node.data };
-      delete data.generationTask;
-      return { ...node, data, selected: false };
-    }),
-    connections: snapshot.edges.map((edge) => ({ ...edge, selected: false })),
-    groups: [],
-    viewport: { x: snapshot.viewport.x, y: snapshot.viewport.y, scale: snapshot.viewport.zoom },
-  };
+  return canvasSnapshotForStorage(snapshot);
 }

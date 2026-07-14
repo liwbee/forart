@@ -140,14 +140,14 @@ body {
   align-items: stretch;
   justify-content: flex-end;
   color: var(--text-secondary);
-  background: color-mix(in srgb, var(--surface-panel) 88%, var(--surface-app));
-  border-bottom: 1px solid var(--border-subtle);
+  background: var(--sidebar);
+  border-bottom: 0;
   user-select: none;
   -webkit-app-region: drag;
 }
 
 :root.theme-dark .window-titlebar {
-  background: color-mix(in srgb, var(--surface-app) 74%, var(--foreground) 6%);
+  background: var(--sidebar);
 }
 
 .window-titlebar-spacer {
@@ -173,19 +173,19 @@ body {
 .window-titlebar-update {
   align-self: center;
   flex: 0 1 auto;
-  min-width: 118px;
-  max-width: 220px;
-  height: 26px;
+  min-width: 102px;
+  max-width: 188px;
+  height: 22px;
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
-  padding: 0 var(--space-3) 0 0;
+  padding: 0 var(--space-2) 0 0;
   color: var(--text-primary);
   background: color-mix(in srgb, var(--surface-card) 86%, var(--surface-app));
   box-shadow: none;
-  margin-right: 6px;
+  margin-right: 4px;
   cursor: pointer;
   -webkit-app-region: no-drag;
   transition:
@@ -225,6 +225,8 @@ body {
 .window-titlebar-update-label {
   min-width: 0;
   overflow: hidden;
+  font-size: 11px;
+  line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -274,6 +276,14 @@ body {
   font-size: 11px;
   font-weight: 900;
   line-height: 1;
+}
+
+.window-titlebar-separator[data-orientation="vertical"] {
+  width: 1px;
+  height: 18px;
+  align-self: center;
+  margin: 0 3px;
+  background: var(--border-subtle);
 }
 
 .window-titlebar-button {
@@ -2166,12 +2176,18 @@ input[type="color"]:focus-visible {
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  background: var(--sidebar);
+}
+
+.app-sidebar {
+  border-inline-end: 0;
 }
 
 .app-main-shell {
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  background: var(--sidebar);
 }
 
 .app-main-shell--electron {
@@ -2189,10 +2205,13 @@ input[type="color"]:focus-visible {
 }
 
 .brand-mark {
+  display: block;
   width: 28px;
   height: 28px;
   flex: 0 0 28px;
-  background: url("../assets/forart-logo.png") center / contain no-repeat;
+  background-color: var(--brand-mark-color);
+  -webkit-mask: url("../assets/forart-logo.svg") center / contain no-repeat;
+  mask: url("../assets/forart-logo.svg") center / contain no-repeat;
 }
 
 .app-sidebar-logo {
@@ -2229,6 +2248,12 @@ input[type="color"]:focus-visible {
   min-height: 0;
   overflow: hidden;
   padding: 0;
+  background: var(--background);
+}
+
+.app-main-shell--electron .workspace {
+  border: 1px solid var(--border-subtle);
+  border-start-start-radius: calc(var(--radius) + 4px);
 }
 
 .update-modal-backdrop {

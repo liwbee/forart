@@ -74,6 +74,7 @@ export interface NativeCanvasNodeData extends Record<string, unknown> {
   imageNaturalWidth?: number;
   imageNaturalHeight?: number;
   generationError?: string;
+  generationTaskId?: string;
   generationRemoteTaskId?: string;
   generationTask?: NativeGenerationTask;
   imageGenerationBackend?: "api" | "libtv";
@@ -85,6 +86,9 @@ export interface NativeCanvasNodeData extends Record<string, unknown> {
     modelName?: string;
     quality?: string;
     resolution?: string;
+    taskId?: string;
+    projectUuid?: string;
+    remoteNodeId?: string;
     task?: LibtvGenerationTask;
   };
   actionFission?: ActionFissionState;
@@ -175,7 +179,7 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
     resizable: {
       minWidth: 680,
       minHeight: 420,
-      maxWidth: 1280,
+      maxWidth: 1600,
       maxHeight: 1078,
     },
   },
@@ -243,12 +247,16 @@ export function createNativeCanvasNode(
 export function cloneNativeCanvasNodeData(data: NativeCanvasNodeData): NativeCanvasNodeData {
   const clonedData = { ...data };
   delete clonedData.generationTask;
+  delete clonedData.generationTaskId;
   delete clonedData.generationRemoteTaskId;
   delete clonedData.generationError;
 
   if (data.libtvImageGeneration) {
     const libtvState = { ...data.libtvImageGeneration };
     delete libtvState.task;
+    delete libtvState.taskId;
+    delete libtvState.projectUuid;
+    delete libtvState.remoteNodeId;
     delete libtvState.error;
     clonedData.libtvImageGeneration = libtvState;
   }

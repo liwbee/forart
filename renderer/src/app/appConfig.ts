@@ -183,7 +183,7 @@ export interface ForartWindowApi {
 export interface EasyToolApi {
   saveResult: (payload: { dataUrl?: string; url?: string; defaultName?: string; directory?: string }) => Promise<{ canceled: boolean; filePath?: string }>;
   listCanvases: () => Promise<{
-    canvases: Array<{ id: string; title: string; icon?: string; canvasType?: string; source?: string; projectId?: string; color?: string; pinned?: boolean; createdAt: number; updatedAt: number; nodeCount: number }>;
+    canvases: Array<{ id: string; title: string; icon?: string; canvasType?: string; source?: string; projectId?: string; color?: string; pinned?: boolean; createdAt: number; updatedAt: number; revision?: number; nodeCount: number }>;
     projects: Array<{ id: string; title: string; color?: string; sortOrder: number; createdAt: number; updatedAt: number }>;
   }>;
   createCanvas: (payload: { title?: string; icon?: string; canvasType?: string; source?: string; projectId?: string; nodes?: unknown[]; connections?: unknown[]; groups?: unknown[]; viewport?: unknown }) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
@@ -212,6 +212,7 @@ export interface EasyToolApi {
   openCanvasCacheRoot: () => Promise<{ ok: true }>;
   getGenerationTask: (taskId: string) => Promise<unknown | null>;
   createGenerationTask: (payload: unknown) => Promise<unknown>;
+  createGenerationTasks: (payloads: unknown[]) => Promise<unknown[]>;
   updateGenerationTask: (taskId: string, patch: unknown) => Promise<unknown>;
   resumeGenerationTask: (taskId: string, payload?: unknown) => Promise<unknown>;
   recoverGenerationTask: (payload: unknown) => Promise<unknown>;
@@ -486,9 +487,9 @@ export interface LibtvApi {
   recoverImageTask: (payload: {
     canvasId: string;
     nodeId: string;
-    rowId: string;
+    rowId?: string;
     taskId: string;
-    target: { type: "actionFissionRow"; nodeId: string; rowId: string };
+    target: { type: "imageGenerator"; nodeId: string } | { type: "actionFissionRow"; nodeId: string; rowId: string };
     projectUuid?: string;
     remoteNodeId?: string;
   }) => Promise<LibtvGenerationTask | null>;

@@ -98,6 +98,14 @@ interface PasteSequence {
 const PASTE_POINTER_RESET_DISTANCE = 8;
 const PASTE_CASCADE_OFFSET = 24;
 
+export type CanvasSaveStatus = "saved" | "unsaved" | "saving";
+
+const SAVE_STATUS_LABEL_KEYS: Record<CanvasSaveStatus, string> = {
+  saved: "infiniteCanvas:saveStatusSaved",
+  unsaved: "infiniteCanvas:saveStatusUnsaved",
+  saving: "infiniteCanvas:saveStatusSaving",
+};
+
 function isEditingTarget(target: EventTarget | null) {
   return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
@@ -201,12 +209,14 @@ function NativeCanvasToolbar({
   );
 }
 
-function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onSnapshotChange, readOnly }: {
+function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onSnapshotChange, onSave, readOnly, saveStatus }: {
   canvasId: string;
   imageDownloadPath?: string;
   initialSnapshot: NativeCanvasSnapshot;
   onSnapshotChange?: (snapshot: NativeCanvasSnapshot) => void;
+  onSave?: () => void | Promise<void>;
   readOnly: boolean;
+  saveStatus: CanvasSaveStatus;
 }) {
   const { t } = useTranslation();
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -1013,6 +1023,21 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
           }}
         /> : null}
 
+        <Button
+          type="button"
+          variant="ghost"
+          className={`rf-canvas-save-status rf-canvas-save-status--${saveStatus}`}
+          disabled={!onSave || saveStatus === "saving"}
+          aria-label={t("infiniteCanvas:saveCanvas")}
+          aria-live="polite"
+          aria-atomic="true"
+          title={t("infiniteCanvas:saveCanvas")}
+          onClick={() => void onSave?.()}
+        >
+          <span className="rf-canvas-save-status__dot" aria-hidden="true" />
+          <span>{t(SAVE_STATUS_LABEL_KEYS[saveStatus])}</span>
+        </Button>
+
         <NativeCanvasToolbar
         readOnly={readOnly}
         libraryOpen={libraryOpen}
@@ -1044,15 +1069,17 @@ interface ReactFlowCanvasPageProps {
   imageDownloadPath?: string;
   initialSnapshot?: NativeCanvasSnapshot;
   onSnapshotChange?: (snapshot: NativeCanvasSnapshot) => void;
+  onSave?: () => void | Promise<void>;
   readOnly?: boolean;
+  saveStatus: CanvasSaveStatus;
 }
 
-export function ReactFlowCanvasPage({ canvasId, imageDownloadPath, initialSnapshot = emptyCanvasSnapshot(), onSnapshotChange, readOnly = false }: ReactFlowCanvasPageProps) {
+export function ReactFlowCanvasPage({ canvasId, imageDownloadPath, initialSnapshot = emptyCanvasSnapshot(), onSnapshotChange, onSave, readOnly = false, saveStatus }: ReactFlowCanvasPageProps) {
   const { t } = useTranslation();
   return (
     <section className="infinite-canvas-page" aria-label={t("infiniteCanvas:title")}>
       <ReactFlowProvider>
-        <NativeCanvasSurface canvasId={canvasId} imageDownloadPath={imageDownloadPath} initialSnapshot={initialSnapshot} onSnapshotChange={onSnapshotChange} readOnly={readOnly} />
+        <NativeCanvasSurface canvasId={canvasId} imageDownloadPath={imageDownloadPath} initialSnapshot={initialSnapshot} onSnapshotChange={onSnapshotChange} onSave={onSave} readOnly={readOnly} saveStatus={saveStatus} />
       </ReactFlowProvider>
     </section>
   );

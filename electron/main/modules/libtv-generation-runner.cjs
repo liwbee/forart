@@ -184,27 +184,36 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
     return task?.target?.type === 'actionFissionRow' && task.target.nodeId && task.target.rowId;
   }
 
-  function writeActionFissionAnchor(task, patch = {}) {
-    if (!isActionFissionTask(task)) return;
-    canvasStore?.setActionFissionRowLibtvAnchor(task.canvasId, task.target.nodeId, task.target.rowId, {
+  function writeTaskAnchor(task, patch = {}) {
+    if (!task?.canvasId || !task.target?.nodeId) return;
+    const payload = {
       taskId: task.id,
       projectUuid: patch.projectUuid || task.projectUuid,
       remoteNodeId: patch.remoteNodeId || task.remoteNodeId,
-    });
+    };
+    if (isActionFissionTask(task)) {
+      canvasStore?.setActionFissionRowLibtvAnchor(task.canvasId, task.target.nodeId, task.target.rowId, payload);
+    } else {
+      canvasStore?.setLibtvGenerationTaskAnchor(task.canvasId, task.target.nodeId, payload);
+    }
   }
 
-  function writeActionFissionTerminal(task, status, result, error) {
-    if (!isActionFissionTask(task)) return;
-    canvasStore?.completeActionFissionRow({
+  function writeTaskTerminal(task, status, result, error) {
+    if (!task?.canvasId || !task.target?.nodeId) return;
+    const payload = {
       backend: 'libtv',
       canvasId: task.canvasId,
       nodeId: task.target.nodeId,
-      rowId: task.target.rowId,
       taskId: task.id,
       status,
       result,
       error,
-    });
+    };
+    if (isActionFissionTask(task)) {
+      canvasStore?.completeActionFissionRow({ ...payload, rowId: task.target.rowId });
+    } else {
+      canvasStore?.completeLibtvGenerationNode(payload);
+    }
   }
   async function prepareReferenceFile(url, index) {
     const localPath = assetStore.resolveAssetUrl(url);
@@ -374,7 +383,7 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
       messageCode: job.referenceImages.length ? 'libtv.referencesUploading' : 'libtv.nodeCreating',
       messageParams: null,
     });
-    writeActionFissionAnchor(task, { projectUuid: project.projectUuid });
+    writeTaskAnchor(task, { projectUuid: project.projectUuid });
 
     const createdAt = Date.now();
     const runId = createRunId(createdAt);
@@ -426,7 +435,7 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
       remoteNodeId = extractNodeId(created.payload, created.stdout);
       if (!remoteNodeId) throw new Error('LibTV image node creation did not return a node id.');
       taskStore.updateTask(task.id, { remoteNodeId });
-      writeActionFissionAnchor(task, { projectUuid: project.projectUuid, remoteNodeId });
+      writeTaskAnchor(task, { projectUuid: project.projectUuid, remoteNodeId });
       for (const referenceNodeId of remoteReferenceNodeIds) {
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
         await libtv.connectLeft(project.projectUuid, remoteNodeId, referenceNodeId);
@@ -507,7 +516,7 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
       messageCode: payload.queueKey ? 'libtv.queueWaiting' : 'libtv.generationPreparing',
       messageParams: null,
     });
-    writeActionFissionAnchor(task);
+    writeTaskAnchor(task);
 
     const execute = async () => {
       const queued = taskStore.getTask(task.id);
@@ -520,7 +529,7 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
         const current = taskStore.getTask(task.id);
         if (!current || current.status === 'interrupted') return;
         const completed = taskStore.updateTask(task.id, { status: 'succeeded', message: '', messageCode: '', messageParams: null, error: '', result });
-        writeActionFissionTerminal(completed, 'succeeded', result);
+        writeTaskTerminal(completed, 'succeeded', result);
       } catch (error) {
         const current = taskStore.getTask(task.id);
         if (!current || current.status === 'interrupted') return;
@@ -532,7 +541,7 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
           messageParams: null,
           error: interrupted ? '' : error instanceof Error ? error.message : String(error),
         });
-        writeActionFissionTerminal(completed, completed.status, undefined, completed.error);
+        writeTaskTerminal(completed, completed.status, undefined, completed.error);
       } finally {
         activeControllers.delete(task.id);
       }
@@ -563,20 +572,18 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
     const projectUuid = firstString(payload.projectUuid);
     const remoteNodeId = firstString(payload.remoteNodeId);
     if (!projectUuid || !remoteNodeId) {
-      canvasStore?.completeActionFissionRow({
-        backend: 'libtv',
+      writeTaskTerminal({
+        id: taskId,
         canvasId: payload.canvasId,
         nodeId: payload.nodeId,
-        rowId: payload.rowId,
-        taskId,
-        status: 'interrupted',
-      });
+        target: payload.target || { type: 'imageGenerator', nodeId: payload.nodeId },
+      }, 'interrupted');
       return null;
     }
     const task = taskStore.createTask({
       ...payload,
       id: taskId,
-      target: payload.target || { type: 'actionFissionRow', nodeId: payload.nodeId, rowId: payload.rowId },
+      target: payload.target || { type: 'imageGenerator', nodeId: payload.nodeId },
       projectUuid,
       remoteNodeId,
       status: 'running',
@@ -584,7 +591,7 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
       messageCode: 'libtv.recovering',
       messageParams: null,
     });
-    writeActionFissionAnchor(task, { projectUuid, remoteNodeId });
+    writeTaskAnchor(task, { projectUuid, remoteNodeId });
     const controller = new AbortController();
     activeControllers.set(task.id, controller);
     void (async () => {
@@ -602,7 +609,7 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
         const current = taskStore.getTask(task.id);
         if (!current || current.status === 'interrupted') return;
         const completed = taskStore.updateTask(task.id, { status: 'succeeded', message: '', messageCode: '', messageParams: null, error: '', result });
-        writeActionFissionTerminal(completed, 'succeeded', result);
+        writeTaskTerminal(completed, 'succeeded', result);
       } catch (error) {
         const current = taskStore.getTask(task.id);
         if (!current || current.status === 'interrupted') return;
@@ -614,7 +621,7 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
           messageParams: null,
           error: interrupted ? '' : error instanceof Error ? error.message : String(error),
         });
-        writeActionFissionTerminal(completed, completed.status, undefined, completed.error);
+        writeTaskTerminal(completed, completed.status, undefined, completed.error);
       } finally {
         activeControllers.delete(task.id);
       }
@@ -639,7 +646,7 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
     activeControllers.get(taskId)?.abort();
     activeControllers.delete(taskId);
     const stopped = taskStore?.stopTask(taskId) || null;
-    if (stopped) writeActionFissionTerminal(stopped, 'interrupted');
+    if (stopped) writeTaskTerminal(stopped, 'interrupted');
     return stopped;
   }
 
@@ -649,7 +656,49 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
       ...payload,
       nodes: payload.nodes.map((node) => {
         const data = node?.data && typeof node.data === 'object' ? { ...node.data } : {};
-        if (!data.actionFission || !Array.isArray(data.actionFission.rows)) return node;
+        const nodeId = String(node?.id || '');
+        const nodeTask = taskStore?.latestTaskForTarget?.(canvasId, { type: 'imageGenerator', nodeId });
+        const state = data.libtvImageGeneration && typeof data.libtvImageGeneration === 'object'
+          ? { ...data.libtvImageGeneration }
+          : nodeTask ? {} : null;
+        if (state) {
+          delete state.task;
+          if (nodeTask && ['queued', 'preparing', 'uploading', 'running'].includes(nodeTask.status)) {
+            state.taskId = nodeTask.id;
+            if (nodeTask.projectUuid) state.projectUuid = nodeTask.projectUuid;
+            if (nodeTask.remoteNodeId) state.remoteNodeId = nodeTask.remoteNodeId;
+            state.error = '';
+          } else if (nodeTask) {
+            delete state.taskId;
+            delete state.projectUuid;
+            delete state.remoteNodeId;
+            if (nodeTask.status === 'succeeded' && nodeTask.result?.localUrl) {
+              data.generatedImages = [{
+                url: String(nodeTask.result.url || ''),
+                localUrl: String(nodeTask.result.localUrl || ''),
+                thumbUrl: String(nodeTask.result.thumbUrl || ''),
+                fileName: String(nodeTask.result.fileName || ''),
+                width: Number(nodeTask.result.width || 0) || undefined,
+                height: Number(nodeTask.result.height || 0) || undefined,
+                downloadState: 'pending',
+              }];
+              data.multiImageExpanded = false;
+              delete data.multiImageCollapsedSize;
+              delete data.imageUrl;
+              delete data.thumbUrl;
+              data.label = String(nodeTask.result.fileName || data.label || 'Generated image');
+              delete data.outputDownloadState;
+              delete data.outputDownloadedAt;
+              state.error = '';
+            } else if (nodeTask.status === 'failed') {
+              state.error = nodeTask.error || 'LibTV generation failed.';
+            } else {
+              state.error = '';
+            }
+          }
+          data.libtvImageGeneration = state;
+        }
+        if (!data.actionFission || !Array.isArray(data.actionFission.rows)) return { ...node, data };
         const rows = data.actionFission.rows.map((sourceRow) => {
           const row = sourceRow && typeof sourceRow === 'object' ? { ...sourceRow } : {};
           delete row.libtvTask;

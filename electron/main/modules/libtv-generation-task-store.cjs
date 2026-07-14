@@ -8,6 +8,21 @@ function createTaskId() {
   return `libtv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function normalizeTarget(input = {}, nodeId = '') {
+  const normalizedNodeId = safeString(input?.nodeId || nodeId);
+  if (input?.type === 'actionFissionRow') {
+    return { type: 'actionFissionRow', nodeId: normalizedNodeId, rowId: safeString(input.rowId) };
+  }
+  return { type: 'imageGenerator', nodeId: normalizedNodeId };
+}
+
+function targetKey(target = {}) {
+  const normalized = normalizeTarget(target);
+  return normalized.type === 'actionFissionRow'
+    ? `${normalized.type}:${normalized.nodeId}:${normalized.rowId}`
+    : `${normalized.type}:${normalized.nodeId}`;
+}
+
 function normalizeTask(input = {}, fallback = {}) {
   const now = Date.now();
   const status = safeString(input.status || fallback.status || 'preparing');
@@ -21,7 +36,10 @@ function normalizeTask(input = {}, fallback = {}) {
     id: safeString(input.id || fallback.id || createTaskId()),
     canvasId: safeString(input.canvasId || fallback.canvasId),
     nodeId: safeString(input.nodeId || fallback.nodeId),
-    target: input.target && typeof input.target === 'object' ? input.target : fallback.target,
+    target: normalizeTarget(
+      input.target && typeof input.target === 'object' ? input.target : fallback.target,
+      input.nodeId || fallback.nodeId,
+    ),
     queueKey: safeString(input.queueKey || fallback.queueKey),
     status: normalizedStatus,
     startedAt,
@@ -93,7 +111,15 @@ function createLibtvGenerationTaskStore() {
     return updateTask(taskId, { status: 'interrupted', message: '', error: '' });
   }
 
-  return { createTask, getTask, stopTask, updateTask };
+  function latestTaskForTarget(canvasId, target) {
+    const safeCanvasId = safeString(canvasId);
+    const safeTargetKey = targetKey(target);
+    return [...tasks.values()]
+      .filter((task) => task.canvasId === safeCanvasId && targetKey(task.target) === safeTargetKey)
+      .sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0))[0] || null;
+  }
+
+  return { createTask, getTask, latestTaskForTarget, stopTask, updateTask };
 }
 
-module.exports = { createLibtvGenerationTaskStore };
+module.exports = { createLibtvGenerationTaskStore, targetKey };

@@ -13,6 +13,7 @@
   --brand: var(--primary);
   --brand-foreground: var(--primary-foreground);
   --brand-soft: var(--secondary);
+  --brand-mark-color: #000;
   --danger: var(--destructive);
   --danger-soft: color-mix(in srgb, var(--destructive) 12%, var(--surface-card));
   --status-success: oklch(0.59 0.17 145);
@@ -120,6 +121,7 @@
 :root.dark,
 .theme-dark,
 .dark {
+  --brand-mark-color: #fff;
   --surface-control: var(--background);
   --button-functional-bg: var(--background);
   --input-bg: var(--background);

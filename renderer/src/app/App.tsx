@@ -10,6 +10,7 @@ import { SetupPage } from "./SetupPage";
 import { allowsBrowserDiagnosticRuntime, isElectronRuntime, missingElectronBridgeNames } from "./electronRuntime";
 import { UnsupportedRuntimePage } from "./UnsupportedRuntimePage";
 import { Toaster } from "../components/ui/sonner";
+import { Separator } from "../components/ui/separator";
 import { SidebarInset, SidebarProvider } from "../components/ui/sidebar";
 import { AppSidebar, AppSidebarTrigger } from "./AppSidebar";
 import { useDesktopUpdater, type DesktopUpdateStatus } from "./update/DesktopUpdater";
@@ -97,7 +98,7 @@ function WindowTitleBar({
           onClick={onUpdateClick}
           onDoubleClick={(event) => event.stopPropagation()}
         >
-          <UpdateIcon className="window-titlebar-update-icon" aria-hidden="true" size={14} />
+          <UpdateIcon className="window-titlebar-update-icon" aria-hidden="true" size={12} />
           <span className="window-titlebar-update-label">{updateButtonLabel}</span>
         </button>
         <button
@@ -120,6 +121,7 @@ function WindowTitleBar({
           <Languages size={15} aria-hidden="true" />
           <span>{languageCode}</span>
         </button>
+        <Separator className="window-titlebar-separator" orientation="vertical" />
         <button className="window-titlebar-button" type="button" aria-label={t("app:minimizeWindow")} title={t("app:minimizeWindow")} onClick={() => void window.forartWindow?.minimize()}>
           <span className="window-caption-glyph" aria-hidden="true">&#xE921;</span>
         </button>

@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('easyTool', {
   openCanvasCacheRoot: () => ipcRenderer.invoke('canvas-cache:open-root'),
   getGenerationTask: (taskId) => ipcRenderer.invoke('generation-tasks:get', taskId),
   createGenerationTask: (payload) => ipcRenderer.invoke('generation-tasks:create', payload),
+  createGenerationTasks: (payloads) => ipcRenderer.invoke('generation-tasks:create-many', payloads),
   updateGenerationTask: (taskId, patch) => ipcRenderer.invoke('generation-tasks:update', taskId, patch),
   resumeGenerationTask: (taskId, payload) => ipcRenderer.invoke('generation-tasks:resume', taskId, payload),
   recoverGenerationTask: (payload) => ipcRenderer.invoke('generation-tasks:recover', payload),

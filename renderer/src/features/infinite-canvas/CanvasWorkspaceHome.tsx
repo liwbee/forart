@@ -1,4 +1,4 @@
-import { ArrowDownAZ, Clock3, Copy, Download, FileJson, Layers3, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
+import { ArrowDownAZ, Clock3, Copy, Download, FileJson, Layers3, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Upload, UploadCloud } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SearchInput } from "../../components/SearchInput";
@@ -27,6 +27,7 @@ interface CanvasWorkspaceHomeProps {
   canvases: CanvasRecord[];
   projects: CanvasProjectRecord[];
   localProjects: CanvasProjectRecord[];
+  sharedProjects: CanvasProjectRecord[];
   activeProjectId: string;
   busy: boolean;
   onCreateCanvas: () => void;
@@ -38,6 +39,7 @@ interface CanvasWorkspaceHomeProps {
   onExportCanvas: (canvasId: string, withResources: boolean) => void;
   onImportCanvas: () => void;
   onMoveCanvas: (canvasId: string, projectId: string) => void;
+  onUploadCanvas: (canvasId: string, projectId: string) => void;
   onOpenCanvas: (canvasId: string) => void;
   onRefresh: () => void;
   onRenameCanvas: (canvasId: string, title: string) => void;
@@ -63,6 +65,7 @@ export function CanvasWorkspaceHome({
   canvases,
   projects,
   localProjects,
+  sharedProjects,
   activeProjectId,
   busy,
   onCreateCanvas,
@@ -74,6 +77,7 @@ export function CanvasWorkspaceHome({
   onExportCanvas,
   onImportCanvas,
   onMoveCanvas,
+  onUploadCanvas,
   onOpenCanvas,
   onRefresh,
   onRenameCanvas,
@@ -256,14 +260,37 @@ export function CanvasWorkspaceHome({
                             ))}
                           </DropdownMenuSubContent>
                         </DropdownMenuSub> : null}
-                        {!readOnly ? <DropdownMenuItem onSelect={() => onExportCanvas(canvas.id, false)}>
-                          <FileJson aria-hidden="true" />
-                          {t("infiniteCanvas:exportCanvasJson")}
-                        </DropdownMenuItem> : null}
-                        {!readOnly ? <DropdownMenuItem onSelect={() => onExportCanvas(canvas.id, true)}>
-                          <Download aria-hidden="true" />
-                          {t("infiniteCanvas:exportCanvasWithResources")}
-                        </DropdownMenuItem> : null}
+                        {!readOnly && sharedCanvasesEnabled ? <DropdownMenuSub>
+                          <DropdownMenuSubTrigger>
+                            <UploadCloud aria-hidden="true" />
+                            {t("infiniteCanvas:uploadToShared")}
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent>
+                            {sharedProjects.length ? sharedProjects.map((project) => (
+                              <DropdownMenuItem key={project.id} onSelect={() => onUploadCanvas(canvas.id, project.id)}>
+                                {project.title}
+                              </DropdownMenuItem>
+                            )) : (
+                              <DropdownMenuItem disabled>{t("common:empty.noProjects")}</DropdownMenuItem>
+                            )}
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub> : null}
+                        {!readOnly ? <DropdownMenuSub>
+                          <DropdownMenuSubTrigger>
+                            <Download aria-hidden="true" />
+                            {t("infiniteCanvas:exportCanvas")}
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent>
+                            <DropdownMenuItem onSelect={() => onExportCanvas(canvas.id, false)}>
+                              <FileJson aria-hidden="true" />
+                              {t("infiniteCanvas:exportCanvasOnly")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => onExportCanvas(canvas.id, true)}>
+                              <Download aria-hidden="true" />
+                              {t("infiniteCanvas:exportCanvasWithResources")}
+                            </DropdownMenuItem>
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub> : null}
                         <ConfirmingDropdownMenuItem
                           confirmChildren={(
                             <>

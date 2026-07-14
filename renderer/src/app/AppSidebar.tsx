@@ -58,7 +58,7 @@ export function AppSidebar({
   const ThemeIcon = theme === "dark" ? Sun : Moon
 
   return (
-    <Sidebar collapsible="icon" mobileTitle={`${appTitle} ${t("app:mainNavigation")}`}>
+    <Sidebar className="app-sidebar" collapsible="icon" mobileTitle={`${appTitle} ${t("app:mainNavigation")}`}>
       <SidebarHeader className="h-[34px] justify-center px-2 py-0">
         <div className="flex h-full min-w-0 items-center gap-2 overflow-hidden pl-[14px] pr-2">
           <span className="flex size-5 shrink-0 items-center justify-center" aria-hidden="true">

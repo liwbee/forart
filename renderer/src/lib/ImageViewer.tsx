@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "../components/ui/button";
+import { cn } from "./utils";
 
 interface ImageViewerNavigation {
   index: number;
@@ -21,6 +22,11 @@ interface ImageViewerAction {
   onClick: () => void;
 }
 
+interface ImageViewerActivity {
+  state: "queued" | "running";
+  label: string;
+}
+
 interface ImageViewerProps {
   src: string;
   alt: string;
@@ -28,9 +34,10 @@ interface ImageViewerProps {
   onClose: () => void;
   navigation?: ImageViewerNavigation;
   actions?: ImageViewerAction[];
+  activity?: ImageViewerActivity;
 }
 
-export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions = [] }: ImageViewerProps) {
+export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions = [], activity }: ImageViewerProps) {
   const { t } = useTranslation();
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
   const [transform, setTransform] = useState({ scale: 1, minScale: 0.5, x: 0, y: 0 });
@@ -49,6 +56,8 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
   } | null>(null);
   const suppressBackdropClickRef = useRef(false);
   const hasNavigation = Boolean(navigation && navigation.total > 1);
+  const canNavigatePrevious = Boolean(navigation && navigation.index > 0);
+  const canNavigateNext = Boolean(navigation && navigation.index < navigation.total - 1);
   const resolutionText = naturalSize.width && naturalSize.height ? `${naturalSize.width} x ${naturalSize.height}` : "";
 
   const requestClose = useCallback(() => {
@@ -103,12 +112,12 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
         return;
       }
       if (!navigation || navigation.total <= 1) return;
-      if (event.key === "ArrowLeft") {
+      if (event.key === "ArrowLeft" && navigation.index > 0) {
         event.preventDefault();
         navigation.onPrevious();
         return;
       }
-      if (event.key === "ArrowRight") {
+      if (event.key === "ArrowRight" && navigation.index < navigation.total - 1) {
         event.preventDefault();
         navigation.onNext();
       }
@@ -247,7 +256,7 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
       >
         {isReady ? (
           <div
-            className="model-image-viewer"
+            className={cn("model-image-viewer", activity?.state === "running" && "is-generating")}
             style={{
               width: naturalSize.width,
               height: naturalSize.height,
@@ -282,8 +291,18 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
             {resolutionText}
           </span>
         </div>
+        {activity?.state === "running" ? (
+          <div className="model-image-viewer-activity" role="status" aria-live="polite">
+            {activity.label}
+          </div>
+        ) : null}
         {(actions.length || hasNavigation) ? (
-          <div className="model-image-viewer-top-right" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+          <div className="model-image-viewer-top-center" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+            {hasNavigation && navigation ? (
+              <span className="model-image-viewer-counter" aria-label={`${navigation.index + 1} / ${navigation.total}`}>
+                {navigation.index + 1} / {navigation.total}
+              </span>
+            ) : null}
             {actions.map((action) => (
               <Button
                 key={action.id}
@@ -302,11 +321,6 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
                 <span className="model-image-viewer-tool-button__label">{action.label}</span>
               </Button>
             ))}
-            {hasNavigation && navigation ? (
-              <span className="model-image-viewer-counter" aria-label={`${navigation.index + 1} / ${navigation.total}`}>
-                {navigation.index + 1} / {navigation.total}
-              </span>
-            ) : null}
           </div>
         ) : null}
         {hasNavigation && navigation ? (
@@ -316,6 +330,7 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
               type="button"
               variant="ghost"
               size="icon-lg"
+              disabled={!canNavigatePrevious}
               aria-label={navigation.previousLabel}
               title={navigation.previousLabel}
               onPointerDown={(event) => event.stopPropagation()}
@@ -331,6 +346,7 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
               type="button"
               variant="ghost"
               size="icon-lg"
+              disabled={!canNavigateNext}
               aria-label={navigation.nextLabel}
               title={navigation.nextLabel}
               onPointerDown={(event) => event.stopPropagation()}

@@ -341,6 +341,9 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
       alt: t("infiniteCanvas:actionFissionActionPreview"),
     }] : []),
   }), [state.rows, t]);
+  const resolvedViewerImage = viewerImage
+    ? viewerImages[viewerImage.kind].find((image) => image.id === viewerImage.id) ?? viewerImage
+    : null;
   const setState = (nextState: typeof state) => actions.patchNodeData(nodeId, { actionFission: nextState });
   const canSwitchAnyRow = rowData.some(({ actions: candidates }) => candidates.length > 0);
   const referenceCount = collectImageGeneratorReferences(nodeId, canvasNodes, canvasEdges).length;
@@ -423,11 +426,83 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   }, [rowData, state.rows]);
 
   const refreshRow = (rowId: string) => {
-    setState({
+    const nextState = {
       ...state,
       rows: randomizeActionFissionRows(state.rows, candidatesByRowId, { rowIds: new Set([rowId]) }),
+    };
+    setState(nextState);
+    return nextState.rows.find((row) => row.id === rowId);
+  };
+
+  const switchViewerAction = () => {
+    if (!viewerImage || viewerImage.kind !== "action") return;
+    const nextRow = refreshRow(viewerImage.id);
+    const nextSrc = nextRow?.selectedActionAssetUrl
+      ? resolveLibraryImageUrl(nextRow.selectedActionAssetUrl)
+      : "";
+    if (!nextRow || !nextSrc) {
+      setViewerImage(null);
+      return;
+    }
+    setViewerImage({
+      id: nextRow.id,
+      kind: "action",
+      src: nextSrc,
+      alt: t("infiniteCanvas:actionFissionActionPreview"),
     });
   };
+
+  const viewerRow = viewerImage
+    ? state.rows.find((row) => row.id === viewerImage.id)
+    : undefined;
+  const viewerActivity = viewerImage?.kind === "result" && viewerRow
+    ? launchingRowIds.has(viewerRow.id) || isRowQueued(viewerRow)
+      ? {
+          state: "queued" as const,
+          label: t("infiniteCanvas:actionFissionQueued"),
+        }
+      : isRowGenerating(viewerRow)
+        ? {
+            state: "running" as const,
+            label: t("infiniteCanvas:generationInProgress"),
+          }
+        : undefined
+    : undefined;
+
+  const viewerActions = !viewerImage
+    ? []
+    : viewerImage.kind === "action"
+      ? [{
+          id: "switch-action",
+          label: t("infiniteCanvas:actionFissionRefreshAction"),
+          icon: "shuffle" as const,
+          disabled: (() => {
+            const row = state.rows.find((item) => item.id === viewerImage.id);
+            return !row
+              || !candidatesByRowId.get(row.id)?.length
+              || launchingRowIds.has(row.id)
+              || isRowRunning(row);
+          })(),
+          onClick: switchViewerAction,
+        }]
+      : [{
+          id: "rerun-result",
+          label: viewerActivity?.state === "queued"
+            ? t("infiniteCanvas:actionFissionQueued")
+            : viewerActivity?.state === "running"
+              ? t("infiniteCanvas:running")
+              : t("infiniteCanvas:actionFissionRerunImage"),
+          icon: "refresh" as const,
+          disabled: (() => {
+            const row = state.rows.find((item) => item.id === viewerImage.id);
+            return !row
+              || launchingRowIds.has(row.id)
+              || isRowRunning(row)
+              || !row.selectedActionId
+              || referenceCount < 1;
+          })(),
+          onClick: () => void actions.runActionFission(nodeId, viewerImage.id),
+        }];
 
   const downloadRow = (row: ActionFissionRow) => {
     if (downloadBusyRowId) return;
@@ -589,10 +664,12 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
       />
       {viewerImage ? (
         <ImageViewer
-          src={viewerImage.src}
-          alt={viewerImage.alt}
+          src={resolvedViewerImage?.src ?? viewerImage.src}
+          alt={resolvedViewerImage?.alt ?? viewerImage.alt}
           ariaLabel={t("infiniteCanvas:viewLargeImage")}
           onClose={() => setViewerImage(null)}
+          actions={viewerActions}
+          activity={viewerActivity}
           navigation={(() => {
             const images = viewerImages[viewerImage.kind];
             const index = images.findIndex((image) => image.id === viewerImage.id);
@@ -602,8 +679,12 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
               total: images.length,
               previousLabel: t("infiniteCanvas:previousImage"),
               nextLabel: t("infiniteCanvas:nextImage"),
-              onPrevious: () => setViewerImage(images[(index - 1 + images.length) % images.length]),
-              onNext: () => setViewerImage(images[(index + 1) % images.length]),
+              onPrevious: () => {
+                if (index > 0) setViewerImage(images[index - 1]);
+              },
+              onNext: () => {
+                if (index < images.length - 1) setViewerImage(images[index + 1]);
+              },
             };
           })()}
         />

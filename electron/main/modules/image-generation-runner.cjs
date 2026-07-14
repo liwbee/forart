@@ -730,6 +730,8 @@ function createImageGenerationRunner({ net, assetStore, canvasStore, generationT
     const task = generationTaskStore.createTask({ ...payload, status: payload.status || 'submitting' });
     if (task.target?.type === 'actionFissionRow') {
       context.canvasStore?.setActionFissionRowTaskAnchor(task.canvasId, task.target.nodeId, task.target.rowId, { taskId: task.id });
+    } else {
+      context.canvasStore?.setGenerationTaskAnchor(task.canvasId, task.target.nodeId, { taskId: task.id });
     }
     supersededTaskIds.forEach((taskId) => {
       const superseded = generationTaskStore.getTask(taskId);
@@ -765,6 +767,10 @@ function createImageGenerationRunner({ net, assetStore, canvasStore, generationT
       }
     })();
     return task;
+  }
+
+  async function startTasks(payloads = []) {
+    return Promise.all((Array.isArray(payloads) ? payloads : []).map((payload) => startTask(payload)));
   }
 
   async function resumeTask(taskId, payload = {}) {
@@ -936,10 +942,43 @@ function createImageGenerationRunner({ net, assetStore, canvasStore, generationT
           };
         }
         const task = generationTaskStore.latestTaskForTarget?.(canvasId, { type: 'imageGenerator', nodeId });
-        if (task && ['queued', 'submitting', 'running'].includes(task.status) && task.upstreamTaskId) {
-          data.generationRemoteTaskId = task.upstreamTaskId;
+        if (task && ['queued', 'submitting', 'running'].includes(task.status)) {
+          data.generationTaskId = task.id;
+          if (task.upstreamTaskId) data.generationRemoteTaskId = task.upstreamTaskId;
         } else if (task && ['succeeded', 'failed', 'interrupted', 'superseded'].includes(task.status)) {
+          delete data.generationTaskId;
           delete data.generationRemoteTaskId;
+          if (task.status === 'succeeded' && task.result?.localUrl) {
+            data.generatedImages = Array.isArray(task.result.results)
+              ? task.result.results.map((result) => ({
+                  url: String(result?.url || ''),
+                  localUrl: String(result?.localUrl || ''),
+                  thumbUrl: String(result?.thumbUrl || ''),
+                  fileName: String(result?.fileName || ''),
+                  width: Number(result?.width || 0) || undefined,
+                  height: Number(result?.height || 0) || undefined,
+                  downloadState: 'pending',
+                })).filter((result) => result.localUrl || result.url)
+              : [{
+                  url: String(task.result.url || ''),
+                  localUrl: String(task.result.localUrl || ''),
+                  thumbUrl: String(task.result.thumbUrl || ''),
+                  fileName: String(task.result.fileName || ''),
+                  width: Number(task.result.width || 0) || undefined,
+                  height: Number(task.result.height || 0) || undefined,
+                  downloadState: 'pending',
+                }];
+            data.multiImageExpanded = false;
+            delete data.multiImageCollapsedSize;
+            delete data.imageUrl;
+            delete data.thumbUrl;
+            data.label = String(task.result.fileName || data.label || 'Generated image');
+            delete data.outputDownloadState;
+            delete data.outputDownloadedAt;
+            data.generationError = '';
+          } else if (task.status === 'failed') {
+            data.generationError = task.error || 'Image generation failed.';
+          }
         }
         return { ...node, data };
       }),
@@ -981,6 +1020,7 @@ function createImageGenerationRunner({ net, assetStore, canvasStore, generationT
     recoverTask,
     resumeTask,
     startTask,
+    startTasks,
     stopTask,
     stopTasksForCanvas,
     stopTasksForNode,

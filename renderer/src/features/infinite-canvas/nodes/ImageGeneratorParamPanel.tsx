@@ -42,7 +42,6 @@ import {
 import { isNativeLibtvTaskActive } from "../libtv-generation/useNativeLibtvGeneration";
 import { ImageReferenceStrip } from "./ImageReferenceStrip";
 
-const PROMPT_COMMIT_DELAY = 250;
 
 interface ImageGeneratorParamPanelProps {
   nodeId: string;
@@ -83,34 +82,18 @@ export function ImageGeneratorParamPanel({
   const [promptDraft, setPromptDraft] = useState(() => String(data.text || ""));
   const referenceInputRef = useRef<HTMLInputElement | null>(null);
   const promptDraftRef = useRef(promptDraft);
-  const promptCommitTimerRef = useRef<number | null>(null);
   const promptFocusedRef = useRef(false);
   const promptComposingRef = useRef(false);
   const pendingPromptCommitRef = useRef<string | null>(null);
   const committedPromptRef = useRef(String(data.text || ""));
   const wasVisibleRef = useRef(visible);
 
-  const clearPromptCommitTimer = useCallback(() => {
-    if (promptCommitTimerRef.current === null) return;
-    window.clearTimeout(promptCommitTimerRef.current);
-    promptCommitTimerRef.current = null;
-  }, []);
-
   const commitPrompt = useCallback((prompt = promptDraftRef.current) => {
-    clearPromptCommitTimer();
     if (prompt === committedPromptRef.current) return;
     committedPromptRef.current = prompt;
     pendingPromptCommitRef.current = prompt;
     patchNodeData(nodeId, { text: prompt });
-  }, [clearPromptCommitTimer, nodeId, patchNodeData]);
-
-  const schedulePromptCommit = useCallback((prompt: string) => {
-    clearPromptCommitTimer();
-    promptCommitTimerRef.current = window.setTimeout(() => {
-      promptCommitTimerRef.current = null;
-      commitPrompt(prompt);
-    }, PROMPT_COMMIT_DELAY);
-  }, [clearPromptCommitTimer, commitPrompt]);
+  }, [nodeId, patchNodeData]);
 
   useEffect(() => {
     const externalPrompt = String(data.text || "");
@@ -131,10 +114,9 @@ export function ImageGeneratorParamPanel({
   }, [commitPrompt, visible]);
 
   useEffect(() => () => {
-    clearPromptCommitTimer();
     const prompt = promptDraftRef.current;
     if (prompt !== committedPromptRef.current) patchNodeData(nodeId, { text: prompt });
-  }, [clearPromptCommitTimer, nodeId, patchNodeData]);
+  }, [nodeId, patchNodeData]);
 
   useEffect(() => {
     if (!visible) {
@@ -171,7 +153,7 @@ export function ImageGeneratorParamPanel({
     data.imageResolution,
     data.imageAspectRatio,
   );
-  const libtvState = data.libtvImageGeneration || {};
+  const libtvState = useMemo(() => data.libtvImageGeneration || {}, [data.libtvImageGeneration]);
   const normalizedLibtvModels = useMemo(() => normalizeLibtvModels(libtvModels), [libtvModels]);
   const libtvModel = normalizedLibtvModels.find((item) => item.modelName === libtvState.modelName)
     || normalizedLibtvModels[0]
@@ -521,7 +503,6 @@ export function ImageGeneratorParamPanel({
                         }}
                         onCompositionStart={() => {
                           promptComposingRef.current = true;
-                          clearPromptCommitTimer();
                         }}
                         onCompositionEnd={(event) => {
                           promptComposingRef.current = false;
@@ -534,7 +515,7 @@ export function ImageGeneratorParamPanel({
                           const prompt = event.currentTarget.value;
                           promptDraftRef.current = prompt;
                           setPromptDraft(prompt);
-                          if (!promptComposingRef.current) schedulePromptCommit(prompt);
+                          if (!promptComposingRef.current) commitPrompt(prompt);
                         }}
                       />
                     </Field>
