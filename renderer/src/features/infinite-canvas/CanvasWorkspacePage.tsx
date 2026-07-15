@@ -444,6 +444,25 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     if (project) setActiveProjectId(project.id);
   });
 
+  const createSharedProject = () => void runBusy(async () => {
+    const baseUrl = serverUrl.trim().replace(/\/+$/, "");
+    if (!baseUrl) return;
+    const response = await fetch(`${baseUrl}/api/canvas-exchange/projects`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: t("infiniteCanvas:projectBaseName") }),
+    });
+    if (!response.ok) throw new Error(t("infiniteCanvas:sharedProjectCreateFailed"));
+    const payload = objectValue(await response.json());
+    const project = normalizeCanvasProject(payload.project);
+    if (!project) throw new Error(t("infiniteCanvas:sharedProjectCreateFailed"));
+    setSharedProjects((current) => [
+      project,
+      ...current.filter((item) => item.id !== project.id),
+    ].sort((left, right) => left.sortOrder - right.sortOrder));
+    setActiveSharedProjectId(project.id);
+  });
+
   const renameCanvas = (canvasId: string, title: string) => void runBusy(async () => {
     if (!window.easyTool?.updateCanvasMeta) return;
     const result = await window.easyTool.updateCanvasMeta(canvasId, { title });
@@ -481,6 +500,21 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     const result = await window.easyTool.updateCanvasProject(projectId, { title });
     const project = normalizeCanvasProject(objectValue(result).project);
     if (project) setProjects((current) => current.map((item) => item.id === project.id ? project : item));
+  });
+
+  const renameSharedProject = (projectId: string, title: string) => void runBusy(async () => {
+    const baseUrl = serverUrl.trim().replace(/\/+$/, "");
+    if (!baseUrl) return;
+    const response = await fetch(`${baseUrl}/api/canvas-exchange/projects/${encodeURIComponent(projectId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    if (!response.ok) throw new Error(t("infiniteCanvas:sharedProjectUpdateFailed"));
+    const payload = objectValue(await response.json());
+    const project = normalizeCanvasProject(payload.project);
+    if (!project) throw new Error(t("infiniteCanvas:sharedProjectUpdateFailed"));
+    setSharedProjects((current) => current.map((item) => item.id === project.id ? project : item));
   });
 
   const deleteCanvas = (canvasId: string) => void runBusy(async () => {
@@ -540,6 +574,33 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
       setShowHome(true);
     }
     await refreshWorkspace();
+  });
+
+  const deleteSharedProject = (projectId: string) => void runBusy(async () => {
+    const baseUrl = serverUrl.trim().replace(/\/+$/, "");
+    if (!baseUrl) return;
+    const response = await fetch(`${baseUrl}/api/canvas-exchange/projects/${encodeURIComponent(projectId)}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) throw new Error(t("infiniteCanvas:sharedProjectDeleteFailed"));
+    const payload = objectValue(await response.json());
+    const deletedTabIds = new Set(
+      (Array.isArray(payload.deletedCanvasIds) ? payload.deletedCanvasIds : [])
+        .map((canvasId) => `shared:${String(canvasId)}`),
+    );
+    setTabs((current) => current.filter((tab) => !deletedTabIds.has(tab.id)));
+    if (deletedTabIds.has(activeCanvasIdRef.current)) {
+      activeCanvasIdRef.current = "";
+      activeDocumentRef.current = null;
+      activeReadOnlyRef.current = false;
+      adoptSavedSnapshot(emptyCanvasSnapshot());
+      allowEmptySaveRef.current = false;
+      setActiveCanvasId("");
+      setActiveDocument(null);
+      showHomeRef.current = true;
+      setShowHome(true);
+    }
+    await refreshSharedWorkspace();
   });
 
   const duplicateCanvas = (canvasId: string) => void runBusy(async () => {
@@ -633,9 +694,9 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
           activeProjectId={homeSource === "shared" ? activeSharedProjectId : activeProjectId}
           busy={busy}
           onCreateCanvas={createCanvas}
-          onCreateProject={createProject}
+          onCreateProject={homeSource === "shared" ? createSharedProject : createProject}
           onDeleteCanvas={homeSource === "shared" ? deleteSharedCanvas : deleteCanvas}
-          onDeleteProject={deleteProject}
+          onDeleteProject={homeSource === "shared" ? deleteSharedProject : deleteProject}
           onDuplicateCanvas={duplicateCanvas}
           onCopyCanvasToLocal={copySharedCanvasToLocal}
           onExportCanvas={(id, withResources) => void runBusy(async () => {
@@ -648,7 +709,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
           onOpenCanvas={(id) => homeSource === "shared" ? void openSharedCanvas(id) : void openCanvas(id)}
           onRefresh={() => homeSource === "shared" ? void refreshSharedWorkspace() : void refreshWorkspace()}
           onRenameCanvas={homeSource === "shared" ? renameSharedCanvas : renameCanvas}
-          onRenameProject={renameProject}
+          onRenameProject={homeSource === "shared" ? renameSharedProject : renameProject}
           onReorderProjects={homeSource === "shared" ? reorderSharedProjects : reorderProjects}
           onSelectProject={homeSource === "shared" ? setActiveSharedProjectId : setActiveProjectId}
           onSourceChange={(source) => {

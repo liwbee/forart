@@ -43,6 +43,8 @@ export const APIMART_BASE_URLS = [
   "https://api.aishuch.com/v1",
 ] as const;
 
+export type LibtvActionFissionConcurrency = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+
 const APIMART_HOST_TO_BASE_URL = new Map(APIMART_BASE_URLS.map((baseUrl) => [new URL(baseUrl).host, baseUrl]));
 
 export interface ApiSettings {
@@ -50,6 +52,7 @@ export interface ApiSettings {
   defaultImageProviderId?: string;
   providerOrder?: string[];
   libtvMachineId?: string;
+  libtvActionFissionConcurrency?: LibtvActionFissionConcurrency;
 }
 
 let apiSettingsCache: ApiSettings = {
@@ -57,6 +60,7 @@ let apiSettingsCache: ApiSettings = {
   defaultImageProviderId: "",
   providerOrder: [],
   libtvMachineId: "",
+  libtvActionFissionConcurrency: 1,
 };
 let apiSettingsCacheLoaded = false;
 
@@ -254,6 +258,9 @@ function normalizeApiSettings(input: Partial<ApiSettings>): ApiSettings {
     defaultImageProviderId,
     providerOrder,
     libtvMachineId: String(input.libtvMachineId || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 32),
+    libtvActionFissionConcurrency: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(Number(input.libtvActionFissionConcurrency))
+      ? Number(input.libtvActionFissionConcurrency) as LibtvActionFissionConcurrency
+      : 1,
   };
 }
 

@@ -3,6 +3,7 @@ import {
   addEdge,
   Background,
   BackgroundVariant,
+  EdgeToolbar,
   getNodesBounds,
   MiniMap,
   ReactFlow,
@@ -13,10 +14,12 @@ import {
   useReactFlow,
   useViewport,
   type Connection,
+  type EdgeMouseHandler,
   type NodeTypes,
   type OnConnectEnd,
+  type OnNodeDrag,
 } from "@xyflow/react";
-import { Crosshair, Eye, EyeOff, Grid3X3, Images, Map as MapIcon, ZoomIn, ZoomOut } from "lucide-react";
+import { Crosshair, Eye, EyeOff, Grid3X3, Images, Map as MapIcon, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -74,6 +77,12 @@ interface ContextPoint {
   flowY: number;
 }
 
+interface EdgeToolbarPoint {
+  edgeId: string;
+  x: number;
+  y: number;
+}
+
 interface ActionFissionSettingsTarget {
   nodeId: string;
   rowId: string;
@@ -93,6 +102,16 @@ interface PasteSequence {
   count: number;
   pointer: { x: number; y: number };
   serialized: string;
+}
+
+interface AltDragCloneGesture {
+  cloneIdBySourceId: Map<string, string>;
+  clonedEdges: NativeCanvasEdge[];
+  sourceNodes: Array<{
+    id: string;
+    position: { x: number; y: number };
+    zIndex?: number;
+  }>;
 }
 
 const PASTE_POINTER_RESET_DISTANCE = 8;
@@ -234,11 +253,16 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   const [connectionsVisible, setConnectionsVisible] = useState(true);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [contextPoint, setContextPoint] = useState<ContextPoint | null>(null);
+  const [edgeToolbarPoint, setEdgeToolbarPoint] = useState<EdgeToolbarPoint | null>(null);
   const [actionFissionSettingsTarget, setActionFissionSettingsTarget] = useState<ActionFissionSettingsTarget | null>(null);
   const pasteSequenceRef = useRef<PasteSequence | null>(null);
+  const altDragCloneGestureRef = useRef<AltDragCloneGesture | null>(null);
   const historyGestureRef = useRef<NativeCanvasHistorySnapshot | null>(null);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
-  const { getEdges, getIntersectingNodes, getNodes, screenToFlowPosition } = useReactFlow<NativeCanvasNode, NativeCanvasEdge>();
+  const edgeToolbarFrameRef = useRef<number | null>(null);
+  const edgeToolbarHideTimerRef = useRef<number | null>(null);
+  const pendingEdgePointerRef = useRef<{ edgeId: string; clientX: number; clientY: number } | null>(null);
+  const { deleteElements, getEdges, getIntersectingNodes, getNodes, screenToFlowPosition } = useReactFlow<NativeCanvasNode, NativeCanvasEdge>();
   const syncSelection = useNativeCanvasInteractionStore((state) => state.syncSelection);
   const beginSelectionGesture = useNativeCanvasInteractionStore((state) => state.beginSelectionGesture);
   const endSelectionGesture = useNativeCanvasInteractionStore((state) => state.endSelectionGesture);
@@ -247,11 +271,53 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   const actionFissionSettingsRow = useMemo<ActionFissionRow | null>(() => {
     if (!actionFissionSettingsTarget) return null;
     const node = nodes.find((item) => item.id === actionFissionSettingsTarget.nodeId);
-    return node?.data.actionFission?.rows.find((row) => row.id === actionFissionSettingsTarget.rowId) || null;
+    return normalizeActionFissionState(node?.data.actionFission).rows.find((row) => row.id === actionFissionSettingsTarget.rowId) || null;
   }, [actionFissionSettingsTarget, nodes]);
 
   useEffect(() => resetInteractions, [resetInteractions]);
   useEffect(() => () => clearCanvasLaunching(canvasId), [canvasId, clearCanvasLaunching]);
+
+  const clearEdgeToolbarHide = useCallback(() => {
+    if (edgeToolbarHideTimerRef.current === null) return;
+    window.clearTimeout(edgeToolbarHideTimerRef.current);
+    edgeToolbarHideTimerRef.current = null;
+  }, []);
+
+  const scheduleEdgeToolbarHide = useCallback(() => {
+    clearEdgeToolbarHide();
+    edgeToolbarHideTimerRef.current = window.setTimeout(() => {
+      edgeToolbarHideTimerRef.current = null;
+      setEdgeToolbarPoint(null);
+    }, 320);
+  }, [clearEdgeToolbarHide]);
+
+  const trackSelectedEdge = useCallback<EdgeMouseHandler<NativeCanvasEdge>>((event, edge) => {
+    if (readOnly || !edge.selected) return;
+    clearEdgeToolbarHide();
+    pendingEdgePointerRef.current = { edgeId: edge.id, clientX: event.clientX, clientY: event.clientY };
+    if (edgeToolbarFrameRef.current !== null) return;
+    edgeToolbarFrameRef.current = window.requestAnimationFrame(() => {
+      edgeToolbarFrameRef.current = null;
+      const pending = pendingEdgePointerRef.current;
+      if (!pending) return;
+      const point = screenToFlowPosition({ x: pending.clientX, y: pending.clientY });
+      setEdgeToolbarPoint({ edgeId: pending.edgeId, x: point.x, y: point.y });
+    });
+  }, [clearEdgeToolbarHide, readOnly, screenToFlowPosition]);
+
+  const leaveSelectedEdge = useCallback<EdgeMouseHandler<NativeCanvasEdge>>((event) => {
+    const relatedTarget = event.relatedTarget;
+    if (relatedTarget instanceof Element && relatedTarget.closest(".rf-native-edge-toolbar")) {
+      clearEdgeToolbarHide();
+      return;
+    }
+    scheduleEdgeToolbarHide();
+  }, [clearEdgeToolbarHide, scheduleEdgeToolbarHide]);
+
+  useEffect(() => () => {
+    clearEdgeToolbarHide();
+    if (edgeToolbarFrameRef.current !== null) window.cancelAnimationFrame(edgeToolbarFrameRef.current);
+  }, [clearEdgeToolbarHide]);
 
   useEffect(() => {
     resetInfiniteCanvasHistory(initialSnapshot.nodes, initialSnapshot.edges);
@@ -673,7 +739,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       const orderById = new Map(orderedEdgeIds.map((edgeId, index) => [edgeId, index + 1]));
       setEdges((current) => current.map((edge) => (
         edge.target === nodeId && orderById.has(edge.id)
-          ? { ...edge, data: { ...edge.data, inputKind: "referenceImage", referenceOrder: orderById.get(edge.id) } }
+          ? { ...edge, data: { ...edge.data, referenceOrder: orderById.get(edge.id) } }
           : edge
       )));
     },
@@ -697,8 +763,14 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
         && edge.sourceHandle === (connection.sourceHandle || null)
         && edge.targetHandle === (connection.targetHandle || null)
       ))) return current;
-      const data = edgeDataForConnection(source.data.kind, target.data.kind, target.id, current);
-      if (target.data.kind === "imageGenerator" && !data) return current;
+      const data = edgeDataForConnection(
+        source.data.kind,
+        target.data.kind,
+        target.id,
+        current,
+        connection.targetHandle,
+      );
+      if ((target.data.kind === "imageGenerator" || target.data.kind === "actionFission") && !data) return current;
       return addEdge({
         ...connection,
         type: "default",
@@ -782,20 +854,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       if (readOnly || !isCanvasAvailable() || isEditingTarget(event.target)) return;
       const selectedNodes = getNodes().filter((node) => node.selected);
       if (!selectedNodes.length) return;
-      const selectedIds = new Set(selectedNodes.map((node) => node.id));
-      const payload: CanvasClipboardPayload = {
-        kind: CANVAS_CLIPBOARD_KIND,
-        version: 1,
-        nodes: selectedNodes.map((node) => ({
-          ...node,
-          data: cloneNativeCanvasNodeData(node.data),
-          position: { ...node.position },
-          selected: false,
-        })),
-        edges: getEdges()
-          .filter((edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target))
-          .map((edge) => ({ ...edge, data: edge.data ? { ...edge.data } : undefined, selected: false })),
-      };
+      const payload = createCanvasClipboardPayload(selectedNodes, getEdges());
       const serialized = JSON.stringify(payload);
       event.clipboardData?.setData(CANVAS_CLIPBOARD_MIME, serialized);
       event.clipboardData?.setData("text/plain", serialized);
@@ -831,30 +890,15 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
         const sourceBounds = getNodesBounds(payload.nodes);
         const deltaX = targetCenter.x - (sourceBounds.x + sourceBounds.width / 2);
         const deltaY = targetCenter.y - (sourceBounds.y + sourceBounds.height / 2);
-        const idMap = new Map(payload.nodes.map((node) => [node.id, `${node.data.kind}_${crypto.randomUUID()}`]));
-        const pastedNodes = payload.nodes.map((node) => ({
-          ...node,
-          id: idMap.get(node.id)!,
-          data: cloneNativeCanvasNodeData(node.data),
-          position: { x: node.position.x + deltaX, y: node.position.y + deltaY },
-          selected: true,
-        }));
-        const pastedEdges = payload.edges.map((edge) => ({
-          ...edge,
-          id: `edge_${crypto.randomUUID()}`,
-          source: idMap.get(edge.source)!,
-          target: idMap.get(edge.target)!,
-          data: edge.data ? { ...edge.data } : undefined,
-          selected: false,
-        }));
+        const pasted = instantiateCanvasClipboardPayload(payload, { x: deltaX, y: deltaY }, true);
 
         setNodes((current) => [
           ...current.map((node) => node.selected ? { ...node, selected: false } : node),
-          ...pastedNodes,
+          ...pasted.nodes,
         ]);
         setEdges((current) => [
           ...current.map((edge) => edge.selected ? { ...edge, selected: false } : edge),
-          ...pastedEdges,
+          ...pasted.edges,
         ]);
         return;
       }
@@ -880,6 +924,112 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       window.removeEventListener("paste", handlePaste);
     };
   }, [addImageFilesAtClientPoint, getEdges, getNodes, readOnly, screenToFlowPosition, setEdges, setNodes, t]);
+
+  const handleNodeDragStart = useCallback<OnNodeDrag<NativeCanvasNode>>((event, draggedNode, draggedNodes) => {
+    if (readOnly) return;
+    historyGestureRef.current = beginInfiniteCanvasHistoryGesture();
+    altDragCloneGestureRef.current = null;
+    const draggedIds = new Set([draggedNode.id, ...draggedNodes.map((node) => node.id)]);
+    const sourceNodes = getNodes().filter((node) => draggedIds.has(node.id));
+    const historyNodeById = new Map(
+      (historyGestureRef.current?.nodes || []).map((node) => [node.id, node]),
+    );
+    const sourceNodesAtDragStart = sourceNodes.map((node) => {
+      const historyNode = historyNodeById.get(node.id);
+      return historyNode ? { ...node, position: { ...historyNode.position } } : node;
+    });
+    const isAltDrag = "altKey" in event && event.altKey;
+    const cloned = isAltDrag && sourceNodesAtDragStart.length
+      ? instantiateCanvasClipboardPayload(
+          createCanvasClipboardPayload(sourceNodesAtDragStart, getEdges()),
+          { x: 0, y: 0 },
+          false,
+        )
+      : null;
+
+    if (cloned) {
+      altDragCloneGestureRef.current = {
+        cloneIdBySourceId: cloned.idMap,
+        clonedEdges: cloned.edges,
+        sourceNodes: sourceNodesAtDragStart.map((node) => ({
+          id: node.id,
+          position: { ...node.position },
+          zIndex: node.zIndex,
+        })),
+      };
+      pasteSequenceRef.current = null;
+    }
+
+    setNodes((current) => {
+      const nextZIndex = Math.max(0, ...current.map((node) => node.zIndex || 0)) + 1;
+      const elevated = current.map((node) => draggedIds.has(node.id) ? { ...node, zIndex: nextZIndex } : node);
+      return cloned ? [...elevated, ...cloned.nodes] : elevated;
+    });
+  }, [getEdges, getNodes, readOnly, setNodes]);
+
+  const handleNodeDragStop = useCallback<OnNodeDrag<NativeCanvasNode>>((_event, draggedNode, draggedNodes) => {
+    if (readOnly) return;
+    const cloneGesture = altDragCloneGestureRef.current;
+    altDragCloneGestureRef.current = null;
+
+    if (cloneGesture) {
+      const currentNodes = getNodes();
+      const currentEdges = getEdges();
+      const sourceStateById = new Map(cloneGesture.sourceNodes.map((node) => [node.id, node]));
+      const finalSourceById = new Map(
+        currentNodes
+          .filter((node) => sourceStateById.has(node.id))
+          .map((node) => [node.id, node]),
+      );
+      [draggedNode, ...draggedNodes].forEach((node) => {
+        if (sourceStateById.has(node.id)) finalSourceById.set(node.id, node);
+      });
+      const sourceIdByCloneId = new Map(
+        [...cloneGesture.cloneIdBySourceId].map(([sourceId, cloneId]) => [cloneId, sourceId]),
+      );
+      const cloneIds = new Set(sourceIdByCloneId.keys());
+      const finalNodes = currentNodes.map((node) => {
+        const sourceState = sourceStateById.get(node.id);
+        if (sourceState) {
+          return {
+            ...node,
+            position: { ...sourceState.position },
+            zIndex: sourceState.zIndex,
+            selected: false,
+            dragging: false,
+          };
+        }
+        const sourceId = sourceIdByCloneId.get(node.id);
+        if (sourceId) {
+          const finalSource = finalSourceById.get(sourceId);
+          return finalSource ? {
+            ...node,
+            position: { ...finalSource.position },
+            zIndex: finalSource.zIndex,
+            selected: true,
+            dragging: false,
+          } : node;
+        }
+        return node.selected ? { ...node, selected: false } : node;
+      });
+      const finalEdges = [
+        ...currentEdges.map((edge) => edge.selected ? { ...edge, selected: false } : edge),
+        ...cloneGesture.clonedEdges,
+      ];
+
+      setNodes(finalNodes);
+      setEdges(finalEdges);
+      syncSelection([...cloneIds]);
+      recordInfiniteCanvasHistory(finalNodes, finalEdges);
+      commitInfiniteCanvasHistoryGesture(historyGestureRef.current);
+      historyGestureRef.current = null;
+      return;
+    }
+
+    recordInfiniteCanvasHistory(getNodes(), getEdges());
+    commitInfiniteCanvasHistoryGesture(historyGestureRef.current);
+    historyGestureRef.current = null;
+  }, [getEdges, getNodes, readOnly, setEdges, setNodes, syncSelection]);
 
   return (
     <div ref={wrapperRef} className={`rf-native-canvas${readOnly ? " rf-native-canvas--readonly" : ""}`}>
@@ -920,12 +1070,15 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
               nodeTypes={NODE_TYPES}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
-              onSelectionChange={({ nodes: selectedNodes }) => {
+              onSelectionChange={({ nodes: selectedNodes, edges: selectedEdges }) => {
                 if (wrapperRef.current) {
                   wrapperRef.current.dataset.selectionCount = String(selectedNodes.length);
                 }
                 syncSelection(selectedNodes.map((node) => node.id));
+                setEdgeToolbarPoint((current) => current && selectedEdges.some((edge) => edge.id === current.edgeId) ? current : null);
               }}
+              onEdgeMouseMove={trackSelectedEdge}
+              onEdgeMouseLeave={leaveSelectedEdge}
               onConnect={readOnly ? undefined : connectNodes}
               onConnectEnd={readOnly ? undefined : connectToNodeBody}
               onSelectionStart={beginCanvasSelection}
@@ -937,21 +1090,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
                 viewportRef.current = viewport;
                 if (!readOnly) onSnapshotChange?.({ nodes, edges, viewport });
               }}
-              onNodeDragStart={(_event, draggedNode, draggedNodes) => {
-                if (readOnly) return;
-                historyGestureRef.current = beginInfiniteCanvasHistoryGesture();
-                const draggedIds = new Set([draggedNode.id, ...draggedNodes.map((node) => node.id)]);
-                setNodes((current) => {
-                  const nextZIndex = Math.max(0, ...current.map((node) => node.zIndex || 0)) + 1;
-                  return current.map((node) => draggedIds.has(node.id) ? { ...node, zIndex: nextZIndex } : node);
-                });
-              }}
-              onNodeDragStop={() => {
-                if (readOnly) return;
-                recordInfiniteCanvasHistory(getNodes(), getEdges());
-                commitInfiniteCanvasHistoryGesture(historyGestureRef.current);
-                historyGestureRef.current = null;
-              }}
+              onNodeDragStart={handleNodeDragStart}
+              onNodeDragStop={handleNodeDragStop}
               minZoom={0.1}
               maxZoom={6}
               selectionOnDrag={!readOnly}
@@ -973,6 +1113,36 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
             >
               <Background variant={BackgroundVariant.Dots} gap={28} size={1.4} />
               {minimapOpen ? <MiniMap className="rf-native-minimap" position="bottom-left" pannable zoomable ariaLabel={t("infiniteCanvas:minimap")} /> : null}
+              {edgeToolbarPoint ? (
+                <EdgeToolbar
+                  edgeId={edgeToolbarPoint.edgeId}
+                  x={edgeToolbarPoint.x}
+                  y={edgeToolbarPoint.y}
+                  isVisible
+                  alignX="center"
+                  alignY="center"
+                  className="rf-native-edge-toolbar nodrag nopan"
+                  onMouseEnter={clearEdgeToolbarHide}
+                  onMouseLeave={scheduleEdgeToolbarHide}
+                >
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="icon-xs"
+                    aria-label={t("common:actions.delete")}
+                    title={t("common:actions.delete")}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      const edgeId = edgeToolbarPoint.edgeId;
+                      setEdgeToolbarPoint(null);
+                      void deleteElements({ edges: [{ id: edgeId }] });
+                    }}
+                  >
+                    <X aria-hidden="true" />
+                  </Button>
+                </EdgeToolbar>
+              ) : null}
             </ReactFlow>
           </div>
         </ContextMenuTrigger>
@@ -1006,17 +1176,15 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
           onOpenChange={(open) => {
             if (!open) setActionFissionSettingsTarget(null);
           }}
-          onApply={(projectId, includeTagIds, excludeTagIds, selectedAction) => {
+          onApply={(groups, selection) => {
             if (!actionFissionSettingsTarget) return;
             setNodes((current) => current.map((node) => {
               if (node.id !== actionFissionSettingsTarget.nodeId) return node;
               const actionFission = configureActionFissionRow(
                 normalizeActionFissionState(node.data.actionFission),
                 actionFissionSettingsTarget.rowId,
-                projectId,
-                includeTagIds,
-                excludeTagIds,
-                selectedAction,
+                groups,
+                selection,
               );
               return { ...node, data: { ...node.data, actionFission } };
             }));
@@ -1054,6 +1222,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
         onToggleConnections={() => {
           if (connectionsVisible) {
             setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
+            setEdgeToolbarPoint(null);
           }
           setConnectionsVisible((current) => !current);
         }}
@@ -1072,6 +1241,54 @@ interface ReactFlowCanvasPageProps {
   onSave?: () => void | Promise<void>;
   readOnly?: boolean;
   saveStatus: CanvasSaveStatus;
+}
+
+function createCanvasClipboardPayload(
+  sourceNodes: NativeCanvasNode[],
+  edges: NativeCanvasEdge[],
+): CanvasClipboardPayload {
+  const sourceIds = new Set(sourceNodes.map((node) => node.id));
+  return {
+    kind: CANVAS_CLIPBOARD_KIND,
+    version: 1,
+    nodes: sourceNodes.map((node) => ({
+      ...node,
+      data: cloneNativeCanvasNodeData(node.data),
+      position: { ...node.position },
+      selected: false,
+      dragging: false,
+    })),
+    edges: edges
+      .filter((edge) => sourceIds.has(edge.source) && sourceIds.has(edge.target))
+      .map((edge) => ({ ...edge, data: edge.data ? { ...edge.data } : undefined, selected: false })),
+  };
+}
+
+function instantiateCanvasClipboardPayload(
+  payload: CanvasClipboardPayload,
+  delta: { x: number; y: number },
+  selected: boolean,
+) {
+  const idMap = new Map(payload.nodes.map((node) => [node.id, `${node.data.kind}_${crypto.randomUUID()}`]));
+  return {
+    idMap,
+    nodes: payload.nodes.map((node) => ({
+      ...node,
+      id: idMap.get(node.id)!,
+      data: cloneNativeCanvasNodeData(node.data),
+      position: { x: node.position.x + delta.x, y: node.position.y + delta.y },
+      selected,
+      dragging: false,
+    })),
+    edges: payload.edges.map((edge) => ({
+      ...edge,
+      id: `edge_${crypto.randomUUID()}`,
+      source: idMap.get(edge.source)!,
+      target: idMap.get(edge.target)!,
+      data: edge.data ? { ...edge.data } : undefined,
+      selected: false,
+    })),
+  };
 }
 
 export function ReactFlowCanvasPage({ canvasId, imageDownloadPath, initialSnapshot = emptyCanvasSnapshot(), onSnapshotChange, onSave, readOnly = false, saveStatus }: ReactFlowCanvasPageProps) {

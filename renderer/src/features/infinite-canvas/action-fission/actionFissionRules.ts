@@ -1,6 +1,6 @@
 import type { ActionEntry } from "../../action-library/types";
-import { actionPatchFromEntry } from "./actionFissionState";
-import type { ActionFissionRow } from "./actionFissionTypes";
+import { actionPatchFromCategoryGroup } from "./actionFissionState";
+import type { ActionFissionCategoryGroup, ActionFissionRow } from "./actionFissionTypes";
 
 export interface ActionFissionRunReadiness {
   canRun: boolean;
@@ -29,6 +29,22 @@ export function getActionFissionRunReadiness(
   };
 }
 
+export interface ActionFissionCategoryCandidates {
+  group: ActionFissionCategoryGroup;
+  actions: readonly ActionEntry[];
+}
+
+export function actionFissionReferenceImages(
+  row: ActionFissionRow,
+  primaryReferences: readonly string[],
+  additionalReferences: readonly string[],
+) {
+  const references = row.useAdditionalReferences
+    ? [...primaryReferences, ...additionalReferences]
+    : primaryReferences;
+  return [...new Set(references.map((reference) => reference.trim()).filter(Boolean))];
+}
+
 export function pickRandomAction(
   candidates: readonly ActionEntry[],
   previousActionId: string | undefined,
@@ -54,14 +70,17 @@ export function pickRandomAction(
 
 export function randomizeActionFissionRows(
   rows: readonly ActionFissionRow[],
-  candidatesByRowId: ReadonlyMap<string, readonly ActionEntry[]>,
+  candidatesByRowId: ReadonlyMap<string, readonly ActionFissionCategoryCandidates[]>,
   options: RandomizeRowsOptions = {},
 ) {
   const random = options.random || Math.random;
+  const candidateCount = (rowId: string) => new Set(
+    (candidatesByRowId.get(rowId) || []).flatMap(({ actions }) => actions).map((action) => action.id),
+  ).size;
   const targetRows = rows
-    .filter((row) => (options.rowIds?.has(row.id) ?? true) && (candidatesByRowId.get(row.id)?.length || 0) > 0)
+    .filter((row) => (options.rowIds?.has(row.id) ?? true) && candidateCount(row.id) > 0)
     .sort((left, right) => (
-      (candidatesByRowId.get(left.id)?.length || 0) - (candidatesByRowId.get(right.id)?.length || 0)
+      candidateCount(left.id) - candidateCount(right.id)
     ));
   const targetIds = new Set(targetRows.map((row) => row.id));
   const reservedActionIds = new Set(
@@ -69,22 +88,40 @@ export function randomizeActionFissionRows(
       .filter((row) => !targetIds.has(row.id) && row.selectedActionId)
       .map((row) => row.selectedActionId as string),
   );
-  const selectedByRowId = new Map<string, ActionEntry>();
+  const selectedByRowId = new Map<string, { group: ActionFissionCategoryGroup; action: ActionEntry }>();
 
   for (const row of targetRows) {
-    const selected = pickRandomAction(
-      candidatesByRowId.get(row.id) || [],
+    const eligibleGroups = (candidatesByRowId.get(row.id) || []).map(({ group, actions }) => ({
+      group,
+      actions: [...actions],
+    })).filter(({ actions }) => actions.length > 0);
+    if (!eligibleGroups.length) continue;
+    const uniqueAlternativeGroups = eligibleGroups.filter(({ actions }) => actions.some((action) => (
+      action.id !== row.selectedActionId && !reservedActionIds.has(action.id)
+    )));
+    const alternativeGroups = eligibleGroups.filter(({ group }) => group.id !== row.selectedCategoryGroupId);
+    const uniqueGroups = eligibleGroups.filter(({ actions }) => actions.some((action) => !reservedActionIds.has(action.id)));
+    const preferredGroups = uniqueAlternativeGroups.length
+      ? uniqueAlternativeGroups
+      : alternativeGroups.length
+        ? alternativeGroups
+        : uniqueGroups.length
+          ? uniqueGroups
+          : eligibleGroups;
+    const selectedGroup = preferredGroups[Math.floor(random() * preferredGroups.length)] || preferredGroups[0];
+    const selectedAction = pickRandomAction(
+      selectedGroup.actions,
       row.selectedActionId,
       reservedActionIds,
       random,
     );
-    if (!selected) continue;
-    selectedByRowId.set(row.id, selected);
-    reservedActionIds.add(selected.id);
+    if (!selectedAction) continue;
+    selectedByRowId.set(row.id, { group: selectedGroup.group, action: selectedAction });
+    reservedActionIds.add(selectedAction.id);
   }
 
   return rows.map((row) => {
     const selected = selectedByRowId.get(row.id);
-    return selected ? { ...row, ...actionPatchFromEntry(selected) } : row;
+    return selected ? { ...row, ...actionPatchFromCategoryGroup(selected.group, selected.action) } : row;
   });
 }

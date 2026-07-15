@@ -71,6 +71,7 @@ export function ApiSettingsPanel() {
   const [providerOrder, setProviderOrder] = useState<string[]>(() => normalizeApiProviderOrder(initialSettings.providerOrder, initialSettings.providers));
   const [defaultImageProviderId, setDefaultImageProviderId] = useState(initialSettings.defaultImageProviderId || "");
   const [libtvMachineId, setLibtvMachineId] = useState(initialSettings.libtvMachineId || "");
+  const [libtvActionFissionConcurrency, setLibtvActionFissionConcurrency] = useState(initialSettings.libtvActionFissionConcurrency ?? 1);
   const [selectedProviderId, setSelectedProviderId] = useState(APIMART_PROVIDER_ID);
   const [activePane, setActivePane] = useState<ApiSettingsPane>("apimart");
   const [action, setAction] = useState<ApiAction>("");
@@ -101,6 +102,7 @@ export function ApiSettingsPanel() {
         setProviderOrder(normalizeApiProviderOrder(settings.providerOrder, settings.providers));
         setDefaultImageProviderId(settings.defaultImageProviderId || "");
         setLibtvMachineId(settings.libtvMachineId || "");
+        setLibtvActionFissionConcurrency(settings.libtvActionFissionConcurrency ?? 1);
         setSelectedProviderId((current) => settings.providers.some((provider) => provider.id === current) ? current : APIMART_PROVIDER_ID);
         setSettingsLoaded(true);
       })
@@ -120,14 +122,14 @@ export function ApiSettingsPanel() {
       return;
     }
     const timeout = window.setTimeout(() => {
-      void saveApiSettings({ providers, defaultImageProviderId, providerOrder: nextOrder, libtvMachineId })
+      void saveApiSettings({ providers, defaultImageProviderId, providerOrder: nextOrder, libtvMachineId, libtvActionFissionConcurrency })
         .catch((error) => setStatus({
           tone: "error",
           text: t("settings:apiSaveFailed", { message: error instanceof Error ? error.message : String(error) }),
         }));
     }, 350);
     return () => window.clearTimeout(timeout);
-  }, [defaultImageProviderId, libtvMachineId, providerOrder, providers, settingsLoaded, t]);
+  }, [defaultImageProviderId, libtvActionFissionConcurrency, libtvMachineId, providerOrder, providers, settingsLoaded, t]);
 
   useEffect(() => {
     if (providers.length && !providers.some((provider) => provider.id === selectedProviderId)) setSelectedProviderId(providers[0].id);
@@ -391,7 +393,14 @@ export function ApiSettingsPanel() {
         </aside>
 
         <main className="settings-api-content">
-          {activePane === "libtv" ? <LibtvSettingsPane machineId={libtvMachineId} onMachineIdChange={setLibtvMachineId} /> : activePane === "apimart" && selectedProvider?.id === APIMART_PROVIDER_ID ? (
+          {activePane === "libtv" ? (
+            <LibtvSettingsPane
+              machineId={libtvMachineId}
+              actionFissionConcurrency={libtvActionFissionConcurrency}
+              onMachineIdChange={setLibtvMachineId}
+              onActionFissionConcurrencyChange={setLibtvActionFissionConcurrency}
+            />
+          ) : activePane === "apimart" && selectedProvider?.id === APIMART_PROVIDER_ID ? (
             <><ApimartSettingsPane provider={selectedProvider} fetchingModels={action === "fetch"} status={status} onProviderChange={patchSelectedProvider} onFetchModels={fetchModels} />{renderModelList("image")}{renderModelList("chat")}{renderModelList("video")}</>
           ) : selectedProvider ? (
             <>

@@ -3,9 +3,13 @@ import type { TFunction } from "i18next";
 import { isImageProviderConfigured, loadApiSettings, orderedApiProviders } from "../../settings/apiProviders";
 import { detectImageModelRuleId, getImageModelRule, normalizeImageModelSizeSelection } from "../../settings/imageModelRules";
 import type { ActionFissionRow, ActionFissionState } from "../action-fission/actionFissionTypes";
-import { getActionFissionRunReadiness } from "../action-fission/actionFissionRules";
+import { actionFissionReferenceImages, getActionFissionRunReadiness } from "../action-fission/actionFissionRules";
 import type { NativeCanvasEdge, NativeCanvasNode } from "../nativeCanvas";
-import { collectImageGeneratorReferences, validateImageGeneratorReferences } from "./imageGenerationInputs";
+import {
+  collectActionFissionAdditionalReferences,
+  collectImageGeneratorReferences,
+  validateImageGeneratorReferences,
+} from "./imageGenerationInputs";
 import {
   actionFissionLaunchKey,
   beginGenerationLaunching,
@@ -149,7 +153,13 @@ export function useNativeActionFissionGeneration({
     }
   }, [canvasId, patchRow, pollApiRow, t]);
 
-  const runApiRows = useCallback(async (node: NativeCanvasNode, rows: ActionFissionRow[], references: string[], connectedPrompt: string) => {
+  const runApiRows = useCallback(async (
+    node: NativeCanvasNode,
+    rows: ActionFissionRow[],
+    primaryReferences: string[],
+    additionalReferences: string[],
+    connectedPrompt: string,
+  ) => {
     if (!window.easyTool?.createGenerationTasks) throw new Error(t("infiniteCanvas:canvasDesktopRequired"));
     const settings = await loadApiSettings();
     const providers = orderedApiProviders(settings.providers, settings.providerOrder).filter(isImageProviderConfigured);
@@ -161,12 +171,13 @@ export function useNativeActionFissionGeneration({
       : provider?.imageModels[0] || "";
     if (!provider || !model) throw new Error(t("infiniteCanvas:noImageApiConfigured"));
     const rule = getImageModelRule(provider.modelRules.image[model] || detectImageModelRuleId(model));
-    const referenceError = validateImageGeneratorReferences(rule, references.length);
-    if (referenceError === "unsupported") throw new Error(t("infiniteCanvas:imageGenerationReferenceNotSupported"));
-    if (referenceError === "tooMany") throw new Error(t("infiniteCanvas:imageGenerationTooManyReferenceImages", { count: rule.maxReferenceImages }));
     const size = normalizeImageModelSizeSelection(rule, node.data.imageResolution, node.data.imageAspectRatio);
 
     const payloads = rows.map((row) => {
+      const references = actionFissionReferenceImages(row, primaryReferences, additionalReferences);
+      const referenceError = validateImageGeneratorReferences(rule, references.length);
+      if (referenceError === "unsupported") throw new Error(t("infiniteCanvas:imageGenerationReferenceNotSupported"));
+      if (referenceError === "tooMany") throw new Error(t("infiniteCanvas:imageGenerationTooManyReferenceImages", { count: rule.maxReferenceImages }));
       const prompt = rowPrompt(row, connectedPrompt);
       if (!prompt) throw new Error(t("infiniteCanvas:promptRequired"));
       return {
@@ -292,7 +303,14 @@ export function useNativeActionFissionGeneration({
     });
   }, [nodes, pollApiRow, pollLibtvRow, recoverApiRow, recoverLibtvRow]);
 
-  const runLibtvRows = useCallback(async (node: NativeCanvasNode, rows: ActionFissionRow[], references: string[], connectedPrompt: string, signal: AbortSignal) => {
+  const runLibtvRows = useCallback(async (
+    node: NativeCanvasNode,
+    rows: ActionFissionRow[],
+    primaryReferences: string[],
+    additionalReferences: string[],
+    connectedPrompt: string,
+    signal: AbortSignal,
+  ) => {
     if (!window.libtv?.startImageTasks) throw new Error(t("infiniteCanvas:libtvUnavailable"));
     const status = await window.libtv.status();
     if (!status.available) throw new Error(status.error || t("infiniteCanvas:libtvUnavailable"));
@@ -303,9 +321,6 @@ export function useNativeActionFissionGeneration({
     if (!modelName) throw new Error(t("infiniteCanvas:libtvModelRequired"));
     const capabilities = deriveLibtvModelCapabilities(await window.libtv.imageModelSchema({ model: modelName }));
     if (!capabilities.supportsReferenceImages) throw new Error(t("infiniteCanvas:imageGenerationReferenceNotSupported"));
-    if (references.length > capabilities.maxReferenceImages) {
-      throw new Error(t("infiniteCanvas:imageGenerationTooManyReferenceImages", { count: capabilities.maxReferenceImages }));
-    }
     const storedResolution = capabilities.resolutionField === "resolution" ? String(state.resolution || "") : String(state.quality || "");
     const selectedResolution = capabilities.resolutions.includes(storedResolution) ? storedResolution : capabilities.defaultResolution;
     const quality = capabilities.resolutionField === "quality"
@@ -315,6 +330,13 @@ export function useNativeActionFissionGeneration({
     const aspectRatio = capabilities.aspectRatios.includes(String(state.aspectRatio || ""))
       ? String(state.aspectRatio)
       : capabilities.defaultAspectRatio;
+    const referencesByRowId = new Map(rows.map((row) => {
+      const references = actionFissionReferenceImages(row, primaryReferences, additionalReferences);
+      if (references.length > capabilities.maxReferenceImages) {
+        throw new Error(t("infiniteCanvas:imageGenerationTooManyReferenceImages", { count: capabilities.maxReferenceImages }));
+      }
+      return [row.id, references] as const;
+    }));
 
     rows.forEach((row) => patchRow(node.id, row.id, {
       libtvQueued: true,
@@ -338,7 +360,7 @@ export function useNativeActionFissionGeneration({
         quality,
         resolution,
         aspectRatio,
-        referenceImages: references,
+        referenceImages: referencesByRowId.get(row.id)!,
         nodeTitle: `${t("infiniteCanvas:actionFission")} - ${row.selectedActionName || row.id}`,
         x: Math.round(node.position.x),
         y: Math.round(node.position.y),
@@ -366,6 +388,12 @@ export function useNativeActionFissionGeneration({
     const state = node?.data.actionFission;
     if (!node || !state) return;
     const references = collectImageGeneratorReferences(nodeId, nodes, edges, t("infiniteCanvas:referenceImage"));
+    const additionalReferences = collectActionFissionAdditionalReferences(
+      nodeId,
+      nodes,
+      edges,
+      t("infiniteCanvas:additionalReference"),
+    );
     const targetRows = rowId ? state.rows.filter((row) => row.id === rowId) : state.rows;
     const readiness = getActionFissionRunReadiness(targetRows, references.length);
     if (!readiness.canRun) {
@@ -384,9 +412,22 @@ export function useNativeActionFissionGeneration({
     patchState(nodeId, { error: "", status: "" });
     try {
       if (node.data.imageGenerationBackend === "libtv") {
-        await runLibtvRows(node, targetRows, references.map((item) => item.imageUrl), connectedPrompt, queueController.signal);
+        await runLibtvRows(
+          node,
+          targetRows,
+          references.map((item) => item.imageUrl),
+          additionalReferences.map((item) => item.imageUrl),
+          connectedPrompt,
+          queueController.signal,
+        );
       } else {
-        await runApiRows(node, targetRows, references.map((item) => item.imageUrl), connectedPrompt);
+        await runApiRows(
+          node,
+          targetRows,
+          references.map((item) => item.imageUrl),
+          additionalReferences.map((item) => item.imageUrl),
+          connectedPrompt,
+        );
       }
     } catch (error) {
       if (mountedRef.current) patchState(nodeId, { error: error instanceof Error ? error.message : String(error) });

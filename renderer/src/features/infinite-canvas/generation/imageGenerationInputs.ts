@@ -33,9 +33,13 @@ export function inputKindForSource(kind: NativeCanvasNodeKind): NativeCanvasInpu
   return undefined;
 }
 
-export function nextReferenceOrder(targetId: string, edges: NativeCanvasEdge[]) {
+export function nextReferenceOrder(
+  targetId: string,
+  edges: NativeCanvasEdge[],
+  inputKind: "referenceImage" | "additionalReferenceImage" = "referenceImage",
+) {
   return edges.reduce((largest, edge) => (
-    edge.target === targetId && edge.data?.inputKind === "referenceImage"
+    edge.target === targetId && edge.data?.inputKind === inputKind
       ? Math.max(largest, Number(edge.data.referenceOrder || 0))
       : largest
   ), 0) + 1;
@@ -46,24 +50,34 @@ export function edgeDataForConnection(
   targetKind: NativeCanvasNodeKind,
   targetId: string,
   edges: NativeCanvasEdge[],
+  targetHandle?: string | null,
 ): NativeCanvasEdgeData | undefined {
   if (targetKind !== "imageGenerator" && targetKind !== "actionFission") return undefined;
   const inputKind = inputKindForSource(sourceKind);
   if (!inputKind) return undefined;
+  if (targetHandle === "additional-reference") {
+    return targetKind === "actionFission" && inputKind === "referenceImage"
+      ? {
+          inputKind: "additionalReferenceImage",
+          referenceOrder: nextReferenceOrder(targetId, edges, "additionalReferenceImage"),
+        }
+      : undefined;
+  }
   return inputKind === "referenceImage"
     ? { inputKind, referenceOrder: nextReferenceOrder(targetId, edges) }
     : { inputKind };
 }
 
-export function collectImageGeneratorReferences(
+function collectReferenceInputs(
   targetId: string,
   nodes: NativeCanvasNode[],
   edges: NativeCanvasEdge[],
+  inputKind: "referenceImage" | "additionalReferenceImage",
   fallbackTitle = "",
 ): ImageGeneratorReferenceInput[] {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   return edges
-    .filter((edge) => edge.target === targetId && edge.data?.inputKind === "referenceImage")
+    .filter((edge) => edge.target === targetId && edge.data?.inputKind === inputKind)
     .flatMap((edge) => {
       const source = nodeMap.get(edge.source);
       const primaryImage = source ? nativeCanvasNodePrimaryImage(source.data) : null;
@@ -79,6 +93,24 @@ export function collectImageGeneratorReferences(
       }];
     })
     .sort((left, right) => left.order - right.order || left.edgeId.localeCompare(right.edgeId));
+}
+
+export function collectImageGeneratorReferences(
+  targetId: string,
+  nodes: NativeCanvasNode[],
+  edges: NativeCanvasEdge[],
+  fallbackTitle = "",
+) {
+  return collectReferenceInputs(targetId, nodes, edges, "referenceImage", fallbackTitle);
+}
+
+export function collectActionFissionAdditionalReferences(
+  targetId: string,
+  nodes: NativeCanvasNode[],
+  edges: NativeCanvasEdge[],
+  fallbackTitle = "",
+) {
+  return collectReferenceInputs(targetId, nodes, edges, "additionalReferenceImage", fallbackTitle);
 }
 
 export function collectImageGeneratorPrompts(

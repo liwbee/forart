@@ -53,6 +53,26 @@ test('canvas snapshot semantics ignore React Flow interaction and measurement st
   assert.deepEqual(canvasSnapshotSignatures(transient), canvasSnapshotSignatures(base));
 });
 
+test('canvas snapshot semantics persist explicit React Flow resize dimensions in node style', () => {
+  const { canvasSnapshotForStorage, canvasSnapshotSignatures } = loadSnapshotSemantics();
+  const base = snapshot();
+  const resized = snapshot({
+    nodes: [{
+      ...base.nodes[0],
+      width: 420,
+      height: 280,
+      measured: { width: 420, height: 280 },
+      resizing: false,
+    }],
+  });
+
+  const stored = canvasSnapshotForStorage(resized);
+  assert.deepEqual(stored.nodes[0].style, { width: 420, height: 280 });
+  assert.equal('width' in stored.nodes[0], false);
+  assert.equal('height' in stored.nodes[0], false);
+  assert.notEqual(canvasSnapshotSignatures(resized).content, canvasSnapshotSignatures(base).content);
+});
+
 test('canvas snapshot semantics ignore transient generation polling objects but keep task anchors', () => {
   const { canvasSnapshotSignatures } = loadSnapshotSemantics();
   const plain = snapshot();

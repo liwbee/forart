@@ -179,11 +179,15 @@ function normalizeApiSettings(payload = {}) {
     if (!providerOrder.includes(provider.id)) providerOrder.push(provider.id);
   });
   if (!providerOrder.includes('libtv')) providerOrder.unshift('libtv');
+  const requestedLibtvConcurrency = Number(payload.libtvActionFissionConcurrency);
   return {
     providers,
     defaultImageProviderId,
     providerOrder,
     libtvMachineId: normalizeLibtvMachineId(payload.libtvMachineId),
+    libtvActionFissionConcurrency: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(requestedLibtvConcurrency)
+      ? requestedLibtvConcurrency
+      : 1,
   };
 }
 

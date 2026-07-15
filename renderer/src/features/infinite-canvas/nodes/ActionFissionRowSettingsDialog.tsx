@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, FolderClosed, Images, Shuffle, X } from "lucide-react";
+import { Check, FolderClosed, Images, Plus, Shuffle, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { AppScrollArea } from "../../../components/AppScrollArea";
 import { Badge } from "../../../components/ui/badge";
@@ -26,17 +26,20 @@ import {
   toggleLibraryTagFilterInclude,
   useLibraryTagSettingsStore,
 } from "../../library-tags";
-import type { ActionFissionRow } from "../action-fission/actionFissionTypes";
+import { createActionFissionCategoryGroup } from "../action-fission/actionFissionState";
+import {
+  MAX_ACTION_FISSION_CATEGORY_GROUPS,
+  type ActionFissionCategoryGroup,
+  type ActionFissionRow,
+} from "../action-fission/actionFissionTypes";
 
 interface ActionFissionRowSettingsDialogProps {
   open: boolean;
   row: ActionFissionRow | null;
   onOpenChange: (open: boolean) => void;
   onApply: (
-    projectId: string,
-    includeTagIds: string[],
-    excludeTagIds: string[],
-    selectedAction: ActionEntry | null,
+    groups: ActionFissionCategoryGroup[],
+    selection?: { groupId: string; action: ActionEntry | null },
   ) => void;
 }
 
@@ -48,6 +51,14 @@ function ListSkeleton() {
   );
 }
 
+function cloneGroups(groups: readonly ActionFissionCategoryGroup[]) {
+  return groups.map((group) => ({
+    ...group,
+    includeActionTagIds: [...group.includeActionTagIds],
+    excludeActionTagIds: [...group.excludeActionTagIds],
+  }));
+}
+
 export function ActionFissionRowSettingsDialog({
   open,
   row,
@@ -55,12 +66,18 @@ export function ActionFissionRowSettingsDialog({
   onApply,
 }: ActionFissionRowSettingsDialogProps) {
   const { t } = useTranslation();
-  const [draftProjectId, setDraftProjectId] = useState("");
-  const [draftIncludeTagIds, setDraftIncludeTagIds] = useState<string[]>([]);
-  const [draftExcludeTagIds, setDraftExcludeTagIds] = useState<string[]>([]);
-  const [draftActionId, setDraftActionId] = useState("");
+  const [draftGroups, setDraftGroups] = useState<ActionFissionCategoryGroup[]>([]);
+  const [activeGroupId, setActiveGroupId] = useState("");
+  const [editingGroupId, setEditingGroupId] = useState("");
   const sameColorSingleFilter = useLibraryTagSettingsStore((state) => state.sameColorSingleFilter);
   const setSameColorSingleFilter = useLibraryTagSettingsStore((state) => state.setSameColorSingleFilter);
+  const activeGroup = draftGroups.find((group) => group.id === activeGroupId) || draftGroups[0];
+  const draftProjectId = activeGroup?.actionProjectId || "";
+  const draftIncludeTagIds = activeGroup?.includeActionTagIds || [];
+  const draftExcludeTagIds = activeGroup?.excludeActionTagIds || [];
+  const draftActionId = row && activeGroup && row.selectedCategoryGroupId === activeGroup.id
+    ? row.selectedActionId || ""
+    : "";
   const draftTagFilter = useMemo(() => ({
     includeTagIds: draftIncludeTagIds,
     excludeTagIds: draftExcludeTagIds,
@@ -93,26 +110,49 @@ export function ActionFissionRowSettingsDialog({
 
   useEffect(() => {
     if (!open || !row) return;
-    setDraftProjectId(row.actionProjectId);
-    setDraftIncludeTagIds(row.includeActionTagIds);
-    setDraftExcludeTagIds(row.excludeActionTagIds);
-    setDraftActionId(row.selectedActionId || "");
+    const nextGroups = cloneGroups(row.categoryGroups?.length ? row.categoryGroups : [{
+      id: `${row.id}_group_1`,
+      actionProjectId: row.actionProjectId,
+      includeActionTagIds: row.includeActionTagIds,
+      excludeActionTagIds: row.excludeActionTagIds,
+    }]);
+    setDraftGroups(nextGroups);
+    setActiveGroupId(nextGroups.find((group) => group.id === row.selectedCategoryGroupId)?.id || nextGroups[0].id);
+    setEditingGroupId("");
   }, [open, row?.id]);
 
-  const clearActionSelection = () => setDraftActionId("");
-  const saveConfig = (
-    projectId: string,
-    includeTagIds: string[],
-    excludeTagIds: string[],
-    actionId = "",
+  const commitGroups = (
+    nextGroups: ActionFissionCategoryGroup[],
+    selection?: { groupId: string; action: ActionEntry | null },
   ) => {
-    onApply(
-      projectId,
-      includeTagIds,
-      excludeTagIds,
-      draftActions.find((action) => action.id === actionId) || null,
-    );
+    setDraftGroups(nextGroups);
+    onApply(nextGroups, selection);
   };
+
+  const patchActiveGroup = (
+    patch: Partial<ActionFissionCategoryGroup>,
+    selection?: { groupId: string; action: ActionEntry | null },
+  ) => {
+    if (!activeGroup) return;
+    commitGroups(draftGroups.map((group) => group.id === activeGroup.id ? { ...group, ...patch } : group), selection);
+  };
+
+  const commitGroupName = (groupId: string, value: string) => {
+    const name = value.trim();
+    commitGroups(draftGroups.map((group) => group.id === groupId ? { ...group, name: name || undefined } : group));
+    setEditingGroupId("");
+  };
+
+  const focusGroupNameEditor = useCallback((element: HTMLDivElement | null) => {
+    if (!element) return;
+    element.focus();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }, []);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -129,6 +169,103 @@ export function ActionFissionRowSettingsDialog({
             </Button>
           </DialogClose>
         </DialogHeader>
+
+        <section className="rf-action-fission-group-bar" aria-label={t("infiniteCanvas:actionFissionCategoryGroups")}>
+          <AppScrollArea
+            className="rf-action-fission-group-scroll"
+            scrollbars="horizontal"
+            scrollBarClassName="h-1 border-t-0 p-0"
+          >
+            <div className="rf-action-fission-group-list">
+              {draftGroups.map((group, index) => {
+                const selected = group.id === activeGroup?.id;
+                const displayName = group.name || t("infiniteCanvas:actionFissionCategoryGroup", { index: index + 1 });
+                return (
+                  <div
+                    key={group.id}
+                    className="rf-action-fission-group-item"
+                    data-selected={selected || undefined}
+                  >
+                    {editingGroupId === group.id ? (
+                      <div
+                        ref={focusGroupNameEditor}
+                        className="rf-action-fission-group-editor"
+                        contentEditable
+                        suppressContentEditableWarning
+                        role="textbox"
+                        spellCheck={false}
+                        aria-label={t("infiniteCanvas:actionFissionRenameCategoryGroup")}
+                        onBlur={(event) => commitGroupName(group.id, event.currentTarget.textContent || "")}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            event.currentTarget.blur();
+                          } else if (event.key === "Escape") {
+                            event.preventDefault();
+                            setEditingGroupId("");
+                          }
+                        }}
+                      >
+                        {displayName}
+                      </div>
+                    ) : (
+                      <Button
+                        className="rf-action-fission-group-choice"
+                        type="button"
+                        variant={selected ? "default" : "outline"}
+                        size="sm"
+                        aria-pressed={selected}
+                        title={displayName}
+                        onClick={() => setActiveGroupId(group.id)}
+                        onDoubleClick={(event) => {
+                          event.preventDefault();
+                          setActiveGroupId(group.id);
+                          setEditingGroupId(group.id);
+                        }}
+                      >
+                        <span>{displayName}</span>
+                      </Button>
+                    )}
+                    {draftGroups.length > 1 ? (
+                      <Button
+                        className="rf-action-fission-group-delete"
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={t("infiniteCanvas:actionFissionDeleteCategoryGroup")}
+                        title={t("infiniteCanvas:actionFissionDeleteCategoryGroup")}
+                        onClick={() => {
+                          const nextGroups = draftGroups.filter((item) => item.id !== group.id);
+                          if (activeGroupId === group.id) setActiveGroupId(nextGroups[Math.min(index, nextGroups.length - 1)].id);
+                          commitGroups(nextGroups);
+                        }}
+                      >
+                        <X aria-hidden="true" />
+                      </Button>
+                    ) : null}
+                  </div>
+                );
+              })}
+              <Button
+                className="rf-action-fission-group-add"
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                disabled={draftGroups.length >= MAX_ACTION_FISSION_CATEGORY_GROUPS}
+                aria-label={t("infiniteCanvas:actionFissionAddCategoryGroup")}
+                title={t("infiniteCanvas:actionFissionAddCategoryGroup")}
+                onClick={() => {
+                  const group = createActionFissionCategoryGroup();
+                  const nextGroups = [...draftGroups, group];
+                  setActiveGroupId(group.id);
+                  commitGroups(nextGroups);
+                }}
+              >
+                <Plus aria-hidden="true" />
+              </Button>
+            </div>
+          </AppScrollArea>
+        </section>
 
         <div className="rf-action-fission-settings-columns">
           <section className="rf-action-fission-settings-column">
@@ -147,13 +284,11 @@ export function ActionFissionRowSettingsDialog({
                       variant={selected ? "default" : "ghost"}
                       className="rf-action-fission-project-choice"
                       aria-pressed={selected}
-                      onClick={() => {
-                        setDraftProjectId(project.id);
-                        setDraftIncludeTagIds([]);
-                        setDraftExcludeTagIds([]);
-                        clearActionSelection();
-                        saveConfig(project.id, [], []);
-                      }}
+                      onClick={() => patchActiveGroup({
+                        actionProjectId: project.id,
+                        includeActionTagIds: [],
+                        excludeActionTagIds: [],
+                      })}
                     >
                       <span title={project.name}>{project.name}</span>
                       {selected ? <Check aria-hidden="true" /> : null}
@@ -181,12 +316,12 @@ export function ActionFissionRowSettingsDialog({
                   checked={sameColorSingleFilter}
                   onCheckedChange={(enabled) => {
                     setSameColorSingleFilter(enabled);
-                    if (!enabled) return;
+                    if (!enabled || !activeGroup) return;
                     const nextFilter = applySameColorSingleIncludeFilter(draftTagFilter, draftTags, true);
-                    setDraftIncludeTagIds(nextFilter.includeTagIds);
-                    setDraftExcludeTagIds(nextFilter.excludeTagIds);
-                    clearActionSelection();
-                    saveConfig(draftProjectId, nextFilter.includeTagIds, nextFilter.excludeTagIds);
+                    patchActiveGroup({
+                      includeActionTagIds: nextFilter.includeTagIds,
+                      excludeActionTagIds: nextFilter.excludeTagIds,
+                    });
                   }}
                   aria-label={t("common:labels.sameColorSingleFilter")}
                 />
@@ -202,12 +337,7 @@ export function ActionFissionRowSettingsDialog({
                     className="rf-action-fission-any-tag justify-start"
                     data-selected={!draftIncludeTagIds.length && !draftExcludeTagIds.length}
                     aria-pressed={!draftIncludeTagIds.length && !draftExcludeTagIds.length}
-                    onClick={() => {
-                      setDraftIncludeTagIds([]);
-                      setDraftExcludeTagIds([]);
-                      clearActionSelection();
-                      saveConfig(draftProjectId, [], []);
-                    }}
+                    onClick={() => patchActiveGroup({ includeActionTagIds: [], excludeActionTagIds: [] })}
                   >
                     {t("infiniteCanvas:actionFissionFilterAny")}
                   </Button>
@@ -226,20 +356,20 @@ export function ActionFissionRowSettingsDialog({
                           draftTags,
                           sameColorSingleFilter,
                         );
-                        setDraftIncludeTagIds(nextFilter.includeTagIds);
-                        setDraftExcludeTagIds(nextFilter.excludeTagIds);
-                        clearActionSelection();
-                        saveConfig(draftProjectId, nextFilter.includeTagIds, nextFilter.excludeTagIds);
+                        patchActiveGroup({
+                          includeActionTagIds: nextFilter.includeTagIds,
+                          excludeActionTagIds: nextFilter.excludeTagIds,
+                        });
                       }}
                       onToggleExclude={() => {
                         const nextIncludeTagIds = draftIncludeTagIds.filter((tagId) => tagId !== tag.id);
                         const nextExcludeTagIds = excludeTagSet.has(tag.id)
                           ? draftExcludeTagIds.filter((tagId) => tagId !== tag.id)
                           : [...draftExcludeTagIds, tag.id];
-                        setDraftIncludeTagIds(nextIncludeTagIds);
-                        setDraftExcludeTagIds(nextExcludeTagIds);
-                        clearActionSelection();
-                        saveConfig(draftProjectId, nextIncludeTagIds, nextExcludeTagIds);
+                        patchActiveGroup({
+                          includeActionTagIds: nextIncludeTagIds,
+                          excludeActionTagIds: nextExcludeTagIds,
+                        });
                       }}
                     />
                   ))}
@@ -263,9 +393,7 @@ export function ActionFissionRowSettingsDialog({
             <AppScrollArea className="rf-action-fission-settings-scroll">
               {actionsQuery.isLoading ? (
                 <div className="rf-action-fission-action-grid">
-                  {Array.from({ length: 8 }, (_, index) => (
-                    <Skeleton key={index} className="rf-action-fission-action-skeleton" />
-                  ))}
+                  {Array.from({ length: 8 }, (_, index) => <Skeleton key={index} className="rf-action-fission-action-skeleton" />)}
                 </div>
               ) : (
                 <div className="rf-action-fission-action-grid">
@@ -276,8 +404,8 @@ export function ActionFissionRowSettingsDialog({
                     data-selected={!draftActionId}
                     aria-pressed={!draftActionId}
                     onClick={() => {
-                      clearActionSelection();
-                      saveConfig(draftProjectId, draftIncludeTagIds, draftExcludeTagIds);
+                      if (!activeGroup) return;
+                      commitGroups(draftGroups, { groupId: activeGroup.id, action: null });
                     }}
                   >
                     <Shuffle aria-hidden="true" />
@@ -296,8 +424,8 @@ export function ActionFissionRowSettingsDialog({
                         data-selected={selected}
                         aria-pressed={selected}
                         onClick={() => {
-                          setDraftActionId(action.id);
-                          saveConfig(draftProjectId, draftIncludeTagIds, draftExcludeTagIds, action.id);
+                          if (!activeGroup) return;
+                          commitGroups(draftGroups, { groupId: activeGroup.id, action });
                         }}
                       >
                         <span className="rf-action-fission-action-choice-image">
@@ -323,7 +451,6 @@ export function ActionFissionRowSettingsDialog({
             </AppScrollArea>
           </section>
         </div>
-
       </DialogContent>
     </Dialog>
   );

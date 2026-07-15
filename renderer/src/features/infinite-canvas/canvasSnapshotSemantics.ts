@@ -33,6 +33,13 @@ function durableActionFission(value: unknown) {
   if (!Array.isArray(actionFission.rows)) return actionFission;
   actionFission.rows = actionFission.rows.map((value) => {
     const row = { ...recordOf(value) };
+    if (Array.isArray(row.categoryGroups)) {
+      row.categoryGroups = row.categoryGroups.map((value) => {
+        const group = { ...recordOf(value) };
+        delete group.fixedActionId;
+        return group;
+      });
+    }
     delete row.generationTask;
     delete row.libtvTask;
     delete row.libtvQueued;
@@ -44,6 +51,14 @@ function durableActionFission(value: unknown) {
 
 function durableNode(value: object) {
   const node = { ...recordOf(value) };
+  const resizedWidth = Number(node.width);
+  const resizedHeight = Number(node.height);
+  if (Number.isFinite(resizedWidth) && resizedWidth > 0) {
+    node.style = { ...recordOf(node.style), width: resizedWidth };
+  }
+  if (Number.isFinite(resizedHeight) && resizedHeight > 0) {
+    node.style = { ...recordOf(node.style), height: resizedHeight };
+  }
   delete node.selected;
   delete node.dragging;
   delete node.measured;

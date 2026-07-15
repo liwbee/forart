@@ -123,7 +123,8 @@ export function CanvasWorkspaceHome({
         projectActionsLabel={(name) => `${t("infiniteCanvas:projectActions")}: ${name}`}
         title={t("infiniteCanvas:projectsTitle")}
         creatingProject={busy}
-        canManageProjects={!readOnly}
+        canCreateProjects={!readOnly || sharedCanvasesEnabled}
+        canManageProjects
         canReorderProjects
         topContent={sharedCanvasesEnabled ? (
           <NativeTabs

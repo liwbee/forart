@@ -211,8 +211,14 @@ function normalizeEdge(input: unknown): NativeCanvasEdge | null {
     sourceHandle: typeof value.sourceHandle === "string" ? value.sourceHandle : "output",
     targetHandle: typeof value.targetHandle === "string" ? value.targetHandle : "input",
     data: {
-      inputKind: data.inputKind === "prompt" || data.inputKind === "referenceImage" ? data.inputKind : undefined,
-      referenceOrder: data.inputKind === "referenceImage" ? Number(data.referenceOrder || 0) || undefined : undefined,
+      inputKind: data.inputKind === "prompt"
+        || data.inputKind === "referenceImage"
+        || data.inputKind === "additionalReferenceImage"
+        ? data.inputKind
+        : undefined,
+      referenceOrder: data.inputKind === "referenceImage" || data.inputKind === "additionalReferenceImage"
+        ? Number(data.referenceOrder || 0) || undefined
+        : undefined,
     },
     selected: false,
   };

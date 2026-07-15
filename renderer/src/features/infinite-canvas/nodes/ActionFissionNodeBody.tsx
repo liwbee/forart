@@ -19,25 +19,29 @@ import { AppScrollArea } from "../../../components/AppScrollArea";
 import { Button } from "../../../components/ui/button";
 import { ButtonGroup } from "../../../components/ui/button-group";
 import { Input } from "../../../components/ui/input";
+import { Switch } from "../../../components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "../../../components/ui/toggle-group";
 import { cn } from "../../../lib/utils";
 import { ImageViewer } from "../../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
-import type { ActionProject, ActionTag } from "../../action-library/types";
+import type { ActionEntry, ActionProject, ActionTag } from "../../action-library/types";
 import {
   addActionFissionRow,
   normalizeActionFissionState,
   removeActionFissionRow,
 } from "../action-fission/actionFissionState";
 import { getActionFissionRunReadiness, randomizeActionFissionRows } from "../action-fission/actionFissionRules";
-import { MAX_ACTION_FISSION_ROWS, type ActionFissionRow } from "../action-fission/actionFissionTypes";
+import { MAX_ACTION_FISSION_ROWS, type ActionFissionCategoryGroup, type ActionFissionRow } from "../action-fission/actionFissionTypes";
 import { useActionFissionLibraryData } from "../action-fission/useActionFissionLibraryData";
 import { useNativeCanvasActions } from "../canvasActions";
 import { isNativeGenerationTaskActive } from "../generation/useNativeImageGeneration";
 import { formatGenerationDuration, generationStatusMessage } from "../generation/generationStatus";
 import type { NativeCanvasNodeData } from "../nativeCanvas";
 import type { NativeCanvasEdge, NativeCanvasNode } from "../nativeCanvas";
-import { collectImageGeneratorReferences } from "../generation/imageGenerationInputs";
+import {
+  collectActionFissionAdditionalReferences,
+  collectImageGeneratorReferences,
+} from "../generation/imageGenerationInputs";
 import { ActionFissionParamPanel } from "./ActionFissionParamPanel";
 import { actionFissionLaunchingRowIds, useGenerationRuntimeStore } from "../generation/generationRuntimeStore";
 
@@ -194,7 +198,43 @@ function openPreviewFromKeyboard(event: React.KeyboardEvent<HTMLDivElement>, onO
   onOpen();
 }
 
-function ActionPreview({ row, onOpen }: { row: ActionFissionRow; onOpen: (image: ViewerImage) => void }) {
+function AdditionalReferenceToggle({
+  checked,
+  disabled,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const stopPropagation = (event: React.SyntheticEvent) => event.stopPropagation();
+  return (
+    <div
+      className="rf-action-fission-additional-toggle nodrag nopan"
+      onPointerDown={stopPropagation}
+      onClick={stopPropagation}
+      onDoubleClick={stopPropagation}
+    >
+      <span>{t("infiniteCanvas:additionalReference")}</span>
+      <Switch
+        size="sm"
+        checked={checked}
+        disabled={disabled}
+        aria-label={t("infiniteCanvas:useAdditionalReference")}
+        onCheckedChange={onCheckedChange}
+      />
+    </div>
+  );
+}
+
+function ActionPreview({
+  row,
+  onOpen,
+}: {
+  row: ActionFissionRow;
+  onOpen: (image: ViewerImage) => void;
+}) {
   const { t } = useTranslation();
   const originalUrl = row.selectedActionAssetUrl ? resolveLibraryImageUrl(row.selectedActionAssetUrl) : "";
   const previewUrl = row.selectedActionThumbUrl
@@ -202,18 +242,20 @@ function ActionPreview({ row, onOpen }: { row: ActionFissionRow; onOpen: (image:
     : originalUrl;
   const alt = t("infiniteCanvas:actionFissionActionPreview");
   return (
-    <div
-      className={cn("rf-action-fission-action-preview nodrag nopan", previewUrl && "is-viewable")}
-      role={originalUrl ? "button" : undefined}
-      tabIndex={originalUrl ? 0 : undefined}
-      aria-label={originalUrl ? t("infiniteCanvas:viewLargeImage") : undefined}
-      onKeyDown={originalUrl ? (event) => openPreviewFromKeyboard(event, () => onOpen({ id: row.id, kind: "action", src: originalUrl, alt })) : undefined}
-      onClick={originalUrl ? (event) => {
-        event.stopPropagation();
-        onOpen({ id: row.id, kind: "action", src: originalUrl, alt });
-      } : undefined}
-    >
-      {previewUrl ? <img src={previewUrl} alt={alt} draggable={false} /> : <Images aria-hidden="true" />}
+    <div className={cn("rf-action-fission-action-preview nodrag nopan", previewUrl && "is-viewable")}>
+      <div
+        className="rf-action-fission-action-preview__trigger"
+        role={originalUrl ? "button" : undefined}
+        tabIndex={originalUrl ? 0 : undefined}
+        aria-label={originalUrl ? t("infiniteCanvas:viewLargeImage") : undefined}
+        onKeyDown={originalUrl ? (event) => openPreviewFromKeyboard(event, () => onOpen({ id: row.id, kind: "action", src: originalUrl, alt })) : undefined}
+        onClick={originalUrl ? (event) => {
+          event.stopPropagation();
+          onOpen({ id: row.id, kind: "action", src: originalUrl, alt });
+        } : undefined}
+      >
+        {previewUrl ? <img src={previewUrl} alt={alt} draggable={false} /> : <Images aria-hidden="true" />}
+      </div>
     </div>
   );
 }
@@ -307,6 +349,10 @@ function ActionRowSummary({ row, projects, tags }: { row: ActionFissionRow; proj
   );
 }
 
+function hasCategoryCandidates(groups: readonly { group: ActionFissionCategoryGroup; actions: readonly ActionEntry[] }[]) {
+  return groups.some(({ actions }) => actions.length > 0);
+}
+
 export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: ActionFissionNodeBodyProps) {
   const { t } = useTranslation();
   const actions = useNativeCanvasActions();
@@ -345,8 +391,10 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
     ? viewerImages[viewerImage.kind].find((image) => image.id === viewerImage.id) ?? viewerImage
     : null;
   const setState = (nextState: typeof state) => actions.patchNodeData(nodeId, { actionFission: nextState });
-  const canSwitchAnyRow = rowData.some(({ actions: candidates }) => candidates.length > 0);
+  const canSwitchAnyRow = rowData.some(({ categoryGroups }) => hasCategoryCandidates(categoryGroups));
   const referenceCount = collectImageGeneratorReferences(nodeId, canvasNodes, canvasEdges).length;
+  const additionalReferenceCount = collectActionFissionAdditionalReferences(nodeId, canvasNodes, canvasEdges).length;
+  const hasAdditionalReferences = additionalReferenceCount > 0;
   const runReadiness = getActionFissionRunReadiness(state.rows, referenceCount);
   const hasRunningRows = state.rows.some(isRowGenerating);
   const hasQueuedRows = state.rows.some((row) => isRowQueued(row));
@@ -388,10 +436,14 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   });
   const defaultTitle = t("infiniteCanvas:actionFission");
   const title = String(data.label || "").trim() || defaultTitle;
-  const candidatesByRowId = new Map(rowData.map((item) => [item.row.id, item.actions]));
+  const candidatesByRowId = new Map(rowData.map((item) => [item.row.id, item.categoryGroups]));
   const selectActions = () => setState({
     ...state,
     rows: randomizeActionFissionRows(state.rows, candidatesByRowId),
+  });
+  const setRowAdditionalReferences = (rowId: string, useAdditionalReferences: boolean) => setState({
+    ...state,
+    rows: state.rows.map((row) => row.id === rowId ? { ...row, useAdditionalReferences } : row),
   });
 
   useEffect(() => {
@@ -416,7 +468,9 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   }, [isRunning]);
 
   useEffect(() => {
-    const pendingRows = rowData.filter(({ row, actions: candidates }) => row.actionProjectId && !row.selectedActionId && candidates.length);
+    const pendingRows = rowData.filter(({ row, categoryGroups }) => (
+      !row.selectedActionId && hasCategoryCandidates(categoryGroups)
+    ));
     if (!pendingRows.length) return;
     const pendingRowIds = new Set(pendingRows.map(({ row }) => row.id));
     setState({
@@ -479,7 +533,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           disabled: (() => {
             const row = state.rows.find((item) => item.id === viewerImage.id);
             return !row
-              || !candidatesByRowId.get(row.id)?.length
+              || !hasCategoryCandidates(candidatesByRowId.get(row.id) || [])
               || launchingRowIds.has(row.id)
               || isRowRunning(row);
           })(),
@@ -542,7 +596,12 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   };
 
   return (
-    <section className="rf-action-fission" data-layout={state.layout} data-generating={isGenerationActive}>
+    <section
+      className="rf-action-fission"
+      data-layout={state.layout}
+      data-generating={isGenerationActive}
+      data-has-additional-references={hasAdditionalReferences || undefined}
+    >
       <header className="rf-action-fission-header">
         <div className="rf-action-fission-title">
           <Split aria-hidden="true" />
@@ -613,15 +672,24 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           <div className="rf-action-fission-empty">{t("common:states.loading")}</div>
         ) : state.layout === "grid" ? (
           <div className="rf-action-fission-grid">
-            {rowData.map(({ row, tags, actions: candidates }, index) => (
+            {rowData.map(({ row, tags, categoryGroups }, index) => (
               <article key={row.id} className="rf-action-fission-grid-card" data-index={String(index + 1).padStart(2, "0")}>
                 <ResultPreview row={row} now={timerNow} launching={launchingRowIds.has(row.id)} showStatusOverlay isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} />
                 <RowStatus row={row} now={timerNow} launching={launchingRowIds.has(row.id)} hasReference={referenceCount > 0} hideTransient />
-                <ActionPreview row={row} onOpen={setViewerImage} />
+                <div className="rf-action-fission-action-stack">
+                  {hasAdditionalReferences ? (
+                    <AdditionalReferenceToggle
+                      checked={Boolean(row.useAdditionalReferences)}
+                      disabled={launchingRowIds.has(row.id) || isRowRunning(row)}
+                      onCheckedChange={(checked) => setRowAdditionalReferences(row.id, checked)}
+                    />
+                  ) : null}
+                  <ActionPreview row={row} onOpen={setViewerImage} />
+                </div>
                 <ActionRowSummary row={row} projects={projects} tags={tags} />
                 <ButtonGroup className="rf-action-fission-row-actions nodrag">
                   <Button type="button" variant="ghost" size="icon-xs" aria-label={t("infiniteCanvas:actionFissionRowSettings")} title={t("infiniteCanvas:actionFissionRowSettings")} onClick={() => actions.openActionFissionRowSettings(nodeId, row.id)}><Settings2 aria-hidden="true" /></Button>
-                  <Button type="button" variant="ghost" size="icon-xs" disabled={!candidates.length} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>
+                  <Button type="button" variant="ghost" size="icon-xs" disabled={!hasCategoryCandidates(categoryGroups)} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>
                   <Button type="button" variant="ghost" size="icon-xs" disabled={launchingRowIds.has(row.id) || (!isRowRunning(row) && (!row.selectedActionId || referenceCount < 1))} aria-label={t(isRowRunning(row) ? "infiniteCanvas:stopRun" : "infiniteCanvas:actionFissionRerunImage")} onClick={() => void (isRowRunning(row) ? actions.stopActionFission(nodeId, row.id) : actions.runActionFission(nodeId, row.id))}>{isRowRunning(row) ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" />}</Button>
                   <Button type="button" variant="ghost" size="icon-xs" disabled={state.rows.length <= 1} aria-label={t("infiniteCanvas:actionFissionDeleteRow")} onClick={() => setState(removeActionFissionRow(state, row.id))}><Trash2 aria-hidden="true" /></Button>
                 </ButtonGroup>
@@ -630,15 +698,22 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           </div>
         ) : (
           <div className="rf-action-fission-list">
-            {rowData.map(({ row, tags, actions: candidates }, index) => (
+            {rowData.map(({ row, tags, categoryGroups }, index) => (
               <article key={row.id} className="rf-action-fission-list-card" data-index={String(index + 1).padStart(2, "0")}>
                 <ResultPreview row={row} now={timerNow} launching={launchingRowIds.has(row.id)} isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} />
                 <ActionRowSummary row={row} projects={projects} tags={tags} />
                 <RowStatus row={row} now={timerNow} launching={launchingRowIds.has(row.id)} hasReference={referenceCount > 0} />
+                {hasAdditionalReferences ? (
+                  <AdditionalReferenceToggle
+                    checked={Boolean(row.useAdditionalReferences)}
+                    disabled={launchingRowIds.has(row.id) || isRowRunning(row)}
+                    onCheckedChange={(checked) => setRowAdditionalReferences(row.id, checked)}
+                  />
+                ) : null}
                 <ActionPreview row={row} onOpen={setViewerImage} />
                 <ButtonGroup className="rf-action-fission-row-actions nodrag">
                   <Button type="button" variant="ghost" size="icon-sm" aria-label={t("infiniteCanvas:actionFissionRowSettings")} title={t("infiniteCanvas:actionFissionRowSettings")} onClick={() => actions.openActionFissionRowSettings(nodeId, row.id)}><Settings2 aria-hidden="true" /></Button>
-                  <Button type="button" variant="ghost" size="icon-sm" disabled={!candidates.length} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>
+                  <Button type="button" variant="ghost" size="icon-sm" disabled={!hasCategoryCandidates(categoryGroups)} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>
                   <Button type="button" variant="ghost" size="icon-sm" disabled={launchingRowIds.has(row.id) || (!isRowRunning(row) && (!row.selectedActionId || referenceCount < 1))} aria-label={t(isRowRunning(row) ? "infiniteCanvas:stopRun" : "infiniteCanvas:actionFissionRerunImage")} onClick={() => void (isRowRunning(row) ? actions.stopActionFission(nodeId, row.id) : actions.runActionFission(nodeId, row.id))}>{isRowRunning(row) ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" />}</Button>
                   <Button type="button" variant="ghost" size="icon-sm" disabled={state.rows.length <= 1} aria-label={t("infiniteCanvas:actionFissionDeleteRow")} onClick={() => setState(removeActionFissionRow(state, row.id))}><Trash2 aria-hidden="true" /></Button>
                 </ButtonGroup>

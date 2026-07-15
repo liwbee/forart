@@ -169,8 +169,21 @@ function createLibtvAdapter({ rootDir }) {
     return `${year}-${month}-${day}`;
   }
 
-  function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  function sleep(ms, signal) {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new DOMException('Aborted', 'AbortError'));
+        return;
+      }
+      const finish = (callback, value) => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        callback(value);
+      };
+      const abort = () => finish(reject, new DOMException('Aborted', 'AbortError'));
+      const timer = setTimeout(() => finish(resolve), ms);
+      signal?.addEventListener('abort', abort, { once: true });
+    });
   }
 
   async function resolveInstallCommand() {
@@ -268,7 +281,7 @@ function createLibtvAdapter({ rootDir }) {
     const pageSize = Math.max(1, Math.min(200, Number(payload.pageSize || 100)));
     const args = ['workspace', 'list', '-p', page, '-s', pageSize];
     if (payload.name) args.push('--name', String(payload.name));
-    const result = await runLibtv(args, { timeoutMs: 60000 });
+    const result = await runLibtv(args, { timeoutMs: 60000, signal: payload.signal });
     const parsed = parseJsonOutput(result.stdout);
     return {
       ok: true,
@@ -314,7 +327,7 @@ function createLibtvAdapter({ rootDir }) {
     const pageSize = Math.max(1, Math.min(200, Number(payload.pageSize || 100)));
     const args = ['project', 'list', '-w', workspaceId, '-p', page, '-s', pageSize];
     if (payload.name) args.push('--name', String(payload.name));
-    const result = await runLibtv(args, { timeoutMs: 60000 });
+    const result = await runLibtv(args, { timeoutMs: 60000, signal: payload.signal });
     const parsed = parseJsonOutput(result.stdout);
     return {
       ok: true,
@@ -372,17 +385,18 @@ function createLibtvAdapter({ rootDir }) {
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
-        const listed = await listProjects({ workspaceId, page: 1, pageSize: 200 });
+        const listed = await listProjects({ workspaceId, page: 1, pageSize: 200, signal: payload.signal });
         const project = listed.projects.find((item) => item.uuid === projectUuid)
           || (projectName ? listed.projects.find((item) => item.name === projectName) : null);
         if (project?.uuid) {
-          await runLibtv(['node', 'list', '-p', project.uuid], { timeoutMs: 60000 });
+          await runLibtv(['node', 'list', '-p', project.uuid], { timeoutMs: 60000, signal: payload.signal });
           return { ok: true, project };
         }
       } catch (error) {
         lastError = error;
       }
-      if (attempt < attempts) await sleep(delayMs);
+      if (payload.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      if (attempt < attempts) await sleep(delayMs, payload.signal);
     }
 
     throw new Error(lastError instanceof Error
@@ -470,11 +484,11 @@ function createLibtvAdapter({ rootDir }) {
     return { ok: true, stdout: result.stdout, stderr: result.stderr, payload: parseJsonOutput(result.stdout) };
   }
 
-  async function connectLeft(projectUuid, targetNodeId, sourceNodeId) {
+  async function connectLeft(projectUuid, targetNodeId, sourceNodeId, options = {}) {
     const project = requireText(projectUuid, 'LibTV project');
     const target = requireText(targetNodeId, 'LibTV target node');
     const source = requireText(sourceNodeId, 'LibTV source node');
-    const result = await runLibtv(['node', target, '-p', project, '--left-add', source], { timeoutMs: 60000 });
+    const result = await runLibtv(['node', target, '-p', project, '--left-add', source], { timeoutMs: 60000, signal: options.signal });
     return { ok: true, stdout: result.stdout, stderr: result.stderr, payload: parseJsonOutput(result.stdout) };
   }
 
@@ -506,10 +520,10 @@ function createLibtvAdapter({ rootDir }) {
     return { ok: true, stdout: result.stdout, stderr: result.stderr, payload: parseJsonOutput(result.stdout) };
   }
 
-  async function queryNode(projectUuid, nodeId) {
+  async function queryNode(projectUuid, nodeId, options = {}) {
     const project = requireText(projectUuid, 'LibTV project');
     const node = requireText(nodeId, 'LibTV node');
-    const result = await runLibtv(['node', node, '-p', project], { timeoutMs: 60000 });
+    const result = await runLibtv(['node', node, '-p', project], { timeoutMs: 60000, signal: options.signal });
     return { ok: true, stdout: result.stdout, stderr: result.stderr, payload: parseJsonOutput(result.stdout) };
   }
 

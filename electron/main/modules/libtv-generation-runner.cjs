@@ -162,9 +162,57 @@ function stringifyDiagnostic(value, maxLength = 12000) {
   return `${text.slice(0, maxLength)}\n... [truncated ${text.length - maxLength} chars]`;
 }
 
-function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore, resolveWorkspaceName }) {
+function createLibtvGenerationRunner({
+  libtv,
+  assetStore,
+  canvasStore,
+  taskStore,
+  resolveWorkspaceName,
+  resolveActionFissionConcurrency,
+}) {
   const activeControllers = new Map();
-  const queueTails = new Map();
+  const queuePools = new Map();
+  const queuedTaskPoolKeys = new Map();
+
+  function configuredActionFissionConcurrency() {
+    const requested = Number(typeof resolveActionFissionConcurrency === 'function'
+      ? resolveActionFissionConcurrency()
+      : 1);
+    return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(requested) ? requested : 1;
+  }
+
+  function drainQueuePool(queueKey) {
+    const pool = queuePools.get(queueKey);
+    if (!pool) return;
+    while (pool.pending.length && (pool.limit === 0 || pool.activeCount < pool.limit)) {
+      const item = pool.pending.shift();
+      queuedTaskPoolKeys.delete(item.taskId);
+      pool.activeCount += 1;
+      void Promise.resolve()
+        .then(item.execute)
+        .catch(() => undefined)
+        .finally(() => {
+          pool.activeCount = Math.max(0, pool.activeCount - 1);
+          if (!pool.activeCount && !pool.pending.length) {
+            queuePools.delete(queueKey);
+            return;
+          }
+          drainQueuePool(queueKey);
+        });
+    }
+  }
+
+  function enqueueTask(task, execute, limit) {
+    const queueKey = task.queueKey;
+    let pool = queuePools.get(queueKey);
+    if (!pool) {
+      pool = { activeCount: 0, limit, pending: [] };
+      queuePools.set(queueKey, pool);
+    }
+    pool.pending.push({ taskId: task.id, execute });
+    queuedTaskPoolKeys.set(task.id, queueKey);
+    drainQueuePool(queueKey);
+  }
 
   function waitFor(delayMs, signal) {
     return new Promise((resolve, reject) => {
@@ -178,6 +226,45 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
         reject(new DOMException('Aborted', 'AbortError'));
       }, { once: true });
     });
+  }
+
+  function throwIfAborted(signal) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  }
+
+  function waitForOperation(operation, signal) {
+    if (!signal) return Promise.resolve(operation);
+    throwIfAborted(signal);
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', abort);
+        callback(value);
+      };
+      const abort = () => finish(reject, new DOMException('Aborted', 'AbortError'));
+      signal.addEventListener('abort', abort, { once: true });
+      Promise.resolve(operation).then(
+        (value) => finish(resolve, value),
+        (error) => finish(reject, error),
+      );
+    });
+  }
+
+  async function queryNodeWithRetry(projectUuid, remoteNodeId, signal, attempts = 3) {
+    let lastError;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      try {
+        return await libtv.queryNode(projectUuid, remoteNodeId, { signal });
+      } catch (error) {
+        if (signal?.aborted || error?.name === 'AbortError') throw error;
+        lastError = error;
+        if (attempt < attempts - 1) await waitFor(500 * (attempt + 1), signal);
+      }
+    }
+    throw lastError;
   }
 
   function isActionFissionTask(task) {
@@ -240,19 +327,25 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
     return { projectUuid, projectName };
   }
 
-  async function ensureReadyProject(payload = {}) {
+  async function ensureReadyProject(payload = {}, signal) {
     const workspaceId = firstString(payload.workspaceId);
     if (!workspaceId) throw new Error('LibTV workspace is required.');
-    const ensuredProject = await libtv.ensureDailyProject({ workspaceId, title: payload.projectName });
+    const ensuredProject = await waitForOperation(
+      libtv.ensureDailyProject({ workspaceId, title: payload.projectName }),
+      signal,
+    );
+    throwIfAborted(signal);
     let projectUuid = firstString(ensuredProject.project?.uuid);
     let projectName = firstString(ensuredProject.project?.name);
     if (!projectUuid) throw new Error('LibTV daily canvas could not be created or resolved.');
     if (libtv.waitForProjectReady) {
-      const ready = await libtv.waitForProjectReady({
+      const ready = await waitForOperation(libtv.waitForProjectReady({
         workspaceId,
         projectUuid,
         projectName,
-      });
+        signal,
+      }), signal);
+      throwIfAborted(signal);
       projectUuid = firstString(ready.project?.uuid, projectUuid);
       projectName = firstString(ready.project?.name, projectName);
     }
@@ -338,17 +431,29 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
     };
   }
 
-  async function saveResult(resultUrl, taskId = '') {
+  async function saveResult(resultUrl, taskId = '', signal) {
     if (taskId) {
       const current = taskStore?.getTask(taskId);
       if (!current || current.status === 'interrupted') throw new Error('Interrupted');
       taskStore.updateTask(taskId, { status: 'running', message: '', messageCode: 'generation.resultProcessing', messageParams: null });
     }
-    const saved = await assetStore.saveAsset({
-      url: resultUrl,
-      kind: 'output',
-      defaultName: 'libtv-generated-image.png',
-    });
+    let saved;
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      throwIfAborted(signal);
+      try {
+        saved = await assetStore.saveAsset({
+          url: resultUrl,
+          kind: 'output',
+          defaultName: 'libtv-generated-image.png',
+        });
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) await waitFor(500 * (attempt + 1), signal);
+      }
+    }
+    if (!saved) throw lastError;
     return {
       url: resultUrl,
       localUrl: saved.url,
@@ -366,16 +471,18 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
   async function executeImageTask(task, payload, signal) {
     const job = normalizeJobs(payload)[0];
     const configuredWorkspaceName = typeof resolveWorkspaceName === 'function'
-      ? await resolveWorkspaceName()
+      ? await waitForOperation(resolveWorkspaceName(), signal)
       : '';
     const workspaceName = firstString(configuredWorkspaceName, payload.workspaceName, 'LibtvImage');
     taskStore.updateTask(task.id, { status: 'preparing', message: '', messageCode: 'libtv.workspacePreparing', messageParams: null });
-    const ensuredWorkspace = await libtv.ensureNamedWorkspace({ name: workspaceName });
+    const ensuredWorkspace = await waitForOperation(libtv.ensureNamedWorkspace({ name: workspaceName }), signal);
+    throwIfAborted(signal);
     const workspaceId = firstString(ensuredWorkspace.workspace?.id);
     if (!workspaceId) throw new Error(`LibTV workspace ${workspaceName} could not be created or resolved.`);
     taskStore.updateTask(task.id, { workspaceId, workspaceName });
 
-    const project = await ensureReadyProject({ workspaceId, projectName: payload.projectName });
+    const project = await ensureReadyProject({ workspaceId, projectName: payload.projectName }, signal);
+    throwIfAborted(signal);
     taskStore.updateTask(task.id, {
       projectUuid: project.projectUuid,
       projectName: project.projectName,
@@ -392,6 +499,7 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
     const remoteReferenceNodeIds = [];
     const remoteReferenceNodeTitles = [];
     let remoteNodeId = '';
+    let runAttempted = false;
 
     try {
       for (let index = 0; index < job.referenceImages.length; index += 1) {
@@ -402,7 +510,8 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
           messageCode: 'libtv.referenceUploading',
           messageParams: { current: index + 1, total: job.referenceImages.length },
         });
-        const filePath = await prepareReferenceFile(job.referenceImages[index], index);
+        const filePath = await waitForOperation(prepareReferenceFile(job.referenceImages[index], index), signal);
+        throwIfAborted(signal);
         const referenceTitle = `Forart Ref - ${runId} - ${String(index + 1).padStart(2, '0')} - ${safeRemoteTitle(path.basename(filePath), 'image')}`;
         const uploaded = await libtv.uploadImageNode(project.projectUuid, filePath, {
           title: referenceTitle,
@@ -438,30 +547,33 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
       writeTaskAnchor(task, { projectUuid: project.projectUuid, remoteNodeId });
       for (const referenceNodeId of remoteReferenceNodeIds) {
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-        await libtv.connectLeft(project.projectUuid, remoteNodeId, referenceNodeId);
+        await libtv.connectLeft(project.projectUuid, remoteNodeId, referenceNodeId, { signal });
       }
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
       taskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'libtv.generating', messageParams: null });
       let run;
       for (let attempt = 0; attempt < 3; attempt += 1) {
+        taskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'libtv.generating', messageParams: null });
         let startBusy = false;
         try {
+          runAttempted = true;
           run = await libtv.runNode(project.projectUuid, remoteNodeId, { signal });
         } catch (error) {
           if (!isTaskStartBusyError(error) || attempt === 2) throw error;
           startBusy = true;
           run = null;
         }
-        const queried = await libtv.queryNode(project.projectUuid, remoteNodeId);
-        if (extractImageUrl(run?.payload, run?.stdout) || extractImageUrl(queried.payload, queried.stdout)) {
-          if (!extractImageUrl(run?.payload, run?.stdout)) run = queried;
+        if (extractImageUrl(run?.payload, run?.stdout)) break;
+        const queried = await queryNodeWithRetry(project.projectUuid, remoteNodeId, signal);
+        if (extractImageUrl(queried.payload, queried.stdout)) {
+          run = queried;
           break;
         }
         if (remoteNodeHasStarted(queried.payload)) {
           let recovered = queried;
           for (let poll = 0; poll < 120 && !signal.aborted; poll += 1) {
             await waitFor(4000, signal);
-            recovered = await libtv.queryNode(project.projectUuid, remoteNodeId);
+            recovered = await queryNodeWithRetry(project.projectUuid, remoteNodeId, signal);
             if (extractImageUrl(recovered.payload, recovered.stdout)) break;
           }
           run = recovered;
@@ -479,11 +591,11 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
       if (!run) throw new Error('LibTV generation did not return a run result.');
       let resultUrl = extractImageUrl(run.payload, run.stdout);
       if (!resultUrl && remoteNodeId) {
-        const queried = await libtv.queryNode(project.projectUuid, remoteNodeId);
+        const queried = await queryNodeWithRetry(project.projectUuid, remoteNodeId, signal);
         resultUrl = extractImageUrl(queried.payload, queried.stdout);
       }
       if (!resultUrl) throw new Error('LibTV generation completed, but no image URL was found.');
-      const saved = await saveResult(resultUrl, task.id);
+      const saved = await saveResult(resultUrl, task.id, signal);
       return {
         ok: true,
         ...saved,
@@ -500,14 +612,14 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
     } catch (error) {
       if (!remoteNodeId && error?.stdout) remoteNodeId = extractNodeId(null, error.stdout);
       if (remoteNodeId) taskStore.updateTask(task.id, { remoteNodeId });
-      if (!remoteNodeId && remoteReferenceNodeIds.length) {
-        await cleanupRemoteNodes(project.projectUuid, remoteReferenceNodeIds);
+      if (!runAttempted) {
+        await cleanupRemoteNodes(project.projectUuid, [remoteNodeId, ...remoteReferenceNodeIds].filter(Boolean));
       }
       throw error;
     }
   }
 
-  function startImageTask(payload = {}) {
+  function startImageTask(payload = {}, queueConcurrency = configuredActionFissionConcurrency()) {
     if (!taskStore) throw new Error('LibTV task store is unavailable.');
     const task = taskStore.createTask({
       ...payload,
@@ -548,12 +660,7 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
     };
 
     if (task.queueKey) {
-      const previous = queueTails.get(task.queueKey) || Promise.resolve();
-      const queuedRun = previous.catch(() => undefined).then(execute);
-      const tail = queuedRun.finally(() => {
-        if (queueTails.get(task.queueKey) === tail) queueTails.delete(task.queueKey);
-      });
-      queueTails.set(task.queueKey, tail);
+      enqueueTask(task, execute, queueConcurrency);
     } else {
       void execute();
     }
@@ -598,14 +705,14 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
       try {
         let resultUrl = '';
         for (let attempt = 0; attempt < 120 && !controller.signal.aborted; attempt += 1) {
-          const queried = await libtv.queryNode(projectUuid, remoteNodeId);
+          const queried = await queryNodeWithRetry(projectUuid, remoteNodeId, controller.signal);
           resultUrl = extractImageUrl(queried.payload, queried.stdout);
           if (resultUrl) break;
           taskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'libtv.generating', messageParams: null });
           await waitFor(4000, controller.signal);
         }
         if (!resultUrl) throw new Error('Recovered LibTV task did not produce an image result.');
-        const result = await saveResult(resultUrl, task.id);
+        const result = await saveResult(resultUrl, task.id, controller.signal);
         const current = taskStore.getTask(task.id);
         if (!current || current.status === 'interrupted') return;
         const completed = taskStore.updateTask(task.id, { status: 'succeeded', message: '', messageCode: '', messageParams: null, error: '', result });
@@ -639,10 +746,20 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
   }
 
   function startImageTasks(payloads = []) {
-    return (Array.isArray(payloads) ? payloads : []).map((payload) => startImageTask(payload));
+    const queueConcurrency = configuredActionFissionConcurrency();
+    return (Array.isArray(payloads) ? payloads : []).map((payload) => startImageTask(payload, queueConcurrency));
   }
 
   function stopImageTask(taskId) {
+    const queueKey = queuedTaskPoolKeys.get(taskId);
+    if (queueKey) {
+      const pool = queuePools.get(queueKey);
+      if (pool) {
+        pool.pending = pool.pending.filter((item) => item.taskId !== taskId);
+        if (!pool.activeCount && !pool.pending.length) queuePools.delete(queueKey);
+      }
+      queuedTaskPoolKeys.delete(taskId);
+    }
     activeControllers.get(taskId)?.abort();
     activeControllers.delete(taskId);
     const stopped = taskStore?.stopTask(taskId) || null;
@@ -702,7 +819,8 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
         const rows = data.actionFission.rows.map((sourceRow) => {
           const row = sourceRow && typeof sourceRow === 'object' ? { ...sourceRow } : {};
           delete row.libtvTask;
-          const task = row.libtvTaskId ? taskStore?.getTask(row.libtvTaskId) : null;
+          const rowId = String(row.id || '');
+          const task = taskStore?.latestTaskForTarget?.(canvasId, { type: 'actionFissionRow', nodeId, rowId });
           if (!task) return row;
           if (['queued', 'preparing', 'uploading', 'running'].includes(task.status)) {
             row.libtvTaskId = task.id;
@@ -718,6 +836,8 @@ function createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore
           if (task.status === 'succeeded' && task.result?.localUrl) {
             row.resultUrl = task.result.localUrl;
             row.resultFileName = task.result.fileName || row.selectedActionName || 'Generated image';
+            row.resultWidth = Number(task.result.width || 0) || undefined;
+            row.resultHeight = Number(task.result.height || 0) || undefined;
             row.resultDownloadState = 'pending';
             delete row.resultDownloadedAt;
             row.error = '';

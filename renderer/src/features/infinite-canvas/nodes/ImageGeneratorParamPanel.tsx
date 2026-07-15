@@ -10,7 +10,9 @@ import { Button } from "../../../components/ui/button";
 import { Card, CardContent } from "../../../components/ui/card";
 import { Field, FieldGroup } from "../../../components/ui/field";
 import { ScrollArea } from "../../../components/ui/scroll-area";
+import { Separator } from "../../../components/ui/separator";
 import { Textarea } from "../../../components/ui/textarea";
+import { cn } from "../../../lib/utils";
 import {
   API_PROVIDER_CHANGED_EVENT,
   getModelDisplayName,
@@ -30,7 +32,11 @@ import {
 } from "../../settings/imageModelRules";
 import { useNativeCanvasActions } from "../canvasActions";
 import type { NativeCanvasEdge, NativeCanvasNode, NativeCanvasNodeData } from "../nativeCanvas";
-import { collectImageGeneratorPrompts, collectImageGeneratorReferences } from "../generation/imageGenerationInputs";
+import {
+  collectActionFissionAdditionalReferences,
+  collectImageGeneratorPrompts,
+  collectImageGeneratorReferences,
+} from "../generation/imageGenerationInputs";
 import { isNativeGenerationTaskActive } from "../generation/useNativeImageGeneration";
 import { isNodeGenerationLaunching, useGenerationRuntimeStore } from "../generation/generationRuntimeStore";
 import { useGenerationPreferenceStore } from "../generation/generationPreferenceStore";
@@ -191,6 +197,10 @@ export function ImageGeneratorParamPanel({
     ? collectImageGeneratorPrompts(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:prompt"))
     : [];
   const referenceImages = collectImageGeneratorReferences(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:referenceImage"));
+  const isActionFission = data.kind === "actionFission";
+  const additionalReferenceImages = isActionFission
+    ? collectActionFissionAdditionalReferences(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference"))
+    : [];
   const normalizedApiGenerationSelection = normalizeImageModelGenerationSelection(
     rule,
     data.imageQuality,
@@ -419,9 +429,64 @@ export function ImageGeneratorParamPanel({
     void (onRun?.() ?? actions.runImageGeneration(nodeId, { promptOverride: prompt }));
   };
 
+  const primaryReferenceStrip = (
+    <ImageReferenceStrip
+      actions={(
+        <>
+          <input
+            ref={referenceInputRef}
+            className="rf-native-image-input"
+            type="file"
+            accept="image/*"
+            multiple
+            tabIndex={-1}
+            onChange={(event) => {
+              const files = Array.from(event.currentTarget.files || []);
+              event.currentTarget.value = "";
+              if (files.length) void actions.addImageReferenceFiles(nodeId, files);
+            }}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            disabled={!referenceSupported || referenceImages.length >= maxReferences}
+            aria-label={t("infiniteCanvas:uploadReferenceImage")}
+            title={t("infiniteCanvas:uploadReferenceImage")}
+            onClick={() => referenceInputRef.current?.click()}
+          >
+            <Upload aria-hidden="true" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            disabled={!referenceSupported || referenceImages.length >= maxReferences}
+            aria-label={t("infiniteCanvas:referenceFromLibrary")}
+            title={t("infiniteCanvas:referenceFromLibrary")}
+            onClick={() => actions.openLibraryForReference(nodeId)}
+          >
+            <Images aria-hidden="true" />
+          </Button>
+        </>
+      )}
+      prompts={promptInputs}
+      items={referenceImages}
+      maxReferences={maxReferences}
+      supported={referenceSupported}
+      onRemove={actions.removeCanvasEdge}
+      onReorder={(edgeIds) => actions.reorderImageGeneratorReferences(nodeId, edgeIds)}
+    />
+  );
+
   return (
     <NodeToolbar nodeId={nodeId} isVisible={visible} position={Position.Bottom} offset={toolbarOffset}>
-      <Card className="nodrag nopan nowheel w-[min(40rem,calc(100vw-2rem))] gap-0 rounded-md border-border/40 py-0 shadow-sm">
+      <Card className={cn(
+        "nodrag nopan nowheel gap-0 rounded-md border-border/40 py-0 shadow-sm",
+        isActionFission
+          ? "w-[min(50rem,calc(100vw-2rem))]"
+          : "w-[min(40rem,calc(100vw-2rem))]",
+      )}>
         <ScrollArea className="max-h-[min(32rem,calc(100vh-4rem))]">
           <CardContent className="p-4">
             {!isLibtv && !provider ? (
@@ -438,53 +503,30 @@ export function ImageGeneratorParamPanel({
                   </Alert>
                 ) : null}
                 <FieldGroup className="gap-2">
-                  <ImageReferenceStrip
-                  actions={(
-                    <>
-                      <input
-                        ref={referenceInputRef}
-                        className="rf-native-image-input"
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        tabIndex={-1}
-                        onChange={(event) => {
-                          const files = Array.from(event.currentTarget.files || []);
-                          event.currentTarget.value = "";
-                          if (files.length) void actions.addImageReferenceFiles(nodeId, files);
-                        }}
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        disabled={!referenceSupported || referenceImages.length >= maxReferences}
-                        aria-label={t("infiniteCanvas:uploadReferenceImage")}
-                        title={t("infiniteCanvas:uploadReferenceImage")}
-                        onClick={() => referenceInputRef.current?.click()}
-                      >
-                        <Upload aria-hidden="true" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        disabled={!referenceSupported || referenceImages.length >= maxReferences}
-                        aria-label={t("infiniteCanvas:referenceFromLibrary")}
-                        title={t("infiniteCanvas:referenceFromLibrary")}
-                        onClick={() => actions.openLibraryForReference(nodeId)}
-                      >
-                        <Images aria-hidden="true" />
-                      </Button>
-                    </>
-                  )}
-                  prompts={promptInputs}
-                  items={referenceImages}
-                  maxReferences={maxReferences}
-                  supported={referenceSupported}
-                  onRemove={actions.removeCanvasEdge}
-                  onReorder={(edgeIds) => actions.reorderImageGeneratorReferences(nodeId, edgeIds)}
-                  />
+                  {isActionFission ? (
+                    <div className="rf-action-fission-reference-groups">
+                      <section className="rf-action-fission-reference-group rf-action-fission-reference-group--primary">
+                        <span className="rf-action-fission-reference-title">{t("infiniteCanvas:mainReference")}</span>
+                        {primaryReferenceStrip}
+                      </section>
+                      {additionalReferenceImages.length ? (
+                        <>
+                          <Separator className="rf-action-fission-reference-divider" orientation="vertical" />
+                          <section className="rf-action-fission-reference-group rf-action-fission-reference-group--additional">
+                            <span className="rf-action-fission-reference-title">{t("infiniteCanvas:additionalReference")}</span>
+                            <ImageReferenceStrip
+                              prompts={[]}
+                              items={additionalReferenceImages}
+                              maxReferences={Math.max(0, maxReferences - referenceImages.length)}
+                              supported={referenceSupported}
+                              onRemove={actions.removeCanvasEdge}
+                              onReorder={(edgeIds) => actions.reorderImageGeneratorReferences(nodeId, edgeIds)}
+                            />
+                          </section>
+                        </>
+                      ) : null}
+                    </div>
+                  ) : primaryReferenceStrip}
 
                   {showPrompt ? (
                     <Field>

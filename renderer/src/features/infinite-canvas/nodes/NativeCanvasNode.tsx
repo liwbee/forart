@@ -272,7 +272,26 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
         />
       ) : null}
 
-      {definition.acceptsInput ? <Handle type="target" position={Position.Left} id="input" /> : null}
+      {definition.acceptsInput ? isActionFissionNode ? (
+        <>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="input"
+            style={{ top: "25%" }}
+            aria-label={t("infiniteCanvas:mainReference")}
+            title={t("infiniteCanvas:mainReference")}
+          />
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="additional-reference"
+            style={{ top: "75%" }}
+            aria-label={t("infiniteCanvas:additionalReference")}
+            title={t("infiniteCanvas:additionalReference")}
+          />
+        </>
+      ) : <Handle type="target" position={Position.Left} id="input" /> : null}
 
       <div ref={nodeFrameRef} className={cn(
         "rf-native-node-frame",

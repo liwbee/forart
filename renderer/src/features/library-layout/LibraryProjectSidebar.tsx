@@ -17,6 +17,7 @@ export interface LibraryProjectSidebarProject {
 interface LibraryProjectSidebarProps<TProject extends LibraryProjectSidebarProject> {
   projects: TProject[];
   activeProjectId: string;
+  canCreateProjects?: boolean;
   canManageProjects?: boolean;
   canReorderProjects?: boolean;
   renamingProjectId: string;
@@ -47,6 +48,7 @@ export function LibraryProjectSidebar<TProject extends LibraryProjectSidebarProj
   projects,
   activeProjectId,
   canManageProjects = true,
+  canCreateProjects = canManageProjects,
   canReorderProjects = canManageProjects,
   renamingProjectId,
   ariaLabel,
@@ -183,7 +185,7 @@ export function LibraryProjectSidebar<TProject extends LibraryProjectSidebarProj
       {topContent ? <div className="library-project-top-content">{topContent}</div> : null}
       <div className="library-project-header">
         <strong>{title || t("infiniteCanvas:projectsTitle")}</strong>
-        {canManageProjects ? <Button className="library-project-add" type="button" variant="default" size="icon" title={t("common:labels.newProject")} aria-label={t("common:labels.newProject")} disabled={creatingProject} onClick={onCreateProject}>
+        {canCreateProjects ? <Button className="library-project-add" type="button" variant="default" size="icon" title={t("common:labels.newProject")} aria-label={t("common:labels.newProject")} disabled={creatingProject} onClick={onCreateProject}>
           <Plus aria-hidden="true" />
         </Button> : null}
       </div>

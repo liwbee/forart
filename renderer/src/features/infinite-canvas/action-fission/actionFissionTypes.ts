@@ -3,14 +3,26 @@ import type { LibtvGenerationTask } from "../../../app/appConfig";
 
 export const MAX_ACTION_FISSION_ROWS = 15;
 export const DEFAULT_ACTION_FISSION_ROWS = 4;
+export const MAX_ACTION_FISSION_CATEGORY_GROUPS = 10;
 
 export type ActionFissionLayout = "list" | "grid";
 
-export interface ActionFissionRow {
+export interface ActionFissionCategoryGroup {
   id: string;
+  name?: string;
   actionProjectId: string;
   includeActionTagIds: string[];
   excludeActionTagIds: string[];
+}
+
+export interface ActionFissionRow {
+  id: string;
+  categoryGroups?: ActionFissionCategoryGroup[];
+  selectedCategoryGroupId?: string;
+  actionProjectId: string;
+  includeActionTagIds: string[];
+  excludeActionTagIds: string[];
+  useAdditionalReferences?: boolean;
   selectedActionId?: string;
   selectedActionName?: string;
   selectedActionPrompt?: string;

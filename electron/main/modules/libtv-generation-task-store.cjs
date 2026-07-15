@@ -108,7 +108,13 @@ function createLibtvGenerationTaskStore() {
   function stopTask(taskId) {
     const current = getTask(taskId);
     if (!current || TERMINAL_STATUSES.has(current.status)) return current;
-    return updateTask(taskId, { status: 'interrupted', message: '', error: '' });
+    return updateTask(taskId, {
+      status: 'interrupted',
+      message: '',
+      messageCode: '',
+      messageParams: null,
+      error: '',
+    });
   }
 
   function latestTaskForTarget(canvasId, target) {

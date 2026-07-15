@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { LibtvAccountRecord } from "../../app/appConfig";
 import { AppSelect as Select } from "../../components/AppSelect";
 import { Button } from "../../components/ui/button";
+import type { LibtvActionFissionConcurrency } from "./apiProviders";
 
 type LibtvAction = "check" | "install" | "login" | "logout" | "";
 
@@ -14,7 +15,9 @@ interface LibtvAccountSummary {
 
 interface LibtvSettingsPaneProps {
   machineId: string;
+  actionFissionConcurrency: LibtvActionFissionConcurrency;
   onMachineIdChange: (machineId: string) => void;
+  onActionFissionConcurrencyChange: (concurrency: LibtvActionFissionConcurrency) => void;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -49,7 +52,12 @@ export function LibtvLogo() {
   );
 }
 
-export function LibtvSettingsPane({ machineId, onMachineIdChange }: LibtvSettingsPaneProps) {
+export function LibtvSettingsPane({
+  machineId,
+  actionFissionConcurrency,
+  onMachineIdChange,
+  onActionFissionConcurrencyChange,
+}: LibtvSettingsPaneProps) {
   const { t } = useTranslation();
   const [action, setAction] = useState<LibtvAction>("");
   const [status, setStatus] = useState("");
@@ -172,6 +180,20 @@ export function LibtvSettingsPane({ machineId, onMachineIdChange }: LibtvSetting
               placeholder={t("settings:libtvMachineIdPlaceholder")}
               title={t("settings:libtvMachineIdDescription")}
               onChange={(event) => onMachineIdChange(event.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 32))}
+            />
+          </label>
+          <label className="settings-libtv-concurrency">
+            <span>{t("settings:libtvActionFissionConcurrency")}</span>
+            <Select
+              value={String(actionFissionConcurrency)}
+              size="sm"
+              menuPlacement="bottom"
+              ariaLabel={t("settings:libtvActionFissionConcurrency")}
+              options={Array.from({ length: 10 }, (_, index) => index + 1).map((count) => ({
+                value: String(count),
+                label: String(count),
+              })).concat({ value: "0", label: t("settings:libtvConcurrencyUnlimited") })}
+              onChange={(value) => onActionFissionConcurrencyChange(Number(value) as LibtvActionFissionConcurrency)}
             />
           </label>
         </div>

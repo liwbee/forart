@@ -95,7 +95,7 @@ export interface NativeCanvasNodeData extends Record<string, unknown> {
 }
 
 export type NativeCanvasNode = Node<NativeCanvasNodeData, "canvasNode">;
-export type NativeCanvasInputKind = "prompt" | "referenceImage";
+export type NativeCanvasInputKind = "prompt" | "referenceImage" | "additionalReferenceImage";
 
 export interface NativeCanvasEdgeData extends Record<string, unknown> {
   inputKind?: NativeCanvasInputKind;
@@ -267,7 +267,20 @@ export function cloneNativeCanvasNodeData(data: NativeCanvasNodeData): NativeCan
       status: "",
       error: "",
       rows: data.actionFission.rows.map((row) => {
-        const clonedRow = { ...row };
+        const clonedRow = {
+          ...row,
+          includeActionTagIds: [...row.includeActionTagIds],
+          excludeActionTagIds: [...row.excludeActionTagIds],
+          categoryGroups: row.categoryGroups?.map((group) => {
+            const clonedGroup = { ...group } as typeof group & { fixedActionId?: string };
+            delete clonedGroup.fixedActionId;
+            return {
+              ...clonedGroup,
+              includeActionTagIds: [...group.includeActionTagIds],
+              excludeActionTagIds: [...group.excludeActionTagIds],
+            };
+          }),
+        };
         delete clonedRow.generationTask;
         delete clonedRow.generationTaskId;
         delete clonedRow.generationRemoteTaskId;

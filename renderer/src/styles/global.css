@@ -1472,7 +1472,7 @@ body {
 
 .settings-libtv-account-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.45fr);
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.45fr) 128px;
   align-items: end;
   gap: var(--space-3);
 }
@@ -1728,6 +1728,19 @@ body {
 .settings-libtv-account-panel .settings-api-test-actions {
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+.settings-libtv-concurrency {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.settings-libtv-concurrency > span {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
 }
 
 @media (max-width: 860px) {

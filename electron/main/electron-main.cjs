@@ -61,6 +61,7 @@ const libtvGenerationRunner = createLibtvGenerationRunner({
   canvasStore,
   taskStore: libtvGenerationTaskStore,
   resolveWorkspaceName: () => createLibtvWorkspaceName(configStore.loadApiSettings().libtvMachineId),
+  resolveActionFissionConcurrency: () => configStore.loadApiSettings().libtvActionFissionConcurrency,
 });
 const portableUpdater = createPortableUpdater({ app, rootDir: appRootDir, dataRoot: portableRootDir, net });
 let localApi = null;
