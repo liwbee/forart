@@ -102,10 +102,16 @@ test('successful saves leave no temporary canvas or index files behind', () => w
   assert.equal(fs.existsSync(path.join(rootDir, 'CanvasAssests', 'canvas-index.json.tmp')), false);
 }));
 
-test('main-process save sessions ignore an older save sequence', async () => {
+test('main-process saves do not consult in-memory task runners', async () => {
   const handlers = new Map();
   const saves = [];
-  const passthroughRunner = { reconcileCanvasPayload: (_canvasId, payload) => payload };
+  let reconciliations = 0;
+  const runner = {
+    reconcileCanvasPayload() {
+      reconciliations += 1;
+      throw new Error('Canvas save must not reconcile task state.');
+    },
+  };
   registerCanvasIpc({
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     app: { getPath: () => '' },
@@ -118,14 +124,20 @@ test('main-process save sessions ignore an older save sequence', async () => {
     assetStore: {},
     canvasPackageStore: {},
     generationTaskStore: {},
-    imageGenerationRunner: passthroughRunner,
-    libtvGenerationRunner: passthroughRunner,
+    imageGenerationRunner: runner,
   });
   const save = handlers.get('canvas:save');
-  await save(null, 'canvas-1', { saveSessionId: 'session', saveSessionStartedAt: 100, saveSequence: 2, nodes: [{ id: 'new' }] });
+  await save(null, 'canvas-1', {
+    saveSessionId: 'session',
+    saveSessionStartedAt: 100,
+    saveSequence: 2,
+    nodes: [{ id: 'new', data: { generatedImages: [{ localUrl: 'forart-asset://output/image.png', downloadState: 'downloaded' }] } }],
+  });
   const stale = await save(null, 'canvas-1', { saveSessionId: 'session', saveSessionStartedAt: 100, saveSequence: 1, nodes: [{ id: 'old' }] });
 
   assert.equal(saves.length, 1);
   assert.equal(saves[0].payload.nodes[0].id, 'new');
+  assert.equal(saves[0].payload.nodes[0].data.generatedImages[0].downloadState, 'downloaded');
+  assert.equal(reconciliations, 0);
   assert.equal(stale.stale, true);
 });

@@ -22,7 +22,6 @@ import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "../../../components/ui/toggle-group";
 import { cn } from "../../../lib/utils";
-import { ImageViewer } from "../../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import type { ActionEntry, ActionProject, ActionTag } from "../../action-library/types";
 import {
@@ -30,7 +29,11 @@ import {
   normalizeActionFissionState,
   removeActionFissionRow,
 } from "../action-fission/actionFissionState";
-import { getActionFissionRunReadiness, randomizeActionFissionRows } from "../action-fission/actionFissionRules";
+import {
+  actionFissionReferenceImages,
+  getActionFissionRunReadiness,
+  randomizeActionFissionRows,
+} from "../action-fission/actionFissionRules";
 import { MAX_ACTION_FISSION_ROWS, type ActionFissionCategoryGroup, type ActionFissionRow } from "../action-fission/actionFissionTypes";
 import { useActionFissionLibraryData } from "../action-fission/useActionFissionLibraryData";
 import { useNativeCanvasActions } from "../canvasActions";
@@ -44,6 +47,8 @@ import {
 } from "../generation/imageGenerationInputs";
 import { ActionFissionParamPanel } from "./ActionFissionParamPanel";
 import { actionFissionLaunchingRowIds, useGenerationRuntimeStore } from "../generation/generationRuntimeStore";
+import { ActionFissionImageViewer } from "./ActionFissionImageViewer";
+import { useInfiniteCanvasSettings } from "../infiniteCanvasSettings";
 
 interface ActionFissionNodeBodyProps {
   nodeId: string;
@@ -356,7 +361,10 @@ function hasCategoryCandidates(groups: readonly { group: ActionFissionCategoryGr
 export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: ActionFissionNodeBodyProps) {
   const { t } = useTranslation();
   const actions = useNativeCanvasActions();
+  const { settings, updateSettings } = useInfiniteCanvasSettings();
+  const viewerSettings = settings.actionFissionViewer;
   const [viewerImage, setViewerImage] = useState<ViewerImage | null>(null);
+  const [viewerReferenceNodeId, setViewerReferenceNodeId] = useState("");
   const [downloadBusyRowId, setDownloadBusyRowId] = useState("");
   const [isRenaming, setIsRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -390,11 +398,38 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   const resolvedViewerImage = viewerImage
     ? viewerImages[viewerImage.kind].find((image) => image.id === viewerImage.id) ?? viewerImage
     : null;
+  const viewerRow = viewerImage
+    ? state.rows.find((row) => row.id === viewerImage.id)
+    : undefined;
+  const primaryReferences = useMemo(
+    () => collectImageGeneratorReferences(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:mainReference")),
+    [canvasEdges, canvasNodes, nodeId, t],
+  );
+  const additionalReferences = useMemo(
+    () => collectActionFissionAdditionalReferences(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference")),
+    [canvasEdges, canvasNodes, nodeId, t],
+  );
+  const viewerReferences = useMemo(() => {
+    if (viewerImage?.kind !== "result" || !viewerRow) return [];
+    const allReferences = [...primaryReferences, ...additionalReferences];
+    const referenceByUrl = new Map(allReferences.map((reference) => [reference.imageUrl, reference]));
+    return actionFissionReferenceImages(
+      viewerRow,
+      primaryReferences.map((reference) => reference.imageUrl),
+      additionalReferences.map((reference) => reference.imageUrl),
+    ).flatMap((url) => {
+      const reference = referenceByUrl.get(url);
+      return reference ? [reference] : [];
+    });
+  }, [additionalReferences, primaryReferences, viewerImage?.kind, viewerRow]);
+  const selectedViewerReferenceIndex = viewerReferences.findIndex((reference) => reference.nodeId === viewerReferenceNodeId);
+  const viewerReferenceIndex = selectedViewerReferenceIndex >= 0 ? selectedViewerReferenceIndex : 0;
+  const viewerReference = viewerReferences[viewerReferenceIndex];
+
   const setState = (nextState: typeof state) => actions.patchNodeData(nodeId, { actionFission: nextState });
   const canSwitchAnyRow = rowData.some(({ categoryGroups }) => hasCategoryCandidates(categoryGroups));
-  const referenceCount = collectImageGeneratorReferences(nodeId, canvasNodes, canvasEdges).length;
-  const additionalReferenceCount = collectActionFissionAdditionalReferences(nodeId, canvasNodes, canvasEdges).length;
-  const hasAdditionalReferences = additionalReferenceCount > 0;
+  const referenceCount = primaryReferences.length;
+  const hasAdditionalReferences = additionalReferences.length > 0;
   const runReadiness = getActionFissionRunReadiness(state.rows, referenceCount);
   const hasRunningRows = state.rows.some(isRowGenerating);
   const hasQueuedRows = state.rows.some((row) => isRowQueued(row));
@@ -506,9 +541,6 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
     });
   };
 
-  const viewerRow = viewerImage
-    ? state.rows.find((row) => row.id === viewerImage.id)
-    : undefined;
   const viewerActivity = viewerImage?.kind === "result" && viewerRow
     ? launchingRowIds.has(viewerRow.id) || isRowQueued(viewerRow)
       ? {
@@ -738,13 +770,41 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
         onStop={() => actions.stopActionFission(nodeId)}
       />
       {viewerImage ? (
-        <ImageViewer
+        <ActionFissionImageViewer
+          kind={viewerImage.kind}
           src={resolvedViewerImage?.src ?? viewerImage.src}
           alt={resolvedViewerImage?.alt ?? viewerImage.alt}
           ariaLabel={t("infiniteCanvas:viewLargeImage")}
           onClose={() => setViewerImage(null)}
           actions={viewerActions}
           activity={viewerActivity}
+          reference={viewerImage.kind === "result" && viewerReference ? {
+            src: viewerReference.imageUrl,
+            alt: viewerReference.title || t("infiniteCanvas:mainReference"),
+            navigation: {
+              index: viewerReferenceIndex,
+              total: viewerReferences.length,
+              previousLabel: t("infiniteCanvas:previousReferenceImage"),
+              nextLabel: t("infiniteCanvas:nextReferenceImage"),
+              onPrevious: () => setViewerReferenceNodeId(viewerReferences[Math.max(0, viewerReferenceIndex - 1)]?.nodeId || ""),
+              onNext: () => setViewerReferenceNodeId(viewerReferences[Math.min(viewerReferences.length - 1, viewerReferenceIndex + 1)]?.nodeId || ""),
+            },
+          } : undefined}
+          comparisonEnabled={viewerSettings.referenceComparisonEnabled}
+          comparisonLabel={t("infiniteCanvas:referenceComparison")}
+          onComparisonEnabledChange={(referenceComparisonEnabled) => updateSettings((current) => ({
+            ...current,
+            actionFissionViewer: { ...current.actionFissionViewer, referenceComparisonEnabled },
+          }))}
+          referencePanelPercent={viewerSettings.referencePanelPercent}
+          onReferencePanelPercentChange={(referencePanelPercent) => updateSettings((current) => {
+            const normalizedPercent = Math.max(20, Math.min(80, Math.round(referencePanelPercent)));
+            if (normalizedPercent === current.actionFissionViewer.referencePanelPercent) return current;
+            return {
+              ...current,
+              actionFissionViewer: { ...current.actionFissionViewer, referencePanelPercent: normalizedPercent },
+            };
+          })}
           navigation={(() => {
             const images = viewerImages[viewerImage.kind];
             const index = images.findIndex((image) => image.id === viewerImage.id);

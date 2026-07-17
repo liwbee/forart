@@ -1,4 +1,15 @@
 export const zhCN = {
+  referenceComparison: "参考对比",
+  resizeReferenceComparison: "调整参考图与结果图空间",
+  previousReferenceImage: "上一张参考图",
+  nextReferenceImage: "下一张参考图",
+  cropImage: "裁剪图片",
+  imageCropAspect: "裁剪比例",
+  imageCropAspectOriginal: "原始比例",
+  imageCropAspectFree: "自由比例",
+  imageCropSourceMissing: "没有可裁剪的图片。",
+  imageCropUnavailable: "当前环境不支持图片裁剪。",
+  imageCropFailed: "裁剪失败：{{message}}",
   title: "无限画布",
   homeTitle: "主页",
   sortCanvases: "排序画布",
@@ -183,6 +194,17 @@ export const zhCN = {
 } as const;
 
 export const enUS = {
+  referenceComparison: "Reference comparison",
+  resizeReferenceComparison: "Resize reference and result areas",
+  previousReferenceImage: "Previous reference image",
+  nextReferenceImage: "Next reference image",
+  cropImage: "Crop image",
+  imageCropAspect: "Crop aspect ratio",
+  imageCropAspectOriginal: "Original ratio",
+  imageCropAspectFree: "Free ratio",
+  imageCropSourceMissing: "There is no image to crop.",
+  imageCropUnavailable: "Image cropping is unavailable in this environment.",
+  imageCropFailed: "Failed to crop image: {{message}}",
   title: "Infinite Canvas",
   homeTitle: "Home",
   sortCanvases: "Sort canvases",

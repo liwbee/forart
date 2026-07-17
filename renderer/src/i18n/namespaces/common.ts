@@ -1,5 +1,6 @@
 export const zhCN = {
   actions: {
+    confirm: "确认",
     viewImage: "查看原图",
     add: "添加",
     back: "返回",
@@ -13,6 +14,7 @@ export const zhCN = {
     toggleSidebar: "切换侧边栏",
     uploadImage: "上传图片",
     downloadOriginalImage: "下载原图",
+    copyNode: "复制节点",
     copyImage: "复制图片",
     copyError: "复制完整报错信息"
   },
@@ -99,6 +101,7 @@ export const zhCN = {
 
 export const enUS = {
   actions: {
+    confirm: "Confirm",
     viewImage: "View original image",
     add: "Add",
     back: "Back",
@@ -112,6 +115,7 @@ export const enUS = {
     toggleSidebar: "Toggle sidebar",
     uploadImage: "Upload image",
     downloadOriginalImage: "Download original image",
+    copyNode: "Copy node",
     copyImage: "Copy image",
     copyError: "Copy full error message"
   },

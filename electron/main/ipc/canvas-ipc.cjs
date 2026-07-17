@@ -1,4 +1,4 @@
-function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskStore, imageGenerationRunner, libtvGenerationRunner }) {
+function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskStore, imageGenerationRunner }) {
   const canvasSaveSessions = new Map();
   ipcMain.handle('save-result', async (_event, payload) => assetStore.saveResult(payload, app.getPath('downloads')));
   ipcMain.handle('canvas:list', async () => ({ canvases: canvasStore.listCanvases(), projects: canvasStore.listProjects() }));
@@ -15,10 +15,9 @@ function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackag
       const staleSequence = previous.sessionId === sessionId && saveSequence > 0 && previous.sequence >= saveSequence;
       if (olderSession || staleSequence) return { ok: true, skipped: true, stale: true };
     }
-    const result = canvasStore.saveCanvas(canvasId, libtvGenerationRunner.reconcileCanvasPayload(
-      canvasId,
-      imageGenerationRunner.reconcileCanvasPayload(canvasId, payload),
-    ));
+    // Task runners persist active anchors and terminal results directly.
+    // A regular canvas save must not replay in-memory task state.
+    const result = canvasStore.saveCanvas(canvasId, payload);
     if (sessionId) {
       canvasSaveSessions.set(String(canvasId || ''), {
         sessionId,

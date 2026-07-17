@@ -47,6 +47,16 @@ export interface ForartImageReviewSettings {
   detailFolders: string;
 }
 
+export interface ForartInfiniteCanvasSettings {
+  connectionsVisible: boolean;
+  minimapOpen: boolean;
+  snapToGrid: boolean;
+  actionFissionViewer: {
+    referenceComparisonEnabled: boolean;
+    referencePanelPercent: number;
+  };
+}
+
 export interface ForartAppInfo {
   name: string;
   repoUrl: string;
@@ -117,6 +127,8 @@ export interface ForartConfigApi {
   saveApiSettings: (settings: ForartApiSettingsConfig) => Promise<{ ok: true; apiSettings: ForartApiSettingsConfig }>;
   loadImageReviewSettings: () => Promise<ForartImageReviewSettings>;
   saveImageReviewSettings: (settings: ForartImageReviewSettings) => Promise<{ ok: true; imageReview: ForartImageReviewSettings }>;
+  loadInfiniteCanvasSettings: () => Promise<ForartInfiniteCanvasSettings>;
+  saveInfiniteCanvasSettings: (settings: ForartInfiniteCanvasSettings) => Promise<{ ok: true; infiniteCanvas: ForartInfiniteCanvasSettings }>;
   defaultPaths: () => Promise<{ imageDownloadPath: string }>;
   chooseDirectory: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
   testServer: (serverUrl: string) => Promise<{ ok: boolean; status?: number; error?: string; payload?: unknown }>;

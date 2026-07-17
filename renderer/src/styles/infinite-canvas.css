@@ -536,6 +536,176 @@
   padding: 0;
 }
 
+.rf-native-image-crop-aspect {
+  width: 116px;
+}
+
+.rf-native-image-crop-editor {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--background);
+}
+
+.rf-native-image-crop-editor .ReactCrop {
+  --rc-drag-handle-bg-colour: var(--background);
+  --rc-border-color: var(--foreground);
+  --rc-focus-color: var(--ring);
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.rf-native-image-crop-editor .ReactCrop__child-wrapper {
+  width: 100%;
+  height: 100%;
+}
+
+.rf-native-image-crop-editor .ReactCrop__child-wrapper > img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.rf-action-fission-viewer-stage .rf-action-fission-viewer-layout {
+  position: absolute;
+  inset: 76px 76px 24px;
+  overflow: hidden;
+}
+
+.rf-action-fission-viewer-panel-group {
+  min-width: 0;
+  min-height: 0;
+}
+
+.rf-action-fission-viewer-pane {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rf-action-fission-viewer-handle {
+  width: 12px;
+  flex: 0 0 12px;
+  background: transparent;
+  cursor: col-resize;
+}
+
+.rf-action-fission-viewer-handle::before {
+  content: "";
+  width: 1px;
+  height: 100%;
+  background: var(--media-overlay-border);
+  transition: background 160ms ease;
+}
+
+.rf-action-fission-viewer-handle:hover::before,
+.rf-action-fission-viewer-handle:focus-visible::before {
+  background: var(--media-overlay-border-strong);
+}
+
+.rf-action-fission-viewer-reference-nav {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  z-index: 6;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--media-overlay-border);
+  border-radius: var(--radius-pill);
+  padding: 2px;
+  background: var(--media-overlay-bg);
+  color: var(--media-overlay-foreground);
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  transform: translateX(-50%);
+  backdrop-filter: blur(16px);
+}
+
+.rf-action-fission-viewer-reference-nav span {
+  min-width: 42px;
+  text-align: center;
+}
+
+.rf-action-fission-viewer-toggle {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius-pill);
+  padding: 0 10px;
+  color: var(--media-overlay-foreground);
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.rf-action-fission-viewer-toggle:hover {
+  background: var(--media-overlay-bg-strong);
+}
+
+.rf-action-fission-viewer-result-nav-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  pointer-events: none;
+}
+
+.rf-action-fission-viewer-result-nav {
+  width: 48px;
+  min-height: 56px;
+  flex: 0 0 48px;
+  border: 1px solid var(--media-overlay-border);
+  border-radius: var(--radius-pill);
+  padding: 0;
+  background: var(--media-overlay-bg);
+  color: var(--media-overlay-foreground);
+  box-shadow: none;
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+}
+
+.rf-action-fission-viewer-result-nav:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--media-overlay-border-strong) 68%, transparent);
+  background: var(--media-overlay-bg-strong);
+}
+
+.rf-action-fission-viewer-result-nav:active {
+  transform: scale(0.96);
+}
+
+.rf-action-fission-viewer-result-nav:disabled {
+  cursor: default;
+  opacity: var(--state-disabled-opacity);
+}
+
+@media (max-width: 760px) {
+  .rf-action-fission-viewer-stage .rf-action-fission-viewer-layout {
+    inset: 70px 58px 18px;
+  }
+
+  .rf-action-fission-viewer-result-nav {
+    width: 44px;
+    min-height: 52px;
+    flex-basis: 44px;
+  }
+}
+
 .rf-native-generated-count {
   position: absolute;
   top: 7px;

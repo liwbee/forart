@@ -126,6 +126,12 @@ function normalizeGeneratedImages(data: Record<string, unknown>, fallbackUrl = "
 function normalizeCurrentNodeData(data: Record<string, unknown>, kind: NativeCanvasNodeKind) {
   const normalized = { ...data, kind } as NativeCanvasNode["data"];
   if (kind !== "imageGenerator") return normalized;
+  if (data.libtvImageGeneration && typeof data.libtvImageGeneration === "object") {
+    const libtvState = { ...(data.libtvImageGeneration as Record<string, unknown>) };
+    normalized.generationError = String(data.generationError || libtvState.error || "") || undefined;
+    delete libtvState.error;
+    normalized.libtvImageGeneration = libtvState as NativeCanvasNode["data"]["libtvImageGeneration"];
+  }
   normalized.generatedImages = normalizeGeneratedImages(data);
   delete normalized.imageUrl;
   delete normalized.thumbUrl;
@@ -174,7 +180,13 @@ function normalizeNode(input: unknown): NativeCanvasNode | null {
       : undefined,
     imageNaturalWidth: Number(data.imageNaturalWidth || value.imageNaturalWidth || 0) || undefined,
     imageNaturalHeight: Number(data.imageNaturalHeight || value.imageNaturalHeight || 0) || undefined,
-    generationError: String(data.generationError || value.generationError || "") || undefined,
+    generationError: String(
+      data.generationError
+      || value.generationError
+      || (data.libtvImageGeneration && typeof data.libtvImageGeneration === "object"
+        ? (data.libtvImageGeneration as Record<string, unknown>).error
+        : ""),
+    ) || undefined,
     generationTaskId: String(data.generationTaskId || "") || undefined,
     generationRemoteTaskId: String(
       data.generationRemoteTaskId
@@ -184,7 +196,11 @@ function normalizeNode(input: unknown): NativeCanvasNode | null {
     ) || undefined,
     imageGenerationBackend: data.imageGenerationBackend === "libtv" ? "libtv" : "api",
     libtvImageGeneration: data.libtvImageGeneration && typeof data.libtvImageGeneration === "object"
-      ? data.libtvImageGeneration as NativeCanvasNode["data"]["libtvImageGeneration"]
+      ? (() => {
+          const state = { ...(data.libtvImageGeneration as Record<string, unknown>) };
+          delete state.error;
+          return state as NativeCanvasNode["data"]["libtvImageGeneration"];
+        })()
       : undefined,
     actionFission: (data.actionFission || value.actionFission) as NativeCanvasNode["data"]["actionFission"],
   });

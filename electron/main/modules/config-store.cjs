@@ -29,6 +29,28 @@ function normalizeImageReviewSettings(payload = {}) {
   };
 }
 
+function normalizeInfiniteCanvasSettings(payload = {}) {
+  const source = payload && typeof payload === 'object' ? payload : {};
+  const viewerSource = source.actionFissionViewer && typeof source.actionFissionViewer === 'object'
+    ? source.actionFissionViewer
+    : {};
+  const rawPercent = viewerSource.referencePanelPercent;
+  const requestedPercent = rawPercent === undefined || rawPercent === null || rawPercent === ''
+    ? Number.NaN
+    : Number(rawPercent);
+  return {
+    connectionsVisible: source.connectionsVisible !== false,
+    minimapOpen: source.minimapOpen === true,
+    snapToGrid: source.snapToGrid === true,
+    actionFissionViewer: {
+      referenceComparisonEnabled: viewerSource.referenceComparisonEnabled === true,
+      referencePanelPercent: Number.isFinite(requestedPercent)
+        ? Math.max(20, Math.min(80, Math.round(requestedPercent)))
+        : 50,
+    },
+  };
+}
+
 function normalizeApiProvider(input = {}, providers = []) {
   if (isApimartProvider(input)) return createApimartProvider(input);
   const name = String(input.name || 'API').trim() || 'API';
@@ -248,6 +270,16 @@ function createConfigStore({ app, rootDir }) {
     return imageReview;
   }
 
+  function loadInfiniteCanvasSettings() {
+    return normalizeInfiniteCanvasSettings(readRaw().infiniteCanvas || {});
+  }
+
+  function saveInfiniteCanvasSettings(payload) {
+    const infiniteCanvas = normalizeInfiniteCanvasSettings(payload);
+    writeRaw({ ...readRaw(), infiniteCanvas });
+    return infiniteCanvas;
+  }
+
   function loadApiSettings() {
     return normalizeApiSettings(readRaw().apiSettings || {});
   }
@@ -258,7 +290,16 @@ function createConfigStore({ app, rootDir }) {
     return apiSettings;
   }
 
-  return { load, loadApiSettings, loadImageReviewSettings, save, saveApiSettings, saveImageReviewSettings };
+  return {
+    load,
+    loadApiSettings,
+    loadImageReviewSettings,
+    loadInfiniteCanvasSettings,
+    save,
+    saveApiSettings,
+    saveImageReviewSettings,
+    saveInfiniteCanvasSettings,
+  };
 }
 
 module.exports = {

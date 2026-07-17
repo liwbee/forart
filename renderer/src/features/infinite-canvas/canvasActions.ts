@@ -8,6 +8,7 @@ import type {
 
 export interface NativeCanvasActions {
   addImageReferenceFiles: (nodeId: string, files: File[]) => Promise<void>;
+  cropNodeImage: (nodeId: string, crop: CanvasImageCropRect) => Promise<void>;
   downloadActionFissionResult: (nodeId: string, rowId: string) => Promise<void>;
   downloadGeneratedImage: (nodeId: string, imageIndex: number) => Promise<void>;
   getImageGeneratorPrompts: (nodeId: string) => ImageGeneratorPromptInput[];
@@ -24,6 +25,13 @@ export interface NativeCanvasActions {
   setNodeText: (nodeId: string, text: string) => void;
   stopImageGeneration: (nodeId: string) => Promise<void>;
   stopActionFission: (nodeId: string, rowId?: string) => Promise<void>;
+}
+
+export interface CanvasImageCropRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export const NativeCanvasActionsContext = createContext<NativeCanvasActions | null>(null);

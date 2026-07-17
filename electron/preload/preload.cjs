@@ -60,6 +60,8 @@ contextBridge.exposeInMainWorld('forartConfig', {
   saveApiSettings: (payload) => ipcRenderer.invoke('config:save-api-settings', payload),
   loadImageReviewSettings: () => ipcRenderer.invoke('config:load-image-review-settings'),
   saveImageReviewSettings: (payload) => ipcRenderer.invoke('config:save-image-review-settings', payload),
+  loadInfiniteCanvasSettings: () => ipcRenderer.invoke('config:load-infinite-canvas-settings'),
+  saveInfiniteCanvasSettings: (payload) => ipcRenderer.invoke('config:save-infinite-canvas-settings', payload),
   defaultPaths: () => ipcRenderer.invoke('config:default-paths'),
   chooseDirectory: (payload) => ipcRenderer.invoke('dialog:choose-directory', payload),
   testServer: (serverUrl) => ipcRenderer.invoke('server:test-remote', serverUrl),

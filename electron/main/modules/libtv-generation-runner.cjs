@@ -767,92 +767,6 @@ function createLibtvGenerationRunner({
     return stopped;
   }
 
-  function reconcileCanvasPayload(canvasId, payload = {}) {
-    if (!Array.isArray(payload.nodes)) return payload;
-    return {
-      ...payload,
-      nodes: payload.nodes.map((node) => {
-        const data = node?.data && typeof node.data === 'object' ? { ...node.data } : {};
-        const nodeId = String(node?.id || '');
-        const nodeTask = taskStore?.latestTaskForTarget?.(canvasId, { type: 'imageGenerator', nodeId });
-        const state = data.libtvImageGeneration && typeof data.libtvImageGeneration === 'object'
-          ? { ...data.libtvImageGeneration }
-          : nodeTask ? {} : null;
-        if (state) {
-          delete state.task;
-          if (nodeTask && ['queued', 'preparing', 'uploading', 'running'].includes(nodeTask.status)) {
-            state.taskId = nodeTask.id;
-            if (nodeTask.projectUuid) state.projectUuid = nodeTask.projectUuid;
-            if (nodeTask.remoteNodeId) state.remoteNodeId = nodeTask.remoteNodeId;
-            state.error = '';
-          } else if (nodeTask) {
-            delete state.taskId;
-            delete state.projectUuid;
-            delete state.remoteNodeId;
-            if (nodeTask.status === 'succeeded' && nodeTask.result?.localUrl) {
-              data.generatedImages = [{
-                url: String(nodeTask.result.url || ''),
-                localUrl: String(nodeTask.result.localUrl || ''),
-                thumbUrl: String(nodeTask.result.thumbUrl || ''),
-                fileName: String(nodeTask.result.fileName || ''),
-                width: Number(nodeTask.result.width || 0) || undefined,
-                height: Number(nodeTask.result.height || 0) || undefined,
-                downloadState: 'pending',
-              }];
-              data.multiImageExpanded = false;
-              delete data.multiImageCollapsedSize;
-              delete data.imageUrl;
-              delete data.thumbUrl;
-              data.label = String(nodeTask.result.fileName || data.label || 'Generated image');
-              delete data.outputDownloadState;
-              delete data.outputDownloadedAt;
-              state.error = '';
-            } else if (nodeTask.status === 'failed') {
-              state.error = nodeTask.error || 'LibTV generation failed.';
-            } else {
-              state.error = '';
-            }
-          }
-          data.libtvImageGeneration = state;
-        }
-        if (!data.actionFission || !Array.isArray(data.actionFission.rows)) return { ...node, data };
-        const rows = data.actionFission.rows.map((sourceRow) => {
-          const row = sourceRow && typeof sourceRow === 'object' ? { ...sourceRow } : {};
-          delete row.libtvTask;
-          const rowId = String(row.id || '');
-          const task = taskStore?.latestTaskForTarget?.(canvasId, { type: 'actionFissionRow', nodeId, rowId });
-          if (!task) return row;
-          if (['queued', 'preparing', 'uploading', 'running'].includes(task.status)) {
-            row.libtvTaskId = task.id;
-            if (task.projectUuid) row.libtvProjectUuid = task.projectUuid;
-            if (task.remoteNodeId) row.libtvRemoteNodeId = task.remoteNodeId;
-            return row;
-          }
-          delete row.libtvTaskId;
-          delete row.libtvProjectUuid;
-          delete row.libtvRemoteNodeId;
-          row.libtvQueued = false;
-          row.libtvRunning = false;
-          if (task.status === 'succeeded' && task.result?.localUrl) {
-            row.resultUrl = task.result.localUrl;
-            row.resultFileName = task.result.fileName || row.selectedActionName || 'Generated image';
-            row.resultWidth = Number(task.result.width || 0) || undefined;
-            row.resultHeight = Number(task.result.height || 0) || undefined;
-            row.resultDownloadState = 'pending';
-            delete row.resultDownloadedAt;
-            row.error = '';
-          } else if (task.status === 'failed') {
-            row.error = task.error || 'LibTV generation failed.';
-          } else {
-            row.error = '';
-          }
-          return row;
-        });
-        return { ...node, data: { ...data, actionFission: { ...data.actionFission, rows } } };
-      }),
-    };
-  }
-
   async function resolveResultUrl(projectUuid, remoteNode, run, fallbackIndex) {
     const runUrls = collectImageUrls(run.payload, run.stdout);
     if (runUrls[fallbackIndex]) return runUrls[fallbackIndex];
@@ -1026,7 +940,6 @@ function createLibtvGenerationRunner({
     generateBatch,
     generateImage,
     getImageTask,
-    reconcileCanvasPayload,
     recoverCanvasTasks,
     recoverImageTask,
     startImageTask,

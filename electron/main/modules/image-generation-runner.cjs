@@ -901,90 +901,6 @@ function createImageGenerationRunner({ net, assetStore, canvasStore, generationT
     return { ok: true, tasks: recovered, errors };
   }
 
-  function reconcileCanvasPayload(canvasId, payload = {}) {
-    if (!Array.isArray(payload.nodes)) return payload;
-    return {
-      ...payload,
-      nodes: payload.nodes.map((node) => {
-        const data = node?.data && typeof node.data === 'object' ? { ...node.data } : {};
-        delete data.generationTask;
-        const nodeId = String(node?.id || '');
-        if (data.actionFission && typeof data.actionFission === 'object' && Array.isArray(data.actionFission.rows)) {
-          data.actionFission = {
-            ...data.actionFission,
-            rows: data.actionFission.rows.map((sourceRow) => {
-              const row = sourceRow && typeof sourceRow === 'object' ? { ...sourceRow } : {};
-              delete row.generationTask;
-              const rowId = String(row.id || '');
-              const rowTask = generationTaskStore.latestTaskForTarget?.(canvasId, { type: 'actionFissionRow', nodeId, rowId });
-              if (rowTask && ['queued', 'submitting', 'running'].includes(rowTask.status)) {
-                row.generationTaskId = rowTask.id;
-                if (rowTask.upstreamTaskId) row.generationRemoteTaskId = rowTask.upstreamTaskId;
-              } else if (rowTask && ['succeeded', 'failed', 'interrupted', 'superseded'].includes(rowTask.status)) {
-                delete row.generationTaskId;
-                delete row.generationRemoteTaskId;
-                if (rowTask.status === 'succeeded' && rowTask.result?.localUrl) {
-                  row.resultUrl = rowTask.result.localUrl;
-                  row.resultFileName = rowTask.result.fileName || row.selectedActionName || 'Generated image';
-                  row.resultWidth = Number(rowTask.result.width || 0) || undefined;
-                  row.resultHeight = Number(rowTask.result.height || 0) || undefined;
-                  row.resultDownloadState = 'pending';
-                  delete row.resultDownloadedAt;
-                  row.error = '';
-                } else if (rowTask.status === 'failed') {
-                  row.error = rowTask.error || 'Image generation failed.';
-                } else {
-                  row.error = '';
-                }
-              }
-              return row;
-            }),
-          };
-        }
-        const task = generationTaskStore.latestTaskForTarget?.(canvasId, { type: 'imageGenerator', nodeId });
-        if (task && ['queued', 'submitting', 'running'].includes(task.status)) {
-          data.generationTaskId = task.id;
-          if (task.upstreamTaskId) data.generationRemoteTaskId = task.upstreamTaskId;
-        } else if (task && ['succeeded', 'failed', 'interrupted', 'superseded'].includes(task.status)) {
-          delete data.generationTaskId;
-          delete data.generationRemoteTaskId;
-          if (task.status === 'succeeded' && task.result?.localUrl) {
-            data.generatedImages = Array.isArray(task.result.results)
-              ? task.result.results.map((result) => ({
-                  url: String(result?.url || ''),
-                  localUrl: String(result?.localUrl || ''),
-                  thumbUrl: String(result?.thumbUrl || ''),
-                  fileName: String(result?.fileName || ''),
-                  width: Number(result?.width || 0) || undefined,
-                  height: Number(result?.height || 0) || undefined,
-                  downloadState: 'pending',
-                })).filter((result) => result.localUrl || result.url)
-              : [{
-                  url: String(task.result.url || ''),
-                  localUrl: String(task.result.localUrl || ''),
-                  thumbUrl: String(task.result.thumbUrl || ''),
-                  fileName: String(task.result.fileName || ''),
-                  width: Number(task.result.width || 0) || undefined,
-                  height: Number(task.result.height || 0) || undefined,
-                  downloadState: 'pending',
-                }];
-            data.multiImageExpanded = false;
-            delete data.multiImageCollapsedSize;
-            delete data.imageUrl;
-            delete data.thumbUrl;
-            data.label = String(task.result.fileName || data.label || 'Generated image');
-            delete data.outputDownloadState;
-            delete data.outputDownloadedAt;
-            data.generationError = '';
-          } else if (task.status === 'failed') {
-            data.generationError = task.error || 'Image generation failed.';
-          }
-        }
-        return { ...node, data };
-      }),
-    };
-  }
-
   function abortTasks(taskIds = []) {
     taskIds.forEach((taskId) => {
       activeControllers.get(taskId)?.abort();
@@ -1015,7 +931,6 @@ function createImageGenerationRunner({ net, assetStore, canvasStore, generationT
 
   return {
     getTask,
-    reconcileCanvasPayload,
     recoverCanvasTasks,
     recoverTask,
     resumeTask,

@@ -49,8 +49,9 @@ function extensionFromPath(value) {
   return ext || '.png';
 }
 
-function isExternalHttpUrl(value) {
-  return /^https?:\/\//i.test(String(value || ''));
+function isRemoteResourceUrl(value) {
+  const text = String(value || '');
+  return /^https?:\/\//i.test(text) || /^\/api(?:\/|$)/i.test(text);
 }
 
 function isLocalUrlLike(value) {
@@ -147,7 +148,7 @@ function cleanActionFissionForJsonOnly(actionFission) {
     delete cleanRow.libtvQueued;
     delete cleanRow.libtvRunning;
     delete cleanRow.generationTask;
-    if (isLocalUrlLike(cleanRow.selectedActionAssetUrl) && !isExternalHttpUrl(cleanRow.selectedActionAssetUrl)) {
+    if (isLocalUrlLike(cleanRow.selectedActionAssetUrl) && !isRemoteResourceUrl(cleanRow.selectedActionAssetUrl)) {
       cleanRow.selectedActionAssetUrl = null;
     }
     return cleanRow;
@@ -199,7 +200,7 @@ function sanitizeCanvasForJsonOnly(canvas) {
   const next = cloneSerializable(canvas);
   next.nodes = Array.isArray(next.nodes) ? next.nodes.map((node) => {
     const cleanNode = cleanGenerationTask({ ...node });
-    if (isLocalUrlLike(cleanNode.url) && !isExternalHttpUrl(cleanNode.url)) delete cleanNode.url;
+    if (isLocalUrlLike(cleanNode.url) && !isRemoteResourceUrl(cleanNode.url)) delete cleanNode.url;
     delete cleanNode.thumbUrl;
     delete cleanNode.filePath;
     delete cleanNode.thumbFilePath;
@@ -210,11 +211,18 @@ function sanitizeCanvasForJsonOnly(canvas) {
     delete cleanNode.outputDownloadedAt;
     cleanNode.actionFission = cleanActionFissionForJsonOnly(cleanNode.actionFission);
     cleanNode.libtvImageGeneration = cleanLibtvForJsonOnly(cleanNode.libtvImageGeneration);
+    if (isRecord(cleanNode.data)) {
+      const cleanData = cleanGenerationTask({ ...cleanNode.data });
+      delete cleanData.thumbUrl;
+      cleanData.actionFission = cleanActionFissionForJsonOnly(cleanData.actionFission);
+      cleanData.libtvImageGeneration = cleanLibtvForJsonOnly(cleanData.libtvImageGeneration);
+      cleanNode.data = cleanData;
+    }
     return cleanNode;
   }) : [];
   return walk(next, (value, key) => {
     if (typeof value !== 'string') return value;
-    if (isExternalHttpUrl(value)) return value;
+    if (isRemoteResourceUrl(value)) return value;
     if (isLocalUrlLike(value)) return undefined;
     if (/path$/i.test(key) || /filePath/i.test(key) || /localPath/i.test(key)) return undefined;
     return value;
@@ -233,13 +241,20 @@ function sanitizeCanvasForPackage(canvas, options = {}) {
     cleanNode.running = false;
     cleanNode.actionFission = cleanActionFissionForPackage(cleanNode.actionFission);
     cleanNode.libtvImageGeneration = cleanLibtvForPackage(cleanNode.libtvImageGeneration);
+    if (isRecord(cleanNode.data)) {
+      const cleanData = cleanGenerationTask({ ...cleanNode.data });
+      delete cleanData.thumbUrl;
+      cleanData.actionFission = cleanActionFissionForPackage(cleanData.actionFission);
+      cleanData.libtvImageGeneration = cleanLibtvForPackage(cleanData.libtvImageGeneration);
+      cleanNode.data = cleanData;
+    }
     return cleanNode;
   }) : [];
   return walk(next, (value, key) => {
     if (/path$/i.test(key) || /filePath/i.test(key) || /localPath/i.test(key)) return undefined;
     if (typeof value === 'string') {
       if (value.startsWith(PACKAGE_URL_PREFIX)) return preservePackageUrls ? value : undefined;
-      if (isLocalUrlLike(value) && !isExternalHttpUrl(value)) return preserveLocalAssetUrls ? value : undefined;
+      if (isLocalUrlLike(value) && !isRemoteResourceUrl(value)) return preserveLocalAssetUrls ? value : undefined;
     }
     return value;
   });
@@ -290,7 +305,12 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore }) 
       return;
     }
     const asset = resolveLocalAsset(text);
-    if (!asset) return;
+    if (!asset) {
+      if (isLocalUrlLike(text) && !isRemoteResourceUrl(text)) {
+        warnings.push({ source: sourceLabel, url: text, message: 'Referenced local asset is unavailable or outside the canvas asset directory.' });
+      }
+      return;
+    }
     const key = asset.filePath.toLowerCase();
     const existing = assetsByPath.get(key);
     if (existing) return;
@@ -304,6 +324,40 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore }) 
     });
   }
 
+  function collectGenerationResultAssets(result, add, prefix) {
+    if (!isRecord(result)) return;
+    add(result.localUrl, `${prefix}.localUrl`);
+    add(result.url, `${prefix}.url`);
+    if (Array.isArray(result.results)) {
+      result.results.forEach((item, index) => collectGenerationResultAssets(item, add, `${prefix}.results.${index}`));
+    }
+  }
+
+  function collectGenerationTaskAssets(task, add, prefix) {
+    if (!isRecord(task)) return;
+    collectGenerationResultAssets(task.result, add, `${prefix}.result`);
+    if (Array.isArray(task.referenceImages)) {
+      task.referenceImages.forEach((url, index) => add(url, `${prefix}.referenceImages.${index}`));
+    }
+  }
+
+  function collectActionFissionAssets(actionFission, add, prefix) {
+    if (!isRecord(actionFission)) return;
+    for (const row of Array.isArray(actionFission.rows) ? actionFission.rows : []) {
+      const rowPrefix = `${prefix}.row:${row?.id || ''}`;
+      add(row?.resultUrl, `${rowPrefix}.resultUrl`);
+      add(row?.selectedActionAssetUrl, `${rowPrefix}.selectedActionAssetUrl`);
+      collectGenerationTaskAssets(row?.generationTask, add, `${rowPrefix}.generationTask`);
+    }
+  }
+
+  function collectLibtvAssets(state, add, prefix) {
+    if (!isRecord(state)) return;
+    add(state.latestRun?.localUrl, `${prefix}.latestRun.localUrl`);
+    add(state.latestRun?.resultUrl, `${prefix}.latestRun.resultUrl`);
+    collectGenerationTaskAssets(state.task, add, `${prefix}.task`);
+  }
+
   function collectAssets(canvas) {
     const assetsByPath = new Map();
     const warnings = [];
@@ -312,22 +366,20 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore }) 
       const prefix = `node:${node.id || ''}`;
       add(node.url, `${prefix}.url`);
       add(node.filePath, `${prefix}.filePath`);
-      add(node.generationTask?.result?.localUrl, `${prefix}.generationTask.result.localUrl`);
-      add(node.generationTask?.result?.url, `${prefix}.generationTask.result.url`);
-      if (Array.isArray(node.generationTask?.referenceImages)) {
-        node.generationTask.referenceImages.forEach((url, index) => add(url, `${prefix}.generationTask.referenceImages.${index}`));
+      collectGenerationTaskAssets(node.generationTask, add, `${prefix}.generationTask`);
+      collectLibtvAssets(node.libtvImageGeneration, add, `${prefix}.libtvImageGeneration`);
+      collectActionFissionAssets(node.actionFission, add, `${prefix}.actionFission`);
+
+      const data = isRecord(node.data) ? node.data : {};
+      add(data.imageUrl, `${prefix}.data.imageUrl`);
+      if (Array.isArray(data.generatedImages)) {
+        data.generatedImages.forEach((result, index) => {
+          collectGenerationResultAssets(result, add, `${prefix}.data.generatedImages.${index}`);
+        });
       }
-      add(node.libtvImageGeneration?.latestRun?.localUrl, `${prefix}.libtvImageGeneration.latestRun.localUrl`);
-      add(node.libtvImageGeneration?.latestRun?.resultUrl, `${prefix}.libtvImageGeneration.latestRun.resultUrl`);
-      for (const row of Array.isArray(node.actionFission?.rows) ? node.actionFission.rows : []) {
-        const rowPrefix = `${prefix}.actionFission.row:${row.id || ''}`;
-        add(row.resultUrl, `${rowPrefix}.resultUrl`);
-        add(row.selectedActionAssetUrl, `${rowPrefix}.selectedActionAssetUrl`);
-        add(row.generationTask?.result?.localUrl, `${rowPrefix}.generationTask.result.localUrl`);
-        if (Array.isArray(row.generationTask?.referenceImages)) {
-          row.generationTask.referenceImages.forEach((url, index) => add(url, `${rowPrefix}.generationTask.referenceImages.${index}`));
-        }
-      }
+      collectGenerationTaskAssets(data.generationTask, add, `${prefix}.data.generationTask`);
+      collectLibtvAssets(data.libtvImageGeneration, add, `${prefix}.data.libtvImageGeneration`);
+      collectActionFissionAssets(data.actionFission, add, `${prefix}.data.actionFission`);
     }
     return { assets: Array.from(assetsByPath.values()), warnings };
   }

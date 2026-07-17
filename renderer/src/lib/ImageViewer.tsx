@@ -3,9 +3,10 @@ import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "../components/ui/button";
+import { ImageViewerSurface, type ImageViewerActivity } from "./ImageViewerSurface";
 import { cn } from "./utils";
 
-interface ImageViewerNavigation {
+export interface ImageViewerNavigation {
   index: number;
   total: number;
   previousLabel: string;
@@ -14,17 +15,12 @@ interface ImageViewerNavigation {
   onNext: () => void;
 }
 
-interface ImageViewerAction {
+export interface ImageViewerAction {
   id: string;
   label: string;
   icon: "refresh" | "shuffle";
   disabled?: boolean;
   onClick: () => void;
-}
-
-interface ImageViewerActivity {
-  state: "queued" | "running";
-  label: string;
 }
 
 interface ImageViewerProps {
@@ -37,24 +33,34 @@ interface ImageViewerProps {
   activity?: ImageViewerActivity;
 }
 
+function actionIcon(icon: ImageViewerAction["icon"]) {
+  if (icon === "shuffle") return <Shuffle data-icon="inline-start" aria-hidden="true" />;
+  return <RefreshCw data-icon="inline-start" aria-hidden="true" />;
+}
+
+export function ImageViewerActionButtons({ actions }: { actions: ImageViewerAction[] }) {
+  return actions.map((action) => (
+    <Button
+      key={action.id}
+      className="model-image-viewer-tool-button"
+      type="button"
+      variant="ghost"
+      aria-label={action.label}
+      title={action.label}
+      disabled={action.disabled}
+      onClick={action.onClick}
+    >
+      {actionIcon(action.icon)}
+      <span className="model-image-viewer-tool-button__label">{action.label}</span>
+    </Button>
+  ));
+}
+
 export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions = [], activity }: ImageViewerProps) {
   const { t } = useTranslation();
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
-  const [transform, setTransform] = useState({ scale: 1, minScale: 0.5, x: 0, y: 0 });
-  const [isReady, setIsReady] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const loadTokenRef = useRef(0);
   const closeTimerRef = useRef<number | null>(null);
-  const dragRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    startPanX: number;
-    startPanY: number;
-    moved: boolean;
-  } | null>(null);
-  const suppressBackdropClickRef = useRef(false);
   const hasNavigation = Boolean(navigation && navigation.total > 1);
   const canNavigatePrevious = Boolean(navigation && navigation.index > 0);
   const canNavigateNext = Boolean(navigation && navigation.index < navigation.total - 1);
@@ -71,38 +77,7 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
   }, [isClosing, onClose]);
 
   useEffect(() => {
-    const loadToken = loadTokenRef.current + 1;
-    loadTokenRef.current = loadToken;
-    setIsReady(false);
     setIsClosing(false);
-    setNaturalSize({ width: 0, height: 0 });
-    setTransform({ scale: 1, minScale: 0.5, x: 0, y: 0 });
-    setIsDragging(false);
-    dragRef.current = null;
-
-    const image = new Image();
-    image.onload = () => {
-      if (loadTokenRef.current !== loadToken) return;
-      const viewportPadding = 96;
-      const maxWidth = Math.max(320, window.innerWidth - viewportPadding);
-      const maxHeight = Math.max(240, window.innerHeight - viewportPadding);
-      const fitScale = Number(Math.min(maxWidth / image.naturalWidth, maxHeight / image.naturalHeight, 1).toFixed(3));
-      setNaturalSize({ width: image.naturalWidth, height: image.naturalHeight });
-      setTransform({
-        scale: fitScale,
-        minScale: Math.min(fitScale, 0.5),
-        x: Math.round((window.innerWidth - image.naturalWidth * fitScale) / 2),
-        y: Math.round((window.innerHeight - image.naturalHeight * fitScale) / 2),
-      });
-      setIsReady(true);
-    };
-    image.onerror = () => {
-      if (loadTokenRef.current !== loadToken) return;
-      setNaturalSize({ width: 0, height: 0 });
-      setTransform({ scale: 1, minScale: 0.5, x: 0, y: 0 });
-      setIsReady(false);
-    };
-    image.src = src;
   }, [src]);
 
   useEffect(() => {
@@ -135,226 +110,61 @@ export function ImageViewer({ src, alt, ariaLabel, onClose, navigation, actions 
     };
   }, []);
 
-  function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-    const stageRect = event.currentTarget.parentElement?.getBoundingClientRect();
-    if (!stageRect?.width || !stageRect.height) return;
-    const pointerX = event.clientX - stageRect.left;
-    const pointerY = event.clientY - stageRect.top;
-    const scaleFactor = Math.exp(-event.deltaY * 0.0015);
-    setTransform((currentTransform) => {
-      const nextScale = Number(Math.max(currentTransform.minScale, Math.min(4, currentTransform.scale * scaleFactor)).toFixed(3));
-      const ratio = nextScale / currentTransform.scale;
-      return {
-        ...currentTransform,
-        scale: nextScale,
-        x: pointerX - (pointerX - currentTransform.x) * ratio,
-        y: pointerY - (pointerY - currentTransform.y) * ratio,
-      };
-    });
-  }
-
-  function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      startPanX: transform.x,
-      startPanY: transform.y,
-      moved: false,
-    };
-    setIsDragging(true);
-  }
-
-  function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const deltaX = event.clientX - drag.startX;
-    const deltaY = event.clientY - drag.startY;
-    if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) drag.moved = true;
-    setTransform((currentTransform) => ({
-      ...currentTransform,
-      x: drag.startPanX + deltaX,
-      y: drag.startPanY + deltaY,
-    }));
-  }
-
-  function stopDrag(event: React.PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    event.preventDefault();
-    event.stopPropagation();
-    suppressBackdropClickRef.current = drag.moved;
-    if (drag.moved) {
-      window.setTimeout(() => {
-        suppressBackdropClickRef.current = false;
-      }, 0);
-    }
-    dragRef.current = null;
-    setIsDragging(false);
-  }
-
-  function handleBlankClick(event: React.MouseEvent<HTMLDivElement>) {
-    event.stopPropagation();
-    if (event.target !== event.currentTarget) return;
-    if (suppressBackdropClickRef.current) {
-      suppressBackdropClickRef.current = false;
-      return;
-    }
-    requestClose();
-  }
-
-  function isolateViewerEvent(event: React.SyntheticEvent) {
-    event.stopPropagation();
-  }
-
-  function blockViewerWheel(event: React.WheelEvent<HTMLDivElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-
-  function blockViewerContextMenu(event: React.MouseEvent<HTMLDivElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-
-  function renderActionIcon(icon: ImageViewerAction["icon"]) {
-    if (icon === "shuffle") return <Shuffle data-icon="inline-start" aria-hidden="true" />;
-    return <RefreshCw data-icon="inline-start" aria-hidden="true" />;
-  }
-
   return createPortal(
     <div
-      className={`model-image-viewer-backdrop${isClosing ? " closing" : ""}`}
+      className={cn("model-image-viewer-backdrop", isClosing && "closing")}
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel || t("shared:imagePreview")}
-      onPointerDown={isolateViewerEvent}
-      onPointerMove={isolateViewerEvent}
-      onPointerUp={isolateViewerEvent}
-      onPointerCancel={isolateViewerEvent}
-      onWheel={blockViewerWheel}
-      onContextMenu={blockViewerContextMenu}
-      onClick={handleBlankClick}
+      onPointerDown={(event) => event.stopPropagation()}
+      onPointerMove={(event) => event.stopPropagation()}
+      onPointerUp={(event) => event.stopPropagation()}
+      onPointerCancel={(event) => event.stopPropagation()}
+      onWheel={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (event.target === event.currentTarget) requestClose();
+      }}
     >
       <div
-        className={`model-image-viewer-stage${isDragging ? " dragging" : ""}${isClosing ? " closing" : ""}`}
-        onPointerDown={isolateViewerEvent}
-        onPointerMove={isolateViewerEvent}
-        onPointerUp={isolateViewerEvent}
-        onPointerCancel={isolateViewerEvent}
-        onWheel={blockViewerWheel}
-        onContextMenu={blockViewerContextMenu}
-        onClick={handleBlankClick}
+        className={cn("model-image-viewer-stage", isClosing && "closing")}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (event.target === event.currentTarget) requestClose();
+        }}
       >
-        {isReady ? (
-          <div
-            className={cn("model-image-viewer", activity?.state === "running" && "is-generating")}
-            style={{
-              width: naturalSize.width,
-              height: naturalSize.height,
-              transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})`,
-            }}
-            onWheel={handleWheel}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={stopDrag}
-            onPointerCancel={stopDrag}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <img src={src} alt={alt} draggable={false} onDragStart={(event) => event.preventDefault()} />
-          </div>
-        ) : null}
+        <ImageViewerSurface
+          src={src}
+          alt={alt}
+          activity={activity}
+          onNaturalSizeChange={setNaturalSize}
+          onBlankClick={requestClose}
+        />
         <div className="model-image-viewer-top-left" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-          <Button
-            className="model-image-viewer-back-button"
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={t("common:actions.back")}
-            title={t("common:actions.back")}
-            onClick={(event) => {
-              event.stopPropagation();
-              requestClose();
-            }}
-          >
+          <Button className="model-image-viewer-back-button" type="button" variant="ghost" size="icon" aria-label={t("common:actions.back")} title={t("common:actions.back")} onClick={requestClose}>
             <ArrowLeft aria-hidden="true" />
           </Button>
-          <span className="model-image-viewer-resolution" aria-live="polite">
-            {resolutionText}
-          </span>
+          <span className="model-image-viewer-resolution" aria-live="polite">{resolutionText}</span>
         </div>
-        {activity?.state === "running" ? (
-          <div className="model-image-viewer-activity" role="status" aria-live="polite">
-            {activity.label}
-          </div>
-        ) : null}
         {(actions.length || hasNavigation) ? (
           <div className="model-image-viewer-top-center" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-            {hasNavigation && navigation ? (
-              <span className="model-image-viewer-counter" aria-label={`${navigation.index + 1} / ${navigation.total}`}>
-                {navigation.index + 1} / {navigation.total}
-              </span>
-            ) : null}
-            {actions.map((action) => (
-              <Button
-                key={action.id}
-                className="model-image-viewer-tool-button"
-                type="button"
-                variant="ghost"
-                aria-label={action.label}
-                title={action.label}
-                disabled={action.disabled}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  action.onClick();
-                }}
-              >
-                {renderActionIcon(action.icon)}
-                <span className="model-image-viewer-tool-button__label">{action.label}</span>
-              </Button>
-            ))}
+            {hasNavigation && navigation ? <span className="model-image-viewer-counter">{navigation.index + 1} / {navigation.total}</span> : null}
+            <ImageViewerActionButtons actions={actions} />
           </div>
         ) : null}
         {hasNavigation && navigation ? (
           <>
-            <Button
-              className="model-image-viewer-nav model-image-viewer-nav--previous"
-              type="button"
-              variant="ghost"
-              size="icon-lg"
-              disabled={!canNavigatePrevious}
-              aria-label={navigation.previousLabel}
-              title={navigation.previousLabel}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation();
-                navigation.onPrevious();
-              }}
-            >
+            <Button className="model-image-viewer-nav model-image-viewer-nav--previous" type="button" variant="ghost" size="icon-lg" disabled={!canNavigatePrevious} aria-label={navigation.previousLabel} title={navigation.previousLabel} onPointerDown={(event) => event.stopPropagation()} onClick={navigation.onPrevious}>
               <ChevronLeft aria-hidden="true" />
             </Button>
-            <Button
-              className="model-image-viewer-nav model-image-viewer-nav--next"
-              type="button"
-              variant="ghost"
-              size="icon-lg"
-              disabled={!canNavigateNext}
-              aria-label={navigation.nextLabel}
-              title={navigation.nextLabel}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation();
-                navigation.onNext();
-              }}
-            >
+            <Button className="model-image-viewer-nav model-image-viewer-nav--next" type="button" variant="ghost" size="icon-lg" disabled={!canNavigateNext} aria-label={navigation.nextLabel} title={navigation.nextLabel} onPointerDown={(event) => event.stopPropagation()} onClick={navigation.onNext}>
               <ChevronRight aria-hidden="true" />
             </Button>
           </>

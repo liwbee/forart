@@ -44,6 +44,13 @@ function registerConfigIpc({ ipcMain, dialog, configStore, app, net }) {
     return { ok: true, imageReview };
   });
 
+  ipcMain.handle('config:load-infinite-canvas-settings', async () => configStore.loadInfiniteCanvasSettings());
+
+  ipcMain.handle('config:save-infinite-canvas-settings', async (_event, payload) => {
+    const infiniteCanvas = configStore.saveInfiniteCanvasSettings(payload);
+    return { ok: true, infiniteCanvas };
+  });
+
   ipcMain.handle('config:default-paths', async () => ({
     imageDownloadPath: app.getPath('downloads'),
   }));

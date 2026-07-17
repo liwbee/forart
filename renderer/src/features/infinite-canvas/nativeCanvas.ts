@@ -81,7 +81,6 @@ export interface NativeCanvasNodeData extends Record<string, unknown> {
   libtvImageGeneration?: {
     aspectRatio?: string;
     count?: number;
-    error?: string;
     modelKey?: string;
     modelName?: string;
     quality?: string;
@@ -257,7 +256,6 @@ export function cloneNativeCanvasNodeData(data: NativeCanvasNodeData): NativeCan
     delete libtvState.taskId;
     delete libtvState.projectUuid;
     delete libtvState.remoteNodeId;
-    delete libtvState.error;
     clonedData.libtvImageGeneration = libtvState;
   }
 

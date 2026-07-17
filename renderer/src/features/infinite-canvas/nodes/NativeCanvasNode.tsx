@@ -1,16 +1,17 @@
 import { Handle, NodeToolbar, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import ImageAiFillIcon from "@iconify-react/ri/image-ai-fill";
-import { ArrowLeft, ChevronUp, CircleAlert, Copy, Download, Images, Maximize2, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, Check, ChevronUp, CircleAlert, Copy, Crop, Download, Images, LoaderCircle, Maximize2, Trash2, Upload, X } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { AppSelect } from "../../../components/AppSelect";
 import { Button } from "../../../components/ui/button";
 import { Textarea } from "../../../components/ui/textarea";
 import { copyText } from "../../../components/ErrorCopyLine";
 import { ImageViewer } from "../../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import { cn } from "../../../lib/utils";
-import { readImageFileAsDataUrl, useNativeCanvasActions } from "../canvasActions";
+import { readImageFileAsDataUrl, useNativeCanvasActions, type CanvasImageCropRect } from "../canvasActions";
 import { useNativeCanvasInteractionStore } from "../canvasInteractionStore";
 import {
   nativeCanvasNodePrimaryImage,
@@ -25,6 +26,7 @@ import { isNativeGenerationTaskActive } from "../generation/useNativeImageGenera
 import { formatGenerationDuration, generationStatusMessage } from "../generation/generationStatus";
 import { isNativeLibtvTaskActive } from "../libtv-generation/useNativeLibtvGeneration";
 import { isImageNodeLaunching, useGenerationRuntimeStore } from "../generation/generationRuntimeStore";
+import { ImageNodeCropEditor, type ImageCropAspect } from "./ImageNodeCropEditor";
 
 function GenerationErrorStatus({ message }: { message: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -86,7 +88,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const isLibtvBackend = data.imageGenerationBackend === "libtv";
   const isLaunching = useGenerationRuntimeStore((state) => isImageNodeLaunching(state.launchingKeys, id));
   const activeGenerationTask = isLibtvBackend ? data.libtvImageGeneration?.task : data.generationTask;
-  const activeGenerationError = String(isLibtvBackend ? data.libtvImageGeneration?.error || "" : data.generationError || "");
+  const activeGenerationError = String(data.generationError || "");
   const isGenerating = data.kind === "imageGenerator" && (isLaunching || (isLibtvBackend
     ? isNativeLibtvTaskActive(data.libtvImageGeneration?.task)
     : isNativeGenerationTaskActive(data.generationTask) || Boolean(data.generationRemoteTaskId)));
@@ -100,6 +102,10 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const [isDownloadBusy, setIsDownloadBusy] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+  const [isCropping, setIsCropping] = useState(false);
+  const [cropAspect, setCropAspect] = useState<ImageCropAspect>("original");
+  const [cropSelection, setCropSelection] = useState<CanvasImageCropRect | null>(null);
+  const [isCropBusy, setIsCropBusy] = useState(false);
   const generationStartedAt = Number(activeGenerationTask?.runningAt || activeGenerationTask?.startedAt || 0);
   const elapsedText = formatGenerationDuration(generationStartedAt ? timerNow - generationStartedAt : 0);
   const imageWidth = Math.round(Number(data.imageNaturalWidth || 0));
@@ -133,6 +139,28 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     if (isDownloadBusy) return;
     setIsDownloadBusy(true);
     void actions.downloadGeneratedImage(id, 0).catch(() => undefined).finally(() => setIsDownloadBusy(false));
+  };
+
+  const cancelCrop = () => {
+    if (isCropBusy) return;
+    setIsCropping(false);
+    setCropSelection(null);
+  };
+
+  const confirmCrop = () => {
+    if (!cropSelection || isCropBusy) return;
+    setIsCropBusy(true);
+    void actions.cropNodeImage(id, cropSelection)
+      .then(() => {
+        setIsCropping(false);
+        setCropSelection(null);
+        window.requestAnimationFrame(() => updateNodeInternals(id));
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        toast.error(t("infiniteCanvas:imageCropFailed", { message }));
+      })
+      .finally(() => setIsCropBusy(false));
   };
 
   const setMultiImageExpanded = (expanded: boolean) => {
@@ -202,11 +230,62 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     return () => document.removeEventListener("pointerdown", handleOutsidePointerDown, true);
   }, [isMultiImageExpanded]);
 
+  useEffect(() => {
+    if (selected && isNodeToolbarActive) return;
+    setIsCropping(false);
+    setCropSelection(null);
+  }, [isNodeToolbarActive, selected]);
+
   return (
     <>
       {selected && isNodeToolbarActive ? (
         <NodeToolbar nodeId={id} position={Position.Top} offset={toolbarOffset} className="rf-native-node-toolbar">
-          {data.kind === "imageLoader" ? (
+          {isCropping ? (
+            <>
+              <AppSelect
+                className="rf-native-image-crop-aspect nodrag nopan nowheel"
+                value={cropAspect}
+                size="sm"
+                menuPlacement="top"
+                ariaLabel={t("infiniteCanvas:imageCropAspect")}
+                disabled={isCropBusy}
+                options={[
+                  { value: "original", label: t("infiniteCanvas:imageCropAspectOriginal") },
+                  { value: "free", label: t("infiniteCanvas:imageCropAspectFree") },
+                  { value: "1:1", label: "1:1" },
+                  { value: "2:3", label: "2:3" },
+                  { value: "3:2", label: "3:2" },
+                  { value: "3:4", label: "3:4" },
+                  { value: "4:3", label: "4:3" },
+                  { value: "16:9", label: "16:9" },
+                  { value: "9:16", label: "9:16" },
+                ]}
+                onChange={(value) => setCropAspect(value as ImageCropAspect)}
+              />
+              <Button
+                type="button"
+                variant="default"
+                size="icon-sm"
+                disabled={!cropSelection || isCropBusy}
+                aria-label={t("common:actions.confirm")}
+                title={t("common:actions.confirm")}
+                onClick={confirmCrop}
+              >
+                {isCropBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Check aria-hidden="true" />}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={isCropBusy}
+                aria-label={t("common:actions.cancel")}
+                title={t("common:actions.cancel")}
+                onClick={cancelCrop}
+              >
+                <X aria-hidden="true" />
+              </Button>
+            </>
+          ) : data.kind === "imageLoader" ? (
             <>
               <Button type="button" variant="ghost" size="icon-sm" aria-label={t("common:actions.uploadImage")} onClick={() => fileInputRef.current?.click()}>
                 <Upload aria-hidden="true" />
@@ -216,7 +295,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               </Button>
             </>
           ) : null}
-          {canUseImageActions ? (
+          {!isCropping && canUseImageActions ? (
             <Button
               type="button"
               variant="ghost"
@@ -229,6 +308,22 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               }}
             >
               <Maximize2 aria-hidden="true" />
+            </Button>
+          ) : null}
+          {data.kind === "imageLoader" && primaryImageUrl && !isCropping ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("infiniteCanvas:cropImage")}
+              title={t("infiniteCanvas:cropImage")}
+              onClick={() => {
+                setCropAspect("original");
+                setCropSelection(null);
+                setIsCropping(true);
+              }}
+            >
+              <Crop aria-hidden="true" />
             </Button>
           ) : null}
           {data.kind === "imageGenerator" && canUseImageActions ? (
@@ -244,7 +339,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               <Download aria-hidden="true" />
             </Button>
           ) : null}
-          <Button
+          {!isCropping ? <Button
             type="button"
             variant="destructive"
             size="icon-sm"
@@ -252,7 +347,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
             onClick={() => void deleteElements({ nodes: [{ id }] })}
           >
             <Trash2 aria-hidden="true" />
-          </Button>
+          </Button> : null}
         </NodeToolbar>
       ) : null}
 
@@ -309,6 +404,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
           isImageNode && "rf-native-node-content--image",
           isPromptNode && "rf-native-node-content--prompt",
           isActionFissionNode && "rf-native-node-content--action-fission",
+          isCropping && "is-cropping",
           isGenerating && "is-generating",
           hasGenerationError && "has-generation-error",
         )}>
@@ -349,7 +445,14 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               ) : null}
             </>
           ) : primaryImageUrl ? (
-            isMultiImageExpanded ? (
+            data.kind === "imageLoader" && isCropping ? (
+              <ImageNodeCropEditor
+                src={resolvedImageUrl}
+                alt={displayLabel}
+                aspect={cropAspect}
+                onSelectionChange={setCropSelection}
+              />
+            ) : isMultiImageExpanded ? (
               <div
                 className={cn("rf-native-generated-grid", generatedImages.length > 2 && "is-four-up")}
                 onPointerDown={(event) => {
@@ -475,10 +578,10 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
           ) : data.kind === "imageGenerator" ? (
             <ImageAiFillIcon className="rf-native-image-generator-empty-icon" aria-hidden="true" />
           ) : null}
-          {imageResolution && primaryImageUrl && !isGenerating && !hasGenerationError && !isMultiImageExpanded ? (
+          {imageResolution && primaryImageUrl && !isCropping && !isGenerating && !hasGenerationError && !isMultiImageExpanded ? (
             <span className="rf-native-image-resolution">{imageResolution}</span>
           ) : null}
-          {data.kind === "imageLoader" && primaryImageUrl ? (
+          {data.kind === "imageLoader" && primaryImageUrl && !isCropping ? (
             <Button
               className="rf-native-image-upload nodrag nopan nowheel"
               type="button"
@@ -556,9 +659,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  actions.patchNodeData(id, isLibtvBackend
-                    ? { libtvImageGeneration: { ...data.libtvImageGeneration, error: "" } }
-                    : { generationError: "" });
+                  actions.patchNodeData(id, { generationError: "" });
                 }}
               >
                 <ArrowLeft aria-hidden="true" />

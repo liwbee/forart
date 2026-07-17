@@ -19,7 +19,7 @@ import {
   type OnConnectEnd,
   type OnNodeDrag,
 } from "@xyflow/react";
-import { Crosshair, Eye, EyeOff, Grid3X3, Images, Map as MapIcon, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Copy, Crosshair, Eye, EyeOff, Grid3X3, Image, Images, Map as MapIcon, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -28,8 +28,14 @@ import { ContextMenu, ContextMenuContent, ContextMenuGroup, ContextMenuItem, Con
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { LibraryAssetPickerRail } from "../library-asset-picker/LibraryAssetPickerRail";
 import type { LibraryAssetSelection } from "../library-asset-picker/types";
-import { resolveLibraryImageUrl } from "../../lib/libraryImageActions";
-import { NativeCanvasActionsContext, readImageDimensions, readImageFileAsDataUrl, type NativeCanvasActions } from "./canvasActions";
+import { copyLibraryImage, resolveLibraryImageUrl } from "../../lib/libraryImageActions";
+import {
+  NativeCanvasActionsContext,
+  readImageDimensions,
+  readImageFileAsDataUrl,
+  type CanvasImageCropRect,
+  type NativeCanvasActions,
+} from "./canvasActions";
 import { useNativeCanvasInteractionStore } from "./canvasInteractionStore";
 import { CanvasFloatingPanel } from "./components/CanvasFloatingPanel";
 import {
@@ -69,12 +75,17 @@ import {
   type NativeCanvasHistorySnapshot,
 } from "./canvasHistoryStore";
 import { rememberedGenerationNodeData } from "./generation/generationPreferenceStore";
+import { useInfiniteCanvasSettings } from "./infiniteCanvasSettings";
 
 const NODE_TYPES: NodeTypes = { canvasNode: NativeCanvasNodeComponent };
 
 interface ContextPoint {
   flowX: number;
   flowY: number;
+}
+
+interface NodeContextTarget {
+  node: NativeCanvasNode;
 }
 
 interface EdgeToolbarPoint {
@@ -238,6 +249,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   saveStatus: CanvasSaveStatus;
 }) {
   const { t } = useTranslation();
+  const { settings, updateSettings } = useInfiniteCanvasSettings();
+  const { connectionsVisible, minimapOpen, snapToGrid } = settings;
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<NativeCanvasNode>(initialSnapshot.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<NativeCanvasEdge>(initialSnapshot.edges);
@@ -245,14 +258,18 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   const edgesRef = useRef(edges);
   nodesRef.current = nodes;
   edgesRef.current = edges;
+  const flowEdges = useMemo(
+    () => edges.map((edge) => edge.hidden === !connectionsVisible
+      ? edge
+      : { ...edge, hidden: !connectionsVisible }),
+    [connectionsVisible, edges],
+  );
   const viewportRef = useRef(initialSnapshot.viewport);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [libraryTargetNodeId, setLibraryTargetNodeId] = useState<string | null>(null);
   const [libraryReferenceTargetNodeId, setLibraryReferenceTargetNodeId] = useState<string | null>(null);
-  const [minimapOpen, setMinimapOpen] = useState(false);
-  const [connectionsVisible, setConnectionsVisible] = useState(true);
-  const [snapToGrid, setSnapToGrid] = useState(false);
   const [contextPoint, setContextPoint] = useState<ContextPoint | null>(null);
+  const [nodeContextTarget, setNodeContextTarget] = useState<NodeContextTarget | null>(null);
   const [edgeToolbarPoint, setEdgeToolbarPoint] = useState<EdgeToolbarPoint | null>(null);
   const [actionFissionSettingsTarget, setActionFissionSettingsTarget] = useState<ActionFissionSettingsTarget | null>(null);
   const pasteSequenceRef = useRef<PasteSequence | null>(null);
@@ -273,6 +290,16 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     const node = nodes.find((item) => item.id === actionFissionSettingsTarget.nodeId);
     return normalizeActionFissionState(node?.data.actionFission).rows.find((row) => row.id === actionFissionSettingsTarget.rowId) || null;
   }, [actionFissionSettingsTarget, nodes]);
+  const contextNode = useMemo(
+    () => nodeContextTarget
+      ? nodes.find((node) => node.id === nodeContextTarget.node.id) || nodeContextTarget.node
+      : null,
+    [nodeContextTarget, nodes],
+  );
+  const contextNodeImage = useMemo(() => {
+    if (contextNode?.data.kind !== "imageLoader" && contextNode?.data.kind !== "imageGenerator") return null;
+    return nativeCanvasNodePrimaryImage(contextNode.data);
+  }, [contextNode]);
 
   useEffect(() => resetInteractions, [resetInteractions]);
   useEffect(() => () => clearCanvasLaunching(canvasId), [canvasId, clearCanvasLaunching]);
@@ -397,6 +424,31 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     setContextPoint(null);
   }, [addNode, contextPoint]);
 
+  const copyContextNode = useCallback(async () => {
+    if (!contextNode) return;
+    const serialized = JSON.stringify(createCanvasClipboardPayload([contextNode], getEdges()));
+    await navigator.clipboard.writeText(serialized);
+    pasteSequenceRef.current = null;
+  }, [contextNode, getEdges]);
+
+  const copyContextNodeImage = useCallback(async () => {
+    const imageUrl = contextNodeImage?.localUrl || contextNodeImage?.url;
+    if (!imageUrl) return;
+    try {
+      await copyLibraryImage(imageUrl);
+      toast.success(t("common:states.imageCopied"));
+    } catch (error) {
+      toast.error(t("common:errors.imageActionFailed", {
+        message: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }, [contextNodeImage, t]);
+
+  const deleteContextNode = useCallback(() => {
+    if (!contextNode) return;
+    void deleteElements({ nodes: [{ id: contextNode.id }] });
+  }, [contextNode, deleteElements]);
+
   const setNodeImage = useCallback((nodeId: string, imageUrl: string, label: string) => {
     const nodeKind = getNodes().find((node) => node.id === nodeId)?.data.kind;
     setNodes((current) => current.map((node) => node.id === nodeId
@@ -463,6 +515,44 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
         : node));
     })().catch(() => undefined);
   }, [getNodes, setNodes]);
+
+  const cropNodeImage = useCallback(async (nodeId: string, crop: CanvasImageCropRect) => {
+    const node = getNodes().find((item) => item.id === nodeId);
+    const sourceUrl = node?.data.kind === "imageLoader" ? String(node.data.imageUrl || "") : "";
+    if (!node || !sourceUrl) throw new Error(t("infiniteCanvas:imageCropSourceMissing"));
+    if (!window.easyTool?.cropCanvasAsset) throw new Error(t("infiniteCanvas:imageCropUnavailable"));
+
+    let localSourceUrl = sourceUrl;
+    if (!/^forart-asset:/i.test(localSourceUrl)) {
+      if (!window.easyTool.saveCanvasAsset) throw new Error(t("infiniteCanvas:imageCropUnavailable"));
+      const stored = await window.easyTool.saveCanvasAsset({
+        url: resolveLibraryImageUrl(localSourceUrl),
+        defaultName: node.data.label || "canvas-image.png",
+        kind: "input",
+      });
+      localSourceUrl = stored.url;
+    }
+
+    const result = await window.easyTool.cropCanvasAsset({
+      url: localSourceUrl,
+      ...crop,
+      defaultName: node.data.label || "cropped-image.png",
+    });
+    const size = getImageNodeSize(result.width, result.height);
+    setNodes((current) => current.map((item) => item.id === nodeId && item.data.kind === "imageLoader"
+      ? {
+          ...item,
+          data: {
+            ...item.data,
+            imageUrl: result.url,
+            thumbUrl: result.thumbUrl || undefined,
+            imageNaturalWidth: result.width,
+            imageNaturalHeight: result.height,
+          },
+          style: { ...item.style, ...size },
+        }
+      : item));
+  }, [getNodes, setNodes, t]);
 
   const patchNodeData = useCallback((nodeId: string, patch: Partial<NativeCanvasNode["data"]>) => {
     setNodes((current) => current.map((node) => {
@@ -716,6 +806,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
 
   const canvasActions = useMemo<NativeCanvasActions>(() => ({
     addImageReferenceFiles: (nodeId, files) => canvasActionHandlersRef.current.addImageReferenceFiles(nodeId, files),
+    cropNodeImage,
     downloadActionFissionResult: (nodeId, rowId) => canvasActionHandlersRef.current.downloadActionFissionResult(nodeId, rowId),
     downloadGeneratedImage: (nodeId, imageIndex) => canvasActionHandlersRef.current.downloadGeneratedImage(nodeId, imageIndex),
     getImageGeneratorPrompts: (nodeId: string) => collectImageGeneratorPrompts(nodeId, nodesRef.current, edgesRef.current, t("infiniteCanvas:prompt")),
@@ -749,7 +840,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     setNodeText: (nodeId: string, text: string) => patchNodeData(nodeId, { text }),
     stopImageGeneration: (nodeId) => canvasActionHandlersRef.current.stopImageGeneration(nodeId),
     stopActionFission: (nodeId, rowId) => canvasActionHandlersRef.current.stopActionFission(nodeId, rowId),
-  }), [patchNodeData, setEdges, setNodeImage, t]);
+  }), [cropNodeImage, patchNodeData, setEdges, setNodeImage, t]);
 
   const connectNodes = useCallback((connection: Connection) => {
     setEdges((current) => {
@@ -1034,7 +1125,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   return (
     <div ref={wrapperRef} className={`rf-native-canvas${readOnly ? " rf-native-canvas--readonly" : ""}`}>
       <NativeCanvasActionsContext.Provider value={canvasActions}>
-        <ContextMenu onOpenChange={(open) => !open && setContextPoint(null)}>
+        <ContextMenu>
         <ContextMenuTrigger asChild disabled={readOnly}>
           <div
             className="rf-native-flow-surface"
@@ -1060,13 +1151,15 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
             }}
             onContextMenu={(event) => {
               if (readOnly) return;
+              if (event.target instanceof Element && event.target.closest(".react-flow__node")) return;
               const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+              setNodeContextTarget(null);
               setContextPoint({ flowX: point.x, flowY: point.y });
             }}
           >
             <ReactFlow<NativeCanvasNode, NativeCanvasEdge>
               nodes={nodes}
-              edges={connectionsVisible ? edges : []}
+              edges={flowEdges}
               nodeTypes={NODE_TYPES}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
@@ -1092,6 +1185,11 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
               }}
               onNodeDragStart={handleNodeDragStart}
               onNodeDragStop={handleNodeDragStop}
+              onNodeContextMenu={(_event, node) => {
+                if (readOnly) return;
+                setContextPoint(null);
+                setNodeContextTarget({ node });
+              }}
               minZoom={0.1}
               maxZoom={6}
               selectionOnDrag={!readOnly}
@@ -1148,7 +1246,22 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
         </ContextMenuTrigger>
         <ContextMenuContent>
           <ContextMenuGroup>
-            {NATIVE_CANVAS_NODE_KINDS.map((kind) => {
+            {contextNode ? <>
+              <ContextMenuItem onSelect={() => void copyContextNode()}>
+                <Copy aria-hidden="true" />
+                <span>{t("common:actions.copyNode")}</span>
+              </ContextMenuItem>
+              {contextNode.data.kind === "imageLoader" || contextNode.data.kind === "imageGenerator" ? (
+                <ContextMenuItem disabled={!contextNodeImage} onSelect={() => void copyContextNodeImage()}>
+                  <Image aria-hidden="true" />
+                  <span>{t("common:actions.copyImage")}</span>
+                </ContextMenuItem>
+              ) : null}
+              <ContextMenuItem variant="destructive" onSelect={deleteContextNode}>
+                <Trash2 aria-hidden="true" />
+                <span>{t("common:actions.delete")}</span>
+              </ContextMenuItem>
+            </> : NATIVE_CANVAS_NODE_KINDS.map((kind) => {
               const definition = NATIVE_CANVAS_NODE_DEFINITIONS[kind];
               const Icon = definition.icon;
               return (
@@ -1217,14 +1330,14 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
           setLibraryReferenceTargetNodeId(null);
           setLibraryOpen((current) => !current);
         }}
-        onToggleMinimap={() => setMinimapOpen((current) => !current)}
-        onToggleSnapToGrid={() => setSnapToGrid((current) => !current)}
+        onToggleMinimap={() => updateSettings((current) => ({ ...current, minimapOpen: !current.minimapOpen }))}
+        onToggleSnapToGrid={() => updateSettings((current) => ({ ...current, snapToGrid: !current.snapToGrid }))}
         onToggleConnections={() => {
           if (connectionsVisible) {
             setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
             setEdgeToolbarPoint(null);
           }
-          setConnectionsVisible((current) => !current);
+          updateSettings((current) => ({ ...current, connectionsVisible: !current.connectionsVisible }));
         }}
         />
 

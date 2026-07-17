@@ -362,11 +362,18 @@ function createCanvasStore({ rootDir }) {
     return { ok: true, canvas: result.canvas, record: canvasRecord(result.canvas), filePath: result.filePath };
   }
 
+  function withoutLegacyLibtvError(data) {
+    if (!data?.libtvImageGeneration || typeof data.libtvImageGeneration !== 'object') return data;
+    const state = { ...data.libtvImageGeneration };
+    delete state.error;
+    return { ...data, libtvImageGeneration: state };
+  }
+
   function setGenerationRemoteTaskId(canvasId, nodeId, remoteTaskId) {
     const taskId = String(remoteTaskId || '').trim();
     if (!taskId) return { ok: false, reason: 'task_id_required' };
     return updateGenerationNode(canvasId, nodeId, (data) => ({
-      ...data,
+      ...withoutLegacyLibtvError(data),
       generationRemoteTaskId: taskId,
       generationError: '',
     }));
@@ -377,7 +384,7 @@ function createCanvasStore({ rootDir }) {
     if (!taskId) return { ok: false, reason: 'task_id_required' };
     return updateGenerationNode(canvasId, nodeId, (data) => {
       const next = {
-        ...data,
+        ...withoutLegacyLibtvError(data),
         generationTaskId: taskId,
         generationError: '',
       };
@@ -402,8 +409,8 @@ function createCanvasStore({ rootDir }) {
       else delete state.projectUuid;
       if (remoteNodeId) state.remoteNodeId = remoteNodeId;
       else delete state.remoteNodeId;
-      state.error = '';
-      return { ...data, libtvImageGeneration: state };
+      delete state.error;
+      return { ...data, generationError: '', libtvImageGeneration: state };
     });
   }
 
@@ -464,7 +471,9 @@ function createCanvasStore({ rootDir }) {
       const anchorField = payload.backend === 'libtv' ? 'libtvTaskId' : 'generationTaskId';
       const currentTaskId = String(row[anchorField] || '').trim();
       const currentRemoteTaskId = String(row.generationRemoteTaskId || '').trim();
-      if (taskId && currentTaskId && currentTaskId !== taskId) return row;
+      // Terminal updates are one-shot: once an anchor is cleared, duplicate
+      // completion notifications cannot replace the current result state.
+      if (taskId && currentTaskId !== taskId) return row;
       if (remoteTaskId && currentRemoteTaskId !== remoteTaskId) return row;
       const next = { ...row };
       delete next[anchorField];
@@ -501,9 +510,10 @@ function createCanvasStore({ rootDir }) {
     return updateGenerationNode(payload.canvasId, payload.nodeId, (data) => {
       const currentTaskId = String(data.generationTaskId || '').trim();
       const currentRemoteTaskId = String(data.generationRemoteTaskId || '').trim();
-      if (taskId && currentTaskId && currentTaskId !== taskId) return data;
+      // Only the task currently anchored to this node may commit a result.
+      if (taskId && currentTaskId !== taskId) return data;
       if (remoteTaskId && currentRemoteTaskId && currentRemoteTaskId !== remoteTaskId) return data;
-      const next = { ...data };
+      const next = { ...withoutLegacyLibtvError(data) };
       delete next.generationTaskId;
       delete next.generationRemoteTaskId;
       delete next.generationTask;
@@ -551,13 +561,18 @@ function createCanvasStore({ rootDir }) {
         ? { ...data.libtvImageGeneration }
         : {};
       const currentTaskId = String(state.taskId || '').trim();
-      if (taskId && currentTaskId && currentTaskId !== taskId) return data;
+      // LibTV follows the same one-shot terminal write contract as API tasks.
+      if (taskId && currentTaskId !== taskId) return data;
       delete state.task;
       delete state.taskId;
       delete state.projectUuid;
       delete state.remoteNodeId;
-      state.error = payload.status === 'failed' ? String(payload.error || 'LibTV generation failed.') : '';
-      const next = { ...data, libtvImageGeneration: state };
+      delete state.error;
+      const next = {
+        ...data,
+        generationError: payload.status === 'failed' ? String(payload.error || 'LibTV generation failed.') : '',
+        libtvImageGeneration: state,
+      };
       if (payload.status === 'succeeded' && payload.result?.localUrl) {
         next.generatedImages = [{
           url: String(payload.result.url || ''),

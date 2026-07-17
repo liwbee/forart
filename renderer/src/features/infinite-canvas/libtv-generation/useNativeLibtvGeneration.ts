@@ -60,7 +60,15 @@ export function useNativeLibtvGeneration({
 
   const patchLibtvState = useCallback((nodeId: string, patch: Record<string, unknown>) => {
     const current = nodes.find((node) => node.id === nodeId)?.data.libtvImageGeneration || {};
-    patchNodeData(nodeId, { libtvImageGeneration: { ...current, ...patch } });
+    const cleanCurrent = { ...current } as Record<string, unknown>;
+    delete cleanCurrent.error;
+    const { error, ...statePatch } = patch;
+    patchNodeData(nodeId, {
+      libtvImageGeneration: { ...cleanCurrent, ...statePatch },
+      ...(Object.prototype.hasOwnProperty.call(patch, "error")
+        ? { generationError: String(error || "") }
+        : {}),
+    });
   }, [nodes, patchNodeData]);
 
   const pollTask = useCallback(async (taskId: string, nodeId: string) => {
