@@ -13,6 +13,11 @@ interface LibtvAccountSummary {
   updatedAt: string;
 }
 
+interface LibtvPowerSummary {
+  total: number | null;
+  remaining: number | null;
+}
+
 interface LibtvSettingsPaneProps {
   machineId: string;
   actionFissionConcurrency: LibtvActionFissionConcurrency;
@@ -64,6 +69,7 @@ export function LibtvSettingsPane({
   const [loggedIn, setLoggedIn] = useState(false);
   const [available, setAvailable] = useState(false);
   const [account, setAccount] = useState<LibtvAccountSummary | null>(null);
+  const [power, setPower] = useState<LibtvPowerSummary | null>(null);
   const [accounts, setAccounts] = useState<LibtvAccountRecord[]>([]);
   const [activeAccountId, setActiveAccountId] = useState("");
 
@@ -75,13 +81,19 @@ export function LibtvSettingsPane({
       const statusResult = await window.libtv.status();
       setAvailable(Boolean(statusResult.available));
       if (!statusResult.available) {
-        setLoggedIn(false); setAccount(null); setAccounts([]); setActiveAccountId("");
+        setLoggedIn(false); setAccount(null); setPower(null); setAccounts([]); setActiveAccountId("");
         setStatus(statusResult.error || t("settings:libtvUnavailable"));
         return;
       }
       const accountResult = await window.libtv.account();
       setLoggedIn(Boolean(accountResult.loggedIn));
       setAccount(accountResult.loggedIn ? summarizeAccount(accountResult.account) : null);
+      if (accountResult.loggedIn && window.libtv.power) {
+        const powerResult = await window.libtv.power().catch(() => null);
+        setPower(powerResult ? { total: powerResult.total, remaining: powerResult.remaining } : null);
+      } else {
+        setPower(null);
+      }
       if (accountResult.loggedIn && window.libtv.accounts) {
         const accountsResult = await window.libtv.accounts();
         const nextAccounts = accountsResult.accounts || [];
@@ -93,7 +105,7 @@ export function LibtvSettingsPane({
       }
       setStatus(accountResult.loggedIn ? t("settings:libtvLoggedIn") : t("settings:libtvNotLoggedIn"));
     } catch (error) {
-      setLoggedIn(false); setAvailable(false); setAccount(null); setAccounts([]); setActiveAccountId("");
+      setLoggedIn(false); setAvailable(false); setAccount(null); setPower(null); setAccounts([]); setActiveAccountId("");
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
       setAction("");
@@ -139,12 +151,15 @@ export function LibtvSettingsPane({
     try {
       if (!window.libtv?.logout) throw new Error(t("settings:libtvBridgeUnavailable"));
       await window.libtv.logout();
-      setLoggedIn(false); setAccount(null); setAccounts([]); setActiveAccountId("");
+      setLoggedIn(false); setAccount(null); setPower(null); setAccounts([]); setActiveAccountId("");
     } catch (error) { setStatus(error instanceof Error ? error.message : String(error)); }
     finally { setAction(""); }
   }
 
   const accountTypeLabel = (item: LibtvAccountRecord) => item.accountType === 2 ? t("settings:libtvTeamAccount") : t("settings:libtvPersonalAccount");
+  const pointsValue = typeof power?.remaining === "number" && typeof power.total === "number"
+    ? `${power.remaining}/${power.total}`
+    : "-";
 
   return (
     <section className="settings-api-block settings-libtv-card">
@@ -198,8 +213,18 @@ export function LibtvSettingsPane({
           </label>
         </div>
         <div className="settings-libtv-account-grid">
-          <div className="settings-libtv-account-field"><span>{t("settings:libtvPlanInfo")}</span><strong>{account?.memberName || "-"}</strong></div>
-          <div className="settings-libtv-account-field"><span>{t("settings:libtvAccountUpdatedAt")}</span><strong>{account?.updatedAt || "-"}</strong></div>
+          <div className="settings-cache-metric settings-libtv-metric">
+            <span>{t("settings:libtvPointsInfo")}</span>
+            <strong title={pointsValue}>{pointsValue}</strong>
+          </div>
+          <div className="settings-cache-metric settings-libtv-metric">
+            <span>{t("settings:libtvPlanInfo")}</span>
+            <strong title={account?.memberName || "-"}>{account?.memberName || "-"}</strong>
+          </div>
+          <div className="settings-cache-metric settings-libtv-metric">
+            <span>{t("settings:libtvAccountUpdatedAt")}</span>
+            <strong title={account?.updatedAt || "-"}>{account?.updatedAt || "-"}</strong>
+          </div>
         </div>
         <div className="settings-api-test-actions">
           {loggedIn ? (

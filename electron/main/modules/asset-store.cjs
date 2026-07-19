@@ -74,6 +74,12 @@ function createAssetStore({ rootDir, net }) {
   });
 
   async function readImageSource(payload = {}) {
+    if (payload.filePath && fs.existsSync(payload.filePath)) {
+      return {
+        buffer: fs.readFileSync(payload.filePath),
+        extension: path.extname(payload.filePath) || '.png',
+      };
+    }
     const source = String(payload.dataUrl || payload.url || '');
     const dataMatch = source.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/s);
     if (dataMatch) {
@@ -111,6 +117,23 @@ function createAssetStore({ rootDir, net }) {
       ...thumb,
       fileName: path.basename(filePath),
       filePath,
+    };
+  }
+
+  async function saveBufferAsset(payload = {}) {
+    const buffer = Buffer.isBuffer(payload.buffer) ? payload.buffer : Buffer.from(payload.buffer || '');
+    if (!buffer.length) throw new Error('Image data is empty.');
+    const directory = assetDirectory(payload.kind);
+    const filePath = uniqueFilePath(directory, payload.defaultName || 'canvas-image.png');
+    fs.writeFileSync(filePath, buffer);
+    const thumb = await thumbnailStore.ensureCanvasAssetThumbnail({ filePath, mimeType: payload.mimeType || 'image/png' });
+    return {
+      url: assetUrl(filePath),
+      ...thumb,
+      fileName: path.basename(filePath),
+      filePath,
+      width: Number(payload.width || 0),
+      height: Number(payload.height || 0),
     };
   }
 
@@ -180,6 +203,7 @@ function createAssetStore({ rootDir, net }) {
     readImageSource,
     resolveAssetUrl,
     saveAsset,
+    saveBufferAsset,
     saveAssetThumbnail,
     ensureAssetThumbnail,
     cropAsset,

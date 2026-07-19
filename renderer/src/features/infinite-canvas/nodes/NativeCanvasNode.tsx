@@ -1,7 +1,7 @@
 import { Handle, NodeToolbar, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import ImageAiFillIcon from "@iconify-react/ri/image-ai-fill";
 import { ArrowLeft, Check, ChevronUp, CircleAlert, Copy, Crop, Download, Images, LoaderCircle, Maximize2, Trash2, Upload, X } from "lucide-react";
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AppSelect } from "../../../components/AppSelect";
@@ -15,6 +15,7 @@ import { readImageFileAsDataUrl, useNativeCanvasActions, type CanvasImageCropRec
 import { useNativeCanvasInteractionStore } from "../canvasInteractionStore";
 import {
   nativeCanvasNodePrimaryImage,
+  nativeCanvasNodeTaskId,
   NATIVE_CANVAS_NODE_DEFINITIONS,
   type NativeCanvasEdge,
   type NativeCanvasNode as NativeCanvasNodeType,
@@ -22,10 +23,13 @@ import {
 import { NativeNodeResizeControl } from "./NativeNodeResizeControl";
 import { ImageGeneratorParamPanel } from "./ImageGeneratorParamPanel";
 import { ActionFissionNodeBody } from "./ActionFissionNodeBody";
-import { isNativeGenerationTaskActive } from "../generation/useNativeImageGeneration";
 import { formatGenerationDuration, generationStatusMessage } from "../generation/generationStatus";
-import { isNativeLibtvTaskActive } from "../libtv-generation/useNativeLibtvGeneration";
-import { isImageNodeLaunching, useGenerationRuntimeStore } from "../generation/generationRuntimeStore";
+import {
+  clearNodeGenerationRuntimeErrors,
+  isImageNodeLaunching,
+  useGenerationRuntimeStore,
+} from "../generation/generationRuntimeStore";
+import { isGenerationTaskActive, useGenerationTaskCache } from "../generation/generationTaskCache";
 import { ImageNodeCropEditor, type ImageCropAspect } from "./ImageNodeCropEditor";
 
 function GenerationErrorStatus({ message }: { message: string }) {
@@ -85,13 +89,15 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const isPromptNode = data.kind === "prompt";
   const isActionFissionNode = data.kind === "actionFission";
   const isContentOnlyNode = isImageNode || isPromptNode || isActionFissionNode;
-  const isLibtvBackend = data.imageGenerationBackend === "libtv";
   const isLaunching = useGenerationRuntimeStore((state) => isImageNodeLaunching(state.launchingKeys, id));
-  const activeGenerationTask = isLibtvBackend ? data.libtvImageGeneration?.task : data.generationTask;
-  const activeGenerationError = String(data.generationError || "");
-  const isGenerating = data.kind === "imageGenerator" && (isLaunching || (isLibtvBackend
-    ? isNativeLibtvTaskActive(data.libtvImageGeneration?.task)
-    : isNativeGenerationTaskActive(data.generationTask) || Boolean(data.generationRemoteTaskId)));
+  const taskId = nativeCanvasNodeTaskId(data);
+  const activeGenerationTask = useGenerationTaskCache((state) => taskId ? state.tasksById[taskId] : undefined);
+  const runtimeError = useGenerationRuntimeStore((state) => Object.entries(state.errorsByKey)
+    .find(([key]) => key.endsWith(`:node:${id}`))?.[1] || "");
+  const taskDismissed = useGenerationRuntimeStore((state) => taskId ? state.dismissedTaskIds.has(taskId) : false);
+  const activeGenerationError = runtimeError
+    || (!taskDismissed && activeGenerationTask?.status === "failed" ? String(activeGenerationTask.errorMessage || "") : "");
+  const isGenerating = data.kind === "imageGenerator" && (isLaunching || isGenerationTaskActive(activeGenerationTask));
   const hasGenerationError = data.kind === "imageGenerator" && !isGenerating && Boolean(activeGenerationError);
   const generationMessage = isGenerating
     ? isLaunching
@@ -163,7 +169,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
       .finally(() => setIsCropBusy(false));
   };
 
-  const setMultiImageExpanded = (expanded: boolean) => {
+  const setMultiImageExpanded = useCallback((expanded: boolean) => {
     if (!hasMultipleGeneratedImages) return;
     const node = getNode(id);
     const collapsedSize = data.multiImageCollapsedSize || {
@@ -174,7 +180,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
       multiImageExpanded: expanded,
       multiImageCollapsedSize: collapsedSize,
     });
-  };
+  }, [actions, data.multiImageCollapsedSize, getNode, hasMultipleGeneratedImages, id]);
 
   useEffect(() => {
     if (!isPromptEditing) return;
@@ -228,7 +234,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     };
     document.addEventListener("pointerdown", handleOutsidePointerDown, true);
     return () => document.removeEventListener("pointerdown", handleOutsidePointerDown, true);
-  }, [isMultiImageExpanded]);
+  }, [isMultiImageExpanded, setMultiImageExpanded]);
 
   useEffect(() => {
     if (selected && isNodeToolbarActive) return;
@@ -340,9 +346,9 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
             </Button>
           ) : null}
           {!isCropping ? <Button
-            type="button"
-            variant="destructive"
-            size="icon-sm"
+              type="button"
+              variant="destructive"
+              size="icon-sm"
             aria-label={t("common:actions.delete")}
             onClick={() => void deleteElements({ nodes: [{ id }] })}
           >
@@ -659,7 +665,8 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  actions.patchNodeData(id, { generationError: "" });
+                  clearNodeGenerationRuntimeErrors(id);
+                  if (taskId) useGenerationRuntimeStore.getState().dismissTask(taskId);
                 }}
               >
                 <ArrowLeft aria-hidden="true" />

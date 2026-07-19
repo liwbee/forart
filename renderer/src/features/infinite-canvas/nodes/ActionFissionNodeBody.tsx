@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEdges, useNodes } from "@xyflow/react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
+import type { GenerationTaskDto } from "../../../app/appConfig";
 import {
   CircleAlert,
   Download,
@@ -34,14 +36,20 @@ import {
   getActionFissionRunReadiness,
   randomizeActionFissionRows,
 } from "../action-fission/actionFissionRules";
-import { MAX_ACTION_FISSION_ROWS, type ActionFissionCategoryGroup, type ActionFissionRow } from "../action-fission/actionFissionTypes";
+import {
+  actionFissionRowTaskId,
+  MAX_ACTION_FISSION_ROWS,
+  type ActionFissionCategoryGroup,
+  type ActionFissionRow,
+} from "../action-fission/actionFissionTypes";
 import { useActionFissionLibraryData } from "../action-fission/useActionFissionLibraryData";
 import { useNativeCanvasActions } from "../canvasActions";
-import { isNativeGenerationTaskActive } from "../generation/useNativeImageGeneration";
 import { formatGenerationDuration, generationStatusMessage } from "../generation/generationStatus";
+import { isGenerationTaskActive, useGenerationTaskCache } from "../generation/generationTaskCache";
 import type { NativeCanvasNodeData } from "../nativeCanvas";
 import type { NativeCanvasEdge, NativeCanvasNode } from "../nativeCanvas";
 import {
+  collectActionFissionAdditionalPrompts,
   collectActionFissionAdditionalReferences,
   collectImageGeneratorReferences,
 } from "../generation/imageGenerationInputs";
@@ -58,50 +66,34 @@ interface ActionFissionNodeBodyProps {
 
 type RowTone = "idle" | "queued" | "ready" | "running" | "completed" | "error";
 
-function isRowQueued(row: ActionFissionRow, launching = false) {
+function isRowQueued(task: GenerationTaskDto | undefined, launching = false) {
   return Boolean(
     launching
-    || row.libtvQueued
-    || Boolean(row.libtvTaskId && !row.libtvTask)
-    || Boolean((row.generationTaskId || row.generationRemoteTaskId) && !row.generationTask)
-    || row.libtvTask?.status === "queued"
-    || row.libtvTask?.status === "preparing"
-    || row.libtvTask?.status === "uploading"
-    || row.generationTask?.status === "queued"
-    || row.generationTask?.status === "submitting",
+    || task?.status === "queued"
+    || task?.status === "preparing"
+    || task?.status === "submitting",
   );
 }
 
-function isRowGenerating(row: ActionFissionRow) {
-  return Boolean(
-    row.libtvRunning
-    || row.libtvTask?.status === "running"
-    || row.generationTask?.status === "running",
-  );
+function isRowGenerating(task: GenerationTaskDto | undefined) {
+  return task?.status === "running" || task?.status === "result_processing";
 }
 
-function toneForRow(row: ActionFissionRow, launching = false): RowTone {
+function toneForRow(row: ActionFissionRow, task: GenerationTaskDto | undefined, launching = false, runtimeError = ""): RowTone {
   if (launching) return "queued";
-  if (row.error || row.generationTask?.status === "failed") return "error";
-  if (isRowQueued(row)) return "queued";
-  if (isRowGenerating(row)) return "running";
+  if (runtimeError || task?.status === "failed") return "error";
+  if (isRowQueued(task)) return "queued";
+  if (isRowGenerating(task)) return "running";
   if (
-    (row.resultUrl || row.generationTask?.status === "succeeded")
+    (row.resultUrl || task?.status === "succeeded")
     && row.resultDownloadState !== "downloaded"
   ) return "completed";
   if (row.selectedActionId) return "ready";
   return "idle";
 }
 
-function isRowRunning(row: ActionFissionRow) {
-  return Boolean(
-    row.libtvTaskId
-    || row.generationTaskId
-    || row.generationRemoteTaskId
-    || row.libtvQueued
-    || row.libtvRunning
-    || isNativeGenerationTaskActive(row.generationTask),
-  );
+function isRowRunning(task: GenerationTaskDto | undefined) {
+  return isGenerationTaskActive(task);
 }
 
 function statusDetails(tone: RowTone, t: ReturnType<typeof useTranslation>["t"]) {
@@ -113,68 +105,63 @@ function statusDetails(tone: RowTone, t: ReturnType<typeof useTranslation>["t"])
   return t("infiniteCanvas:actionFissionPending");
 }
 
-function rowTask(row: ActionFissionRow) {
-  if (row.libtvTask && (row.libtvTaskId || row.libtvQueued || row.libtvRunning)) return row.libtvTask;
-  if (row.generationTask && (row.generationTaskId || row.generationRemoteTaskId || isNativeGenerationTaskActive(row.generationTask))) {
-    return row.generationTask;
-  }
-  return row.libtvTask || row.generationTask;
-}
-
-function rowStatusMessage(row: ActionFissionRow, tone: RowTone, t: ReturnType<typeof useTranslation>["t"]) {
-  if (tone === "error") return row.error || row.libtvTask?.error || row.generationTask?.error || t("infiniteCanvas:generationFailed");
+function rowStatusMessage(task: GenerationTaskDto | undefined, tone: RowTone, t: ReturnType<typeof useTranslation>["t"], runtimeError = "") {
+  if (tone === "error") return runtimeError || task?.errorMessage || t("infiniteCanvas:generationFailed");
   if (tone === "queued" || tone === "running") {
-    return generationStatusMessage(rowTask(row), t) || statusDetails(tone, t);
+    return generationStatusMessage(task, t) || statusDetails(tone, t);
   }
   return statusDetails(tone, t);
 }
 
-function rowElapsedText(row: ActionFissionRow, now: number) {
-  const task = rowTask(row);
+function rowElapsedText(task: GenerationTaskDto | undefined, now: number) {
   const runningAt = Number(task?.runningAt || 0);
   return formatGenerationDuration(runningAt ? now - runningAt : 0);
 }
 
 function RowStatus({
   row,
+  task,
+  runtimeError,
   now,
   hasReference,
   launching,
   hideTransient = false,
 }: {
   row: ActionFissionRow;
+  task?: GenerationTaskDto;
+  runtimeError?: string;
   now: number;
   hasReference: boolean;
   launching: boolean;
   hideTransient?: boolean;
 }) {
   const { t } = useTranslation();
-  const rowTone = toneForRow(row, launching);
+  const rowTone = toneForRow(row, task, launching, runtimeError);
   const tone = rowTone === "ready" && !hasReference ? "idle" : rowTone;
   if (hideTransient && (tone === "queued" || tone === "running" || tone === "error")) return null;
-  const message = launching ? t("infiniteCanvas:generationPreparing") : rowStatusMessage(row, tone, t);
+  const message = launching ? t("infiniteCanvas:generationPreparing") : rowStatusMessage(task, tone, t, runtimeError);
   const showElapsed = tone === "running";
   return (
     <span className="rf-action-fission-status" data-tone={tone} title={message}>
       <span>{message}</span>
-      {showElapsed ? <time>{rowElapsedText(row, now)}</time> : null}
+      {showElapsed ? <time>{rowElapsedText(task, now)}</time> : null}
     </span>
   );
 }
 
-function RowGenerationOverlay({ row, now, launching }: { row: ActionFissionRow; now: number; launching: boolean }) {
+function RowGenerationOverlay({ row, task, runtimeError, now, launching }: { row: ActionFissionRow; task?: GenerationTaskDto; runtimeError?: string; now: number; launching: boolean }) {
   const { t } = useTranslation();
-  const tone = toneForRow(row, launching);
+  const tone = toneForRow(row, task, launching, runtimeError);
   if (tone !== "queued" && tone !== "running" && tone !== "error") return null;
-  const message = launching ? t("infiniteCanvas:generationPreparing") : rowStatusMessage(row, tone, t);
+  const message = launching ? t("infiniteCanvas:generationPreparing") : rowStatusMessage(task, tone, t, runtimeError);
   return (
     <>
       {tone === "running" ? (
         <time
           className="rf-action-fission-generation-timer"
-          aria-label={t("infiniteCanvas:generationElapsed", { time: rowElapsedText(row, now) })}
+          aria-label={t("infiniteCanvas:generationElapsed", { time: rowElapsedText(task, now) })}
         >
-          {rowElapsedText(row, now)}
+          {rowElapsedText(task, now)}
         </time>
       ) : null}
       <div
@@ -267,6 +254,8 @@ function ActionPreview({
 
 function ResultPreview({
   row,
+  task,
+  runtimeError,
   isDownloadBusy,
   onDownload,
   onOpen,
@@ -275,6 +264,8 @@ function ResultPreview({
   now,
 }: {
   row: ActionFissionRow;
+  task?: GenerationTaskDto;
+  runtimeError?: string;
   isDownloadBusy: boolean;
   onDownload: () => void;
   onOpen: (image: ViewerImage) => void;
@@ -283,14 +274,15 @@ function ResultPreview({
   now: number;
 }) {
   const { t } = useTranslation();
-  const originalUrl = row.resultUrl || row.generationTask?.result?.localUrl || row.generationTask?.result?.url || "";
-  const previewUrl = row.resultThumbUrl || originalUrl;
+  const taskImage = task?.result?.images[0];
+  const originalUrl = row.resultUrl || taskImage?.assetUrl || "";
+  const previewUrl = row.resultThumbUrl || taskImage?.thumbUrl || originalUrl;
   const resolvedOriginalUrl = originalUrl ? resolveLibraryImageUrl(originalUrl) : "";
   const resolvedPreviewUrl = previewUrl ? resolveLibraryImageUrl(previewUrl) : "";
   const alt = t("infiniteCanvas:actionFissionResultPreview");
-  const canDownload = Boolean(resolvedOriginalUrl) && !launching && !isRowRunning(row) && toneForRow(row) !== "error";
+  const canDownload = Boolean(resolvedOriginalUrl) && !launching && !isRowRunning(task) && toneForRow(row, task, false, runtimeError) !== "error";
   const isPendingDownload = canDownload && row.resultDownloadState !== "downloaded";
-  const tone = toneForRow(row, launching);
+  const tone = toneForRow(row, task, launching, runtimeError);
   const isActive = tone === "queued" || tone === "running";
   return (
     <div className={cn(
@@ -332,7 +324,7 @@ function ResultPreview({
           <Download aria-hidden="true" />
         </Button>
       ) : null}
-      {showStatusOverlay ? <RowGenerationOverlay row={row} now={now} launching={launching} /> : null}
+      {showStatusOverlay ? <RowGenerationOverlay row={row} task={task} runtimeError={runtimeError} now={now} launching={launching} /> : null}
     </div>
   );
 }
@@ -340,10 +332,11 @@ function ResultPreview({
 
 function ActionRowSummary({ row, projects, tags }: { row: ActionFissionRow; projects: ActionProject[]; tags: ActionTag[] }) {
   const { t } = useTranslation();
-  const projectName = projects.find((project) => project.id === row.actionProjectId)?.name || t("infiniteCanvas:actionFissionSelectProject");
+  const selectedGroup = row.categoryGroups.find((group) => group.id === row.selectedCategoryGroupId) || row.categoryGroups[0];
+  const projectName = projects.find((project) => project.id === selectedGroup?.actionProjectId)?.name || t("infiniteCanvas:actionFissionSelectProject");
   const tagNames = [
-    ...tags.filter((tag) => row.includeActionTagIds.includes(tag.id)).map((tag) => tag.name),
-    ...tags.filter((tag) => row.excludeActionTagIds.includes(tag.id)).map((tag) => t("infiniteCanvas:actionFissionExcludeTag", { name: tag.name })),
+    ...tags.filter((tag) => selectedGroup?.includeActionTagIds.includes(tag.id)).map((tag) => tag.name),
+    ...tags.filter((tag) => selectedGroup?.excludeActionTagIds.includes(tag.id)).map((tag) => t("infiniteCanvas:actionFissionExcludeTag", { name: tag.name })),
   ];
   return (
     <div className="rf-action-fission-row-summary">
@@ -374,13 +367,22 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   const canvasNodes = useNodes<NativeCanvasNode>();
   const canvasEdges = useEdges<NativeCanvasEdge>();
   const state = useMemo(() => normalizeActionFissionState(data.actionFission), [data.actionFission]);
+  const tasksByRowId = useGenerationTaskCache(useShallow((cache) => Object.fromEntries(
+    state.rows.map((row) => [row.id, cache.tasksById[actionFissionRowTaskId(row)]]),
+  )));
+  const runtimeErrorsByRowId = useGenerationRuntimeStore(useShallow((runtime) => Object.fromEntries(
+    state.rows.map((row) => {
+      const suffix = `:action-fission:${nodeId}:${row.id}`;
+      return [row.id, Object.entries(runtime.errorsByKey).find(([key]) => key.endsWith(suffix))?.[1] || ""];
+    }),
+  )));
   const launchingKeys = useGenerationRuntimeStore((runtime) => runtime.launchingKeys);
   const launchingRowIds = useMemo(() => actionFissionLaunchingRowIds(launchingKeys, nodeId), [launchingKeys, nodeId]);
   const isLaunching = launchingRowIds.size > 0;
   const { projects, rowData, isLoading } = useActionFissionLibraryData(state);
   const viewerImages = useMemo(() => ({
     result: state.rows.flatMap((row) => {
-      const url = row.resultUrl || row.generationTask?.result?.localUrl || row.generationTask?.result?.url || "";
+      const url = row.resultUrl || tasksByRowId[row.id]?.result?.images[0]?.assetUrl || "";
       return url ? [{
         id: row.id,
         kind: "result" as const,
@@ -394,7 +396,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
       src: resolveLibraryImageUrl(row.selectedActionAssetUrl),
       alt: t("infiniteCanvas:actionFissionActionPreview"),
     }] : []),
-  }), [state.rows, t]);
+  }), [state.rows, t, tasksByRowId]);
   const resolvedViewerImage = viewerImage
     ? viewerImages[viewerImage.kind].find((image) => image.id === viewerImage.id) ?? viewerImage
     : null;
@@ -407,6 +409,10 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   );
   const additionalReferences = useMemo(
     () => collectActionFissionAdditionalReferences(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference")),
+    [canvasEdges, canvasNodes, nodeId, t],
+  );
+  const additionalPrompts = useMemo(
+    () => collectActionFissionAdditionalPrompts(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference")),
     [canvasEdges, canvasNodes, nodeId, t],
   );
   const viewerReferences = useMemo(() => {
@@ -426,26 +432,26 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   const viewerReferenceIndex = selectedViewerReferenceIndex >= 0 ? selectedViewerReferenceIndex : 0;
   const viewerReference = viewerReferences[viewerReferenceIndex];
 
-  const setState = (nextState: typeof state) => actions.patchNodeData(nodeId, { actionFission: nextState });
+  const setState = useCallback((nextState: typeof state) => {
+    actions.patchNodeData(nodeId, { actionFission: nextState });
+  }, [actions, nodeId]);
+  const deleteRow = useCallback((rowId: string) => {
+    void actions.stopActionFission(nodeId, rowId);
+    setState(removeActionFissionRow(state, rowId));
+  }, [actions, nodeId, setState, state]);
   const canSwitchAnyRow = rowData.some(({ categoryGroups }) => hasCategoryCandidates(categoryGroups));
   const referenceCount = primaryReferences.length;
-  const hasAdditionalReferences = additionalReferences.length > 0;
+  const hasAdditionalReferences = additionalReferences.length > 0 || additionalPrompts.length > 0;
   const runReadiness = getActionFissionRunReadiness(state.rows, referenceCount);
-  const hasRunningRows = state.rows.some(isRowGenerating);
-  const hasQueuedRows = state.rows.some((row) => isRowQueued(row));
-  const isRunning = state.rows.some((row) => (
-    row.libtvTaskId
-    || row.generationTaskId
-    || row.generationRemoteTaskId
-    || row.libtvQueued
-    || row.libtvRunning
-    || isNativeGenerationTaskActive(row.generationTask)
-  ));
+  const hasRunningRows = state.rows.some((row) => isRowGenerating(tasksByRowId[row.id]));
+  const hasQueuedRows = state.rows.some((row) => isRowQueued(tasksByRowId[row.id]));
+  const isRunning = state.rows.some((row) => isRowRunning(tasksByRowId[row.id]));
   const isGenerationActive = isLaunching || hasQueuedRows || hasRunningRows;
   const completedRowCount = state.rows.filter((row) => {
-    if (launchingRowIds.has(row.id) || isRowQueued(row) || isRowGenerating(row)) return false;
-    if (toneForRow(row) === "error") return false;
-    return Boolean(row.resultUrl || row.generationTask?.result?.localUrl || row.generationTask?.result?.url);
+    const task = tasksByRowId[row.id];
+    if (launchingRowIds.has(row.id) || isRowQueued(task) || isRowGenerating(task)) return false;
+    if (toneForRow(row, task, false, runtimeErrorsByRowId[row.id]) === "error") return false;
+    return Boolean(row.resultUrl || task?.result?.images[0]?.assetUrl);
   }).length;
   const groupTone: RowTone = isLaunching
     ? "queued"
@@ -453,9 +459,9 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
       ? "running"
       : hasQueuedRows
       ? "queued"
-      : state.rows.some((row) => toneForRow(row) === "error")
+      : state.rows.some((row) => toneForRow(row, tasksByRowId[row.id], false, runtimeErrorsByRowId[row.id]) === "error")
         ? "error"
-        : state.rows.length > 0 && state.rows.every((row) => toneForRow(row) === "completed")
+        : state.rows.length > 0 && state.rows.every((row) => toneForRow(row, tasksByRowId[row.id]) === "completed")
           ? "completed"
           : runReadiness.canRun
             ? "ready"
@@ -466,12 +472,17 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
       ? t("infiniteCanvas:actionFissionRunningProgress", { completed: completedRowCount, total: state.rows.length })
       : statusDetails(groupTone, t);
   const downloadableRows = state.rows.filter((row) => {
-    const hasResult = Boolean(row.resultUrl || row.generationTask?.result?.localUrl || row.generationTask?.result?.url);
-    return hasResult && !launchingRowIds.has(row.id) && !isRowRunning(row) && toneForRow(row) !== "error";
+    const task = tasksByRowId[row.id];
+    const hasResult = Boolean(row.resultUrl || task?.result?.images[0]?.assetUrl);
+    return hasResult && !launchingRowIds.has(row.id) && !isRowRunning(task)
+      && toneForRow(row, task, false, runtimeErrorsByRowId[row.id]) !== "error";
   });
   const defaultTitle = t("infiniteCanvas:actionFission");
   const title = String(data.label || "").trim() || defaultTitle;
-  const candidatesByRowId = new Map(rowData.map((item) => [item.row.id, item.categoryGroups]));
+  const candidatesByRowId = useMemo(
+    () => new Map(rowData.map((item) => [item.row.id, item.categoryGroups])),
+    [rowData],
+  );
   const selectActions = () => setState({
     ...state,
     rows: randomizeActionFissionRows(state.rows, candidatesByRowId),
@@ -512,7 +523,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
       ...state,
       rows: randomizeActionFissionRows(state.rows, candidatesByRowId, { rowIds: pendingRowIds }),
     });
-  }, [rowData, state.rows]);
+  }, [candidatesByRowId, rowData, setState, state]);
 
   const refreshRow = (rowId: string) => {
     const nextState = {
@@ -542,12 +553,12 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   };
 
   const viewerActivity = viewerImage?.kind === "result" && viewerRow
-    ? launchingRowIds.has(viewerRow.id) || isRowQueued(viewerRow)
+    ? launchingRowIds.has(viewerRow.id) || isRowQueued(tasksByRowId[viewerRow.id])
       ? {
           state: "queued" as const,
           label: t("infiniteCanvas:actionFissionQueued"),
         }
-      : isRowGenerating(viewerRow)
+      : isRowGenerating(tasksByRowId[viewerRow.id])
         ? {
             state: "running" as const,
             label: t("infiniteCanvas:generationInProgress"),
@@ -567,7 +578,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
             return !row
               || !hasCategoryCandidates(candidatesByRowId.get(row.id) || [])
               || launchingRowIds.has(row.id)
-              || isRowRunning(row);
+              || isRowRunning(tasksByRowId[row.id]);
           })(),
           onClick: switchViewerAction,
         }]
@@ -583,7 +594,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
             const row = state.rows.find((item) => item.id === viewerImage.id);
             return !row
               || launchingRowIds.has(row.id)
-              || isRowRunning(row)
+              || isRowRunning(tasksByRowId[row.id])
               || !row.selectedActionId
               || referenceCount < 1;
           })(),
@@ -706,13 +717,13 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           <div className="rf-action-fission-grid">
             {rowData.map(({ row, tags, categoryGroups }, index) => (
               <article key={row.id} className="rf-action-fission-grid-card" data-index={String(index + 1).padStart(2, "0")}>
-                <ResultPreview row={row} now={timerNow} launching={launchingRowIds.has(row.id)} showStatusOverlay isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} />
-                <RowStatus row={row} now={timerNow} launching={launchingRowIds.has(row.id)} hasReference={referenceCount > 0} hideTransient />
+                <ResultPreview row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} showStatusOverlay isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} />
+                <RowStatus row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} hasReference={referenceCount > 0} hideTransient />
                 <div className="rf-action-fission-action-stack">
                   {hasAdditionalReferences ? (
                     <AdditionalReferenceToggle
                       checked={Boolean(row.useAdditionalReferences)}
-                      disabled={launchingRowIds.has(row.id) || isRowRunning(row)}
+                      disabled={launchingRowIds.has(row.id) || isRowRunning(tasksByRowId[row.id])}
                       onCheckedChange={(checked) => setRowAdditionalReferences(row.id, checked)}
                     />
                   ) : null}
@@ -722,8 +733,8 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
                 <ButtonGroup className="rf-action-fission-row-actions nodrag">
                   <Button type="button" variant="ghost" size="icon-xs" aria-label={t("infiniteCanvas:actionFissionRowSettings")} title={t("infiniteCanvas:actionFissionRowSettings")} onClick={() => actions.openActionFissionRowSettings(nodeId, row.id)}><Settings2 aria-hidden="true" /></Button>
                   <Button type="button" variant="ghost" size="icon-xs" disabled={!hasCategoryCandidates(categoryGroups)} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>
-                  <Button type="button" variant="ghost" size="icon-xs" disabled={launchingRowIds.has(row.id) || (!isRowRunning(row) && (!row.selectedActionId || referenceCount < 1))} aria-label={t(isRowRunning(row) ? "infiniteCanvas:stopRun" : "infiniteCanvas:actionFissionRerunImage")} onClick={() => void (isRowRunning(row) ? actions.stopActionFission(nodeId, row.id) : actions.runActionFission(nodeId, row.id))}>{isRowRunning(row) ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" />}</Button>
-                  <Button type="button" variant="ghost" size="icon-xs" disabled={state.rows.length <= 1} aria-label={t("infiniteCanvas:actionFissionDeleteRow")} onClick={() => setState(removeActionFissionRow(state, row.id))}><Trash2 aria-hidden="true" /></Button>
+                  <Button type="button" variant="ghost" size="icon-xs" disabled={launchingRowIds.has(row.id) || (!isRowRunning(tasksByRowId[row.id]) && (!row.selectedActionId || referenceCount < 1))} aria-label={t(isRowRunning(tasksByRowId[row.id]) ? "infiniteCanvas:stopRun" : "infiniteCanvas:actionFissionRerunImage")} onClick={() => void (isRowRunning(tasksByRowId[row.id]) ? actions.stopActionFission(nodeId, row.id) : actions.runActionFission(nodeId, row.id))}>{isRowRunning(tasksByRowId[row.id]) ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" />}</Button>
+                  <Button type="button" variant="ghost" size="icon-xs" disabled={state.rows.length <= 1} aria-label={t("infiniteCanvas:actionFissionDeleteRow")} onClick={() => deleteRow(row.id)}><Trash2 aria-hidden="true" /></Button>
                 </ButtonGroup>
               </article>
             ))}
@@ -732,13 +743,13 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           <div className="rf-action-fission-list">
             {rowData.map(({ row, tags, categoryGroups }, index) => (
               <article key={row.id} className="rf-action-fission-list-card" data-index={String(index + 1).padStart(2, "0")}>
-                <ResultPreview row={row} now={timerNow} launching={launchingRowIds.has(row.id)} isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} />
+                <ResultPreview row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} />
                 <ActionRowSummary row={row} projects={projects} tags={tags} />
-                <RowStatus row={row} now={timerNow} launching={launchingRowIds.has(row.id)} hasReference={referenceCount > 0} />
+                <RowStatus row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} hasReference={referenceCount > 0} />
                 {hasAdditionalReferences ? (
                   <AdditionalReferenceToggle
                     checked={Boolean(row.useAdditionalReferences)}
-                    disabled={launchingRowIds.has(row.id) || isRowRunning(row)}
+                    disabled={launchingRowIds.has(row.id) || isRowRunning(tasksByRowId[row.id])}
                     onCheckedChange={(checked) => setRowAdditionalReferences(row.id, checked)}
                   />
                 ) : null}
@@ -746,8 +757,8 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
                 <ButtonGroup className="rf-action-fission-row-actions nodrag">
                   <Button type="button" variant="ghost" size="icon-sm" aria-label={t("infiniteCanvas:actionFissionRowSettings")} title={t("infiniteCanvas:actionFissionRowSettings")} onClick={() => actions.openActionFissionRowSettings(nodeId, row.id)}><Settings2 aria-hidden="true" /></Button>
                   <Button type="button" variant="ghost" size="icon-sm" disabled={!hasCategoryCandidates(categoryGroups)} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>
-                  <Button type="button" variant="ghost" size="icon-sm" disabled={launchingRowIds.has(row.id) || (!isRowRunning(row) && (!row.selectedActionId || referenceCount < 1))} aria-label={t(isRowRunning(row) ? "infiniteCanvas:stopRun" : "infiniteCanvas:actionFissionRerunImage")} onClick={() => void (isRowRunning(row) ? actions.stopActionFission(nodeId, row.id) : actions.runActionFission(nodeId, row.id))}>{isRowRunning(row) ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" />}</Button>
-                  <Button type="button" variant="ghost" size="icon-sm" disabled={state.rows.length <= 1} aria-label={t("infiniteCanvas:actionFissionDeleteRow")} onClick={() => setState(removeActionFissionRow(state, row.id))}><Trash2 aria-hidden="true" /></Button>
+                  <Button type="button" variant="ghost" size="icon-sm" disabled={launchingRowIds.has(row.id) || (!isRowRunning(tasksByRowId[row.id]) && (!row.selectedActionId || referenceCount < 1))} aria-label={t(isRowRunning(tasksByRowId[row.id]) ? "infiniteCanvas:stopRun" : "infiniteCanvas:actionFissionRerunImage")} onClick={() => void (isRowRunning(tasksByRowId[row.id]) ? actions.stopActionFission(nodeId, row.id) : actions.runActionFission(nodeId, row.id))}>{isRowRunning(tasksByRowId[row.id]) ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" />}</Button>
+                  <Button type="button" variant="ghost" size="icon-sm" disabled={state.rows.length <= 1} aria-label={t("infiniteCanvas:actionFissionDeleteRow")} onClick={() => deleteRow(row.id)}><Trash2 aria-hidden="true" /></Button>
                 </ButtonGroup>
               </article>
             ))}

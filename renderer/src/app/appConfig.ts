@@ -57,6 +57,67 @@ export interface ForartInfiniteCanvasSettings {
   };
 }
 
+export type GenerationTaskStatus =
+  | "queued"
+  | "preparing"
+  | "submitting"
+  | "running"
+  | "result_processing"
+  | "succeeded"
+  | "failed"
+  | "canceled"
+  | "interrupted"
+  | "superseded";
+
+export interface GenerationTaskDto {
+  id: string;
+  target: {
+    canvasId: string;
+    kind: "imageGenerator" | "actionFissionRow";
+    nodeId: string;
+    rowId?: string;
+  };
+  executorKind: "api" | "libtv";
+  providerId?: string;
+  providerName?: string;
+  model?: string;
+  resolution?: string;
+  aspectRatio?: string;
+  quality?: string;
+  status: GenerationTaskStatus;
+  version: number;
+  messageCode?: string;
+  messageParams?: Record<string, string | number>;
+  remoteMessage?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  startedAt: number;
+  runningAt?: number;
+  updatedAt: number;
+  completedAt?: number;
+  durationMs?: number;
+  result?: {
+    images: Array<{
+      assetUrl: string;
+      thumbUrl?: string;
+      fileName?: string;
+      width?: number;
+      height?: number;
+    }>;
+  };
+}
+
+export interface ForartGenerationTasksApi {
+  get: (taskId: string) => Promise<GenerationTaskDto | null>;
+  getMany: (taskIds: string[]) => Promise<GenerationTaskDto[]>;
+  listForCanvas: (canvasId: string) => Promise<GenerationTaskDto[]>;
+  listRecent: (limit?: number) => Promise<GenerationTaskDto[]>;
+  start: (executorKind: "api" | "libtv", payload: unknown) => Promise<GenerationTaskDto | null>;
+  startMany: (executorKind: "api" | "libtv", payloads: unknown[]) => Promise<GenerationTaskDto[]>;
+  stop: (taskId: string) => Promise<unknown>;
+  onChanged: (callback: (task: GenerationTaskDto) => void) => () => void;
+}
+
 export interface ForartAppInfo {
   name: string;
   repoUrl: string;
@@ -223,17 +284,6 @@ export interface EasyToolApi {
   deleteCanvasCacheAssets: (payload: { ids: string[] }) => Promise<CanvasCacheDeleteResult>;
   revealCanvasCacheAsset: (payload: { id?: string; filePath?: string }) => Promise<{ ok: true }>;
   openCanvasCacheRoot: () => Promise<{ ok: true }>;
-  getGenerationTask: (taskId: string) => Promise<unknown | null>;
-  createGenerationTask: (payload: unknown) => Promise<unknown>;
-  createGenerationTasks: (payloads: unknown[]) => Promise<unknown[]>;
-  updateGenerationTask: (taskId: string, patch: unknown) => Promise<unknown>;
-  resumeGenerationTask: (taskId: string, payload?: unknown) => Promise<unknown>;
-  recoverGenerationTask: (payload: unknown) => Promise<unknown>;
-  recoverCanvasGenerationTasks: (payload: unknown) => Promise<{ ok: true; tasks: unknown[] }>;
-  stopGenerationTask: (taskId: string) => Promise<unknown>;
-  stopGenerationTasksForTarget: (canvasId: string, target: unknown) => Promise<{ ok: true; tasks: unknown[]; taskIds: string[] }>;
-  stopGenerationTasksForNode: (canvasId: string, nodeId: string) => Promise<{ ok: true; tasks: unknown[]; taskIds: string[] }>;
-  stopGenerationTasksForCanvas: (canvasId: string) => Promise<{ ok: true; tasks: unknown[]; taskIds: string[] }>;
   writeCanvasClipboard: (payload: unknown) => Promise<{ ok: true }>;
 }
 
@@ -378,83 +428,12 @@ export interface LibtvImageModelRecord {
   modelName: string;
 }
 
-export interface LibtvImageGenerationResult {
-  ok: true;
-  url: string;
-  localUrl: string;
-  fileName: string;
-  filePath?: string;
-  remoteNodeId: string;
-  remoteNodeTitle?: string;
-  remoteReferenceNodeIds: string[];
-  remoteReferenceNodeTitles?: string[];
-  groupNodeId?: string;
-  groupTitle?: string;
-  projectUuid?: string;
-  projectName?: string;
-  createdAt: number;
-}
-
-export type LibtvGenerationTaskStatus = "queued" | "preparing" | "uploading" | "running" | "succeeded" | "failed" | "interrupted";
-
-export interface LibtvGenerationTask {
-  id: string;
-  canvasId: string;
-  nodeId: string;
-  target?: { type: "imageGenerator"; nodeId: string } | { type: "actionFissionRow"; nodeId: string; rowId: string };
-  queueKey?: string;
-    status: LibtvGenerationTaskStatus;
-    startedAt: number;
-    runningAt?: number;
-    updatedAt: number;
-  completedAt?: number;
-  durationMs?: number;
-  message?: string;
-  messageCode?: string;
-  messageParams?: Record<string, string | number>;
-  error?: string;
-  prompt?: string;
-  modelName: string;
-  count?: number;
-  quality?: string;
-  resolution?: string;
-  aspectRatio?: string;
-  referenceImages?: string[];
-  workspaceId?: string;
-  workspaceName?: string;
-  projectUuid?: string;
-  projectName?: string;
-  remoteNodeId?: string;
-  remoteReferenceNodeIds?: string[];
-  result?: LibtvImageGenerationResult;
-}
-
-export interface LibtvBatchGenerationFailureResult {
-  ok: false;
-  id?: string;
-  error: string;
-  remoteNodeId?: string;
-  remoteNodeTitle?: string;
-  remoteReferenceNodeIds?: string[];
-  remoteReferenceNodeTitles?: string[];
-  createdAt: number;
-}
-
-export interface LibtvBatchGenerationResult {
-  ok: true;
-  projectUuid?: string;
-  projectName?: string;
-  groupNodeId?: string;
-  groupTitle?: string;
-  results: Array<(LibtvImageGenerationResult & { id?: string }) | LibtvBatchGenerationFailureResult>;
-  createdAt: number;
-}
-
 export interface LibtvApi {
   status: () => Promise<{ ok: boolean; available: boolean; path?: string; version?: string; error?: string }>;
   install: () => Promise<{ ok: true; path?: string; stdout?: string; stderr?: string }>;
   account: () => Promise<{ ok: boolean; loggedIn: boolean; account?: unknown; error?: string }>;
   accounts: () => Promise<{ ok: boolean; accounts: LibtvAccountRecord[] }>;
+  power: () => Promise<{ ok: true; total: number | null; remaining: number | null }>;
   useAccount: (account: string | number) => Promise<{ ok: true }>;
   loginWeb: () => Promise<{ ok: true }>;
   logout: () => Promise<{ ok: true }>;
@@ -462,92 +441,6 @@ export interface LibtvApi {
   projects: (payload: { workspaceId: string; page?: number; pageSize?: number }) => Promise<{ ok: true; projects: LibtvProjectRecord[] }>;
   imageModels: () => Promise<{ ok: true; models: LibtvImageModelRecord[] }>;
   imageModelSchema: (payload: { model: string }) => Promise<Record<string, unknown> & { ok: true }>;
-  startImageTask: (payload: {
-    canvasId: string;
-    nodeId: string;
-    target?: { type: "imageGenerator"; nodeId: string } | { type: "actionFissionRow"; nodeId: string; rowId: string };
-    queueKey?: string;
-    workspaceName?: string;
-    prompt: string;
-    modelName: string;
-    count?: number;
-    aspectRatio?: string;
-    quality?: string;
-    resolution?: string;
-    referenceImages?: string[];
-    nodeTitle?: string;
-    x?: number;
-    y?: number;
-  }) => Promise<LibtvGenerationTask>;
-  startImageTasks: (payloads: Array<{
-    canvasId: string;
-    nodeId: string;
-    target: { type: "actionFissionRow"; nodeId: string; rowId: string };
-    queueKey: string;
-    workspaceName?: string;
-    prompt: string;
-    modelName: string;
-    count?: number;
-    aspectRatio?: string;
-    quality?: string;
-    resolution?: string;
-    referenceImages?: string[];
-    nodeTitle?: string;
-    x?: number;
-    y?: number;
-  }>) => Promise<LibtvGenerationTask[]>;
-  getImageTask: (taskId: string) => Promise<LibtvGenerationTask | null>;
-  recoverImageTask: (payload: {
-    canvasId: string;
-    nodeId: string;
-    rowId?: string;
-    taskId: string;
-    target: { type: "imageGenerator"; nodeId: string } | { type: "actionFissionRow"; nodeId: string; rowId: string };
-    projectUuid?: string;
-    remoteNodeId?: string;
-  }) => Promise<LibtvGenerationTask | null>;
-  recoverCanvasImageTasks: () => Promise<{ ok: true; tasks: LibtvGenerationTask[] }>;
-  stopImageTask: (taskId: string) => Promise<LibtvGenerationTask | null>;
-  ensureReadyProject: (payload: { workspaceId: string }) => Promise<{ ok: true; created?: boolean; projectUuid: string; projectName?: string; project?: LibtvProjectRecord }>;
-  generateImage: (payload: {
-    workspaceId?: string;
-    projectUuid?: string;
-    prompt: string;
-    modelName: string;
-    count?: number;
-    aspectRatio?: string;
-    quality?: string;
-    resolution?: string;
-    referenceImages?: string[];
-    nodeTitle?: string;
-    x?: number;
-    y?: number;
-  }) => Promise<LibtvImageGenerationResult>;
-  generateBatch: (payload: {
-    workspaceId?: string;
-    projectUuid?: string;
-    projectName?: string;
-    modelName?: string;
-    count?: number;
-    aspectRatio?: string;
-    quality?: string;
-    resolution?: string;
-    groupTitle?: string;
-    jobs: Array<{
-      id?: string;
-      localTargetId?: string;
-      prompt: string;
-      modelName?: string;
-      count?: number;
-      aspectRatio?: string;
-      quality?: string;
-      resolution?: string;
-      referenceImages?: string[];
-      nodeTitle?: string;
-      x?: number;
-      y?: number;
-    }>;
-  }) => Promise<LibtvBatchGenerationResult>;
 }
 
 declare global {
@@ -558,6 +451,7 @@ declare global {
     forartReview?: ImageReviewApi;
     forartActionImport?: ForartActionImportApi;
     forartLocalApi?: ForartLocalApi;
+    forartGenerationTasks?: ForartGenerationTasksApi;
     libtv?: LibtvApi;
   }
 }

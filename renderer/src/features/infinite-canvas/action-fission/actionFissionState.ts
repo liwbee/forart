@@ -6,6 +6,7 @@ import {
   type ActionFissionCategoryGroup,
   type ActionFissionRow,
   type ActionFissionState,
+  actionFissionRowTaskId,
 } from "./actionFissionTypes";
 
 function createRowId() {
@@ -31,9 +32,6 @@ export function createActionFissionRow(actionProjectId = ""): ActionFissionRow {
     id: createRowId(),
     categoryGroups: [group],
     selectedCategoryGroupId: group.id,
-    actionProjectId,
-    includeActionTagIds: [],
-    excludeActionTagIds: [],
   };
 }
 
@@ -84,24 +82,17 @@ function categoryGroupSelectionSignature(group: ActionFissionCategoryGroup | und
 }
 
 export function normalizeActionFissionRow(row: ActionFissionRow): ActionFissionRow {
-  const groups = row.categoryGroups?.length
+  const groups = row.categoryGroups.length
     ? row.categoryGroups
         .slice(0, MAX_ACTION_FISSION_CATEGORY_GROUPS)
         .map((group, index) => normalizeActionFissionGroup(group, `${row.id}_group_${index + 1}`))
-    : [normalizeActionFissionGroup({
-        id: `${row.id}_group_1`,
-        actionProjectId: row.actionProjectId,
-        includeActionTagIds: row.includeActionTagIds,
-        excludeActionTagIds: row.excludeActionTagIds,
-      }, `${row.id}_group_1`)];
+    : [normalizeActionFissionGroup(createActionFissionCategoryGroup(), `${row.id}_group_1`)];
   const selectedGroup = groups.find((group) => group.id === row.selectedCategoryGroupId) || groups[0];
   return {
     ...row,
+    latestGenerationTaskId: actionFissionRowTaskId(row) || undefined,
     categoryGroups: groups,
     selectedCategoryGroupId: selectedGroup.id,
-    actionProjectId: selectedGroup.actionProjectId,
-    includeActionTagIds: [...selectedGroup.includeActionTagIds],
-    excludeActionTagIds: [...selectedGroup.excludeActionTagIds],
   };
 }
 
@@ -113,16 +104,12 @@ export function actionPatchFromEntry(action: ActionEntry) {
     selectedActionTags: action.tags,
     selectedActionAssetUrl: action.asset_url,
     selectedActionThumbUrl: action.thumbnail_url || action.asset_url,
-    error: "",
   } satisfies Partial<ActionFissionRow>;
 }
 
 export function actionPatchFromCategoryGroup(group: ActionFissionCategoryGroup, action: ActionEntry) {
   return {
     selectedCategoryGroupId: group.id,
-    actionProjectId: group.actionProjectId,
-    includeActionTagIds: [...group.includeActionTagIds],
-    excludeActionTagIds: [...group.excludeActionTagIds],
     ...actionPatchFromEntry(action),
   } satisfies Partial<ActionFissionRow>;
 }
@@ -136,7 +123,6 @@ function clearRowAction(row: ActionFissionRow) {
     selectedActionTags: undefined,
     selectedActionAssetUrl: undefined,
     selectedActionThumbUrl: undefined,
-    error: "",
   };
 }
 
@@ -162,9 +148,6 @@ export function configureActionFissionRow(
           ...normalizedRow,
           categoryGroups: nextGroups,
           selectedCategoryGroupId: selectedGroup.id,
-          actionProjectId: selectedGroup.actionProjectId,
-          includeActionTagIds: [...selectedGroup.includeActionTagIds],
-          excludeActionTagIds: [...selectedGroup.excludeActionTagIds],
         });
         return selection.action ? { ...nextRow, ...actionPatchFromCategoryGroup(selectedGroup, selection.action) } : nextRow;
       }
@@ -177,9 +160,6 @@ export function configureActionFissionRow(
         ...normalizedRow,
         categoryGroups: nextGroups,
         selectedCategoryGroupId: selectedGroup.id,
-        actionProjectId: selectedGroup.actionProjectId,
-        includeActionTagIds: [...selectedGroup.includeActionTagIds],
-        excludeActionTagIds: [...selectedGroup.excludeActionTagIds],
       };
       return selectedGroupChanged ? clearRowAction(nextRow) : nextRow;
     }),

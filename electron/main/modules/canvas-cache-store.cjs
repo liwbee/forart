@@ -39,28 +39,7 @@ function thumbPathForAsset(filePath) {
   return path.join(directory, 'thumb', `${parsed.name}.webp`);
 }
 
-function collectTasksFromUnknown(value, tasks = []) {
-  if (!value) return tasks;
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectTasksFromUnknown(item, tasks));
-    return tasks;
-  }
-  if (!isRecord(value)) return tasks;
-  if (isRecord(value.result) || Array.isArray(value.referenceImages)) tasks.push(value);
-  Object.values(value).forEach((item) => collectTasksFromUnknown(item, tasks));
-  return tasks;
-}
-
-function readJson(filePath) {
-  try {
-    if (!fs.existsSync(filePath)) return null;
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-function createCanvasCacheStore({ rootDir, assetStore, canvasStore, shell }) {
+function createCanvasCacheStore({ assetStore, canvasStore, generationTaskRepository, shell }) {
   function rootPath() {
     return assetStore.canvasAssetsRoot();
   }
@@ -123,6 +102,7 @@ function createCanvasCacheStore({ rootDir, assetStore, canvasStore, shell }) {
       const canvas = canvasStore.readCanvas(record.id);
       if (!canvas || !Array.isArray(canvas.nodes)) continue;
       for (const node of canvas.nodes) {
+        const data = isRecord(node.data) ? node.data : {};
         const nodeReference = (source) => ({
           canvasId: canvas.id,
           canvasTitle: canvas.title,
@@ -132,14 +112,13 @@ function createCanvasCacheStore({ rootDir, assetStore, canvasStore, shell }) {
         });
         addReference(referenceMap, node.url, nodeReference('node.url'));
         addReference(referenceMap, node.filePath, nodeReference('node.filePath'));
-        addReference(referenceMap, node.generationTask?.result?.localUrl, nodeReference('node.generationTask.result.localUrl'));
-        if (Array.isArray(node.generationTask?.referenceImages)) {
-          node.generationTask.referenceImages.forEach((url) => addReference(referenceMap, url, nodeReference('task.referenceImages')));
+        addReference(referenceMap, data.imageUrl, nodeReference('node.data.imageUrl'));
+        for (const image of Array.isArray(data.generatedImages) ? data.generatedImages : []) {
+          addReference(referenceMap, image?.localUrl || image?.url, nodeReference('node.data.generatedImages'));
         }
-        addReference(referenceMap, node.libtvImageGeneration?.latestRun?.localUrl, nodeReference('node.libtvImageGeneration.latestRun.localUrl'));
-        addReference(referenceMap, node.libtvImageGeneration?.latestRun?.resultUrl, nodeReference('node.libtvImageGeneration.latestRun.localUrl'));
 
-        const rows = Array.isArray(node.actionFission?.rows) ? node.actionFission.rows : [];
+        const actionFission = isRecord(data.actionFission) ? data.actionFission : node.actionFission;
+        const rows = Array.isArray(actionFission?.rows) ? actionFission.rows : [];
         for (const row of rows) {
           const rowReference = (source) => ({
             canvasId: canvas.id,
@@ -149,29 +128,27 @@ function createCanvasCacheStore({ rootDir, assetStore, canvasStore, shell }) {
             source,
           });
           addReference(referenceMap, row.resultUrl, rowReference('actionFission.row.resultUrl'));
-          addReference(referenceMap, row.generationTask?.result?.localUrl, rowReference('actionFission.row.generationTask.result.localUrl'));
-          if (Array.isArray(row.generationTask?.referenceImages)) {
-            row.generationTask.referenceImages.forEach((url) => addReference(referenceMap, url, rowReference('task.referenceImages')));
-          }
+          addReference(referenceMap, row.selectedActionAssetUrl, rowReference('actionFission.row.selectedActionAssetUrl'));
         }
       }
     }
   }
 
-  function collectTaskRegistryReferences(referenceMap) {
-    const registryPath = path.join(rootDir, 'CanvasAssests', 'tasks', 'generation-task-registry.json');
-    const registry = readJson(registryPath);
-    if (!registry) return;
-    const tasks = collectTasksFromUnknown(registry);
-    for (const task of tasks) {
+  function collectTaskReferences(referenceMap) {
+    for (const record of generationTaskRepository?.listTaskRecords?.() || []) {
+      const task = record?.task;
+      if (!isRecord(task)) continue;
       const reference = (source) => ({
         canvasId: safeString(task.canvasId),
-        canvasTitle: safeString(task.canvasTitle || task.canvasId || 'Task registry'),
+        canvasTitle: safeString(task.canvasId || 'Generation task'),
         nodeId: safeString(task.nodeId || task.target?.nodeId),
         nodeTitle: safeString(task.nodeTitle),
         source,
       });
       addReference(referenceMap, task.result?.localUrl, reference('task.result.localUrl'));
+      for (const result of Array.isArray(task.result?.results) ? task.result.results : []) {
+        addReference(referenceMap, result?.localUrl, reference('task.result.results.localUrl'));
+      }
       if (Array.isArray(task.referenceImages)) {
         task.referenceImages.forEach((url) => addReference(referenceMap, url, reference('task.referenceImages')));
       }
@@ -265,7 +242,7 @@ function createCanvasCacheStore({ rootDir, assetStore, canvasStore, shell }) {
   function scan() {
     const referenceMap = new Map();
     collectCanvasReferences(referenceMap);
-    collectTaskRegistryReferences(referenceMap);
+    collectTaskReferences(referenceMap);
     const files = [...enumerateAssetFiles(inputRoot()), ...enumerateAssetFiles(outputRoot())];
     const assets = files.map((filePath) => assetRecord(filePath, referenceMap));
     const existingIds = new Set(assets.map((asset) => asset.id));

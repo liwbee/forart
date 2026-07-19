@@ -44,6 +44,7 @@ import {
   getImageGeneratorNodeSize,
   getImageNodeSize,
   nativeCanvasNodePrimaryImage,
+  nativeCanvasNodeTaskId,
   NATIVE_CANVAS_NODE_DEFINITIONS,
   NATIVE_CANVAS_NODE_KINDS,
   type NativeCanvasEdge,
@@ -53,7 +54,7 @@ import {
 import { NativeCanvasNode as NativeCanvasNodeComponent } from "./nodes/NativeCanvasNode";
 import { ActionFissionRowSettingsDialog } from "./nodes/ActionFissionRowSettingsDialog";
 import { configureActionFissionRow, normalizeActionFissionState } from "./action-fission/actionFissionState";
-import type { ActionFissionRow } from "./action-fission/actionFissionTypes";
+import { actionFissionRowTaskId, type ActionFissionRow } from "./action-fission/actionFissionTypes";
 import { emptyCanvasSnapshot, type NativeCanvasSnapshot } from "./canvasWorkspaceTypes";
 import { useNativeImageGeneration } from "./generation/useNativeImageGeneration";
 import { useNativeActionFissionGeneration } from "./generation/useNativeActionFissionGeneration";
@@ -449,6 +450,22 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     void deleteElements({ nodes: [{ id: contextNode.id }] });
   }, [contextNode, deleteElements]);
 
+  const stopDeletedNodeTasks = useCallback((deletedNodes: NativeCanvasNode[]) => {
+    if (!window.forartGenerationTasks?.stop) return;
+    const taskIds = new Set<string>();
+    deletedNodes.forEach((node) => {
+      const nodeTaskId = nativeCanvasNodeTaskId(node.data);
+      if (nodeTaskId) taskIds.add(nodeTaskId);
+      normalizeActionFissionState(node.data.actionFission).rows.forEach((row) => {
+        const rowTaskId = actionFissionRowTaskId(row);
+        if (rowTaskId) taskIds.add(rowTaskId);
+      });
+    });
+    void Promise.allSettled([...taskIds].map((taskId) => (
+      Promise.resolve().then(() => window.forartGenerationTasks!.stop(taskId))
+    )));
+  }, []);
+
   const setNodeImage = useCallback((nodeId: string, imageUrl: string, label: string) => {
     const nodeKind = getNodes().find((node) => node.id === nodeId)?.data.kind;
     setNodes((current) => current.map((node) => node.id === nodeId
@@ -581,29 +598,22 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     setNodes((current) => current.map((node) => {
       if (node.id !== nodeId || node.data.kind !== "actionFission") return node;
       const actionFission = normalizeActionFissionState(node.data.actionFission);
+      const nextRows = actionFission.rows.map((row) => {
+        if (row.id !== rowId) return row;
+        const next = { ...row, ...patch } as ActionFissionRow & Record<string, unknown>;
+        return next;
+      });
       return {
         ...node,
         data: {
           ...node.data,
           actionFission: {
             ...actionFission,
-            rows: actionFission.rows.map((row) => row.id === rowId ? { ...row, ...patch } : row),
+            rows: nextRows,
           },
         },
       };
     }));
-  }, [setNodes]);
-
-  const patchActionFissionState = useCallback((nodeId: string, patch: Partial<NonNullable<NativeCanvasNode["data"]["actionFission"]>>) => {
-    setNodes((current) => current.map((node) => node.id === nodeId && node.data.kind === "actionFission"
-      ? {
-          ...node,
-          data: {
-            ...node.data,
-            actionFission: { ...normalizeActionFissionState(node.data.actionFission), ...patch },
-          },
-        }
-      : node));
   }, [setNodes]);
 
   const {
@@ -614,7 +624,6 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     edges,
     nodes,
     patchNodeData,
-    setNodeImage,
     t,
   });
   const { runLibtvGeneration, stopLibtvGeneration } = useNativeLibtvGeneration({
@@ -622,7 +631,6 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     edges,
     nodes,
     patchNodeData,
-    setNodeImage,
     t,
   });
   const { runActionFission, stopActionFission } = useNativeActionFissionGeneration({
@@ -630,7 +638,6 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     edges,
     nodes,
     patchRow: patchActionFissionRow,
-    patchState: patchActionFissionState,
     t,
   });
   const runImageGeneration = useCallback(async (nodeId: string, options?: { promptOverride?: string }) => {
@@ -687,7 +694,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
 
   const downloadActionFissionResult = useCallback(async (nodeId: string, rowId: string) => {
     const row = nodes.find((node) => node.id === nodeId)?.data.actionFission?.rows.find((item) => item.id === rowId);
-    const imageUrl = String(row?.resultUrl || row?.generationTask?.result?.localUrl || row?.generationTask?.result?.url || "");
+    const imageUrl = String(row?.resultUrl || "");
     if (!row || !imageUrl) return;
     const defaultName = String(row.resultFileName || row.selectedActionName || `generated-image-${Date.now()}.png`);
     await saveGeneratedImage(imageUrl, defaultName);
@@ -1162,6 +1169,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
               edges={flowEdges}
               nodeTypes={NODE_TYPES}
               onNodesChange={onNodesChange}
+              onNodesDelete={readOnly ? undefined : stopDeletedNodeTasks}
               onEdgesChange={onEdgesChange}
               onSelectionChange={({ nodes: selectedNodes, edges: selectedEdges }) => {
                 if (wrapperRef.current) {

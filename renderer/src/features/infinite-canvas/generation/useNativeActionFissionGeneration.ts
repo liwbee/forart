@@ -2,10 +2,18 @@ import { useCallback, useEffect, useRef } from "react";
 import type { TFunction } from "i18next";
 import { isImageProviderConfigured, loadApiSettings, orderedApiProviders } from "../../settings/apiProviders";
 import { detectImageModelRuleId, getImageModelRule, normalizeImageModelSizeSelection } from "../../settings/imageModelRules";
-import type { ActionFissionRow, ActionFissionState } from "../action-fission/actionFissionTypes";
-import { actionFissionReferenceImages, getActionFissionRunReadiness } from "../action-fission/actionFissionRules";
+import {
+  actionFissionRowTaskId,
+  type ActionFissionRow,
+} from "../action-fission/actionFissionTypes";
+import {
+  actionFissionPrompt,
+  actionFissionReferenceImages,
+  getActionFissionRunReadiness,
+} from "../action-fission/actionFissionRules";
 import type { NativeCanvasEdge, NativeCanvasNode } from "../nativeCanvas";
 import {
+  collectActionFissionAdditionalPrompts,
   collectActionFissionAdditionalReferences,
   collectImageGeneratorReferences,
   validateImageGeneratorReferences,
@@ -13,30 +21,26 @@ import {
 import {
   actionFissionLaunchKey,
   beginGenerationLaunching,
+  clearGenerationRuntimeError,
   endGenerationLaunching,
+  setGenerationRuntimeError,
 } from "./generationRuntimeStore";
 import { activateGenerationHook } from "./generationHookLifecycle";
-import {
-  collectConnectedPrompt,
-  getGenerationTaskWithRetry,
-  isNativeGenerationTaskActive,
-  normalizeGenerationTask,
-  TERMINAL_TASK_STATUSES,
-} from "./useNativeImageGeneration";
+import { collectConnectedPrompt } from "./useNativeImageGeneration";
 import { deriveLibtvModelCapabilities } from "../libtv-generation/libtvModelSchema";
-import { isNativeLibtvTaskActive } from "../libtv-generation/useNativeLibtvGeneration";
+import {
+  isGenerationTaskActive,
+  isGenerationTaskTerminal,
+  useGenerationTaskCache,
+  watchGenerationTask,
+} from "./generationTaskCache";
 
 interface UseNativeActionFissionGenerationOptions {
   canvasId: string;
   edges: NativeCanvasEdge[];
   nodes: NativeCanvasNode[];
   patchRow: (nodeId: string, rowId: string, patch: Partial<ActionFissionRow>) => void;
-  patchState: (nodeId: string, patch: Partial<ActionFissionState>) => void;
   t: TFunction;
-}
-
-function rowPrompt(row: ActionFissionRow, connectedPrompt: string) {
-  return [String(row.selectedActionPrompt || "").trim(), connectedPrompt].filter(Boolean).join("\n\n");
 }
 
 export function useNativeActionFissionGeneration({
@@ -44,23 +48,21 @@ export function useNativeActionFissionGeneration({
   edges,
   nodes,
   patchRow,
-  patchState,
   t,
 }: UseNativeActionFissionGenerationOptions) {
   const mountedRef = useRef(true);
-  const apiControllersRef = useRef(new Map<string, AbortController>());
-  const libtvControllersRef = useRef(new Map<string, AbortController>());
+  const taskControllersRef = useRef(new Map<string, AbortController>());
   const nodeQueueControllersRef = useRef(new Map<string, AbortController>());
   const activeNodeRunsRef = useRef(new Set<string>());
   const thumbnailAttemptsRef = useRef(new Set<string>());
-  const recoveringApiRowsRef = useRef(new Set<string>());
+  const handledTerminalVersionsRef = useRef(new Map<string, number>());
 
   useEffect(() => {
     if (!window.easyTool?.ensureCanvasAssetThumbnail) return;
     nodes.forEach((node) => {
       if (node.data.kind !== "actionFission") return;
       node.data.actionFission?.rows.forEach((row) => {
-        const resultUrl = row.resultUrl || row.generationTask?.result?.localUrl || row.generationTask?.result?.url || "";
+        const resultUrl = row.resultUrl || "";
         if (!resultUrl) return;
         const attemptKey = `${node.id}:${row.id}:${resultUrl}`;
         if (thumbnailAttemptsRef.current.has(attemptKey)) return;
@@ -74,84 +76,39 @@ export function useNativeActionFissionGeneration({
     });
   }, [nodes, patchRow]);
 
-  const pollApiRow = useCallback(async (taskId: string, nodeId: string, rowId: string) => {
-    if (!mountedRef.current || !window.easyTool?.getGenerationTask || apiControllersRef.current.has(taskId)) return;
+  const watchRowTask = useCallback(async (taskId: string, nodeId: string, rowId: string) => {
+    if (!mountedRef.current || !window.forartGenerationTasks?.get || taskControllersRef.current.has(taskId)) return;
+    const cachedTask = useGenerationTaskCache.getState().tasksById[taskId];
+    if (cachedTask && isGenerationTaskTerminal(cachedTask.status)
+      && (handledTerminalVersionsRef.current.get(taskId) || -1) >= cachedTask.version) return;
     const controller = new AbortController();
-    apiControllersRef.current.set(taskId, controller);
+    const runtimeKey = actionFissionLaunchKey(canvasId, nodeId, rowId);
+    taskControllersRef.current.set(taskId, controller);
     try {
-      while (!controller.signal.aborted) {
-        const task = normalizeGenerationTask(await getGenerationTaskWithRetry(taskId, controller.signal));
-        if (!task) throw new Error(t("infiniteCanvas:generationTaskNotFound"));
-        const terminal = TERMINAL_TASK_STATUSES.has(task.status);
+      await watchGenerationTask(taskId, controller.signal, (dto) => {
+        if (!isGenerationTaskTerminal(dto.status)) return;
+        if ((handledTerminalVersionsRef.current.get(dto.id) || -1) >= dto.version) return;
+        handledTerminalVersionsRef.current.set(dto.id, dto.version);
+        if (dto.status !== "succeeded" || !dto.result?.images.length) return;
+        const image = dto.result.images[0];
         patchRow(nodeId, rowId, {
-          generationTask: task,
-          generationTaskId: terminal ? undefined : task.id,
-          generationRemoteTaskId: terminal ? undefined : task.upstreamTaskId,
-          error: task.status === "failed" ? task.error || t("infiniteCanvas:generationFailed") : "",
-          ...(terminal && task.status === "succeeded" ? {
-            resultUrl: task.result?.localUrl || task.result?.url,
-            resultFileName: task.result?.fileName,
-            resultWidth: task.result?.width,
-            resultHeight: task.result?.height,
-            resultDownloadState: "pending" as const,
-            resultDownloadedAt: undefined,
-          } : {}),
+          resultUrl: image.assetUrl,
+          resultThumbUrl: image.thumbUrl,
+          resultFileName: image.fileName,
+          resultWidth: image.width,
+          resultHeight: image.height,
+          resultDownloadState: "pending",
+          resultDownloadedAt: undefined,
         });
-        if (terminal) return;
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
-      }
-    } catch (error) {
-      if (!controller.signal.aborted) patchRow(nodeId, rowId, { error: error instanceof Error ? error.message : String(error) });
-    } finally {
-      apiControllersRef.current.delete(taskId);
-    }
-  }, [patchRow, t]);
-
-  const recoverApiRow = useCallback(async (node: NativeCanvasNode, row: ActionFissionRow) => {
-    const recoveryKey = `${node.id}:${row.id}`;
-    if (recoveringApiRowsRef.current.has(recoveryKey)) return;
-    recoveringApiRowsRef.current.add(recoveryKey);
-    try {
-      let task = row.generationTaskId && window.easyTool?.getGenerationTask
-        ? normalizeGenerationTask(await window.easyTool.getGenerationTask(row.generationTaskId))
-        : null;
-      if (!task && row.generationRemoteTaskId && window.easyTool?.recoverGenerationTask) {
-        const settings = await loadApiSettings();
-        const provider = settings.providers.find((item) => item.id === node.data.imageProviderId);
-        const model = String(node.data.imageModel || "");
-        if (!provider || !model) throw new Error(t("infiniteCanvas:noImageApiConfigured"));
-        task = normalizeGenerationTask(await window.easyTool.recoverGenerationTask({
-          canvasId,
-          nodeId: node.id,
-          rowId: row.id,
-          target: { type: "actionFissionRow", nodeId: node.id, rowId: row.id },
-          upstreamTaskId: row.generationRemoteTaskId,
-          providerId: provider.id,
-          provider,
-          model,
-          status: "running",
-        }));
-      }
-      if (!task) {
-        patchRow(node.id, row.id, {
-          generationTaskId: undefined,
-          generationRemoteTaskId: undefined,
-          error: t("infiniteCanvas:generationInterruptedUnexpected"),
-        });
-        return;
-      }
-      patchRow(node.id, row.id, {
-        generationTask: task,
-        generationTaskId: TERMINAL_TASK_STATUSES.has(task.status) ? undefined : task.id,
-        generationRemoteTaskId: TERMINAL_TASK_STATUSES.has(task.status) ? undefined : task.upstreamTaskId,
       });
-      await pollApiRow(task.id, node.id, row.id);
     } catch (error) {
-      patchRow(node.id, row.id, { error: error instanceof Error ? error.message : String(error) });
+      if (!controller.signal.aborted) {
+        setGenerationRuntimeError(runtimeKey, error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      recoveringApiRowsRef.current.delete(recoveryKey);
+      taskControllersRef.current.delete(taskId);
     }
-  }, [canvasId, patchRow, pollApiRow, t]);
+  }, [canvasId, patchRow]);
 
   const runApiRows = useCallback(async (
     node: NativeCanvasNode,
@@ -159,8 +116,9 @@ export function useNativeActionFissionGeneration({
     primaryReferences: string[],
     additionalReferences: string[],
     connectedPrompt: string,
+    additionalPrompts: string[],
   ) => {
-    if (!window.easyTool?.createGenerationTasks) throw new Error(t("infiniteCanvas:canvasDesktopRequired"));
+    if (!window.forartGenerationTasks?.startMany) throw new Error(t("infiniteCanvas:canvasDesktopRequired"));
     const settings = await loadApiSettings();
     const providers = orderedApiProviders(settings.providers, settings.providerOrder).filter(isImageProviderConfigured);
     const provider = providers.find((item) => item.id === node.data.imageProviderId)
@@ -178,130 +136,37 @@ export function useNativeActionFissionGeneration({
       const referenceError = validateImageGeneratorReferences(rule, references.length);
       if (referenceError === "unsupported") throw new Error(t("infiniteCanvas:imageGenerationReferenceNotSupported"));
       if (referenceError === "tooMany") throw new Error(t("infiniteCanvas:imageGenerationTooManyReferenceImages", { count: rule.maxReferenceImages }));
-      const prompt = rowPrompt(row, connectedPrompt);
+      const prompt = actionFissionPrompt(row, connectedPrompt, additionalPrompts);
       if (!prompt) throw new Error(t("infiniteCanvas:promptRequired"));
       return {
-          canvasId,
-          nodeId: node.id,
-          target: { type: "actionFissionRow", nodeId: node.id, rowId: row.id },
-          kind: "image",
-          providerId: provider.id,
-          provider,
-          model,
-          modelRule: rule,
-          prompt,
-          referenceImages: references,
-          resolution: size.resolution,
-          aspectRatio: size.aspectRatio,
-          quality: node.data.imageQuality,
-          imageCount: 1,
-          status: "submitting",
+        canvasId,
+        nodeId: node.id,
+        target: { type: "actionFissionRow", nodeId: node.id, rowId: row.id },
+        kind: "image",
+        providerId: provider.id,
+        provider,
+        model,
+        modelRule: rule,
+        prompt,
+        referenceImages: references,
+        resolution: size.resolution,
+        aspectRatio: size.aspectRatio,
+        quality: node.data.imageQuality,
+        imageCount: 1,
+        status: "submitting",
       };
     });
-    const tasks = (await window.easyTool.createGenerationTasks(payloads))
-      .map(normalizeGenerationTask);
-    if (tasks.some((task) => !task)) throw new Error(t("infiniteCanvas:generationTaskCreateFailed"));
+    const tasks = await window.forartGenerationTasks.startMany("api", payloads);
+    if (tasks.length !== rows.length) throw new Error(t("infiniteCanvas:generationTaskCreateFailed"));
     if (!mountedRef.current) return;
-    const normalizedTasks = tasks.filter((task): task is NonNullable<typeof task> => Boolean(task));
-    normalizedTasks.forEach((task, index) => {
-      const row = rows[index];
-      patchRow(node.id, row.id, {
-        generationTask: task,
-        generationTaskId: task.id,
-        error: "",
-        resultDownloadState: undefined,
-        resultDownloadedAt: undefined,
-      });
-    });
+    tasks.forEach((task, index) => patchRow(node.id, rows[index].id, {
+      latestGenerationTaskId: task.id,
+      resultDownloadState: undefined,
+      resultDownloadedAt: undefined,
+    }));
     endGenerationLaunching(rows.map((row) => actionFissionLaunchKey(canvasId, node.id, row.id)));
-    await Promise.allSettled(normalizedTasks.map((task, index) => pollApiRow(task.id, node.id, rows[index].id)));
-  }, [canvasId, patchRow, pollApiRow, t]);
-
-  const pollLibtvRow = useCallback(async (taskId: string, nodeId: string, rowId: string) => {
-    if (!mountedRef.current || !window.libtv?.getImageTask || libtvControllersRef.current.has(taskId)) return;
-    const controller = new AbortController();
-    libtvControllersRef.current.set(taskId, controller);
-    try {
-      while (!controller.signal.aborted) {
-        const task = await window.libtv.getImageTask(taskId);
-        if (!task) throw new Error(t("infiniteCanvas:generationTaskNotFound"));
-        const active = isNativeLibtvTaskActive(task);
-        patchRow(nodeId, rowId, {
-          libtvTask: task,
-          libtvTaskId: active ? task.id : undefined,
-          libtvProjectUuid: active ? task.projectUuid : undefined,
-          libtvRemoteNodeId: active ? task.remoteNodeId : undefined,
-          libtvQueued: task.status === "queued" || task.status === "preparing" || task.status === "uploading",
-          libtvRunning: task.status === "running",
-          error: task.status === "failed" ? task.error || t("infiniteCanvas:generationFailed") : "",
-          ...(!active && task.status === "succeeded" ? {
-            resultUrl: task.result?.localUrl || task.result?.url,
-            resultFileName: task.result?.fileName,
-            resultDownloadState: "pending" as const,
-            resultDownloadedAt: undefined,
-          } : {}),
-        });
-        if (!active) return;
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
-      }
-    } catch (error) {
-      if (!controller.signal.aborted) patchRow(nodeId, rowId, { libtvQueued: false, libtvRunning: false, error: error instanceof Error ? error.message : String(error) });
-    } finally {
-      libtvControllersRef.current.delete(taskId);
-    }
-  }, [patchRow, t]);
-
-  const recoverLibtvRow = useCallback(async (node: NativeCanvasNode, row: ActionFissionRow) => {
-    if (!row.libtvTaskId || !window.libtv?.recoverImageTask) return;
-    const recoveryKey = `libtv:${node.id}:${row.id}`;
-    if (recoveringApiRowsRef.current.has(recoveryKey)) return;
-    recoveringApiRowsRef.current.add(recoveryKey);
-    try {
-      let task = await window.libtv.getImageTask(row.libtvTaskId);
-      if (!task) {
-        task = await window.libtv.recoverImageTask({
-          canvasId,
-          nodeId: node.id,
-          rowId: row.id,
-          taskId: row.libtvTaskId,
-          target: { type: "actionFissionRow", nodeId: node.id, rowId: row.id },
-          projectUuid: row.libtvProjectUuid,
-          remoteNodeId: row.libtvRemoteNodeId,
-        });
-      }
-      if (!task) {
-        patchRow(node.id, row.id, {
-          libtvTaskId: undefined,
-          libtvQueued: false,
-          libtvRunning: false,
-          error: t("infiniteCanvas:generationInterruptedUnexpected"),
-        });
-        return;
-      }
-      patchRow(node.id, row.id, { libtvTask: task, libtvTaskId: isNativeLibtvTaskActive(task) ? task.id : undefined });
-      await pollLibtvRow(task.id, node.id, row.id);
-    } catch (error) {
-      patchRow(node.id, row.id, { error: error instanceof Error ? error.message : String(error) });
-    } finally {
-      recoveringApiRowsRef.current.delete(recoveryKey);
-    }
-  }, [canvasId, patchRow, pollLibtvRow, t]);
-
-  useEffect(() => {
-    nodes.forEach((node) => {
-      if (node.data.kind !== "actionFission") return;
-      node.data.actionFission?.rows.forEach((row) => {
-        if (node.data.imageGenerationBackend === "libtv") {
-          if (isNativeLibtvTaskActive(row.libtvTask)) void pollLibtvRow(row.libtvTask!.id, node.id, row.id);
-          else if (row.libtvTaskId) void recoverLibtvRow(node, row);
-        } else if (isNativeGenerationTaskActive(row.generationTask)) {
-          void pollApiRow(row.generationTask!.id, node.id, row.id);
-        } else if (row.generationTaskId || row.generationRemoteTaskId) {
-          void recoverApiRow(node, row);
-        }
-      });
-    });
-  }, [nodes, pollApiRow, pollLibtvRow, recoverApiRow, recoverLibtvRow]);
+    await Promise.allSettled(tasks.map((task, index) => watchRowTask(task.id, node.id, rows[index].id)));
+  }, [canvasId, patchRow, t, watchRowTask]);
 
   const runLibtvRows = useCallback(async (
     node: NativeCanvasNode,
@@ -309,17 +174,19 @@ export function useNativeActionFissionGeneration({
     primaryReferences: string[],
     additionalReferences: string[],
     connectedPrompt: string,
+    additionalPrompts: string[],
     signal: AbortSignal,
   ) => {
-    if (!window.libtv?.startImageTasks) throw new Error(t("infiniteCanvas:libtvUnavailable"));
-    const status = await window.libtv.status();
+    const libtvApi = window.libtv;
+    if (!window.forartGenerationTasks?.startMany || !libtvApi) throw new Error(t("infiniteCanvas:libtvUnavailable"));
+    const status = await libtvApi.status();
     if (!status.available) throw new Error(status.error || t("infiniteCanvas:libtvUnavailable"));
-    const account = await window.libtv.account();
+    const account = await libtvApi.account();
     if (!account.loggedIn) throw new Error(account.error || t("infiniteCanvas:libtvNotLoggedIn"));
     const state = node.data.libtvImageGeneration || {};
     const modelName = String(state.modelName || "").trim();
     if (!modelName) throw new Error(t("infiniteCanvas:libtvModelRequired"));
-    const capabilities = deriveLibtvModelCapabilities(await window.libtv.imageModelSchema({ model: modelName }));
+    const capabilities = deriveLibtvModelCapabilities(await libtvApi.imageModelSchema({ model: modelName }));
     if (!capabilities.supportsReferenceImages) throw new Error(t("infiniteCanvas:imageGenerationReferenceNotSupported"));
     const storedResolution = capabilities.resolutionField === "resolution" ? String(state.resolution || "") : String(state.quality || "");
     const selectedResolution = capabilities.resolutions.includes(storedResolution) ? storedResolution : capabilities.defaultResolution;
@@ -337,18 +204,9 @@ export function useNativeActionFissionGeneration({
       }
       return [row.id, references] as const;
     }));
-
-    rows.forEach((row) => patchRow(node.id, row.id, {
-      libtvQueued: true,
-      libtvRunning: false,
-      error: "",
-    }));
-
     const payloads = rows.map((row) => {
-      const prompt = rowPrompt(row, connectedPrompt);
-      if (!prompt) {
-        throw new Error(t("infiniteCanvas:promptRequired"));
-      }
+      const prompt = actionFissionPrompt(row, connectedPrompt, additionalPrompts);
+      if (!prompt) throw new Error(t("infiniteCanvas:promptRequired"));
       return {
         canvasId,
         nodeId: node.id,
@@ -367,17 +225,27 @@ export function useNativeActionFissionGeneration({
       };
     });
     if (signal.aborted) return;
-    const tasks = await window.libtv.startImageTasks(payloads);
+    const tasks = await window.forartGenerationTasks.startMany("libtv", payloads);
+    if (tasks.length !== rows.length) throw new Error(t("infiniteCanvas:generationTaskCreateFailed"));
     if (!mountedRef.current) return;
     tasks.forEach((task, index) => patchRow(node.id, rows[index].id, {
-      libtvTask: task,
-      libtvTaskId: task.id,
-      libtvQueued: true,
-      error: "",
+      latestGenerationTaskId: task.id,
+      resultDownloadState: undefined,
+      resultDownloadedAt: undefined,
     }));
     endGenerationLaunching(rows.map((row) => actionFissionLaunchKey(canvasId, node.id, row.id)));
-    await Promise.all(tasks.map((task, index) => pollLibtvRow(task.id, node.id, rows[index].id)));
-  }, [canvasId, patchRow, pollLibtvRow, t]);
+    await Promise.allSettled(tasks.map((task, index) => watchRowTask(task.id, node.id, rows[index].id)));
+  }, [canvasId, patchRow, t, watchRowTask]);
+
+  useEffect(() => {
+    nodes.forEach((node) => {
+      if (node.data.kind !== "actionFission") return;
+      node.data.actionFission?.rows.forEach((row) => {
+        const taskId = actionFissionRowTaskId(row);
+        if (taskId) void watchRowTask(taskId, node.id, row.id);
+      });
+    });
+  }, [nodes, watchRowTask]);
 
   const runActionFission = useCallback(async (nodeId: string, rowId?: string) => {
     const runKey = `${nodeId}:${rowId || "group"}`;
@@ -388,28 +256,26 @@ export function useNativeActionFissionGeneration({
     const state = node?.data.actionFission;
     if (!node || !state) return;
     const references = collectImageGeneratorReferences(nodeId, nodes, edges, t("infiniteCanvas:referenceImage"));
-    const additionalReferences = collectActionFissionAdditionalReferences(
-      nodeId,
-      nodes,
-      edges,
-      t("infiniteCanvas:additionalReference"),
-    );
+    const additionalReferences = collectActionFissionAdditionalReferences(nodeId, nodes, edges, t("infiniteCanvas:additionalReference"));
+    const additionalPrompts = collectActionFissionAdditionalPrompts(nodeId, nodes, edges, t("infiniteCanvas:additionalReference"));
     const targetRows = rowId ? state.rows.filter((row) => row.id === rowId) : state.rows;
+    const runtimeKeys = targetRows.map((row) => actionFissionLaunchKey(canvasId, nodeId, row.id));
     const readiness = getActionFissionRunReadiness(targetRows, references.length);
     if (!readiness.canRun) {
-      patchState(nodeId, { error: readiness.missingReference
+      const message = readiness.missingReference
         ? t("infiniteCanvas:actionFissionConnectReferenceFirst")
-        : t("infiniteCanvas:actionFissionSelectActionFirst") });
+        : t("infiniteCanvas:actionFissionSelectActionFirst");
+      runtimeKeys.forEach((key) => setGenerationRuntimeError(key, message));
       return;
     }
-    if (targetRows.some((row) => isNativeGenerationTaskActive(row.generationTask) || row.libtvTaskId || isNativeLibtvTaskActive(row.libtvTask))) return;
+    const tasksById = useGenerationTaskCache.getState().tasksById;
+    if (targetRows.some((row) => isGenerationTaskActive(tasksById[actionFissionRowTaskId(row)]))) return;
     const connectedPrompt = collectConnectedPrompt(nodeId, nodes, edges);
     const queueController = new AbortController();
-    const launchKeys = targetRows.map((row) => actionFissionLaunchKey(canvasId, nodeId, row.id));
-    beginGenerationLaunching(launchKeys);
+    runtimeKeys.forEach(clearGenerationRuntimeError);
+    beginGenerationLaunching(runtimeKeys);
     activeNodeRunsRef.current.add(runKey);
     nodeQueueControllersRef.current.set(runKey, queueController);
-    patchState(nodeId, { error: "", status: "" });
     try {
       if (node.data.imageGenerationBackend === "libtv") {
         await runLibtvRows(
@@ -418,6 +284,7 @@ export function useNativeActionFissionGeneration({
           references.map((item) => item.imageUrl),
           additionalReferences.map((item) => item.imageUrl),
           connectedPrompt,
+          additionalPrompts.map((item) => item.text),
           queueController.signal,
         );
       } else {
@@ -427,18 +294,20 @@ export function useNativeActionFissionGeneration({
           references.map((item) => item.imageUrl),
           additionalReferences.map((item) => item.imageUrl),
           connectedPrompt,
+          additionalPrompts.map((item) => item.text),
         );
       }
     } catch (error) {
-      if (mountedRef.current) patchState(nodeId, { error: error instanceof Error ? error.message : String(error) });
+      if (mountedRef.current) {
+        const message = error instanceof Error ? error.message : String(error);
+        runtimeKeys.forEach((key) => setGenerationRuntimeError(key, message));
+      }
     } finally {
-      endGenerationLaunching(launchKeys);
-      if (mountedRef.current) targetRows.forEach((row) => patchRow(nodeId, row.id, { libtvQueued: false }));
+      endGenerationLaunching(runtimeKeys);
       activeNodeRunsRef.current.delete(runKey);
       if (nodeQueueControllersRef.current.get(runKey) === queueController) nodeQueueControllersRef.current.delete(runKey);
-      if (mountedRef.current) patchState(nodeId, { status: "" });
     }
-  }, [canvasId, edges, nodes, patchRow, patchState, runApiRows, runLibtvRows, t]);
+  }, [canvasId, edges, nodes, runApiRows, runLibtvRows, t]);
 
   const stopActionFission = useCallback(async (nodeId: string, rowId?: string) => {
     if (!rowId) {
@@ -450,46 +319,20 @@ export function useNativeActionFissionGeneration({
     const rows = nodes.find((node) => node.id === nodeId)?.data.actionFission?.rows || [];
     const targets = rowId ? rows.filter((row) => row.id === rowId) : rows;
     await Promise.allSettled(targets.map(async (row) => {
-      const apiTaskId = row.generationTask?.id || row.generationTaskId;
-      if (apiTaskId) {
-        apiControllersRef.current.get(apiTaskId)?.abort();
-        const stopped = normalizeGenerationTask(await window.easyTool?.stopGenerationTask?.(apiTaskId));
-        patchRow(nodeId, row.id, {
-          generationTask: stopped || (row.generationTask ? { ...row.generationTask, status: "interrupted", updatedAt: Date.now() } : undefined),
-          generationTaskId: undefined,
-          generationRemoteTaskId: undefined,
-          error: "",
-        });
-      } else if (row.generationRemoteTaskId) {
-        await window.easyTool?.stopGenerationTasksForTarget?.(canvasId, { type: "actionFissionRow", nodeId, rowId: row.id });
-        patchRow(nodeId, row.id, { generationRemoteTaskId: undefined, error: "" });
-      }
-      const libtvTaskId = row.libtvTask?.id || row.libtvTaskId;
-      if (libtvTaskId) {
-        libtvControllersRef.current.get(libtvTaskId)?.abort();
-        const stopped = await window.libtv?.stopImageTask?.(libtvTaskId);
-        patchRow(nodeId, row.id, {
-          libtvTask: stopped || (row.libtvTask ? { ...row.libtvTask, status: "interrupted" } : undefined),
-          libtvTaskId: undefined,
-          libtvProjectUuid: undefined,
-          libtvRemoteNodeId: undefined,
-          libtvQueued: false,
-          libtvRunning: false,
-          error: "",
-        });
-      }
+      const taskId = actionFissionRowTaskId(row);
+      const task = taskId ? useGenerationTaskCache.getState().tasksById[taskId] : undefined;
+      if (!taskId || !isGenerationTaskActive(task)) return;
+      taskControllersRef.current.get(taskId)?.abort();
+      await window.forartGenerationTasks?.stop(taskId);
+      clearGenerationRuntimeError(actionFissionLaunchKey(canvasId, nodeId, row.id));
     }));
-    patchState(nodeId, { status: "" });
-  }, [canvasId, nodes, patchRow, patchState]);
+  }, [canvasId, nodes]);
 
   useEffect(() => activateGenerationHook(mountedRef, () => {
-    apiControllersRef.current.forEach((controller) => controller.abort());
-    libtvControllersRef.current.forEach((controller) => controller.abort());
-    apiControllersRef.current.clear();
-    libtvControllersRef.current.clear();
+    taskControllersRef.current.forEach((controller) => controller.abort());
+    taskControllersRef.current.clear();
     nodeQueueControllersRef.current.clear();
     activeNodeRunsRef.current.clear();
-    recoveringApiRowsRef.current.clear();
   }), []);
 
   return { runActionFission, stopActionFission };

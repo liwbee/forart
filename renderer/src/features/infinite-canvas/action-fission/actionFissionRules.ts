@@ -45,6 +45,19 @@ export function actionFissionReferenceImages(
   return [...new Set(references.map((reference) => reference.trim()).filter(Boolean))];
 }
 
+export function actionFissionPrompt(
+  row: ActionFissionRow,
+  primaryPrompt: string,
+  additionalPrompts: readonly string[],
+) {
+  const prompts = [
+    String(row.selectedActionPrompt || ""),
+    primaryPrompt,
+    ...(row.useAdditionalReferences ? additionalPrompts : []),
+  ];
+  return prompts.map((prompt) => prompt.trim()).filter(Boolean).join("\n\n");
+}
+
 export function pickRandomAction(
   candidates: readonly ActionEntry[],
   previousActionId: string | undefined,

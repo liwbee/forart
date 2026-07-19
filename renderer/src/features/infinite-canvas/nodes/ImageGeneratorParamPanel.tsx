@@ -31,21 +31,21 @@ import {
   normalizeImageModelSizeSelection,
 } from "../../settings/imageModelRules";
 import { useNativeCanvasActions } from "../canvasActions";
-import type { NativeCanvasEdge, NativeCanvasNode, NativeCanvasNodeData } from "../nativeCanvas";
+import { nativeCanvasNodeTaskId, type NativeCanvasEdge, type NativeCanvasNode, type NativeCanvasNodeData } from "../nativeCanvas";
 import {
+  collectActionFissionAdditionalPrompts,
   collectActionFissionAdditionalReferences,
   collectImageGeneratorPrompts,
   collectImageGeneratorReferences,
 } from "../generation/imageGenerationInputs";
-import { isNativeGenerationTaskActive } from "../generation/useNativeImageGeneration";
-import { isNodeGenerationLaunching, useGenerationRuntimeStore } from "../generation/generationRuntimeStore";
+import { clearNodeGenerationRuntimeErrors, isNodeGenerationLaunching, useGenerationRuntimeStore } from "../generation/generationRuntimeStore";
+import { isGenerationTaskActive, useGenerationTaskCache } from "../generation/generationTaskCache";
 import { useGenerationPreferenceStore } from "../generation/generationPreferenceStore";
 import {
   DEFAULT_LIBTV_CAPABILITIES,
   deriveLibtvModelCapabilities,
   normalizeLibtvModels,
 } from "../libtv-generation/libtvModelSchema";
-import { isNativeLibtvTaskActive } from "../libtv-generation/useNativeLibtvGeneration";
 import { ImageReferenceStrip } from "./ImageReferenceStrip";
 
 
@@ -187,9 +187,9 @@ export function ImageGeneratorParamPanel({
       : libtvCapabilities.defaultImageCount;
   const referenceSupported = isLibtv ? libtvCapabilities.supportsReferenceImages : rule.supportsReferenceImages;
   const maxReferences = isLibtv ? libtvCapabilities.maxReferenceImages : rule.maxReferenceImages;
-  const detectedTaskRunning = isLibtv
-    ? isNativeLibtvTaskActive(libtvState.task)
-    : isNativeGenerationTaskActive(data.generationTask) || Boolean(data.generationRemoteTaskId);
+  const taskId = nativeCanvasNodeTaskId(data);
+  const currentTask = useGenerationTaskCache((state) => taskId ? state.tasksById[taskId] : undefined);
+  const detectedTaskRunning = isGenerationTaskActive(currentTask);
   const taskRunning = taskRunningOverride ?? detectedTaskRunning;
   const taskLaunching = useGenerationRuntimeStore((state) => isNodeGenerationLaunching(state.launchingKeys, nodeId));
   const taskBusy = taskRunning || taskLaunching;
@@ -200,6 +200,9 @@ export function ImageGeneratorParamPanel({
   const isActionFission = data.kind === "actionFission";
   const additionalReferenceImages = isActionFission
     ? collectActionFissionAdditionalReferences(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference"))
+    : [];
+  const additionalReferencePrompts = isActionFission
+    ? collectActionFissionAdditionalPrompts(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference"))
     : [];
   const normalizedApiGenerationSelection = normalizeImageModelGenerationSelection(
     rule,
@@ -335,6 +338,8 @@ export function ImageGeneratorParamPanel({
   ]);
 
   const updatePlatform = (platformId: string) => {
+    clearNodeGenerationRuntimeErrors(nodeId);
+    if (taskId) useGenerationRuntimeStore.getState().dismissTask(taskId);
     if (platformId === "libtv") {
       useGenerationPreferenceStore.getState().rememberLibtv({
         modelName: libtvModel?.modelName || libtvModel?.modelKey,
@@ -343,7 +348,7 @@ export function ImageGeneratorParamPanel({
         quality: libtvCapabilities.resolutionField === "quality" ? libtvResolution : libtvQuality || undefined,
         aspectRatio: libtvAspectRatio,
       });
-      patchNodeData(nodeId, { imageGenerationBackend: "libtv", generationError: "" });
+      patchNodeData(nodeId, { imageGenerationBackend: "libtv" });
       return;
     }
     const providerId = platformId;
@@ -362,7 +367,6 @@ export function ImageGeneratorParamPanel({
     });
     patchNodeData(nodeId, {
       imageGenerationBackend: "api",
-      generationError: "",
       imageProviderId: nextProvider.id,
       imageModel: nextModel,
       imageResolution: nextSize.resolution,
@@ -373,6 +377,8 @@ export function ImageGeneratorParamPanel({
   };
 
   const updateModel = (nextModel: string) => {
+    clearNodeGenerationRuntimeErrors(nodeId);
+    if (taskId) useGenerationRuntimeStore.getState().dismissTask(taskId);
     if (isLibtv) {
       const next = normalizedLibtvModels.find((item) => (item.modelName || item.modelKey) === nextModel);
       if (!next) return;
@@ -384,7 +390,6 @@ export function ImageGeneratorParamPanel({
         aspectRatio: libtvAspectRatio,
       });
       patchNodeData(nodeId, {
-        generationError: "",
         libtvImageGeneration: {
           ...libtvState,
           modelName: next.modelName || next.modelKey,
@@ -504,13 +509,13 @@ export function ImageGeneratorParamPanel({
                         <span className="rf-action-fission-reference-title">{t("infiniteCanvas:mainReference")}</span>
                         {primaryReferenceStrip}
                       </section>
-                      {additionalReferenceImages.length ? (
+                      {additionalReferenceImages.length || additionalReferencePrompts.length ? (
                         <>
                           <Separator className="rf-action-fission-reference-divider" orientation="vertical" />
                           <section className="rf-action-fission-reference-group rf-action-fission-reference-group--additional">
                             <span className="rf-action-fission-reference-title">{t("infiniteCanvas:additionalReference")}</span>
                             <ImageReferenceStrip
-                              prompts={[]}
+                              prompts={additionalReferencePrompts}
                               items={additionalReferenceImages}
                               maxReferences={Math.max(0, maxReferences - referenceImages.length)}
                               supported={referenceSupported}
@@ -667,7 +672,6 @@ export function ImageGeneratorParamPanel({
                         });
                       }
                       patchNodeData(nodeId, isLibtv ? {
-                          generationError: "",
                           libtvImageGeneration: {
                             ...libtvState,
                             [libtvCapabilities.resolutionField === "resolution" ? "resolution" : "quality"]: imageResolution,
@@ -694,11 +698,11 @@ export function ImageGeneratorParamPanel({
                         });
                       }
                       patchNodeData(nodeId, isLibtv
-                        ? { generationError: "", libtvImageGeneration: { ...libtvState, quality } }
+                        ? { libtvImageGeneration: { ...libtvState, quality } }
                         : { imageQuality: quality });
                     }}
                     onImageCountChange={(count) => patchNodeData(nodeId, isLibtv
-                      ? { generationError: "", libtvImageGeneration: { ...libtvState, count: Number(count) } }
+                      ? { libtvImageGeneration: { ...libtvState, count: Number(count) } }
                       : { imageCount: Number(count) })}
                     onAspectRatioChange={(imageAspectRatio) => {
                       if (isLibtv) {
@@ -719,7 +723,7 @@ export function ImageGeneratorParamPanel({
                         });
                       }
                       patchNodeData(nodeId, isLibtv
-                        ? { generationError: "", libtvImageGeneration: { ...libtvState, aspectRatio: imageAspectRatio } }
+                        ? { libtvImageGeneration: { ...libtvState, aspectRatio: imageAspectRatio } }
                         : { imageAspectRatio });
                     }}
                   />

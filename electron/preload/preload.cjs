@@ -39,18 +39,23 @@ contextBridge.exposeInMainWorld('easyTool', {
   deleteCanvasCacheAssets: (payload) => ipcRenderer.invoke('canvas-cache:delete', payload),
   revealCanvasCacheAsset: (payload) => ipcRenderer.invoke('canvas-cache:reveal', payload),
   openCanvasCacheRoot: () => ipcRenderer.invoke('canvas-cache:open-root'),
-  getGenerationTask: (taskId) => ipcRenderer.invoke('generation-tasks:get', taskId),
-  createGenerationTask: (payload) => ipcRenderer.invoke('generation-tasks:create', payload),
-  createGenerationTasks: (payloads) => ipcRenderer.invoke('generation-tasks:create-many', payloads),
-  updateGenerationTask: (taskId, patch) => ipcRenderer.invoke('generation-tasks:update', taskId, patch),
-  resumeGenerationTask: (taskId, payload) => ipcRenderer.invoke('generation-tasks:resume', taskId, payload),
-  recoverGenerationTask: (payload) => ipcRenderer.invoke('generation-tasks:recover', payload),
-  recoverCanvasGenerationTasks: (payload) => ipcRenderer.invoke('generation-tasks:recover-canvases', payload),
-  stopGenerationTask: (taskId) => ipcRenderer.invoke('generation-tasks:stop', taskId),
-  stopGenerationTasksForTarget: (canvasId, target) => ipcRenderer.invoke('generation-tasks:stop-for-target', canvasId, target),
-  stopGenerationTasksForNode: (canvasId, nodeId) => ipcRenderer.invoke('generation-tasks:stop-for-node', canvasId, nodeId),
-  stopGenerationTasksForCanvas: (canvasId) => ipcRenderer.invoke('generation-tasks:stop-for-canvas', canvasId),
   writeCanvasClipboard: (payload) => ipcRenderer.invoke('canvas:write-clipboard', payload),
+});
+
+contextBridge.exposeInMainWorld('forartGenerationTasks', {
+  get: (taskId) => ipcRenderer.invoke('generation-task-system:get', taskId),
+  getMany: (taskIds) => ipcRenderer.invoke('generation-task-system:get-many', taskIds),
+  listForCanvas: (canvasId) => ipcRenderer.invoke('generation-task-system:list-for-canvas', canvasId),
+  listRecent: (limit) => ipcRenderer.invoke('generation-task-system:list-recent', limit),
+  start: (executorKind, payload) => ipcRenderer.invoke('generation-task-system:start', executorKind, payload),
+  startMany: (executorKind, payloads) => ipcRenderer.invoke('generation-task-system:start-many', executorKind, payloads),
+  stop: (taskId) => ipcRenderer.invoke('generation-task-system:stop', taskId),
+  onChanged: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, task) => callback(task);
+    ipcRenderer.on('generation-task:changed', listener);
+    return () => ipcRenderer.removeListener('generation-task:changed', listener);
+  },
 });
 
 contextBridge.exposeInMainWorld('forartConfig', {
@@ -120,6 +125,7 @@ contextBridge.exposeInMainWorld('libtv', {
   install: () => ipcRenderer.invoke('libtv:install'),
   account: () => ipcRenderer.invoke('libtv:account'),
   accounts: () => ipcRenderer.invoke('libtv:accounts'),
+  power: () => ipcRenderer.invoke('libtv:power'),
   useAccount: (account) => ipcRenderer.invoke('libtv:account-use', account),
   loginWeb: () => ipcRenderer.invoke('libtv:login-web'),
   logout: () => ipcRenderer.invoke('libtv:logout'),
@@ -127,13 +133,4 @@ contextBridge.exposeInMainWorld('libtv', {
   projects: (payload) => ipcRenderer.invoke('libtv:projects', payload),
   imageModels: () => ipcRenderer.invoke('libtv:image-models'),
   imageModelSchema: (payload) => ipcRenderer.invoke('libtv:image-model-schema', payload),
-  startImageTask: (payload) => ipcRenderer.invoke('libtv:image-task-start', payload),
-  startImageTasks: (payloads) => ipcRenderer.invoke('libtv:image-tasks-start', payloads),
-  getImageTask: (taskId) => ipcRenderer.invoke('libtv:image-task-get', taskId),
-  recoverImageTask: (payload) => ipcRenderer.invoke('libtv:image-task-recover', payload),
-  recoverCanvasImageTasks: () => ipcRenderer.invoke('libtv:image-tasks-recover-canvases'),
-  stopImageTask: (taskId) => ipcRenderer.invoke('libtv:image-task-stop', taskId),
-  ensureReadyProject: (payload) => ipcRenderer.invoke('libtv:ensure-ready-project', payload),
-  generateImage: (payload) => ipcRenderer.invoke('libtv:generate-image', payload),
-  generateBatch: (payload) => ipcRenderer.invoke('libtv:generate-batch', payload),
 });

@@ -32,6 +32,7 @@ test('canvas upload packages include resources stored in React Flow node data', 
   const missingUrl = assetStore.assetUrl(path.join(inputDir, 'missing.png'));
 
   const canvas = {
+    canvasSchemaVersion: 2,
     id: 'canvas-modern',
     title: 'Modern canvas',
     nodes: [
@@ -41,13 +42,12 @@ test('canvas upload packages include resources stored in React Flow node data', 
       },
       {
         id: 'image-generator',
+        running: true,
         data: {
           kind: 'imageGenerator',
+          running: true,
+          latestGenerationTaskId: 'task-image-generator',
           generatedImages: [{ localUrl: generatedUrl, thumbUrl: thumbnailUrl }],
-          generationTask: {
-            result: { localUrl: generatedUrl },
-            referenceImages: [inputUrl],
-          },
         },
       },
       {
@@ -57,6 +57,7 @@ test('canvas upload packages include resources stored in React Flow node data', 
           actionFission: {
             rows: [{
               id: 'row-1',
+              latestGenerationTaskId: 'task-action-row',
               resultUrl: actionResultUrl,
               resultThumbUrl: thumbnailUrl,
               selectedActionAssetUrl: actionPreviewUrl,
@@ -88,6 +89,7 @@ test('canvas upload packages include resources stored in React Flow node data', 
   const manifest = JSON.parse(zip.getEntry('manifest.json').getData().toString('utf8'));
   const packagedCanvas = JSON.parse(zip.getEntry('canvas.json').getData().toString('utf8'));
 
+  assert.equal(packagedCanvas.canvasSchemaVersion, 2);
   assert.equal(manifest.assets.length, 4);
   assert.equal(manifest.warnings.length, 1);
   assert.match(manifest.warnings[0].source, /missing-image.*data\.imageUrl/);
@@ -97,10 +99,13 @@ test('canvas upload packages include resources stored in React Flow node data', 
   assert.equal('thumbUrl' in packagedCanvas.nodes[0].data, false);
   assert.match(packagedCanvas.nodes[1].data.generatedImages[0].localUrl, /^forart-package:\/\/asset\//);
   assert.equal('thumbUrl' in packagedCanvas.nodes[1].data.generatedImages[0], false);
-  assert.equal('generationTask' in packagedCanvas.nodes[1].data, false);
+  assert.equal('latestGenerationTaskId' in packagedCanvas.nodes[1].data, false);
+  assert.equal('running' in packagedCanvas.nodes[1], false);
+  assert.equal('running' in packagedCanvas.nodes[1].data, false);
   assert.match(packagedCanvas.nodes[2].data.actionFission.rows[0].resultUrl, /^forart-package:\/\/asset\//);
   assert.match(packagedCanvas.nodes[2].data.actionFission.rows[0].selectedActionAssetUrl, /^forart-package:\/\/asset\//);
   assert.equal('resultThumbUrl' in packagedCanvas.nodes[2].data.actionFission.rows[0], false);
+  assert.equal('latestGenerationTaskId' in packagedCanvas.nodes[2].data.actionFission.rows[0], false);
   assert.equal(packagedCanvas.nodes[2].data.actionFission.rows[1].selectedActionAssetUrl, '/api/assets/action-preview/file');
   assert.equal('imageUrl' in packagedCanvas.nodes[3].data, false);
 });

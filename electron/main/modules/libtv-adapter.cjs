@@ -1,4 +1,5 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
@@ -27,6 +28,7 @@ function createLibtvAdapter({ rootDir }) {
     ? path.join(process.env.USERPROFILE, '.libtv', 'libtv.exe')
     : 'libtv';
   const LIBTV_VERSION_CHANNEL_URL = 'https://api2.liblib.art/api/www/landing-activities/getById?id=240';
+  const LIBTV_POWER_URL = 'https://api2.liblib.art/api/www/member/account?isApp=false';
   const LIBTV_FALLBACK_INSTALL_COMMAND = 'irm https://liblibai-web-static.liblib.cloud/cli/latest/install-libtv-cli.ps1 | iex';
   const workspaceEnsurePromises = new Map();
   const projectEnsurePromises = new Map();
@@ -256,6 +258,34 @@ function createLibtvAdapter({ rootDir }) {
     return {
       ok: true,
       accounts: Array.isArray(payload?.accounts) ? payload.accounts : [],
+    };
+  }
+
+  async function power() {
+    const configDir = process.env.LIBTV_CONFIG_DIR?.trim() || path.join(os.homedir(), '.libtv');
+    let credentials;
+    try {
+      credentials = JSON.parse(fs.readFileSync(path.join(configDir, 'credentials.json'), 'utf8'));
+    } catch {
+      throw new Error('LibTV credentials are unavailable. Please log in again.');
+    }
+    const token = String(credentials?.usertoken || '').trim();
+    if (!token) throw new Error('LibTV credentials are unavailable. Please log in again.');
+
+    const response = await fetch(LIBTV_POWER_URL, {
+      headers: { Accept: 'application/json', token },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) throw new Error(`LibTV points request failed with status ${response.status}.`);
+    const payload = await response.json();
+    if (payload?.code !== 0) throw new Error(payload?.msg || 'LibTV points request failed.');
+
+    const total = payload?.data?.attr?.totalPower;
+    const remaining = payload?.data?.attr?.usablePower;
+    return {
+      ok: true,
+      total: total !== null && total !== '' && Number.isFinite(Number(total)) ? Number(total) : null,
+      remaining: remaining !== null && remaining !== '' && Number.isFinite(Number(remaining)) ? Number(remaining) : null,
     };
   }
 
@@ -557,6 +587,7 @@ function createLibtvAdapter({ rootDir }) {
     listWorkspaces,
     loginWeb,
     logout,
+    power,
     queryNode,
     runGroup,
     runNode,

@@ -376,7 +376,22 @@ export function App() {
           </SidebarInset>
         </SidebarProvider>
       </AppFrame>
-      <Toaster theme={theme} position="bottom-right" />
+      <Toaster
+        theme={theme}
+        position="top-right"
+        offset={{
+          top: isElectron
+            ? "calc(var(--window-titlebar-height) + var(--space-4))"
+            : "var(--space-4)",
+          right: "var(--space-4)",
+        }}
+        mobileOffset={{
+          top: isElectron
+            ? "calc(var(--window-titlebar-height) + var(--space-4))"
+            : "var(--space-4)",
+          right: "var(--space-4)",
+        }}
+      />
     </>
   );
 }

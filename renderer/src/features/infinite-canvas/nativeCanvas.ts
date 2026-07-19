@@ -1,18 +1,8 @@
 import type { Edge, Node, XYPosition } from "@xyflow/react";
 import { Bot, ImageIcon, ImagePlus, Split, TextCursorInput, type LucideIcon } from "lucide-react";
-import type { LibtvGenerationTask } from "../../app/appConfig";
 import type { ActionFissionState } from "./action-fission/actionFissionTypes";
 
 export type NativeCanvasNodeKind = "imageGenerator" | "imageLoader" | "prompt" | "llm" | "actionFission";
-
-export type NativeGenerationTaskStatus =
-  | "queued"
-  | "submitting"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "interrupted"
-  | "superseded";
 
 export interface NativeGenerationResult {
   url?: string;
@@ -23,37 +13,6 @@ export interface NativeGenerationResult {
   height?: number;
   downloadState?: "pending" | "downloaded";
   downloadedAt?: number;
-}
-
-export interface NativeGenerationTask {
-  id: string;
-  canvasId: string;
-  nodeId: string;
-  target:
-    | { type: "imageGenerator"; nodeId: string }
-    | { type: "actionFissionRow"; nodeId: string; rowId: string };
-  kind: "image";
-  providerId: string;
-  model: string;
-  upstreamTaskId?: string;
-  status: NativeGenerationTaskStatus;
-  startedAt: number;
-  runningAt?: number;
-  updatedAt: number;
-  completedAt?: number;
-  durationMs?: number;
-  prompt?: string;
-  referenceImages?: string[];
-  resolution?: string;
-  aspectRatio?: string;
-  quality?: string;
-  imageCount?: number;
-  message?: string;
-  messageCode?: string;
-  messageParams?: Record<string, string | number>;
-  error?: string;
-  interruptReason?: "user_stop" | "app_restart" | "provider_lost" | "superseded";
-  result?: NativeGenerationResult & { results?: NativeGenerationResult[] };
 }
 
 export interface NativeCanvasNodeData extends Record<string, unknown> {
@@ -73,10 +32,7 @@ export interface NativeCanvasNodeData extends Record<string, unknown> {
   multiImageCollapsedSize?: { width: number; height: number };
   imageNaturalWidth?: number;
   imageNaturalHeight?: number;
-  generationError?: string;
-  generationTaskId?: string;
-  generationRemoteTaskId?: string;
-  generationTask?: NativeGenerationTask;
+  latestGenerationTaskId?: string;
   imageGenerationBackend?: "api" | "libtv";
   libtvImageGeneration?: {
     aspectRatio?: string;
@@ -85,16 +41,16 @@ export interface NativeCanvasNodeData extends Record<string, unknown> {
     modelName?: string;
     quality?: string;
     resolution?: string;
-    taskId?: string;
-    projectUuid?: string;
-    remoteNodeId?: string;
-    task?: LibtvGenerationTask;
   };
   actionFission?: ActionFissionState;
 }
 
 export type NativeCanvasNode = Node<NativeCanvasNodeData, "canvasNode">;
-export type NativeCanvasInputKind = "prompt" | "referenceImage" | "additionalReferenceImage";
+export type NativeCanvasInputKind =
+  | "prompt"
+  | "referenceImage"
+  | "additionalReferenceImage"
+  | "additionalReferencePrompt";
 
 export interface NativeCanvasEdgeData extends Record<string, unknown> {
   inputKind?: NativeCanvasInputKind;
@@ -102,6 +58,10 @@ export interface NativeCanvasEdgeData extends Record<string, unknown> {
 }
 
 export type NativeCanvasEdge = Edge<NativeCanvasEdgeData, "default">;
+
+export function nativeCanvasNodeTaskId(data: NativeCanvasNodeData) {
+  return String(data.latestGenerationTaskId || "");
+}
 
 export function nativeCanvasNodePrimaryImage(data: NativeCanvasNodeData): NativeGenerationResult | null {
   if (data.kind === "imageGenerator") {
@@ -245,50 +205,21 @@ export function createNativeCanvasNode(
 
 export function cloneNativeCanvasNodeData(data: NativeCanvasNodeData): NativeCanvasNodeData {
   const clonedData = { ...data };
-  delete clonedData.generationTask;
-  delete clonedData.generationTaskId;
-  delete clonedData.generationRemoteTaskId;
-  delete clonedData.generationError;
-
-  if (data.libtvImageGeneration) {
-    const libtvState = { ...data.libtvImageGeneration };
-    delete libtvState.task;
-    delete libtvState.taskId;
-    delete libtvState.projectUuid;
-    delete libtvState.remoteNodeId;
-    clonedData.libtvImageGeneration = libtvState;
-  }
+  delete clonedData.latestGenerationTaskId;
 
   if (data.actionFission) {
     clonedData.actionFission = {
       ...data.actionFission,
-      status: "",
-      error: "",
       rows: data.actionFission.rows.map((row) => {
         const clonedRow = {
           ...row,
-          includeActionTagIds: [...row.includeActionTagIds],
-          excludeActionTagIds: [...row.excludeActionTagIds],
-          categoryGroups: row.categoryGroups?.map((group) => {
-            const clonedGroup = { ...group } as typeof group & { fixedActionId?: string };
-            delete clonedGroup.fixedActionId;
-            return {
-              ...clonedGroup,
-              includeActionTagIds: [...group.includeActionTagIds],
-              excludeActionTagIds: [...group.excludeActionTagIds],
-            };
-          }),
-        };
-        delete clonedRow.generationTask;
-        delete clonedRow.generationTaskId;
-        delete clonedRow.generationRemoteTaskId;
-        delete clonedRow.libtvQueued;
-        delete clonedRow.libtvRunning;
-        delete clonedRow.libtvTask;
-        delete clonedRow.libtvTaskId;
-        delete clonedRow.libtvProjectUuid;
-        delete clonedRow.libtvRemoteNodeId;
-        delete clonedRow.error;
+          categoryGroups: row.categoryGroups.map((group) => ({
+            ...group,
+            includeActionTagIds: [...group.includeActionTagIds],
+            excludeActionTagIds: [...group.excludeActionTagIds],
+          })),
+        } as typeof row & Record<string, unknown>;
+        delete clonedRow.latestGenerationTaskId;
         return clonedRow;
       }),
     };

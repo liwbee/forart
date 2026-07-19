@@ -110,12 +110,7 @@ export function ActionFissionRowSettingsDialog({
 
   useEffect(() => {
     if (!open || !row) return;
-    const nextGroups = cloneGroups(row.categoryGroups?.length ? row.categoryGroups : [{
-      id: `${row.id}_group_1`,
-      actionProjectId: row.actionProjectId,
-      includeActionTagIds: row.includeActionTagIds,
-      excludeActionTagIds: row.excludeActionTagIds,
-    }]);
+    const nextGroups = cloneGroups(row.categoryGroups);
     setDraftGroups(nextGroups);
     setActiveGroupId(nextGroups.find((group) => group.id === row.selectedCategoryGroupId)?.id || nextGroups[0].id);
     setEditingGroupId("");

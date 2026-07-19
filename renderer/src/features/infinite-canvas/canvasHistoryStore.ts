@@ -35,16 +35,7 @@ function historySnapshot(nodes: NativeCanvasNode[], edges: NativeCanvasEdge[]): 
 }
 
 function snapshotsEqual(left: NativeCanvasHistorySnapshot, right: NativeCanvasHistorySnapshot) {
-  if (left.nodes.length !== right.nodes.length) return false;
-  return left.nodes.every((node, index) => {
-    const other = right.nodes[index];
-    return Boolean(
-      other
-      && node.id === other.id
-      && node.position.x === other.position.x
-      && node.position.y === other.position.y
-    );
-  });
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 export const useInfiniteCanvasHistoryStore = create<NativeCanvasHistoryState>()(

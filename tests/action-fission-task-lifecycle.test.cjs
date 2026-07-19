@@ -5,10 +5,48 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { createCanvasStore } = require('../electron/main/modules/canvas-store.cjs');
-const { createGenerationTaskStore } = require('../electron/main/modules/generation-task-store.cjs');
-const { createImageGenerationRunner } = require('../electron/main/modules/image-generation-runner.cjs');
-const { createLibtvGenerationTaskStore } = require('../electron/main/modules/libtv-generation-task-store.cjs');
-const { createLibtvGenerationRunner, extractImageUrl } = require('../electron/main/modules/libtv-generation-runner.cjs');
+const { createImageGenerationRunner: createImageGenerationRunnerModule } = require('../electron/main/modules/image-generation-runner.cjs');
+const {
+  createLibtvGenerationRunner: createLibtvGenerationRunnerModule,
+  extractImageUrl,
+  pollRecoveredImageResult,
+} = require('../electron/main/modules/libtv-generation-runner.cjs');
+const { createMemoryGenerationTaskStore } = require('./fixtures/generation-task-memory.cjs');
+
+const createGenerationTaskStore = () => createMemoryGenerationTaskStore('api');
+const createLibtvGenerationTaskStore = () => createMemoryGenerationTaskStore('libtv');
+
+function createTestResultCommitter(canvasStore) {
+  return {
+    commit(task, payload = {}) {
+      const common = {
+        canvasId: task.canvasId,
+        nodeId: task.target.nodeId,
+        taskId: task.id,
+        status: payload.status || task.status,
+        result: payload.result || task.result,
+        error: payload.error || task.error,
+      };
+      return task.target.type === 'actionFissionRow'
+        ? canvasStore.completeActionFissionRow({ ...common, backend: payload.backend, rowId: task.target.rowId })
+        : canvasStore.completeGenerationNode(common);
+    },
+  };
+}
+
+function createImageGenerationRunner(options) {
+  return createImageGenerationRunnerModule({
+    ...options,
+    resultCommitter: options.resultCommitter || createTestResultCommitter(options.canvasStore),
+  });
+}
+
+function createLibtvGenerationRunner(options) {
+  return createLibtvGenerationRunnerModule({
+    ...options,
+    resultCommitter: options.resultCommitter || createTestResultCommitter(options.canvasStore),
+  });
+}
 
 function waitFor(predicate, timeoutMs = 3000) {
   const startedAt = Date.now();
@@ -36,26 +74,16 @@ function createCanvasRecorder() {
     anchors,
     terminals,
     setActionFissionRowTaskAnchor(canvasId, nodeId, rowId, payload) {
-      anchors.push({ backend: 'api', canvasId, nodeId, rowId, ...payload });
-    },
-    setActionFissionRowRemoteTaskId() {},
-    setActionFissionRowLibtvAnchor(canvasId, nodeId, rowId, payload) {
-      anchors.push({ backend: 'libtv', canvasId, nodeId, rowId, ...payload });
+      anchors.push({ canvasId, nodeId, rowId, ...payload });
     },
     setGenerationTaskAnchor(canvasId, nodeId, payload) {
-      anchors.push({ backend: 'api', canvasId, nodeId, ...payload });
-    },
-    setLibtvGenerationTaskAnchor(canvasId, nodeId, payload) {
-      anchors.push({ backend: 'libtv', canvasId, nodeId, ...payload });
+      anchors.push({ canvasId, nodeId, ...payload });
     },
     completeActionFissionRow(payload) {
       terminals.push(payload);
     },
     completeGenerationNode(payload) {
       terminals.push(payload);
-    },
-    completeLibtvGenerationNode(payload) {
-      terminals.push({ backend: 'libtv', ...payload });
     },
   };
 }
@@ -117,6 +145,23 @@ test('API action rows write terminal results without renderer polling', async ()
 
 });
 
+test('LibTV recovery keeps polling beyond the former fixed attempt limit', async () => {
+  let queryCount = 0;
+  const resultUrl = await pollRecoveredImageResult({
+    signal: new AbortController().signal,
+    queryNode: async () => {
+      queryCount += 1;
+      return queryCount === 121
+        ? { payload: { data: { url: ['https://example.test/recovered.png'] } }, stdout: '' }
+        : { payload: { data: { url: [] } }, stdout: '' };
+    },
+    waitForNext: async () => undefined,
+  });
+
+  assert.equal(queryCount, 121);
+  assert.equal(resultUrl, 'https://example.test/recovered.png');
+});
+
 test('API image nodes keep a local task anchor while preparation is still running', async () => {
   const canvasStore = createCanvasRecorder();
   const generationTaskStore = createGenerationTaskStore();
@@ -154,43 +199,6 @@ test('API image nodes keep a local task anchor while preparation is still runnin
   assert.equal(canvasStore.terminals.some((terminal) => terminal.nodeId === 'node-api' && terminal.taskId === task.id), true);
 });
 
-test('API recovery reuses the canvas local task id and only polls the existing remote task', async () => {
-  const canvasStore = createCanvasRecorder();
-  const generationTaskStore = createGenerationTaskStore();
-  const requests = [];
-  const net = {
-    async fetch(url, init = {}) {
-      requests.push({ url: String(url), method: init.method || 'GET' });
-      return new Response(JSON.stringify({
-        data: { status: 'completed', output: { url: 'https://example.test/recovered.png' } },
-      }), { status: 200, headers: { 'content-type': 'application/json' } });
-    },
-  };
-  const assetStore = {
-    async saveAsset() {
-      return { url: 'forart-asset://output/recovered.png', fileName: 'recovered.png' };
-    },
-  };
-  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore });
-  const task = await runner.recoverTask({
-    canvasId: 'canvas-recover',
-    nodeId: 'node-recover',
-    rowId: 'row-recover',
-    target: { type: 'actionFissionRow', nodeId: 'node-recover', rowId: 'row-recover' },
-    taskId: 'gen_original_local_id',
-    upstreamTaskId: 'task_existing_remote_id',
-    providerId: 'apimart',
-    provider: { id: 'apimart', baseUrl: 'https://example.test/v1', apiKey: 'test', protocol: 'compatible' },
-    model: 'gpt-image-2',
-  });
-
-  assert.equal(task.id, 'gen_original_local_id');
-  await waitFor(() => generationTaskStore.getTask(task.id)?.status === 'succeeded', 7000);
-  assert.equal(requests.every((request) => request.method === 'GET'), true);
-  assert.equal(canvasStore.terminals[0].taskId, 'gen_original_local_id');
-  assert.equal(canvasStore.terminals[0].remoteTaskId, 'task_existing_remote_id');
-});
-
 test('stopping an API action group prevents late responses from writing results', async () => {
   const canvasStore = createCanvasRecorder();
   const generationTaskStore = createGenerationTaskStore();
@@ -220,8 +228,8 @@ test('stopping an API action group prevents late responses from writing results'
     model: 'gpt-image-2',
     prompt: `row ${row}`,
   })));
-  const stopped = runner.stopTasksForNode('canvas-stop', 'node-stop');
-  assert.equal(stopped.tasks.length, 3);
+  const stopped = tasks.map((task) => runner.stopTask(task.id));
+  assert.equal(stopped.filter(Boolean).length, 3);
   releaseResponses();
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(tasks.every((task) => generationTaskStore.getTask(task.id)?.status === 'interrupted'), true);
@@ -236,7 +244,20 @@ test('an older action row attempt cannot overwrite the current task anchor', () 
     const canvas = canvasStore.createCanvas({
       nodes: [{
         id: 'node-attempt',
-        data: { actionFission: { rows: [{ id: 'row-attempt', selectedActionName: 'Walk' }] } },
+        data: { actionFission: { rows: [{
+          id: 'row-attempt',
+          selectedActionName: 'Walk',
+          generationTaskId: 'legacy-api-task',
+          generationRemoteTaskId: 'legacy-remote-task',
+          generationTask: { id: 'legacy-api-task', status: 'running' },
+          libtvTaskId: 'legacy-libtv-task',
+          libtvQueued: true,
+          libtvRunning: true,
+          libtvProjectUuid: 'legacy-project',
+          libtvRemoteNodeId: 'legacy-node',
+          libtvTask: { id: 'legacy-libtv-task', status: 'running' },
+          error: 'Legacy failure',
+        }] } },
       }],
     }).canvas;
     canvasStore.setActionFissionRowTaskAnchor(canvas.id, 'node-attempt', 'row-attempt', { taskId: 'task-old' });
@@ -250,7 +271,17 @@ test('an older action row attempt cannot overwrite the current task anchor', () 
       result: { localUrl: 'forart-asset://output/old.png', fileName: 'old.png' },
     });
     let row = canvasStore.readCanvas(canvas.id).nodes[0].data.actionFission.rows[0];
-    assert.equal(row.generationTaskId, 'task-new');
+    assert.equal(row.latestGenerationTaskId, 'task-new');
+    assert.equal(row.generationTaskId, undefined);
+    assert.equal(row.generationRemoteTaskId, undefined);
+    assert.equal(row.generationTask, undefined);
+    assert.equal(row.libtvTaskId, undefined);
+    assert.equal(row.libtvQueued, undefined);
+    assert.equal(row.libtvRunning, undefined);
+    assert.equal(row.libtvProjectUuid, undefined);
+    assert.equal(row.libtvRemoteNodeId, undefined);
+    assert.equal(row.libtvTask, undefined);
+    assert.equal(row.error, undefined);
     assert.equal(row.resultUrl, undefined);
     canvasStore.completeActionFissionRow({
       canvasId: canvas.id,
@@ -261,24 +292,8 @@ test('an older action row attempt cannot overwrite the current task anchor', () 
       result: { localUrl: 'forart-asset://output/new.png', fileName: 'new.png' },
     });
     row = canvasStore.readCanvas(canvas.id).nodes[0].data.actionFission.rows[0];
-    assert.equal(row.generationTaskId, undefined);
+    assert.equal(row.latestGenerationTaskId, 'task-new');
     assert.equal(row.resultUrl, 'forart-asset://output/new.png');
-
-    const downloaded = canvasStore.readCanvas(canvas.id);
-    downloaded.nodes[0].data.actionFission.rows[0].resultDownloadState = 'downloaded';
-    downloaded.nodes[0].data.actionFission.rows[0].resultDownloadedAt = 1;
-    canvasStore.saveCanvas(canvas.id, { nodes: downloaded.nodes });
-    canvasStore.completeActionFissionRow({
-      canvasId: canvas.id,
-      nodeId: 'node-attempt',
-      rowId: 'row-attempt',
-      taskId: 'task-new',
-      status: 'succeeded',
-      result: { localUrl: 'forart-asset://output/duplicate.png', fileName: 'duplicate.png' },
-    });
-    row = canvasStore.readCanvas(canvas.id).nodes[0].data.actionFission.rows[0];
-    assert.equal(row.resultUrl, 'forart-asset://output/new.png');
-    assert.equal(row.resultDownloadState, 'downloaded');
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
@@ -536,9 +551,8 @@ test('ordinary image node anchors survive canvas reloads and reject older termin
       result: { localUrl: 'forart-asset://output/api-old.png', fileName: 'api-old.png' },
     });
     let data = canvasStore.readCanvas(canvas.id).nodes[0].data;
-    assert.equal(data.generationTaskId, 'api-new');
+    assert.equal(data.latestGenerationTaskId, 'api-new');
     assert.equal(data.generatedImages, undefined);
-    assert.equal(canvasStore.listGenerationTaskAnchors()[0].taskId, 'api-new');
 
     canvasStore.completeGenerationNode({
       canvasId: canvas.id,
@@ -547,24 +561,13 @@ test('ordinary image node anchors survive canvas reloads and reject older termin
       status: 'succeeded',
       result: { localUrl: 'forart-asset://output/api-new.png', fileName: 'api-new.png' },
     });
-    let downloaded = canvasStore.readCanvas(canvas.id);
-    downloaded.nodes[0].data.generatedImages[0].downloadState = 'downloaded';
-    downloaded.nodes[0].data.generatedImages[0].downloadedAt = 1;
-    canvasStore.saveCanvas(canvas.id, { nodes: downloaded.nodes });
-    canvasStore.completeGenerationNode({
-      canvasId: canvas.id,
-      nodeId: 'node-attempt',
-      taskId: 'api-new',
-      status: 'succeeded',
-      result: { localUrl: 'forart-asset://output/api-duplicate.png', fileName: 'api-duplicate.png' },
-    });
     data = canvasStore.readCanvas(canvas.id).nodes[0].data;
     assert.equal(data.generatedImages[0].localUrl, 'forart-asset://output/api-new.png');
-    assert.equal(data.generatedImages[0].downloadState, 'downloaded');
+    assert.equal(data.latestGenerationTaskId, 'api-new');
 
-    canvasStore.setLibtvGenerationTaskAnchor(canvas.id, 'node-attempt', { taskId: 'libtv-old' });
-    canvasStore.setLibtvGenerationTaskAnchor(canvas.id, 'node-attempt', { taskId: 'libtv-new', projectUuid: 'project', remoteNodeId: 'remote' });
-    canvasStore.completeLibtvGenerationNode({
+    canvasStore.setGenerationTaskAnchor(canvas.id, 'node-attempt', { taskId: 'libtv-old' });
+    canvasStore.setGenerationTaskAnchor(canvas.id, 'node-attempt', { taskId: 'libtv-new' });
+    canvasStore.completeGenerationNode({
       canvasId: canvas.id,
       nodeId: 'node-attempt',
       taskId: 'libtv-old',
@@ -572,12 +575,10 @@ test('ordinary image node anchors survive canvas reloads and reject older termin
       result: { localUrl: 'forart-asset://output/libtv-old.png', fileName: 'libtv-old.png' },
     });
     data = canvasStore.readCanvas(canvas.id).nodes[0].data;
-    assert.equal(data.libtvImageGeneration.taskId, 'libtv-new');
+    assert.equal(data.latestGenerationTaskId, 'libtv-new');
     assert.equal(data.generatedImages[0].localUrl, 'forart-asset://output/api-new.png');
-    assert.equal(data.generatedImages[0].downloadState, 'downloaded');
-    assert.equal(canvasStore.listLibtvTaskAnchors()[0].taskId, 'libtv-new');
 
-    canvasStore.completeLibtvGenerationNode({
+    canvasStore.completeGenerationNode({
       canvasId: canvas.id,
       nodeId: 'node-attempt',
       taskId: 'libtv-new',
@@ -585,29 +586,14 @@ test('ordinary image node anchors survive canvas reloads and reject older termin
       result: { localUrl: 'forart-asset://output/libtv-new.png', fileName: 'libtv-new.png' },
     });
     data = canvasStore.readCanvas(canvas.id).nodes[0].data;
-    assert.equal(data.libtvImageGeneration.taskId, undefined);
+    assert.equal(data.latestGenerationTaskId, 'libtv-new');
     assert.equal(data.generatedImages[0].localUrl, 'forart-asset://output/libtv-new.png');
-
-    downloaded = canvasStore.readCanvas(canvas.id);
-    downloaded.nodes[0].data.generatedImages[0].downloadState = 'downloaded';
-    downloaded.nodes[0].data.generatedImages[0].downloadedAt = 2;
-    canvasStore.saveCanvas(canvas.id, { nodes: downloaded.nodes });
-    canvasStore.completeLibtvGenerationNode({
-      canvasId: canvas.id,
-      nodeId: 'node-attempt',
-      taskId: 'libtv-new',
-      status: 'succeeded',
-      result: { localUrl: 'forart-asset://output/libtv-duplicate.png', fileName: 'libtv-duplicate.png' },
-    });
-    data = canvasStore.readCanvas(canvas.id).nodes[0].data;
-    assert.equal(data.generatedImages[0].localUrl, 'forart-asset://output/libtv-new.png');
-    assert.equal(data.generatedImages[0].downloadState, 'downloaded');
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });
 
-test('LibTV image node failures use the shared generation error field', () => {
+test('LibTV image node failures remain in the task system instead of canvas JSON', () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-libtv-shared-error-'));
   try {
     const canvasStore = createCanvasStore({ rootDir });
@@ -622,12 +608,8 @@ test('LibTV image node failures use the shared generation error field', () => {
       }],
     }).canvas;
 
-    canvasStore.setLibtvGenerationTaskAnchor(canvas.id, 'node-error', {
-      taskId: 'libtv-error-task',
-      projectUuid: 'project',
-      remoteNodeId: 'remote',
-    });
-    canvasStore.completeLibtvGenerationNode({
+    canvasStore.setGenerationTaskAnchor(canvas.id, 'node-error', { taskId: 'libtv-error-task' });
+    canvasStore.completeGenerationNode({
       canvasId: canvas.id,
       nodeId: 'node-error',
       taskId: 'libtv-error-task',
@@ -636,7 +618,8 @@ test('LibTV image node failures use the shared generation error field', () => {
     });
 
     const data = canvasStore.readCanvas(canvas.id).nodes[0].data;
-    assert.equal(data.generationError, 'LibTV failed.');
+    assert.equal(data.generationError, undefined);
+    assert.equal(data.latestGenerationTaskId, 'libtv-error-task');
     assert.equal(data.libtvImageGeneration.error, undefined);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
@@ -654,8 +637,18 @@ test('API task anchors clear a legacy nested LibTV error', () => {
           kind: 'imageGenerator',
           imageProviderId: 'provider',
           imageModel: 'model',
-          generationError: '',
-          libtvImageGeneration: { modelName: 'Qwen Edit', error: 'Old LibTV failure.' },
+          generationError: 'Old API failure.',
+          generationTaskId: 'legacy-api-task',
+          generationRemoteTaskId: 'legacy-remote-task',
+          generationTask: { id: 'legacy-api-task', status: 'running' },
+          libtvImageGeneration: {
+            modelName: 'Qwen Edit',
+            error: 'Old LibTV failure.',
+            taskId: 'legacy-libtv-task',
+            projectUuid: 'legacy-project',
+            remoteNodeId: 'legacy-node',
+            task: { id: 'legacy-libtv-task', status: 'running' },
+          },
         },
       }],
     }).canvas;
@@ -663,9 +656,16 @@ test('API task anchors clear a legacy nested LibTV error', () => {
     canvasStore.setGenerationTaskAnchor(canvas.id, 'node-error', { taskId: 'api-task' });
 
     const data = canvasStore.readCanvas(canvas.id).nodes[0].data;
-    assert.equal(data.generationError, '');
+    assert.equal(data.generationError, undefined);
+    assert.equal(data.generationTaskId, undefined);
+    assert.equal(data.generationRemoteTaskId, undefined);
+    assert.equal(data.generationTask, undefined);
     assert.equal(data.libtvImageGeneration.error, undefined);
-    assert.equal(data.generationTaskId, 'api-task');
+    assert.equal(data.libtvImageGeneration.taskId, undefined);
+    assert.equal(data.libtvImageGeneration.projectUuid, undefined);
+    assert.equal(data.libtvImageGeneration.remoteNodeId, undefined);
+    assert.equal(data.libtvImageGeneration.task, undefined);
+    assert.equal(data.latestGenerationTaskId, 'api-task');
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
@@ -977,4 +977,89 @@ test('LibTV retries local result materialization without starting another remote
   assert.equal(taskStore.getTask(task.id)?.status, 'succeeded', taskStore.getTask(task.id)?.error);
   assert.equal(runCalls, 1);
   assert.equal(saveCalls, 2);
+});
+
+test('API startup recovery uses persisted tasks without scanning canvas anchors', async () => {
+  const canvasStore = createCanvasRecorder();
+  const generationTaskStore = createGenerationTaskStore();
+  generationTaskStore.createTask({
+    id: 'gen_startup_recovery',
+    canvasId: 'canvas-startup-api',
+    target: { type: 'imageGenerator', nodeId: 'node-startup-api' },
+    providerId: 'provider',
+    model: 'gpt-image-2',
+    upstreamTaskId: 'remote-startup-api',
+    status: 'running',
+  });
+  const requests = [];
+  const runner = createImageGenerationRunner({
+    net: {
+      async fetch(url, init = {}) {
+        requests.push({ url: String(url), method: init.method || 'GET' });
+        return new Response(JSON.stringify({ data: { status: 'completed', output: { url: 'https://example.test/startup-api.png' } } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      },
+    },
+    assetStore: {
+      async saveAsset() { return { url: 'forart-asset://output/startup-api.png', fileName: 'startup-api.png' }; },
+    },
+    canvasStore,
+    generationTaskStore,
+  });
+
+  await runner.recoverPersistedTasks({
+    providers: [{ id: 'provider', baseUrl: 'https://example.test/v1', apiKey: 'test', protocol: 'compatible' }],
+  });
+  await waitFor(() => generationTaskStore.getTask('gen_startup_recovery')?.status === 'succeeded', 7000);
+
+  assert.equal(requests.length > 0, true);
+  assert.equal(requests.every((request) => request.method === 'GET'), true);
+  assert.equal(canvasStore.terminals.some((terminal) => terminal.taskId === 'gen_startup_recovery'), true);
+});
+
+test('LibTV startup recovery requeues persisted tasks that never reached the remote', async () => {
+  const canvasStore = createCanvasRecorder();
+  const taskStore = createLibtvGenerationTaskStore();
+  taskStore.createTask({
+    id: 'libtv_startup_queued',
+    canvasId: 'canvas-startup-libtv',
+    nodeId: 'node-startup-libtv',
+    target: { type: 'actionFissionRow', nodeId: 'node-startup-libtv', rowId: 'row-startup-libtv' },
+    queueKey: 'canvas-startup-libtv:node-startup-libtv',
+    status: 'queued',
+    prompt: 'startup prompt',
+    modelName: 'Qwen Edit',
+    aspectRatio: '3:4',
+  });
+  let runCalls = 0;
+  const runner = createLibtvGenerationRunner({
+    libtv: {
+      async ensureNamedWorkspace() { return { workspace: { id: 'workspace' } }; },
+      async ensureDailyProject() { return { project: { uuid: 'project', name: 'today' } }; },
+      async waitForProjectReady(input) { return { project: { uuid: input.projectUuid, name: input.projectName } }; },
+      async createImageNode() { return { payload: { id: 'remote-startup-libtv' }, stdout: '' }; },
+      async connectLeft() {},
+      async runNode() {
+        runCalls += 1;
+        return { payload: { url: 'https://example.test/startup-libtv.png' }, stdout: '' };
+      },
+      async queryNode() { return { payload: {}, stdout: '' }; },
+      async deleteNode() {},
+    },
+    assetStore: {
+      resolveAssetUrl() { return ''; },
+      async saveAsset() { return { url: 'forart-asset://output/startup-libtv.png', fileName: 'startup-libtv.png' }; },
+    },
+    canvasStore,
+    taskStore,
+    resolveActionFissionConcurrency: () => 1,
+  });
+
+  runner.recoverPersistedTasks();
+  await waitFor(() => taskStore.getTask('libtv_startup_queued')?.status === 'succeeded', 5000);
+
+  assert.equal(runCalls, 1);
+  assert.equal(canvasStore.terminals.some((terminal) => terminal.taskId === 'libtv_startup_queued'), true);
 });

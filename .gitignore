@@ -5,6 +5,7 @@ CanvasAssests/
 data/
 config.json
 forart-config.json
+generation-tasks.sqlite*
 .env
 .env.*
 !.env.example

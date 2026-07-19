@@ -534,33 +534,12 @@ async function saveOutputAssets(context, results, taskId) {
 function updateTaskWithRemoteAnchor(context, taskId, patch) {
   const current = context.generationTaskStore.getTask(taskId);
   if (!current || ['interrupted', 'superseded'].includes(current.status)) throw new Error('Interrupted');
-  const task = context.generationTaskStore.updateTask(taskId, patch);
-  if (patch.upstreamTaskId && task.canvasId && task.target?.nodeId) {
-    if (task.target.type === 'actionFissionRow') {
-      context.canvasStore?.setActionFissionRowRemoteTaskId(task.canvasId, task.target.nodeId, task.target.rowId, patch.upstreamTaskId);
-    } else {
-      context.canvasStore?.setGenerationRemoteTaskId(task.canvasId, task.target.nodeId, patch.upstreamTaskId);
-    }
-  }
-  return task;
+  return context.generationTaskStore.updateTask(taskId, patch);
 }
 
 function writeTaskTerminalToCanvas(context, task, status, result, error) {
   if (!task?.canvasId || !task.target?.nodeId) return;
-  const payload = {
-    canvasId: task.canvasId,
-    nodeId: task.target.nodeId,
-    taskId: task.id,
-    remoteTaskId: task.upstreamTaskId,
-    status,
-    result,
-    error,
-  };
-  if (task.target.type === 'actionFissionRow') {
-    context.canvasStore?.completeActionFissionRow({ ...payload, rowId: task.target.rowId });
-  } else {
-    context.canvasStore?.completeGenerationNode(payload);
-  }
+  context.resultCommitter.commit(task, { status, result, error, backend: 'api' });
 }
 
 async function submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, size, quality, imageCount, signal) {
@@ -722,16 +701,23 @@ async function executeImageTask(context, task, payload, signal) {
   return saveOutputAssets(context, polledResults, task.id);
 }
 
-function createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore }) {
-  const context = { net, assetStore, canvasStore, generationTaskStore };
+function createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore, resultCommitter }) {
+  if (!resultCommitter?.commit) throw new Error('Generation result committer is required.');
+  const context = { net, assetStore, canvasStore, generationTaskStore, resultCommitter };
 
   async function startTask(payload = {}) {
     const supersededTaskIds = generationTaskStore.activeTaskIdsForTarget?.(payload.canvasId, payload.target) || [];
     const task = generationTaskStore.createTask({ ...payload, status: payload.status || 'submitting' });
-    if (task.target?.type === 'actionFissionRow') {
-      context.canvasStore?.setActionFissionRowTaskAnchor(task.canvasId, task.target.nodeId, task.target.rowId, { taskId: task.id });
-    } else {
-      context.canvasStore?.setGenerationTaskAnchor(task.canvasId, task.target.nodeId, { taskId: task.id });
+    const anchorResult = task.target?.type === 'actionFissionRow'
+      ? context.canvasStore?.setActionFissionRowTaskAnchor(task.canvasId, task.target.nodeId, task.target.rowId, { taskId: task.id })
+      : context.canvasStore?.setGenerationTaskAnchor(task.canvasId, task.target.nodeId, { taskId: task.id });
+    if (anchorResult?.ok === false) {
+      generationTaskStore.updateTask(task.id, {
+        status: 'interrupted',
+        error: `Canvas task anchor failed: ${anchorResult.reason || 'unknown'}`,
+        interruptReason: 'provider_lost',
+      });
+      throw new Error(`Canvas task anchor failed: ${anchorResult.reason || 'unknown'}`);
     }
     supersededTaskIds.forEach((taskId) => {
       const superseded = generationTaskStore.getTask(taskId);
@@ -822,78 +808,36 @@ function createImageGenerationRunner({ net, assetStore, canvasStore, generationT
     return stopped;
   }
 
-  function getTask(taskId) {
-    return generationTaskStore.getTask(taskId);
-  }
-
-  async function recoverTask(payload = {}) {
-    const canvasId = String(payload.canvasId || '').trim();
-    const nodeId = String(payload.nodeId || '').trim();
-    const upstreamTaskId = String(payload.upstreamTaskId || payload.remoteTaskId || '').trim();
-    if (!canvasId || !nodeId || !upstreamTaskId) throw new Error('Generation recovery target is incomplete.');
-    const target = payload.target?.type === 'actionFissionRow'
-      ? { type: 'actionFissionRow', nodeId, rowId: String(payload.target.rowId || payload.rowId || '').trim() }
-      : { type: 'imageGenerator', nodeId };
-    if (target.type === 'actionFissionRow' && !target.rowId) throw new Error('Generation recovery row target is incomplete.');
-    const existingId = generationTaskStore.activeTaskIdsForTarget?.(canvasId, target)?.[0];
-    const existing = existingId ? generationTaskStore.getTask(existingId) : null;
-    if (existing?.upstreamTaskId === upstreamTaskId) return existing;
-    if (existing) stopTask(existing.id);
-    const anchoredTaskId = String(payload.taskId || '').trim();
-    const safeRemoteId = upstreamTaskId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 120);
-    const taskId = anchoredTaskId || `gen_recover_${safeRemoteId || Date.now().toString(36)}`;
-    return resumeTask(taskId, {
-      ...payload,
-      id: taskId,
-      canvasId,
-      nodeId,
-      target,
-      upstreamTaskId,
-      status: 'running',
-    });
-  }
-
-  async function recoverCanvasTasks(payload = {}) {
+  async function recoverPersistedTasks(payload = {}) {
     const providers = Array.isArray(payload.providers) ? payload.providers : [];
     const providersById = new Map(providers.map((provider) => [String(provider?.id || ''), provider]));
     const recovered = [];
     const errors = [];
-    for (const anchor of canvasStore?.listGenerationTaskAnchors?.() || []) {
-      const provider = providersById.get(anchor.providerId);
-      if (!provider) continue;
+    const activeTasks = (generationTaskStore.listTasks?.() || []).filter((task) => (
+      !['succeeded', 'failed', 'interrupted', 'superseded'].includes(task.status)
+    ));
+
+    for (const task of activeTasks) {
+      if (activeControllers.has(task.id)) {
+        recovered.push(task);
+        continue;
+      }
       try {
-        const existing = anchor.taskId ? generationTaskStore.getTask(anchor.taskId) : null;
-        if (existing) {
-          recovered.push(existing);
+        const provider = providersById.get(task.providerId);
+        if (task.upstreamTaskId && provider) {
+          recovered.push(await resumeTask(task.id, { provider, model: task.model }));
           continue;
         }
-        if (!anchor.remoteTaskId) {
-          if (anchor.target?.type === 'actionFissionRow') {
-            canvasStore?.completeActionFissionRow({
-              canvasId: anchor.canvasId,
-              nodeId: anchor.nodeId,
-              rowId: anchor.target.rowId,
-              taskId: anchor.taskId,
-              status: 'interrupted',
-            });
-          }
-          continue;
-        }
-        recovered.push(await recoverTask({
-          canvasId: anchor.canvasId,
-          nodeId: anchor.nodeId,
-          rowId: anchor.rowId,
-          target: anchor.target,
-          taskId: anchor.taskId,
-          upstreamTaskId: anchor.remoteTaskId,
-          providerId: anchor.providerId,
-          provider,
-          model: anchor.model,
-        }));
+        const interrupted = generationTaskStore.updateTask(task.id, {
+          status: 'interrupted',
+          error: '',
+          interruptReason: provider ? 'app_restart' : 'provider_lost',
+        });
+        writeTaskTerminalToCanvas(context, interrupted, 'interrupted');
+        recovered.push(interrupted);
       } catch (error) {
         errors.push({
-          canvasId: anchor.canvasId,
-          nodeId: anchor.nodeId,
+          taskId: task.id,
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -901,45 +845,11 @@ function createImageGenerationRunner({ net, assetStore, canvasStore, generationT
     return { ok: true, tasks: recovered, errors };
   }
 
-  function abortTasks(taskIds = []) {
-    taskIds.forEach((taskId) => {
-      activeControllers.get(taskId)?.abort();
-      activeControllers.delete(taskId);
-    });
-  }
-
-  function stopTasksForTarget(canvasId, target) {
-    const result = generationTaskStore.stopTasksForTarget(canvasId, target);
-    abortTasks(result.taskIds);
-    result.tasks.forEach((task) => writeTaskTerminalToCanvas(context, task, 'interrupted'));
-    return result;
-  }
-
-  function stopTasksForNode(canvasId, nodeId) {
-    const result = generationTaskStore.stopTasksForNode(canvasId, nodeId);
-    abortTasks(result.taskIds);
-    result.tasks.forEach((task) => writeTaskTerminalToCanvas(context, task, 'interrupted'));
-    return result;
-  }
-
-  function stopTasksForCanvas(canvasId) {
-    const result = generationTaskStore.stopTasksForCanvas(canvasId);
-    abortTasks(result.taskIds);
-    result.tasks.forEach((task) => writeTaskTerminalToCanvas(context, task, 'interrupted'));
-    return result;
-  }
-
   return {
-    getTask,
-    recoverCanvasTasks,
-    recoverTask,
-    resumeTask,
+    recoverPersistedTasks,
     startTask,
     startTasks,
     stopTask,
-    stopTasksForCanvas,
-    stopTasksForNode,
-    stopTasksForTarget,
   };
 }
 

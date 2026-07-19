@@ -56,12 +56,14 @@ export function edgeDataForConnection(
   const inputKind = inputKindForSource(sourceKind);
   if (!inputKind) return undefined;
   if (targetHandle === "additional-reference") {
-    return targetKind === "actionFission" && inputKind === "referenceImage"
-      ? {
+    if (targetKind !== "actionFission") return undefined;
+    if (inputKind === "referenceImage") {
+      return {
           inputKind: "additionalReferenceImage",
           referenceOrder: nextReferenceOrder(targetId, edges, "additionalReferenceImage"),
-        }
-      : undefined;
+        };
+    }
+    return inputKind === "prompt" ? { inputKind: "additionalReferencePrompt" } : undefined;
   }
   return inputKind === "referenceImage"
     ? { inputKind, referenceOrder: nextReferenceOrder(targetId, edges) }
@@ -113,15 +115,16 @@ export function collectActionFissionAdditionalReferences(
   return collectReferenceInputs(targetId, nodes, edges, "additionalReferenceImage", fallbackTitle);
 }
 
-export function collectImageGeneratorPrompts(
+function collectPromptInputs(
   targetId: string,
   nodes: NativeCanvasNode[],
   edges: NativeCanvasEdge[],
+  inputKind: "prompt" | "additionalReferencePrompt",
   fallbackTitle = "",
 ): ImageGeneratorPromptInput[] {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   return edges
-    .filter((edge) => edge.target === targetId && edge.data?.inputKind === "prompt")
+    .filter((edge) => edge.target === targetId && edge.data?.inputKind === inputKind)
     .flatMap((edge) => {
       const source = nodeMap.get(edge.source);
       if (!source) return [];
@@ -132,6 +135,24 @@ export function collectImageGeneratorPrompts(
         text: String(source.data.text || "").trim(),
       }];
     });
+}
+
+export function collectImageGeneratorPrompts(
+  targetId: string,
+  nodes: NativeCanvasNode[],
+  edges: NativeCanvasEdge[],
+  fallbackTitle = "",
+) {
+  return collectPromptInputs(targetId, nodes, edges, "prompt", fallbackTitle);
+}
+
+export function collectActionFissionAdditionalPrompts(
+  targetId: string,
+  nodes: NativeCanvasNode[],
+  edges: NativeCanvasEdge[],
+  fallbackTitle = "",
+) {
+  return collectPromptInputs(targetId, nodes, edges, "additionalReferencePrompt", fallbackTitle);
 }
 
 export function validateImageGeneratorReferences(rule: ImageModelRule, count: number): ReferenceValidationError {

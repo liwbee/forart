@@ -64,5 +64,8 @@ test('every renderer-owned generation hook uses the StrictMode-safe lifecycle', 
       hookPath,
     ), 'utf8');
     assert.match(source, /useEffect\(\(\) => activateGenerationHook\(mountedRef,/);
+    assert.match(source, /watchGenerationTask\(/);
+    assert.doesNotMatch(source, /setTimeout\(resolve, 1000\)/);
+    assert.doesNotMatch(source, /forartGenerationTasks\.get\(taskId\)/);
   }
 });

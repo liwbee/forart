@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { TFunction } from "i18next";
-import type { LibtvGenerationTask } from "../../../app/appConfig";
-import type { NativeCanvasEdge, NativeCanvasNode } from "../nativeCanvas";
+import { nativeCanvasNodeTaskId, type NativeCanvasEdge, type NativeCanvasNode } from "../nativeCanvas";
 import { collectImageGeneratorReferences } from "../generation/imageGenerationInputs";
 import {
   beginGenerationLaunching,
+  clearGenerationRuntimeError,
   endGenerationLaunching,
   imageGenerationLaunchKey,
+  setGenerationRuntimeError,
   useGenerationRuntimeStore,
 } from "../generation/generationRuntimeStore";
 import { activateGenerationHook } from "../generation/generationHookLifecycle";
 import { deriveLibtvModelCapabilities } from "./libtvModelSchema";
-
-export function isNativeLibtvTaskActive(task: LibtvGenerationTask | undefined) {
-  return task?.status === "queued" || task?.status === "preparing" || task?.status === "uploading" || task?.status === "running";
-}
+import {
+  isGenerationTaskActive,
+  isGenerationTaskTerminal,
+  useGenerationTaskCache,
+  watchGenerationTask,
+} from "../generation/generationTaskCache";
 
 function collectConnectedPrompt(nodeId: string, nodes: NativeCanvasNode[], edges: NativeCanvasEdge[]) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
@@ -43,7 +46,6 @@ interface UseNativeLibtvGenerationOptions {
   edges: NativeCanvasEdge[];
   nodes: NativeCanvasNode[];
   patchNodeData: (nodeId: string, patch: Partial<NativeCanvasNode["data"]>) => void;
-  setNodeImage: (nodeId: string, imageUrl: string, label: string) => void;
   t: TFunction;
 }
 
@@ -52,101 +54,89 @@ export function useNativeLibtvGeneration({
   edges,
   nodes,
   patchNodeData,
-  setNodeImage,
   t,
 }: UseNativeLibtvGenerationOptions) {
   const mountedRef = useRef(true);
-  const pollingControllersRef = useRef(new Map<string, AbortController>());
+  const taskControllersRef = useRef(new Map<string, AbortController>());
+  const handledTerminalVersionsRef = useRef(new Map<string, number>());
 
   const patchLibtvState = useCallback((nodeId: string, patch: Record<string, unknown>) => {
     const current = nodes.find((node) => node.id === nodeId)?.data.libtvImageGeneration || {};
     const cleanCurrent = { ...current } as Record<string, unknown>;
     delete cleanCurrent.error;
-    const { error, ...statePatch } = patch;
     patchNodeData(nodeId, {
-      libtvImageGeneration: { ...cleanCurrent, ...statePatch },
-      ...(Object.prototype.hasOwnProperty.call(patch, "error")
-        ? { generationError: String(error || "") }
-        : {}),
+      libtvImageGeneration: { ...cleanCurrent, ...patch },
     });
   }, [nodes, patchNodeData]);
 
-  const pollTask = useCallback(async (taskId: string, nodeId: string) => {
-    if (!mountedRef.current || !window.libtv?.getImageTask || pollingControllersRef.current.has(taskId)) return;
+  const watchTask = useCallback(async (taskId: string, nodeId: string) => {
+    if (!mountedRef.current || !window.forartGenerationTasks?.get || taskControllersRef.current.has(taskId)) return;
+    const cachedTask = useGenerationTaskCache.getState().tasksById[taskId];
+    if (cachedTask && isGenerationTaskTerminal(cachedTask.status)
+      && (handledTerminalVersionsRef.current.get(taskId) || -1) >= cachedTask.version) return;
     const controller = new AbortController();
-    pollingControllersRef.current.set(taskId, controller);
+    taskControllersRef.current.set(taskId, controller);
     try {
-      while (!controller.signal.aborted) {
-        let task = await window.libtv.getImageTask(taskId);
-        if (!task) {
-          const state = nodes.find((node) => node.id === nodeId)?.data.libtvImageGeneration;
-          if (state?.taskId === taskId && state.projectUuid && state.remoteNodeId && window.libtv.recoverImageTask) {
-            task = await window.libtv.recoverImageTask({
-              canvasId,
-              nodeId,
-              taskId,
-              target: { type: "imageGenerator", nodeId },
-              projectUuid: state.projectUuid,
-              remoteNodeId: state.remoteNodeId,
-            });
-          }
-        }
-        if (!task) {
-          patchLibtvState(nodeId, {
-            task: undefined,
-            taskId: undefined,
-            projectUuid: undefined,
-            remoteNodeId: undefined,
-            error: t("infiniteCanvas:generationInterruptedUnexpected"),
+      await watchGenerationTask(taskId, controller.signal, (dto) => {
+        if (dto.executorKind !== "libtv") return;
+        if (!isGenerationTaskTerminal(dto.status)) return;
+        if ((handledTerminalVersionsRef.current.get(dto.id) || -1) >= dto.version) return;
+        handledTerminalVersionsRef.current.set(dto.id, dto.version);
+        if (dto.status === "succeeded" && dto.result?.images.length) {
+          const images = dto.result.images.map((image) => ({
+            url: image.assetUrl,
+            localUrl: image.assetUrl,
+            thumbUrl: image.thumbUrl,
+            fileName: image.fileName,
+            width: image.width,
+            height: image.height,
+            downloadState: "pending" as const,
+            downloadedAt: undefined,
+          }));
+          const primary = images[0];
+          patchNodeData(nodeId, {
+            label: primary.fileName || "LibTV generated image",
+            generatedImages: images,
+            imageNaturalWidth: primary.width,
+            imageNaturalHeight: primary.height,
+            multiImageExpanded: false,
+            multiImageCollapsedSize: undefined,
           });
-          return;
         }
-        const active = isNativeLibtvTaskActive(task);
-        patchLibtvState(nodeId, {
-          task,
-          taskId: active ? task.id : undefined,
-          projectUuid: active ? task.projectUuid : undefined,
-          remoteNodeId: active ? task.remoteNodeId : undefined,
-          error: task.status === "failed" ? task.error || "LibTV generation failed." : "",
-        });
-        if (task.status === "succeeded") {
-          if (task.result?.localUrl) {
-            setNodeImage(nodeId, task.result.localUrl, task.result.fileName || "LibTV generated image");
-          }
-          return;
-        }
-        if (task.status === "failed" || task.status === "interrupted") return;
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
-      }
+      });
     } catch (error) {
       if (!controller.signal.aborted) {
-        patchLibtvState(nodeId, { error: error instanceof Error ? error.message : String(error) });
+        setGenerationRuntimeError(imageGenerationLaunchKey(canvasId, nodeId), error instanceof Error ? error.message : String(error));
       }
     } finally {
-      pollingControllersRef.current.delete(taskId);
+      taskControllersRef.current.delete(taskId);
     }
-  }, [canvasId, nodes, patchLibtvState, setNodeImage, t]);
+  }, [canvasId, patchNodeData]);
 
   const runLibtvGeneration = useCallback(async (nodeId: string, options?: { promptOverride?: string }) => {
     const node = nodes.find((item) => item.id === nodeId && item.data.kind === "imageGenerator");
     const state = node?.data.libtvImageGeneration || {};
-    if (!node || state.taskId || isNativeLibtvTaskActive(state.task)) return;
-    if (!canvasId || !window.libtv?.startImageTask) {
-      patchLibtvState(nodeId, { error: t("infiniteCanvas:libtvUnavailable") });
+    const currentTaskId = node ? nativeCanvasNodeTaskId(node.data) : "";
+    const currentTask = currentTaskId ? useGenerationTaskCache.getState().tasksById[currentTaskId] : undefined;
+    if (!node || isGenerationTaskActive(currentTask)) return;
+    const libtvApi = window.libtv;
+    if (!canvasId || !window.forartGenerationTasks?.start || !libtvApi) {
+      setGenerationRuntimeError(imageGenerationLaunchKey(canvasId, nodeId), t("infiniteCanvas:libtvUnavailable"));
       return;
     }
 
     const launchKey = imageGenerationLaunchKey(canvasId, nodeId);
     if (useGenerationRuntimeStore.getState().launchingKeys.has(launchKey)) return;
     beginGenerationLaunching([launchKey]);
+    clearGenerationRuntimeError(launchKey);
     try {
-      const status = await window.libtv.status();
+      const status = await libtvApi.status();
       if (!status.available) throw new Error(status.error || t("infiniteCanvas:libtvUnavailable"));
-      const account = await window.libtv.account();
+      const account = await libtvApi.account();
       if (!account.loggedIn) throw new Error(account.error || t("infiniteCanvas:libtvNotLoggedIn"));
       const modelName = String(state.modelName || "").trim();
       if (!modelName) throw new Error(t("infiniteCanvas:libtvModelRequired"));
-      const schema = await window.libtv.imageModelSchema({ model: modelName });
+      const schema = await libtvApi.imageModelSchema({ model: modelName });
       const capabilities = deriveLibtvModelCapabilities(schema);
       const references = collectImageGeneratorReferences(nodeId, nodes, edges, t("infiniteCanvas:referenceImage"));
       if (!capabilities.supportsReferenceImages && references.length) {
@@ -177,8 +167,8 @@ export function useNativeLibtvGeneration({
       const count = Number(capabilities.imageCounts.includes(storedCount)
         ? storedCount
         : capabilities.defaultImageCount);
-      patchLibtvState(nodeId, { quality, resolution: resolution || undefined, aspectRatio, count, error: "" });
-      const task = await window.libtv.startImageTask({
+      patchLibtvState(nodeId, { quality, resolution: resolution || undefined, aspectRatio, count });
+      const task = await window.forartGenerationTasks.start("libtv", {
         canvasId,
         nodeId,
         target: { type: "imageGenerator", nodeId },
@@ -193,51 +183,54 @@ export function useNativeLibtvGeneration({
         x: Math.round(node.position.x),
         y: Math.round(node.position.y),
       });
+      if (!task) throw new Error(t("infiniteCanvas:generationTaskCreateFailed"));
       if (!mountedRef.current) return;
-      patchLibtvState(nodeId, { task, taskId: task.id, error: "" });
+      patchNodeData(nodeId, {
+        latestGenerationTaskId: task.id,
+        libtvImageGeneration: {
+          ...state,
+          quality,
+          resolution: resolution || undefined,
+          aspectRatio,
+          count,
+        },
+      });
       endGenerationLaunching([launchKey]);
-      await pollTask(task.id, nodeId);
+      await watchTask(task.id, nodeId);
     } catch (error) {
-      if (mountedRef.current) patchLibtvState(nodeId, { error: error instanceof Error ? error.message : String(error) });
+      if (mountedRef.current) setGenerationRuntimeError(launchKey, error instanceof Error ? error.message : String(error));
     } finally {
       endGenerationLaunching([launchKey]);
     }
-  }, [canvasId, edges, nodes, patchLibtvState, pollTask, t]);
+  }, [canvasId, edges, nodes, patchLibtvState, patchNodeData, t, watchTask]);
 
   const stopLibtvGeneration = useCallback(async (nodeId: string) => {
-    const state = nodes.find((node) => node.id === nodeId)?.data.libtvImageGeneration;
-    const task = state?.task;
-    const taskId = task?.id || state?.taskId;
-    if (!taskId || (task && !isNativeLibtvTaskActive(task))) return;
-    pollingControllersRef.current.get(taskId)?.abort();
+    const data = nodes.find((node) => node.id === nodeId)?.data;
+    const taskId = data ? nativeCanvasNodeTaskId(data) : "";
+    const task = taskId ? useGenerationTaskCache.getState().tasksById[taskId] : undefined;
+    if (!taskId || !isGenerationTaskActive(task)) return;
+    taskControllersRef.current.get(taskId)?.abort();
     try {
-      const stopped = await window.libtv?.stopImageTask?.(taskId);
-      patchLibtvState(nodeId, {
-        task: stopped || (task ? { ...task, status: "interrupted" } : undefined),
-        taskId: undefined,
-        projectUuid: undefined,
-        remoteNodeId: undefined,
-        error: "",
-      });
+      await window.forartGenerationTasks?.stop(taskId);
+      clearGenerationRuntimeError(imageGenerationLaunchKey(canvasId, nodeId));
     } catch (error) {
-      patchLibtvState(nodeId, { error: error instanceof Error ? error.message : String(error) });
+      setGenerationRuntimeError(imageGenerationLaunchKey(canvasId, nodeId), error instanceof Error ? error.message : String(error));
     }
-  }, [nodes, patchLibtvState]);
+  }, [canvasId, nodes]);
 
   useEffect(() => {
     nodes.forEach((node) => {
-      const task = node.data.libtvImageGeneration?.task;
-      if (node.data.imageGenerationBackend === "libtv" && task?.canvasId === canvasId && isNativeLibtvTaskActive(task)) {
-        void pollTask(task.id, node.id);
-      } else if (node.data.imageGenerationBackend === "libtv" && node.data.libtvImageGeneration?.taskId) {
-        void pollTask(node.data.libtvImageGeneration.taskId, node.id);
+      if (node.data.imageGenerationBackend !== "libtv") return;
+      const taskId = nativeCanvasNodeTaskId(node.data);
+      if (taskId) {
+        void watchTask(taskId, node.id);
       }
     });
-  }, [canvasId, nodes, pollTask]);
+  }, [canvasId, nodes, watchTask]);
 
   useEffect(() => activateGenerationHook(mountedRef, () => {
-    pollingControllersRef.current.forEach((controller) => controller.abort());
-    pollingControllersRef.current.clear();
+    taskControllersRef.current.forEach((controller) => controller.abort());
+    taskControllersRef.current.clear();
   }), []);
 
   return { runLibtvGeneration, stopLibtvGeneration };

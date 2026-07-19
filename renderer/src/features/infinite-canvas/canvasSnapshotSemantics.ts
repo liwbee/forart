@@ -28,27 +28,6 @@ function recordOf(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
 
-function durableActionFission(value: unknown) {
-  const actionFission = { ...recordOf(value) };
-  if (!Array.isArray(actionFission.rows)) return actionFission;
-  actionFission.rows = actionFission.rows.map((value) => {
-    const row = { ...recordOf(value) };
-    if (Array.isArray(row.categoryGroups)) {
-      row.categoryGroups = row.categoryGroups.map((value) => {
-        const group = { ...recordOf(value) };
-        delete group.fixedActionId;
-        return group;
-      });
-    }
-    delete row.generationTask;
-    delete row.libtvTask;
-    delete row.libtvQueued;
-    delete row.libtvRunning;
-    return row;
-  });
-  return actionFission;
-}
-
 function durableNode(value: object) {
   const node = { ...recordOf(value) };
   const resizedWidth = Number(node.width);
@@ -66,17 +45,7 @@ function durableNode(value: object) {
   delete node.height;
   delete node.resizing;
 
-  const data = { ...recordOf(node.data) };
-  delete data.generationTask;
-  if (data.libtvImageGeneration && typeof data.libtvImageGeneration === "object") {
-    const libtvState = { ...recordOf(data.libtvImageGeneration) };
-    delete libtvState.task;
-    data.libtvImageGeneration = libtvState;
-  }
-  if (data.actionFission && typeof data.actionFission === "object") {
-    data.actionFission = durableActionFission(data.actionFission);
-  }
-  node.data = data;
+  node.data = { ...recordOf(node.data) };
   return node;
 }
 
@@ -89,6 +58,7 @@ function durableEdge(value: object) {
 function contentNode(value: Record<string, unknown>) {
   const node = { ...value };
   const data = { ...recordOf(node.data) };
+  delete data.latestGenerationTaskId;
   if (Array.isArray(data.generatedImages)) {
     data.generatedImages = data.generatedImages.map((value) => {
       const image = { ...recordOf(value) };
@@ -104,6 +74,7 @@ function contentNode(value: Record<string, unknown>) {
         const row = { ...recordOf(value) };
         delete row.resultDownloadState;
         delete row.resultDownloadedAt;
+        delete row.latestGenerationTaskId;
         return row;
       });
     }

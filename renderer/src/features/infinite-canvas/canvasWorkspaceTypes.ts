@@ -1,6 +1,5 @@
 import type { Viewport } from "@xyflow/react";
 import {
-  createNativeCanvasNode,
   NATIVE_CANVAS_NODE_DEFINITIONS,
   type NativeCanvasEdge,
   type NativeCanvasNode,
@@ -40,7 +39,9 @@ export interface NativeCanvasSnapshot {
   viewport: Viewport;
 }
 
-export interface NativeCanvasDocument extends CanvasRecord, NativeCanvasSnapshot {}
+export interface NativeCanvasDocument extends CanvasRecord, NativeCanvasSnapshot {
+  canvasSchemaVersion: 2;
+}
 
 function timestampOf(value: unknown) {
   const numeric = Number(value || 0);
@@ -89,7 +90,7 @@ function isNodeKind(value: unknown): value is NativeCanvasNodeKind {
   return typeof value === "string" && value in NATIVE_CANVAS_NODE_DEFINITIONS;
 }
 
-function normalizeGeneratedImages(data: Record<string, unknown>, fallbackUrl = "") {
+function normalizeGeneratedImages(data: Record<string, unknown>) {
   const images = Array.isArray(data.generatedImages)
     ? data.generatedImages.flatMap((item) => {
         if (!item || typeof item !== "object") return [];
@@ -109,114 +110,50 @@ function normalizeGeneratedImages(data: Record<string, unknown>, fallbackUrl = "
         }];
       })
     : [];
-  if (images.length) return images;
-  const legacyUrl = String(data.imageUrl || fallbackUrl || "");
-  if (!legacyUrl) return [];
-  return [{
-    localUrl: legacyUrl,
-    thumbUrl: String(data.thumbUrl || "") || undefined,
-    fileName: String(data.label || "") || undefined,
-    width: Number(data.imageNaturalWidth || 0) || undefined,
-    height: Number(data.imageNaturalHeight || 0) || undefined,
-    downloadState: data.outputDownloadState === "downloaded" ? "downloaded" as const : "pending" as const,
-    downloadedAt: Number(data.outputDownloadedAt || 0) || undefined,
-  }];
+  return images;
+}
+
+function normalizeLibtvImageGeneration(input: unknown): NativeCanvasNode["data"]["libtvImageGeneration"] {
+  if (!input || typeof input !== "object") return undefined;
+  const source = input as Record<string, unknown>;
+  const count = Number(source.count || 0);
+  const normalized = {
+    aspectRatio: String(source.aspectRatio || "") || undefined,
+    count: count > 0 ? count : undefined,
+    modelKey: String(source.modelKey || "") || undefined,
+    modelName: String(source.modelName || "") || undefined,
+    quality: String(source.quality || "") || undefined,
+    resolution: String(source.resolution || "") || undefined,
+  };
+  return Object.values(normalized).some((value) => value !== undefined) ? normalized : undefined;
 }
 
 function normalizeCurrentNodeData(data: Record<string, unknown>, kind: NativeCanvasNodeKind) {
   const normalized = { ...data, kind } as NativeCanvasNode["data"];
+  normalized.latestGenerationTaskId = String(data.latestGenerationTaskId || "") || undefined;
   if (kind !== "imageGenerator") return normalized;
-  if (data.libtvImageGeneration && typeof data.libtvImageGeneration === "object") {
-    const libtvState = { ...(data.libtvImageGeneration as Record<string, unknown>) };
-    normalized.generationError = String(data.generationError || libtvState.error || "") || undefined;
-    delete libtvState.error;
-    normalized.libtvImageGeneration = libtvState as NativeCanvasNode["data"]["libtvImageGeneration"];
-  }
+  normalized.libtvImageGeneration = normalizeLibtvImageGeneration(data.libtvImageGeneration);
   normalized.generatedImages = normalizeGeneratedImages(data);
-  delete normalized.imageUrl;
-  delete normalized.thumbUrl;
-  delete normalized.outputDownloadState;
-  delete normalized.outputDownloadedAt;
   return normalized;
 }
 
 function normalizeNode(input: unknown): NativeCanvasNode | null {
   const value = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const data = value.data && typeof value.data === "object" ? value.data as Record<string, unknown> : {};
-  const kindValue = data.kind || value.type;
-  const kind = kindValue === "image" ? "imageLoader" : kindValue;
-  if (!isNodeKind(kind)) return null;
-
-  if (value.type === "canvasNode" && value.position && data.kind) {
-    return {
-      ...(value as unknown as NativeCanvasNode),
-      type: "canvasNode",
-      data: normalizeCurrentNodeData(data, kind),
-      selected: false,
-    };
-  }
-
-  const positionValue = value.position && typeof value.position === "object"
-    ? value.position as Record<string, unknown>
-    : null;
-  const node = createNativeCanvasNode(kind, {
-    x: Number(positionValue?.x ?? value.x ?? 0),
-    y: Number(positionValue?.y ?? value.y ?? 0),
-  }, {
-    label: String(data.label || value.title || ""),
-    imageUrl: kind === "imageLoader" ? String(data.imageUrl || value.url || "") || undefined : undefined,
-    thumbUrl: kind === "imageLoader" ? String(data.thumbUrl || value.thumbUrl || "") || undefined : undefined,
-    text: String(data.text ?? value.text ?? ""),
-    imageProviderId: String(data.imageProviderId || value.imageProviderId || "") || undefined,
-    imageModel: String(data.imageModel || value.imageModel || "") || undefined,
-    imageResolution: String(data.imageResolution || value.imageResolution || "") || undefined,
-    imageAspectRatio: String(data.imageAspectRatio || value.imageAspectRatio || "") || undefined,
-    imageQuality: String(data.imageQuality || value.imageQuality || "") || undefined,
-    imageCount: Number(data.imageCount || value.imageCount || 0) || undefined,
-    generatedImages: kind === "imageGenerator" ? normalizeGeneratedImages(data, String(value.url || "")) : undefined,
-    multiImageExpanded: data.multiImageExpanded === true,
-    multiImageCollapsedSize: data.multiImageCollapsedSize && typeof data.multiImageCollapsedSize === "object"
-      ? data.multiImageCollapsedSize as NativeCanvasNode["data"]["multiImageCollapsedSize"]
-      : undefined,
-    imageNaturalWidth: Number(data.imageNaturalWidth || value.imageNaturalWidth || 0) || undefined,
-    imageNaturalHeight: Number(data.imageNaturalHeight || value.imageNaturalHeight || 0) || undefined,
-    generationError: String(
-      data.generationError
-      || value.generationError
-      || (data.libtvImageGeneration && typeof data.libtvImageGeneration === "object"
-        ? (data.libtvImageGeneration as Record<string, unknown>).error
-        : ""),
-    ) || undefined,
-    generationTaskId: String(data.generationTaskId || "") || undefined,
-    generationRemoteTaskId: String(
-      data.generationRemoteTaskId
-      || (data.generationTask && typeof data.generationTask === "object"
-        ? (data.generationTask as Record<string, unknown>).upstreamTaskId
-        : ""),
-    ) || undefined,
-    imageGenerationBackend: data.imageGenerationBackend === "libtv" ? "libtv" : "api",
-    libtvImageGeneration: data.libtvImageGeneration && typeof data.libtvImageGeneration === "object"
-      ? (() => {
-          const state = { ...(data.libtvImageGeneration as Record<string, unknown>) };
-          delete state.error;
-          return state as NativeCanvasNode["data"]["libtvImageGeneration"];
-        })()
-      : undefined,
-    actionFission: (data.actionFission || value.actionFission) as NativeCanvasNode["data"]["actionFission"],
-  });
-  const width = Number(value.width ?? value.w ?? 0);
-  const height = Number(value.height ?? value.h ?? 0);
+  const kind = data.kind;
+  if (value.type !== "canvasNode" || !value.position || !isNodeKind(kind)) return null;
   return {
-    ...node,
-    id: String(value.id || node.id),
-    style: width > 0 && height > 0 ? { ...node.style, width, height } : node.style,
+    ...(value as unknown as NativeCanvasNode),
+    type: "canvasNode",
+    data: normalizeCurrentNodeData(data, kind),
+    selected: false,
   };
 }
 
 function normalizeEdge(input: unknown): NativeCanvasEdge | null {
   const value = input && typeof input === "object" ? input as Record<string, unknown> : {};
-  const source = String(value.source || value.from || "");
-  const target = String(value.target || value.to || "");
+  const source = String(value.source || "");
+  const target = String(value.target || "");
   const data = value.data && typeof value.data === "object" ? value.data as Record<string, unknown> : {};
   if (!source || !target) return null;
   return {
@@ -230,6 +167,7 @@ function normalizeEdge(input: unknown): NativeCanvasEdge | null {
       inputKind: data.inputKind === "prompt"
         || data.inputKind === "referenceImage"
         || data.inputKind === "additionalReferenceImage"
+        || data.inputKind === "additionalReferencePrompt"
         ? data.inputKind
         : undefined,
       referenceOrder: data.inputKind === "referenceImage" || data.inputKind === "additionalReferenceImage"
@@ -248,6 +186,7 @@ export function normalizeCanvasDocument(input: unknown): NativeCanvasDocument | 
   const record = recordOf(input);
   if (!record) return null;
   const value = input as Record<string, unknown>;
+  if (Number(value.canvasSchemaVersion) !== 2) return null;
   const rawViewport = value.viewport && typeof value.viewport === "object"
     ? value.viewport as Record<string, unknown>
     : {};
@@ -257,6 +196,7 @@ export function normalizeCanvasDocument(input: unknown): NativeCanvasDocument | 
     .filter((edge): edge is NativeCanvasEdge => Boolean(edge));
   return {
     ...record,
+    canvasSchemaVersion: 2,
     nodeCount: nodes.length,
     nodes,
     edges,

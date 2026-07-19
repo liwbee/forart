@@ -1,20 +1,31 @@
-import { LoaderCircle } from "lucide-react";
+import { ListTodo, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "../../components/ui/alert";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Tabs, TabsContent } from "../../components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { CanvasDocumentTabs } from "./CanvasDocumentTabs";
 import { ReactFlowCanvasPage, type CanvasSaveStatus } from "./ReactFlowCanvasPage";
 import { CanvasWorkspaceHome } from "./CanvasWorkspaceHome";
+import { CanvasFloatingPanel } from "./components/CanvasFloatingPanel";
 import {
   canvasSnapshotSaveState,
   canvasSnapshotSignatures,
   storedCanvasSnapshotSignatures,
   type CanvasSnapshotSignatures,
 } from "./canvasSnapshotSemantics";
-import { loadApiSettings } from "../settings/apiProviders";
+import {
+  connectGenerationTaskEvents,
+  hydrateRecentGenerationTasks,
+  hydrateGenerationTasks,
+  isGenerationTaskActive,
+  useGenerationTaskCache,
+} from "./generation/generationTaskCache";
+import { GenerationTaskCenter } from "./generation/GenerationTaskCenter";
 import {
   emptyCanvasSnapshot,
   normalizeCanvasDocument,
@@ -87,6 +98,8 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
   const [loadingCanvas, setLoadingCanvas] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [saveStatus, setSaveStatus] = useState<CanvasSaveStatus>("saved");
+  const [taskCenterOpen, setTaskCenterOpen] = useState(false);
+  const activeTaskCount = useGenerationTaskCache((state) => Object.values(state.tasksById).filter(isGenerationTaskActive).length);
   const activeCanvasIdRef = useRef("");
   const activeDocumentRef = useRef<NativeCanvasDocument | null>(null);
   const activeReadOnlyRef = useRef(false);
@@ -325,10 +338,6 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
 
   useEffect(() => {
     void refreshWorkspace().then(() => {
-      void loadApiSettings()
-        .then((settings) => window.easyTool?.recoverCanvasGenerationTasks?.({ providers: settings.providers }))
-        .catch(() => undefined);
-      void window.libtv?.recoverCanvasImageTasks?.().catch(() => undefined);
       if (initialRestoreRef.current) return;
       initialRestoreRef.current = true;
       const lastCanvasId = window.localStorage.getItem(LAST_CANVAS_ID_KEY) || "";
@@ -337,6 +346,17 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
       }
     });
   }, [openCanvas, refreshWorkspace]);
+
+  useEffect(() => {
+    const disconnect = connectGenerationTaskEvents();
+    void hydrateRecentGenerationTasks(100).catch(() => undefined);
+    return disconnect;
+  }, []);
+
+  useEffect(() => {
+    if (!activeCanvasId || activeCanvasId.startsWith("shared:")) return;
+    void hydrateGenerationTasks(activeCanvasId).catch(() => undefined);
+  }, [activeCanvasId]);
 
   useEffect(() => {
     window.localStorage.setItem(OPEN_TABS_KEY, JSON.stringify(tabs.filter((tab) => !tab.readOnly)));
@@ -736,6 +756,31 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
           ) : null}
         </TabsContent>
       ))}
+      <CanvasFloatingPanel
+        open={taskCenterOpen}
+        title={t("infiniteCanvas:taskCenter")}
+        className="rf-generation-task-center-panel"
+      >
+        <GenerationTaskCenter open={taskCenterOpen} onClose={() => setTaskCenterOpen(false)} />
+      </CanvasFloatingPanel>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant={taskCenterOpen ? "default" : "outline"}
+            size="icon"
+            className="rf-generation-task-button"
+            aria-label={t("infiniteCanvas:taskCenter")}
+            aria-pressed={taskCenterOpen}
+            onClick={() => setTaskCenterOpen((current) => !current)}
+          >
+            <ListTodo aria-hidden="true" />
+            {activeTaskCount > 0 ? <Badge className="rf-generation-task-button__count">{Math.min(99, activeTaskCount)}</Badge> : null}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">{t("infiniteCanvas:taskCenter")}</TooltipContent>
+      </Tooltip>
     </Tabs>
   );
 }

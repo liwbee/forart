@@ -6,8 +6,6 @@ export function formatGenerationDuration(totalMs: number) {
 }
 
 import type { TFunction } from "i18next";
-import type { NativeGenerationTask } from "../nativeCanvas";
-import type { LibtvGenerationTask } from "../../../app/appConfig";
 
 const STATUS_TRANSLATION_KEYS: Record<string, string> = {
   "generation.resultProcessing": "resultProcessing",
@@ -32,15 +30,21 @@ const STATUS_TRANSLATION_KEYS: Record<string, string> = {
   "libtv.recovering": "libtvRecovering",
 };
 
-type GenerationStatusTask = Pick<NativeGenerationTask | LibtvGenerationTask, "message" | "messageCode" | "messageParams">;
+type GenerationStatusTask = {
+  message?: string;
+  messageCode?: string;
+  messageParams?: Record<string, string | number>;
+  remoteMessage?: string;
+};
 
 export function generationStatusMessage(task: GenerationStatusTask | undefined, t: TFunction) {
   if (task?.messageCode) {
     const translationKey = STATUS_TRANSLATION_KEYS[task.messageCode];
     if (translationKey) return t(`infiniteCanvas:${translationKey}`, task.messageParams || {});
   }
-  if (task?.message === "result_processing") return t("infiniteCanvas:resultProcessing");
-  return task?.message
-    ? t("infiniteCanvas:remoteGenerationStatus", { status: task.message })
+  const message = task?.remoteMessage || task?.message;
+  if (message === "result_processing") return t("infiniteCanvas:resultProcessing");
+  return message
+    ? t("infiniteCanvas:remoteGenerationStatus", { status: message })
     : "";
 }

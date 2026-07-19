@@ -29,6 +29,8 @@
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
 
+  --window-titlebar-height: 34px;
+
   --ease-fluid: cubic-bezier(0.3, 0, 0, 1);
   --radius-pill: 999px;
   --state-drag-ring: 0 0 0 2px color-mix(in srgb, var(--border-strong) 34%, transparent);
@@ -130,12 +132,12 @@ body {
 }
 
 .app-frame--electron {
-  grid-template-rows: 34px minmax(0, 1fr);
+  grid-template-rows: var(--window-titlebar-height) minmax(0, 1fr);
 }
 
 .window-titlebar {
   min-width: 0;
-  height: 34px;
+  height: var(--window-titlebar-height);
   display: flex;
   align-items: stretch;
   justify-content: flex-end;
@@ -1507,31 +1509,23 @@ body {
 
 .settings-libtv-account-grid {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-3);
 }
 
-.settings-libtv-account-field {
-  display: grid;
-  gap: 4px;
-  border-bottom: 1px solid var(--border-subtle);
-  padding: 0 0 var(--space-3);
+.settings-libtv-metric {
+  align-content: start;
 }
 
-.settings-libtv-account-field span {
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: var(--font-weight-medium);
-}
-
-.settings-libtv-account-field strong {
-  min-width: 0;
+.settings-libtv-metric strong {
+  display: -webkit-box;
   overflow: hidden;
-  color: var(--text-primary);
   font-size: 15px;
-  font-weight: var(--font-weight-semibold);
   line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .settings-api-form {

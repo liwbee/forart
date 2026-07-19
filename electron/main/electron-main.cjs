@@ -6,6 +6,7 @@ const { pathToFileURL } = require('url');
 const { createWindow, registerAppWindowIpc } = require('./app-window.cjs');
 const { registerCanvasIpc } = require('./ipc/canvas-ipc.cjs');
 const { registerConfigIpc } = require('./ipc/config-ipc.cjs');
+const { registerGenerationTaskIpc } = require('./ipc/generation-task-ipc.cjs');
 const { registerImageReviewIpc } = require('./ipc/image-review-ipc.cjs');
 const { registerLocalApiIpc } = require('./ipc/local-api-ipc.cjs');
 const { registerLibtvIpc } = require('./ipc/libtv-ipc.cjs');
@@ -16,12 +17,14 @@ const { createCanvasCacheStore } = require('./modules/canvas-cache-store.cjs');
 const { createCanvasPackageStore } = require('./modules/canvas-package-store.cjs');
 const { createCanvasStore } = require('./modules/canvas-store.cjs');
 const { createConfigStore } = require('./modules/config-store.cjs');
-const { createGenerationTaskStore } = require('./modules/generation-task-store.cjs');
+const { createGenerationTaskRepository } = require('./modules/generation/generation-task-repository.cjs');
+const { createGenerationResultCommitter } = require('./modules/generation/generation-result-committer.cjs');
+const { createGenerationTaskCleanup } = require('./modules/generation/generation-task-cleanup.cjs');
+const { createGenerationTaskService } = require('./modules/generation/generation-task-service.cjs');
 const { createImageGenerationRunner } = require('./modules/image-generation-runner.cjs');
 const { createImageReviewStore } = require('./modules/image-review-store.cjs');
 const { createLibtvAdapter } = require('./modules/libtv-adapter.cjs');
 const { createLibtvGenerationRunner } = require('./modules/libtv-generation-runner.cjs');
-const { createLibtvGenerationTaskStore } = require('./modules/libtv-generation-task-store.cjs');
 const { createLibtvWorkspaceName } = require('./modules/libtv-workspace.cjs');
 const { createPortableUpdater } = require('./modules/portable-updater.cjs');
 
@@ -46,26 +49,52 @@ protocol.registerSchemesAsPrivileged([
 
 const assetStore = createAssetStore({ rootDir: portableRootDir, net });
 const canvasStore = createCanvasStore({ rootDir: portableRootDir });
-const canvasCacheStore = createCanvasCacheStore({ rootDir: portableRootDir, assetStore, canvasStore, shell });
+const generationTaskRepository = createGenerationTaskRepository({ rootDir: portableRootDir });
+const canvasCacheStore = createCanvasCacheStore({ assetStore, canvasStore, generationTaskRepository, shell });
 const canvasPackageStore = createCanvasPackageStore({ rootDir: appRootDir, dialog, canvasStore, assetStore });
 const configStore = createConfigStore({ app, rootDir: portableRootDir });
-const generationTaskStore = createGenerationTaskStore();
+const generationResultCommitter = createGenerationResultCommitter({ repository: generationTaskRepository, canvasStore });
+const generationTaskService = createGenerationTaskService({ repository: generationTaskRepository });
+const generationTaskStore = generationTaskService.createStoreAdapter('api');
+const libtvGenerationTaskStore = generationTaskService.createStoreAdapter('libtv');
+const generationTaskCleanup = createGenerationTaskCleanup({
+  repository: generationTaskRepository,
+  findMissingTargets: (heads) => canvasStore.findMissingGenerationTargets(heads),
+  onTasksDeleted: (taskIds) => generationTaskService.removeTasks(taskIds),
+});
 const actionFolderImportStore = createActionFolderImportStore();
-const imageGenerationRunner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore });
+const imageGenerationRunner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore, resultCommitter: generationResultCommitter });
 const imageReviewStore = createImageReviewStore();
 const libtv = createLibtvAdapter({ rootDir: appRootDir });
-const libtvGenerationTaskStore = createLibtvGenerationTaskStore();
 const libtvGenerationRunner = createLibtvGenerationRunner({
   libtv,
   assetStore,
   canvasStore,
   taskStore: libtvGenerationTaskStore,
+  resultCommitter: generationResultCommitter,
   resolveWorkspaceName: () => createLibtvWorkspaceName(configStore.loadApiSettings().libtvMachineId),
   resolveActionFissionConcurrency: () => configStore.loadApiSettings().libtvActionFissionConcurrency,
+});
+generationTaskService.registerExecutor('api', {
+  startTask: imageGenerationRunner.startTask,
+  startTasks: imageGenerationRunner.startTasks,
+  stopTask: imageGenerationRunner.stopTask,
+  recoverPersistedTasks: imageGenerationRunner.recoverPersistedTasks,
+});
+generationTaskService.registerExecutor('libtv', {
+  startTask: libtvGenerationRunner.startImageTask,
+  startTasks: libtvGenerationRunner.startImageTasks,
+  stopTask: libtvGenerationRunner.stopImageTask,
+  recoverPersistedTasks: libtvGenerationRunner.recoverPersistedTasks,
 });
 const portableUpdater = createPortableUpdater({ app, rootDir: appRootDir, dataRoot: portableRootDir, net });
 let localApi = null;
 let mainWindow = null;
+const disposeGenerationTaskIpc = registerGenerationTaskIpc({
+  ipcMain,
+  generationTaskService,
+  getWebContents: () => mainWindow?.webContents,
+});
 
 function registerCanvasAssetProtocol() {
   protocol.handle('forart-asset', async (request) => {
@@ -90,13 +119,21 @@ function registerImageReviewProtocol() {
   });
 }
 
-registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskStore, imageGenerationRunner, libtvGenerationRunner });
+registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskService });
 ipcMain.handle('canvas-cache:scan', async () => canvasCacheStore.scan());
-ipcMain.handle('canvas-cache:delete', async (_event, payload) => canvasCacheStore.deleteAssets(payload));
+ipcMain.handle('canvas-cache:delete', async (_event, payload) => {
+  const result = await canvasCacheStore.deleteAssets(payload);
+  try {
+    generationTaskCleanup.run({ force: true });
+  } catch (error) {
+    console.error('Generation task cleanup after cache deletion failed:', error);
+  }
+  return result;
+});
 ipcMain.handle('canvas-cache:reveal', async (_event, payload) => canvasCacheStore.revealAsset(payload));
 ipcMain.handle('canvas-cache:open-root', async () => canvasCacheStore.openRoot());
 registerImageReviewIpc({ ipcMain, dialog, imageReviewStore });
-registerLibtvIpc({ ipcMain, libtv, libtvGenerationRunner });
+registerLibtvIpc({ ipcMain, libtv });
 localApi = registerLocalApiIpc({ ipcMain, configStore, app, dataRoot: portableRootDir });
 registerConfigIpc({ ipcMain, dialog, configStore, app, net });
 registerUpdaterIpc({ ipcMain, updater: portableUpdater });
@@ -119,10 +156,38 @@ ipcMain.handle('canvas:write-clipboard', async (_event, payload = {}) => {
 app.whenReady().then(async () => {
   registerCanvasAssetProtocol();
   registerImageReviewProtocol();
+  try {
+    const commitRecovery = generationResultCommitter.recoverPending();
+    if (commitRecovery.errors.length) {
+      console.error('Generation result commit recovery completed with errors:', commitRecovery.errors);
+    }
+  } catch (error) {
+    console.error('Generation result commit recovery failed:', error);
+  }
+  try {
+    await generationTaskService.recoverActiveTasks({
+      api: { providers: configStore.loadApiSettings().providers },
+    });
+  } catch (error) {
+    console.error('Generation active task recovery failed:', error);
+  }
+  try {
+    generationTaskCleanup.run();
+  } catch (error) {
+    console.error('Generation task startup cleanup failed:', error);
+  }
+  generationTaskCleanup.start();
   mainWindow = await createWindow({ rootDir: appRootDir, isDev });
 });
 
-app.on('before-quit', () => localApi?.close?.());
+app.on('before-quit', () => {
+  localApi?.close?.();
+});
+app.on('will-quit', () => {
+  generationTaskCleanup.stop();
+  disposeGenerationTaskIpc();
+  generationTaskRepository.close();
+});
 
 app.on('second-instance', () => {
   if (!mainWindow) return;

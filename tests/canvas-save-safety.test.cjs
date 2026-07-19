@@ -141,3 +141,41 @@ test('main-process saves do not consult in-memory task runners', async () => {
   assert.equal(reconciliations, 0);
   assert.equal(stale.stale, true);
 });
+
+test('canvas save stops active generation tasks whose targets were deleted', async () => {
+  const handlers = new Map();
+  const stoppedTaskIds = [];
+  registerCanvasIpc({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    app: { getPath: () => '' },
+    canvasStore: {
+      saveCanvas() {
+        return { ok: true };
+      },
+      findMissingGenerationTargets(tasks) {
+        return tasks.filter((task) => task.target.nodeId === 'deleted-node');
+      },
+    },
+    assetStore: {},
+    canvasPackageStore: {},
+    generationTaskService: {
+      listTasksForCanvas() {
+        return [
+          { id: 'active-missing', status: 'running', target: { canvasId: 'canvas-1', kind: 'imageGenerator', nodeId: 'deleted-node' } },
+          { id: 'active-existing', status: 'queued', target: { canvasId: 'canvas-1', kind: 'imageGenerator', nodeId: 'existing-node' } },
+          { id: 'terminal-missing', status: 'succeeded', target: { canvasId: 'canvas-1', kind: 'imageGenerator', nodeId: 'deleted-node' } },
+        ];
+      },
+      stopTask(taskId) {
+        stoppedTaskIds.push(taskId);
+        return { id: taskId, status: 'interrupted' };
+      },
+    },
+  });
+
+  await handlers.get('canvas:save')(null, 'canvas-1', {
+    nodes: [{ id: 'existing-node' }],
+  });
+
+  assert.deepEqual(stoppedTaskIds, ['active-missing']);
+});

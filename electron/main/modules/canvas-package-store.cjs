@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const AdmZip = require('adm-zip');
+const { upgradeCanvasDocument } = require('./canvas-schema.cjs');
 
 const PACKAGE_FORMAT = 'forart.canvas.package';
 const PACKAGE_VERSION = 1;
@@ -122,19 +123,14 @@ function walk(value, visitor, key = '') {
 
 function cleanGenerationTask(value) {
   if (!isRecord(value)) return value;
-  delete value.generationTask;
-  delete value.generationStatus;
-  delete value.generationError;
-  value.running = false;
+  delete value.latestGenerationTaskId;
+  delete value.running;
   return value;
 }
 
 function cleanActionFissionForJsonOnly(actionFission) {
   if (!isRecord(actionFission)) return actionFission;
   const next = cloneSerializable(actionFission);
-  delete next.running;
-  delete next.status;
-  delete next.error;
   next.rows = Array.isArray(next.rows) ? next.rows.map((row) => {
     const cleanRow = { ...row };
     delete cleanRow.resultUrl;
@@ -144,10 +140,7 @@ function cleanActionFissionForJsonOnly(actionFission) {
     delete cleanRow.resultHeight;
     delete cleanRow.resultDownloadState;
     delete cleanRow.resultDownloadedAt;
-    delete cleanRow.error;
-    delete cleanRow.libtvQueued;
-    delete cleanRow.libtvRunning;
-    delete cleanRow.generationTask;
+    delete cleanRow.latestGenerationTaskId;
     if (isLocalUrlLike(cleanRow.selectedActionAssetUrl) && !isRemoteResourceUrl(cleanRow.selectedActionAssetUrl)) {
       cleanRow.selectedActionAssetUrl = null;
     }
@@ -159,40 +152,12 @@ function cleanActionFissionForJsonOnly(actionFission) {
 function cleanActionFissionForPackage(actionFission) {
   if (!isRecord(actionFission)) return actionFission;
   const next = cloneSerializable(actionFission);
-  delete next.running;
-  delete next.status;
-  delete next.error;
   next.rows = Array.isArray(next.rows) ? next.rows.map((row) => {
     const cleanRow = { ...row };
     delete cleanRow.resultThumbUrl;
-    delete cleanRow.error;
-    delete cleanRow.libtvQueued;
-    delete cleanRow.libtvRunning;
-    delete cleanRow.generationTask;
+    delete cleanRow.latestGenerationTaskId;
     return cleanRow;
   }) : [];
-  return next;
-}
-
-function cleanLibtvForJsonOnly(state) {
-  if (!isRecord(state)) return state;
-  const next = cloneSerializable(state);
-  delete next.latestRun;
-  delete next.error;
-  next.running = false;
-  next.status = '';
-  return next;
-}
-
-function cleanLibtvForPackage(state) {
-  if (!isRecord(state)) return state;
-  const next = cloneSerializable(state);
-  delete next.error;
-  next.running = false;
-  next.status = '';
-  if (isRecord(next.latestRun)) {
-    delete next.latestRun.localUrl;
-  }
   return next;
 }
 
@@ -210,12 +175,10 @@ function sanitizeCanvasForJsonOnly(canvas) {
     delete cleanNode.outputDownloadState;
     delete cleanNode.outputDownloadedAt;
     cleanNode.actionFission = cleanActionFissionForJsonOnly(cleanNode.actionFission);
-    cleanNode.libtvImageGeneration = cleanLibtvForJsonOnly(cleanNode.libtvImageGeneration);
     if (isRecord(cleanNode.data)) {
       const cleanData = cleanGenerationTask({ ...cleanNode.data });
       delete cleanData.thumbUrl;
       cleanData.actionFission = cleanActionFissionForJsonOnly(cleanData.actionFission);
-      cleanData.libtvImageGeneration = cleanLibtvForJsonOnly(cleanData.libtvImageGeneration);
       cleanNode.data = cleanData;
     }
     return cleanNode;
@@ -238,14 +201,11 @@ function sanitizeCanvasForPackage(canvas, options = {}) {
     delete cleanNode.thumbUrl;
     delete cleanNode.filePath;
     delete cleanNode.thumbFilePath;
-    cleanNode.running = false;
     cleanNode.actionFission = cleanActionFissionForPackage(cleanNode.actionFission);
-    cleanNode.libtvImageGeneration = cleanLibtvForPackage(cleanNode.libtvImageGeneration);
     if (isRecord(cleanNode.data)) {
       const cleanData = cleanGenerationTask({ ...cleanNode.data });
       delete cleanData.thumbUrl;
       cleanData.actionFission = cleanActionFissionForPackage(cleanData.actionFission);
-      cleanData.libtvImageGeneration = cleanLibtvForPackage(cleanData.libtvImageGeneration);
       cleanNode.data = cleanData;
     }
     return cleanNode;
@@ -333,29 +293,13 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore }) 
     }
   }
 
-  function collectGenerationTaskAssets(task, add, prefix) {
-    if (!isRecord(task)) return;
-    collectGenerationResultAssets(task.result, add, `${prefix}.result`);
-    if (Array.isArray(task.referenceImages)) {
-      task.referenceImages.forEach((url, index) => add(url, `${prefix}.referenceImages.${index}`));
-    }
-  }
-
   function collectActionFissionAssets(actionFission, add, prefix) {
     if (!isRecord(actionFission)) return;
     for (const row of Array.isArray(actionFission.rows) ? actionFission.rows : []) {
       const rowPrefix = `${prefix}.row:${row?.id || ''}`;
       add(row?.resultUrl, `${rowPrefix}.resultUrl`);
       add(row?.selectedActionAssetUrl, `${rowPrefix}.selectedActionAssetUrl`);
-      collectGenerationTaskAssets(row?.generationTask, add, `${rowPrefix}.generationTask`);
     }
-  }
-
-  function collectLibtvAssets(state, add, prefix) {
-    if (!isRecord(state)) return;
-    add(state.latestRun?.localUrl, `${prefix}.latestRun.localUrl`);
-    add(state.latestRun?.resultUrl, `${prefix}.latestRun.resultUrl`);
-    collectGenerationTaskAssets(state.task, add, `${prefix}.task`);
   }
 
   function collectAssets(canvas) {
@@ -366,8 +310,6 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore }) 
       const prefix = `node:${node.id || ''}`;
       add(node.url, `${prefix}.url`);
       add(node.filePath, `${prefix}.filePath`);
-      collectGenerationTaskAssets(node.generationTask, add, `${prefix}.generationTask`);
-      collectLibtvAssets(node.libtvImageGeneration, add, `${prefix}.libtvImageGeneration`);
       collectActionFissionAssets(node.actionFission, add, `${prefix}.actionFission`);
 
       const data = isRecord(node.data) ? node.data : {};
@@ -377,8 +319,6 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore }) 
           collectGenerationResultAssets(result, add, `${prefix}.data.generatedImages.${index}`);
         });
       }
-      collectGenerationTaskAssets(data.generationTask, add, `${prefix}.data.generationTask`);
-      collectLibtvAssets(data.libtvImageGeneration, add, `${prefix}.data.libtvImageGeneration`);
       collectActionFissionAssets(data.actionFission, add, `${prefix}.data.actionFission`);
     }
     return { assets: Array.from(assetsByPath.values()), warnings };
@@ -569,7 +509,7 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore }) 
 
   function importJsonFile(filePath, projectId) {
     const parsed = readJsonFile(filePath);
-    const cleaned = sanitizeCanvasForJsonOnly(parsed);
+    const cleaned = sanitizeCanvasForJsonOnly(upgradeCanvasDocument(parsed).canvas);
     return createImportedCanvas(cleaned, projectId);
   }
 
@@ -591,7 +531,7 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore }) 
     if (!manifestEntry || !canvasEntry) throw new Error('Invalid Forart canvas package.');
     const manifest = JSON.parse(manifestEntry.getData().toString('utf8'));
     if (manifest?.format !== PACKAGE_FORMAT) throw new Error('Unsupported canvas package format.');
-    const canvas = JSON.parse(canvasEntry.getData().toString('utf8'));
+    const canvas = upgradeCanvasDocument(JSON.parse(canvasEntry.getData().toString('utf8'))).canvas;
     const urlByAssetId = new Map();
     const urlByOriginalUrl = new Map();
     for (const asset of Array.isArray(manifest.assets) ? manifest.assets : []) {

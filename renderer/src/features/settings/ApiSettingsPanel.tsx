@@ -155,10 +155,11 @@ export function ApiSettingsPanel() {
   }
 
   function applySidebarOrder(nextOrder: string[]) {
-    setProviderOrder(nextOrder);
+    const normalizedOrder = normalizeApiProviderOrder(nextOrder, providers);
+    setProviderOrder(normalizedOrder);
     setProviders((current) => {
       const byId = new Map(current.map((provider) => [provider.id, provider]));
-      return nextOrder.filter((id) => id !== "libtv").map((id) => byId.get(id)).filter((provider): provider is ApiProvider => Boolean(provider));
+      return normalizedOrder.filter((id) => id !== "libtv").map((id) => byId.get(id)).filter((provider): provider is ApiProvider => Boolean(provider));
     });
   }
 

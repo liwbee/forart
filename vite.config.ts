@@ -33,6 +33,7 @@ export default defineConfig({
       ignored: [
         "**/.forart-data/**",
         "**/CanvasAssests/**",
+        "**/generation-tasks.sqlite*",
         "**/dist/**",
         "**/node_modules/**",
         "**/server/node_modules/**",

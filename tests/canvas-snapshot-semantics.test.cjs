@@ -73,7 +73,7 @@ test('canvas snapshot semantics persist explicit React Flow resize dimensions in
   assert.notEqual(canvasSnapshotSignatures(resized).content, canvasSnapshotSignatures(base).content);
 });
 
-test('canvas snapshot semantics ignore transient generation polling objects but keep task anchors', () => {
+test('canvas snapshot semantics persist unified task pointers silently', () => {
   const { canvasSnapshotSignatures } = loadSnapshotSemantics();
   const plain = snapshot();
   const base = snapshot({
@@ -86,38 +86,19 @@ test('canvas snapshot semantics ignore transient generation polling objects but 
       },
     }],
   });
-  const transient = snapshot({
+  const anchored = snapshot({
     nodes: [{
       ...base.nodes[0],
       data: {
         ...base.nodes[0].data,
-        generationTask: { id: 'poll-1', status: 'running', updatedAt: 20 },
-        libtvImageGeneration: {
-          ...base.nodes[0].data.libtvImageGeneration,
-          task: { id: 'libtv-poll', status: 'running' },
-        },
-        actionFission: {
-          ...base.nodes[0].data.actionFission,
-          rows: [{
-            id: 'row-1',
-            generationTask: { id: 'row-poll', status: 'running' },
-            libtvTask: { id: 'row-libtv-poll', status: 'running' },
-            libtvQueued: true,
-            libtvRunning: true,
-          }],
-        },
+        latestGenerationTaskId: 'task-anchor',
+        actionFission: { rows: [{ id: 'row-1', latestGenerationTaskId: 'row-task-anchor' }] },
       },
     }],
   });
-  const anchored = snapshot({
-    nodes: [{
-      ...base.nodes[0],
-      data: { ...base.nodes[0].data, generationTaskId: 'task-anchor' },
-    }],
-  });
 
-  assert.deepEqual(canvasSnapshotSignatures(transient), canvasSnapshotSignatures(base));
-  assert.notEqual(canvasSnapshotSignatures(anchored).content, canvasSnapshotSignatures(base).content);
+  assert.equal(canvasSnapshotSignatures(anchored).content, canvasSnapshotSignatures(base).content);
+  assert.notEqual(canvasSnapshotSignatures(anchored).persistence, canvasSnapshotSignatures(base).persistence);
 });
 
 test('viewport changes require silent persistence without changing the content signature', () => {

@@ -242,6 +242,10 @@
 }
 
 @media (max-width: 560px) {
+  .settings-libtv-account-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .settings-api-control-row {
     grid-template-columns: minmax(0, 1fr);
   }
