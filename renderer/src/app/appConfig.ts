@@ -51,7 +51,7 @@ export interface ForartInfiniteCanvasSettings {
   connectionsVisible: boolean;
   minimapOpen: boolean;
   snapToGrid: boolean;
-  actionFissionViewer: {
+  referenceComparisonViewer: {
     referenceComparisonEnabled: boolean;
     referencePanelPercent: number;
   };

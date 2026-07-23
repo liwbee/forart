@@ -31,6 +31,7 @@ import {
 } from "../generation/generationRuntimeStore";
 import { isGenerationTaskActive, useGenerationTaskCache } from "../generation/generationTaskCache";
 import { ImageNodeCropEditor, type ImageCropAspect } from "./ImageNodeCropEditor";
+import { ImageGeneratorImageViewer } from "./ImageGeneratorImageViewer";
 
 function GenerationErrorStatus({ message }: { message: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -140,6 +141,14 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     : [];
   const viewerImages = generatedViewerImages.length ? generatedViewerImages : resolvedImageUrl ? [resolvedImageUrl] : [];
   const viewerSrc = viewerImages[Math.min(viewerIndex, Math.max(0, viewerImages.length - 1))] || "";
+  const viewerNavigation = viewerImages.length > 1 ? {
+    index: viewerIndex,
+    total: viewerImages.length,
+    previousLabel: t("infiniteCanvas:previousImage"),
+    nextLabel: t("infiniteCanvas:nextImage"),
+    onPrevious: () => setViewerIndex((current) => Math.max(0, current - 1)),
+    onNext: () => setViewerIndex((current) => Math.min(viewerImages.length - 1, current + 1)),
+  } : undefined;
 
   const downloadImage = () => {
     if (isDownloadBusy) return;
@@ -682,20 +691,21 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
       ) : null}
 
       {definition.providesOutput ? <Handle type="source" position={Position.Right} id="output" /> : null}
-      {viewerOpen && viewerSrc ? (
+      {viewerOpen && viewerSrc && data.kind === "imageGenerator" ? (
+        <ImageGeneratorImageViewer
+          nodeId={id}
+          src={viewerSrc}
+          alt={displayLabel}
+          onClose={() => setViewerOpen(false)}
+          navigation={viewerNavigation}
+        />
+      ) : viewerOpen && viewerSrc ? (
         <ImageViewer
           src={viewerSrc}
           alt={displayLabel}
           ariaLabel={t("infiniteCanvas:viewLargeImage")}
           onClose={() => setViewerOpen(false)}
-          navigation={viewerImages.length > 1 ? {
-            index: viewerIndex,
-            total: viewerImages.length,
-            previousLabel: t("infiniteCanvas:previousImage"),
-            nextLabel: t("infiniteCanvas:nextImage"),
-            onPrevious: () => setViewerIndex((current) => (current - 1 + viewerImages.length) % viewerImages.length),
-            onNext: () => setViewerIndex((current) => (current + 1) % viewerImages.length),
-          } : undefined}
+          navigation={viewerNavigation}
         />
       ) : null}
     </>

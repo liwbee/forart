@@ -21,7 +21,7 @@ test('infinite canvas settings use stable defaults for old config files', (t) =>
     connectionsVisible: true,
     minimapOpen: false,
     snapToGrid: false,
-    actionFissionViewer: { referenceComparisonEnabled: false, referencePanelPercent: 50 },
+    referenceComparisonViewer: { referenceComparisonEnabled: false, referencePanelPercent: 50 },
   });
 });
 
@@ -50,6 +50,10 @@ test('config sections preserve sibling data and use atomic replacement', (t) => 
   }), 'utf8');
 
   const store = createConfigStore({ app: { isPackaged: false }, rootDir: tempRoot });
+  assert.deepEqual(store.loadInfiniteCanvasSettings().referenceComparisonViewer, {
+    referenceComparisonEnabled: true,
+    referencePanelPercent: 64,
+  });
   const savedApiSettings = store.saveApiSettings({
     ...store.loadApiSettings(),
     libtvMachineId: ' PC-02_中文 ',
@@ -66,9 +70,9 @@ test('config sections preserve sibling data and use atomic replacement', (t) => 
     connectionsVisible: true,
     minimapOpen: false,
     snapToGrid: true,
-    actionFissionViewer: { referenceComparisonEnabled: true, referencePanelPercent: 92.4 },
+    referenceComparisonViewer: { referenceComparisonEnabled: true, referencePanelPercent: 92.4 },
   });
-  assert.equal(savedInfiniteCanvas.actionFissionViewer.referencePanelPercent, 80);
+  assert.equal(savedInfiniteCanvas.referenceComparisonViewer.referencePanelPercent, 80);
   assert.deepEqual(store.loadInfiniteCanvasSettings(), savedInfiniteCanvas);
 
   store.save({

@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import "../../renderer/src/i18n";
 import "../../renderer/src/styles/global.css";
 import { TooltipProvider } from "../../renderer/src/components/ui/tooltip";
-import { ActionFissionImageViewer } from "../../renderer/src/features/infinite-canvas/nodes/ActionFissionImageViewer";
+import { ReferenceComparisonImageViewer } from "../../renderer/src/features/infinite-canvas/nodes/ReferenceComparisonImageViewer";
 
 function imageData(label: string, width: number, height: number, color: string) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="${color}"/><circle cx="50%" cy="38%" r="18%" fill="#f5f5f5"/><rect x="31%" y="58%" width="38%" height="30%" rx="20" fill="#f5f5f5"/><text x="50%" y="95%" fill="#111" font-family="sans-serif" font-size="28" text-anchor="middle">${label}</text></svg>`;
@@ -19,8 +19,7 @@ function Fixture() {
   const [referencePanelPercent, setReferencePanelPercent] = useState(50);
 
   return (
-    <ActionFissionImageViewer
-      kind="result"
+    <ReferenceComparisonImageViewer
       src={results[resultIndex]}
       alt={`Result ${resultIndex + 1}`}
       ariaLabel="Action fission result viewer"

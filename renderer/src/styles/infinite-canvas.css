@@ -571,18 +571,18 @@
   object-fit: contain;
 }
 
-.rf-action-fission-viewer-stage .rf-action-fission-viewer-layout {
+.rf-reference-comparison-viewer-stage .rf-reference-comparison-viewer-layout {
   position: absolute;
   inset: 76px 76px 24px;
   overflow: hidden;
 }
 
-.rf-action-fission-viewer-panel-group {
+.rf-reference-comparison-viewer-panel-group {
   min-width: 0;
   min-height: 0;
 }
 
-.rf-action-fission-viewer-pane {
+.rf-reference-comparison-viewer-pane {
   position: relative;
   width: 100%;
   height: 100%;
@@ -591,14 +591,14 @@
   overflow: hidden;
 }
 
-.rf-action-fission-viewer-handle {
+.rf-reference-comparison-viewer-handle {
   width: 12px;
   flex: 0 0 12px;
   background: transparent;
   cursor: col-resize;
 }
 
-.rf-action-fission-viewer-handle::before {
+.rf-reference-comparison-viewer-handle::before {
   content: "";
   width: 1px;
   height: 100%;
@@ -606,12 +606,12 @@
   transition: background 160ms ease;
 }
 
-.rf-action-fission-viewer-handle:hover::before,
-.rf-action-fission-viewer-handle:focus-visible::before {
+.rf-reference-comparison-viewer-handle:hover::before,
+.rf-reference-comparison-viewer-handle:focus-visible::before {
   background: var(--media-overlay-border-strong);
 }
 
-.rf-action-fission-viewer-reference-nav {
+.rf-reference-comparison-viewer-reference-nav {
   position: absolute;
   left: 50%;
   bottom: 12px;
@@ -632,12 +632,12 @@
   backdrop-filter: blur(16px);
 }
 
-.rf-action-fission-viewer-reference-nav span {
+.rf-reference-comparison-viewer-reference-nav span {
   min-width: 42px;
   text-align: center;
 }
 
-.rf-action-fission-viewer-toggle {
+.rf-reference-comparison-viewer-toggle {
   min-height: 36px;
   display: inline-flex;
   align-items: center;
@@ -651,11 +651,11 @@
   cursor: pointer;
 }
 
-.rf-action-fission-viewer-toggle:hover {
+.rf-reference-comparison-viewer-toggle:hover {
   background: var(--media-overlay-bg-strong);
 }
 
-.rf-action-fission-viewer-result-nav-layer {
+.rf-reference-comparison-viewer-result-nav-layer {
   position: absolute;
   inset: 0;
   z-index: 6;
@@ -666,7 +666,7 @@
   pointer-events: none;
 }
 
-.rf-action-fission-viewer-result-nav {
+.rf-reference-comparison-viewer-result-nav {
   width: 48px;
   min-height: 56px;
   flex: 0 0 48px;
@@ -680,26 +680,26 @@
   pointer-events: auto;
 }
 
-.rf-action-fission-viewer-result-nav:hover:not(:disabled) {
+.rf-reference-comparison-viewer-result-nav:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--media-overlay-border-strong) 68%, transparent);
   background: var(--media-overlay-bg-strong);
 }
 
-.rf-action-fission-viewer-result-nav:active {
+.rf-reference-comparison-viewer-result-nav:active {
   transform: scale(0.96);
 }
 
-.rf-action-fission-viewer-result-nav:disabled {
+.rf-reference-comparison-viewer-result-nav:disabled {
   cursor: default;
   opacity: var(--state-disabled-opacity);
 }
 
 @media (max-width: 760px) {
-  .rf-action-fission-viewer-stage .rf-action-fission-viewer-layout {
+  .rf-reference-comparison-viewer-stage .rf-reference-comparison-viewer-layout {
     inset: 70px 58px 18px;
   }
 
-  .rf-action-fission-viewer-result-nav {
+  .rf-reference-comparison-viewer-result-nav {
     width: 44px;
     min-height: 52px;
     flex-basis: 44px;

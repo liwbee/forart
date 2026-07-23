@@ -23,6 +23,7 @@ import { ButtonGroup } from "../../../components/ui/button-group";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "../../../components/ui/toggle-group";
+import { ImageViewer } from "../../../lib/ImageViewer";
 import { cn } from "../../../lib/utils";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import type { ActionEntry, ActionProject, ActionTag } from "../../action-library/types";
@@ -55,7 +56,7 @@ import {
 } from "../generation/imageGenerationInputs";
 import { ActionFissionParamPanel } from "./ActionFissionParamPanel";
 import { actionFissionLaunchingRowIds, useGenerationRuntimeStore } from "../generation/generationRuntimeStore";
-import { ActionFissionImageViewer } from "./ActionFissionImageViewer";
+import { ReferenceComparisonImageViewer } from "./ReferenceComparisonImageViewer";
 import { useInfiniteCanvasSettings } from "../infiniteCanvasSettings";
 
 interface ActionFissionNodeBodyProps {
@@ -355,7 +356,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   const { t } = useTranslation();
   const actions = useNativeCanvasActions();
   const { settings, updateSettings } = useInfiniteCanvasSettings();
-  const viewerSettings = settings.actionFissionViewer;
+  const viewerSettings = settings.referenceComparisonViewer;
   const [viewerImage, setViewerImage] = useState<ViewerImage | null>(null);
   const [viewerReferenceNodeId, setViewerReferenceNodeId] = useState("");
   const [downloadBusyRowId, setDownloadBusyRowId] = useState("");
@@ -600,6 +601,24 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           })(),
           onClick: () => void actions.runActionFission(nodeId, viewerImage.id),
         }];
+  const viewerNavigation = (() => {
+    if (!viewerImage) return undefined;
+    const images = viewerImages[viewerImage.kind];
+    const index = images.findIndex((image) => image.id === viewerImage.id);
+    if (images.length <= 1 || index < 0) return undefined;
+    return {
+      index,
+      total: images.length,
+      previousLabel: t("infiniteCanvas:previousImage"),
+      nextLabel: t("infiniteCanvas:nextImage"),
+      onPrevious: () => {
+        if (index > 0) setViewerImage(images[index - 1]);
+      },
+      onNext: () => {
+        if (index < images.length - 1) setViewerImage(images[index + 1]);
+      },
+    };
+  })();
 
   const downloadRow = (row: ActionFissionRow) => {
     if (downloadBusyRowId) return;
@@ -780,9 +799,17 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
         onRun={() => actions.runActionFission(nodeId)}
         onStop={() => actions.stopActionFission(nodeId)}
       />
-      {viewerImage ? (
-        <ActionFissionImageViewer
-          kind={viewerImage.kind}
+      {viewerImage?.kind === "action" ? (
+        <ImageViewer
+          src={resolvedViewerImage?.src ?? viewerImage.src}
+          alt={resolvedViewerImage?.alt ?? viewerImage.alt}
+          ariaLabel={t("infiniteCanvas:viewLargeImage")}
+          onClose={() => setViewerImage(null)}
+          actions={viewerActions}
+          navigation={viewerNavigation}
+        />
+      ) : viewerImage ? (
+        <ReferenceComparisonImageViewer
           src={resolvedViewerImage?.src ?? viewerImage.src}
           alt={resolvedViewerImage?.alt ?? viewerImage.alt}
           ariaLabel={t("infiniteCanvas:viewLargeImage")}
@@ -805,34 +832,18 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           comparisonLabel={t("infiniteCanvas:referenceComparison")}
           onComparisonEnabledChange={(referenceComparisonEnabled) => updateSettings((current) => ({
             ...current,
-            actionFissionViewer: { ...current.actionFissionViewer, referenceComparisonEnabled },
+            referenceComparisonViewer: { ...current.referenceComparisonViewer, referenceComparisonEnabled },
           }))}
           referencePanelPercent={viewerSettings.referencePanelPercent}
           onReferencePanelPercentChange={(referencePanelPercent) => updateSettings((current) => {
             const normalizedPercent = Math.max(20, Math.min(80, Math.round(referencePanelPercent)));
-            if (normalizedPercent === current.actionFissionViewer.referencePanelPercent) return current;
+            if (normalizedPercent === current.referenceComparisonViewer.referencePanelPercent) return current;
             return {
               ...current,
-              actionFissionViewer: { ...current.actionFissionViewer, referencePanelPercent: normalizedPercent },
+              referenceComparisonViewer: { ...current.referenceComparisonViewer, referencePanelPercent: normalizedPercent },
             };
           })}
-          navigation={(() => {
-            const images = viewerImages[viewerImage.kind];
-            const index = images.findIndex((image) => image.id === viewerImage.id);
-            if (images.length <= 1 || index < 0) return undefined;
-            return {
-              index,
-              total: images.length,
-              previousLabel: t("infiniteCanvas:previousImage"),
-              nextLabel: t("infiniteCanvas:nextImage"),
-              onPrevious: () => {
-                if (index > 0) setViewerImage(images[index - 1]);
-              },
-              onNext: () => {
-                if (index < images.length - 1) setViewerImage(images[index + 1]);
-              },
-            };
-          })()}
+          navigation={viewerNavigation}
         />
       ) : null}
     </section>

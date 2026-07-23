@@ -7,10 +7,10 @@ test("keeps reference and result navigation visible inside their panes", async (
 
   await expect(page.getByRole("dialog", { name: "Action fission result viewer" })).toBeVisible();
 
-  const panes = page.locator(".rf-action-fission-viewer-pane");
+  const panes = page.locator(".rf-reference-comparison-viewer-pane");
   await expect(panes).toHaveCount(2);
 
-  const referenceNavigation = page.locator(".rf-action-fission-viewer-reference-nav");
+  const referenceNavigation = page.locator(".rf-reference-comparison-viewer-reference-nav");
   await expect(referenceNavigation).toBeVisible();
   await expect(referenceNavigation).toContainText("1 / 1");
   await expect(referenceNavigation.getByRole("button")).toHaveCount(2);
@@ -26,7 +26,7 @@ test("keeps reference and result navigation visible inside their panes", async (
   const referenceNavigationTopmost = await page.evaluate(({ x, y }) => {
     const element = document.elementFromPoint(x, y);
     return {
-      isNavigation: Boolean(element?.closest(".rf-action-fission-viewer-reference-nav")),
+      isNavigation: Boolean(element?.closest(".rf-reference-comparison-viewer-reference-nav")),
       tagName: element?.tagName,
       className: element?.getAttribute("class"),
     };
@@ -36,7 +36,7 @@ test("keeps reference and result navigation visible inside their panes", async (
   });
   expect(referenceNavigationTopmost).toEqual(expect.objectContaining({ isNavigation: true }));
 
-  const resultNavigation = page.locator(".rf-action-fission-viewer-result-nav");
+  const resultNavigation = page.locator(".rf-reference-comparison-viewer-result-nav");
   await expect(resultNavigation).toHaveCount(2);
   await expect(page.getByRole("button", { name: "Previous result" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Next result" })).toBeVisible();

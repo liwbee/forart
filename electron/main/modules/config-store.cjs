@@ -31,8 +31,9 @@ function normalizeImageReviewSettings(payload = {}) {
 
 function normalizeInfiniteCanvasSettings(payload = {}) {
   const source = payload && typeof payload === 'object' ? payload : {};
-  const viewerSource = source.actionFissionViewer && typeof source.actionFissionViewer === 'object'
-    ? source.actionFissionViewer
+  const viewerCandidate = source.referenceComparisonViewer || source.actionFissionViewer;
+  const viewerSource = viewerCandidate && typeof viewerCandidate === 'object'
+    ? viewerCandidate
     : {};
   const rawPercent = viewerSource.referencePanelPercent;
   const requestedPercent = rawPercent === undefined || rawPercent === null || rawPercent === ''
@@ -42,7 +43,7 @@ function normalizeInfiniteCanvasSettings(payload = {}) {
     connectionsVisible: source.connectionsVisible !== false,
     minimapOpen: source.minimapOpen === true,
     snapToGrid: source.snapToGrid === true,
-    actionFissionViewer: {
+    referenceComparisonViewer: {
       referenceComparisonEnabled: viewerSource.referenceComparisonEnabled === true,
       referencePanelPercent: Number.isFinite(requestedPercent)
         ? Math.max(20, Math.min(80, Math.round(requestedPercent)))

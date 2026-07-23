@@ -1,7 +1,7 @@
 {
   "name": "forart-server",
   "private": true,
-  "version": "0.1.35",
+  "version": "0.1.36",
   "type": "module",
   "scripts": {
     "start": "node forart-server.mjs",

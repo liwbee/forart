@@ -5,7 +5,7 @@ export const DEFAULT_INFINITE_CANVAS_SETTINGS: ForartInfiniteCanvasSettings = {
   connectionsVisible: true,
   minimapOpen: false,
   snapToGrid: false,
-  actionFissionViewer: {
+  referenceComparisonViewer: {
     referenceComparisonEnabled: false,
     referencePanelPercent: 50,
   },
@@ -13,8 +13,12 @@ export const DEFAULT_INFINITE_CANVAS_SETTINGS: ForartInfiniteCanvasSettings = {
 
 export function normalizeInfiniteCanvasSettings(input: unknown): ForartInfiniteCanvasSettings {
   const source = input && typeof input === "object" ? input as Partial<ForartInfiniteCanvasSettings> : {};
-  const viewerSource: Partial<ForartInfiniteCanvasSettings["actionFissionViewer"]> = source.actionFissionViewer && typeof source.actionFissionViewer === "object"
-    ? source.actionFissionViewer
+  const legacySource = source as Partial<ForartInfiniteCanvasSettings> & {
+    actionFissionViewer?: Partial<ForartInfiniteCanvasSettings["referenceComparisonViewer"]>;
+  };
+  const viewerCandidate = source.referenceComparisonViewer || legacySource.actionFissionViewer;
+  const viewerSource: Partial<ForartInfiniteCanvasSettings["referenceComparisonViewer"]> = viewerCandidate && typeof viewerCandidate === "object"
+    ? viewerCandidate
     : {};
   const rawPercent: unknown = viewerSource.referencePanelPercent;
   const requestedPercent = rawPercent === undefined || rawPercent === null || rawPercent === ""
@@ -24,7 +28,7 @@ export function normalizeInfiniteCanvasSettings(input: unknown): ForartInfiniteC
     connectionsVisible: source.connectionsVisible !== false,
     minimapOpen: source.minimapOpen === true,
     snapToGrid: source.snapToGrid === true,
-    actionFissionViewer: {
+    referenceComparisonViewer: {
       referenceComparisonEnabled: viewerSource.referenceComparisonEnabled === true,
       referencePanelPercent: Number.isFinite(requestedPercent)
         ? Math.max(20, Math.min(80, Math.round(requestedPercent)))

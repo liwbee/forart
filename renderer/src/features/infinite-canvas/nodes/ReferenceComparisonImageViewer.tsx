@@ -6,7 +6,6 @@ import { Button } from "../../../components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../components/ui/resizable";
 import { Switch } from "../../../components/ui/switch";
 import {
-  ImageViewer,
   ImageViewerActionButtons,
   type ImageViewerAction,
   type ImageViewerNavigation,
@@ -14,14 +13,13 @@ import {
 import { ImageViewerSurface, type ImageViewerActivity } from "../../../lib/ImageViewerSurface";
 import { cn } from "../../../lib/utils";
 
-interface ActionFissionViewerReference {
+export interface ReferenceComparisonViewerReference {
   src: string;
   alt: string;
   navigation: ImageViewerNavigation;
 }
 
-interface ActionFissionImageViewerProps {
-  kind: "result" | "action";
+interface ReferenceComparisonImageViewerProps {
   src: string;
   alt: string;
   ariaLabel: string;
@@ -29,7 +27,7 @@ interface ActionFissionImageViewerProps {
   actions: ImageViewerAction[];
   navigation?: ImageViewerNavigation;
   activity?: ImageViewerActivity;
-  reference?: ActionFissionViewerReference;
+  reference?: ReferenceComparisonViewerReference;
   comparisonEnabled: boolean;
   comparisonLabel: string;
   onComparisonEnabledChange: (enabled: boolean) => void;
@@ -37,8 +35,7 @@ interface ActionFissionImageViewerProps {
   onReferencePanelPercentChange: (percent: number) => void;
 }
 
-export function ActionFissionImageViewer({
-  kind,
+export function ReferenceComparisonImageViewer({
   src,
   alt,
   ariaLabel,
@@ -52,7 +49,7 @@ export function ActionFissionImageViewer({
   onComparisonEnabledChange,
   referencePanelPercent,
   onReferencePanelPercentChange,
-}: ActionFissionImageViewerProps) {
+}: ReferenceComparisonImageViewerProps) {
   const { t } = useTranslation();
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
   const [isClosing, setIsClosing] = useState(false);
@@ -77,7 +74,6 @@ export function ActionFissionImageViewer({
   }, [src]);
 
   useEffect(() => {
-    if (kind !== "result") return;
     function handleKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") {
         requestClose();
@@ -96,30 +92,16 @@ export function ActionFissionImageViewer({
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [kind, navigation, requestClose]);
+  }, [navigation, requestClose]);
 
   useEffect(() => {
-    if (kind !== "result") return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
       document.body.style.overflow = previousOverflow;
     };
-  }, [kind]);
-
-  if (kind === "action") {
-    return (
-      <ImageViewer
-        src={src}
-        alt={alt}
-        ariaLabel={ariaLabel}
-        onClose={onClose}
-        actions={actions}
-        navigation={navigation}
-      />
-    );
-  }
+  }, []);
 
   const isolatePointerEvent = (event: React.SyntheticEvent) => {
     if (isResizingRef.current || (event.target as Element | null)?.closest?.("[data-separator]")) return;
@@ -127,9 +109,9 @@ export function ActionFissionImageViewer({
   };
 
   const resultNavigation = hasNavigation && navigation ? (
-    <div className="rf-action-fission-viewer-result-nav-layer">
+    <div className="rf-reference-comparison-viewer-result-nav-layer">
       <Button
-        className="rf-action-fission-viewer-result-nav is-previous"
+        className="rf-reference-comparison-viewer-result-nav is-previous"
         type="button"
         variant="ghost"
         size="icon-lg"
@@ -142,7 +124,7 @@ export function ActionFissionImageViewer({
         <ChevronLeft aria-hidden="true" />
       </Button>
       <Button
-        className="rf-action-fission-viewer-result-nav is-next"
+        className="rf-reference-comparison-viewer-result-nav is-next"
         type="button"
         variant="ghost"
         size="icon-lg"
@@ -180,16 +162,16 @@ export function ActionFissionImageViewer({
       }}
     >
       <div
-        className={cn("model-image-viewer-stage", "rf-action-fission-viewer-stage", isClosing && "closing")}
+        className={cn("model-image-viewer-stage", "rf-reference-comparison-viewer-stage", isClosing && "closing")}
         onClick={(event) => {
           event.stopPropagation();
           if (event.target === event.currentTarget) requestClose();
         }}
       >
         {showComparison && reference ? (
-          <div className="rf-action-fission-viewer-layout">
+          <div className="rf-reference-comparison-viewer-layout">
             <ResizablePanelGroup
-              className="rf-action-fission-viewer-panel-group"
+              className="rf-reference-comparison-viewer-panel-group"
               orientation="horizontal"
               defaultLayout={{ reference: referencePanelPercent, result: 100 - referencePanelPercent }}
               onLayoutChanged={(layout, meta) => {
@@ -199,9 +181,9 @@ export function ActionFissionImageViewer({
               }}
             >
               <ResizablePanel id="reference" defaultSize={`${referencePanelPercent}%`} minSize="20%">
-                <div className="rf-action-fission-viewer-pane">
+                <div className="rf-reference-comparison-viewer-pane">
                   <ImageViewerSurface src={reference.src} alt={reference.alt} onBlankClick={requestClose} />
-                  <div className="rf-action-fission-viewer-reference-nav" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+                  <div className="rf-reference-comparison-viewer-reference-nav" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
                     <Button type="button" variant="ghost" size="icon-sm" disabled={reference.navigation.index <= 0} aria-label={reference.navigation.previousLabel} title={reference.navigation.previousLabel} onClick={reference.navigation.onPrevious}>
                       <ChevronLeft aria-hidden="true" />
                     </Button>
@@ -213,7 +195,7 @@ export function ActionFissionImageViewer({
                 </div>
               </ResizablePanel>
               <ResizableHandle
-                className="rf-action-fission-viewer-handle"
+                className="rf-reference-comparison-viewer-handle"
                 aria-label={t("infiniteCanvas:resizeReferenceComparison")}
                 onPointerDown={() => {
                   isResizingRef.current = true;
@@ -226,7 +208,7 @@ export function ActionFissionImageViewer({
                 }}
               />
               <ResizablePanel id="result" defaultSize={`${100 - referencePanelPercent}%`} minSize="20%">
-                <div className="rf-action-fission-viewer-pane">
+                <div className="rf-reference-comparison-viewer-pane">
                   <ImageViewerSurface src={src} alt={alt} activity={activity} onNaturalSizeChange={setNaturalSize} onBlankClick={requestClose} />
                   {resultNavigation}
                 </div>
@@ -250,7 +232,7 @@ export function ActionFissionImageViewer({
         <div className="model-image-viewer-top-center" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
           {hasNavigation && navigation ? <span className="model-image-viewer-counter">{navigation.index + 1} / {navigation.total}</span> : null}
           {reference ? (
-            <label className="rf-action-fission-viewer-toggle">
+            <label className="rf-reference-comparison-viewer-toggle">
               <span>{comparisonLabel}</span>
               <Switch size="sm" checked={comparisonEnabled} aria-label={comparisonLabel} onCheckedChange={onComparisonEnabledChange} />
             </label>
