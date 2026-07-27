@@ -1,10 +1,11 @@
 const CURRENT_CANVAS_SCHEMA_VERSION = 2;
 
-const NODE_KINDS = new Set(['imageGenerator', 'imageLoader', 'prompt', 'llm', 'actionFission']);
+const NODE_KINDS = new Set(['imageGenerator', 'imageLoader', 'prompt', 'annotation', 'llm', 'actionFission']);
 const NODE_DEFAULT_SIZES = Object.freeze({
   imageGenerator: { width: 280, height: 280 },
   imageLoader: { width: 240, height: 320 },
   prompt: { width: 260, height: 160 },
+  annotation: { width: 64, height: 40 },
   llm: { width: 280, height: 190 },
   actionFission: { width: 820, height: 620 },
 });
@@ -174,10 +175,11 @@ function currentNodeKind(node, data) {
 function normalizeNodeData(node, kind) {
   const source = isRecord(node.data) ? node.data : {};
   const data = { ...source, kind };
-  if (!safeString(data.label)) data.label = safeString(node.title);
+  if (!safeString(data.label)) data.label = safeString(data.title || node.title);
   else data.label = String(data.label);
 
   removeKeys(data, [
+    'title',
     'generationTask',
     'generationTaskId',
     'generationRemoteTaskId',

@@ -24,13 +24,19 @@ contextBridge.exposeInMainWorld('easyTool', {
   deleteCanvas: (canvasId) => ipcRenderer.invoke('canvas:delete', canvasId),
   deleteCanvasProject: (projectId) => ipcRenderer.invoke('canvas:delete-project', projectId),
   moveCanvasToProject: (canvasId, projectId) => ipcRenderer.invoke('canvas:move-to-project', canvasId, projectId),
-  exportCanvasJson: (canvasId) => ipcRenderer.invoke('canvas:export-json', canvasId),
-  exportCanvasPackage: (canvasId) => ipcRenderer.invoke('canvas:export-package', canvasId),
+  exportCanvasJson: (canvasId, operationId) => ipcRenderer.invoke('canvas:export-json', canvasId, operationId),
+  exportCanvasPackage: (canvasId, operationId) => ipcRenderer.invoke('canvas:export-package', canvasId, operationId),
   importCanvas: (payload) => ipcRenderer.invoke('canvas:import', payload),
-  createCanvasPackageForUpload: (canvasId) => ipcRenderer.invoke('canvas:create-package-for-upload', canvasId),
+  createCanvasPackageForUpload: (canvasId, operationId) => ipcRenderer.invoke('canvas:create-package-for-upload', canvasId, operationId),
   importCanvasPackageFromPath: (payload) => ipcRenderer.invoke('canvas:import-package-from-path', payload),
   uploadCanvasPackageToRemote: (payload) => ipcRenderer.invoke('canvas:upload-package-to-remote', payload),
   downloadCanvasPackageFromRemote: (payload) => ipcRenderer.invoke('canvas:download-package-from-remote', payload),
+  cancelCanvasTransfer: (operationId) => ipcRenderer.invoke('canvas:cancel-transfer', operationId),
+  onCanvasTransferProgress: (callback) => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on('canvas:transfer-progress', listener);
+    return () => ipcRenderer.removeListener('canvas:transfer-progress', listener);
+  },
   saveCanvasAsset: (payload) => ipcRenderer.invoke('canvas:save-asset', payload),
   saveCanvasAssetThumbnail: (payload) => ipcRenderer.invoke('canvas:save-asset-thumbnail', payload),
   ensureCanvasAssetThumbnail: (payload) => ipcRenderer.invoke('canvas:ensure-asset-thumbnail', payload),

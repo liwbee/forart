@@ -25,6 +25,7 @@ import {
 import { ImageViewer } from "../../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import { formatGenerationDuration } from "./generationStatus";
+import { buildTaskDownloadName } from "./generationDownloadName";
 import {
   hydrateRecentGenerationTasks,
   isGenerationTaskActive,
@@ -132,7 +133,7 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
         const result = await window.easyTool.saveResult({
           url: imageUrl,
           dataUrl: imageUrl,
-          defaultName: image.fileName || `generated-image-${task.id}.png`,
+          defaultName: buildTaskDownloadName(task, image.fileName, image.assetUrl),
         });
         toast.success(result.filePath
           ? t("infiniteCanvas:downloadSaved", { path: result.filePath })
@@ -140,7 +141,7 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
       } else {
         const link = document.createElement("a");
         link.href = imageUrl;
-        link.download = image.fileName || `generated-image-${task.id}.png`;
+        link.download = buildTaskDownloadName(task, image.fileName, image.assetUrl);
         document.body.appendChild(link);
         link.click();
         link.remove();

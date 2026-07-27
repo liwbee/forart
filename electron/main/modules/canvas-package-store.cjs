@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const AdmZip = require('adm-zip');
+const { Worker } = require('node:worker_threads');
 const { upgradeCanvasDocument } = require('./canvas-schema.cjs');
 
 const PACKAGE_FORMAT = 'forart.canvas.package';
@@ -9,6 +9,67 @@ const PACKAGE_URL_PREFIX = 'forart-package://asset/';
 
 function nowMs() {
   return Date.now();
+}
+
+function abortError() {
+  const error = new Error('Canvas transfer canceled.');
+  error.name = 'AbortError';
+  return error;
+}
+
+function reportProgress(onProgress, phase, percent, loadedBytes = 0, totalBytes = 0) {
+  onProgress?.({
+    phase,
+    percent: Math.max(0, Math.min(100, Math.round(Number(percent || 0)))),
+    loadedBytes: Math.max(0, Number(loadedBytes || 0)),
+    totalBytes: Math.max(0, Number(totalBytes || 0)),
+  });
+}
+
+function mapWorkerProgress(onProgress, rangeStart = 0, rangeEnd = 100) {
+  return (progress) => {
+    const workerPercent = Math.max(0, Math.min(100, Number(progress?.percent || 0)));
+    reportProgress(
+      onProgress,
+      progress?.phase || 'working',
+      rangeStart + ((rangeEnd - rangeStart) * workerPercent) / 100,
+      progress?.loadedBytes,
+      progress?.totalBytes,
+    );
+  };
+}
+
+function runPackageWorker(payload, options = {}) {
+  const { signal, onProgress } = options;
+  if (signal?.aborted) return Promise.reject(abortError());
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(path.join(__dirname, 'canvas-package-worker.cjs'), { workerData: payload });
+    let settled = false;
+    let aborting = false;
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
+      callback();
+    };
+    const onAbort = () => {
+      aborting = true;
+      void worker.terminate().finally(() => finish(() => reject(abortError())));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    worker.on('message', (message) => {
+      if (message?.type === 'progress') {
+        onProgress?.(message.progress || {});
+        return;
+      }
+      if (message?.type === 'result') finish(() => resolve(message.result));
+      else if (message?.type === 'error') finish(() => reject(new Error(String(message.error || 'Canvas package worker failed.'))));
+    });
+    worker.once('error', (error) => finish(() => reject(error)));
+    worker.once('exit', (code) => {
+      if (!settled && !aborting && code !== 0) finish(() => reject(new Error(`Canvas package worker exited with code ${code}.`)));
+    });
+  });
 }
 
 function isRecord(value) {
@@ -64,13 +125,6 @@ function isLocalUrlLike(value) {
     || /^\/[^/]/.test(text);
 }
 
-function safePackagePath(value) {
-  const normalized = String(value || '').replace(/\\/g, '/');
-  const clean = path.posix.normalize(normalized);
-  if (!clean || clean.startsWith('../') || clean.includes('/../') || clean.startsWith('/') || /^[a-zA-Z]:/.test(clean)) return '';
-  return clean;
-}
-
 function packageAssetUrl(assetId) {
   return PACKAGE_URL_PREFIX + encodeURIComponent(assetId);
 }
@@ -83,11 +137,6 @@ function packageAssetIdFromUrl(value) {
 
 function readJsonFile(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-}
-
-function writeJsonFile(filePath, payload) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
 }
 
 function appVersion(rootDir) {
@@ -220,7 +269,7 @@ function sanitizeCanvasForPackage(canvas, options = {}) {
   });
 }
 
-function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore }) {
+function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, net }) {
   const canvasAssetsRoot = () => assetStore.canvasAssetsRoot();
   const inputRoot = () => assetStore.assetDirectory('input');
   const outputRoot = () => assetStore.assetDirectory('output');
@@ -356,133 +405,227 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore }) 
     return { canvas: rewritten, manifestAssets };
   }
 
-  function exportJson(canvasId) {
+  async function exportJson(canvasId, options = {}) {
     const canvas = canvasStore.readCanvas(canvasId);
     if (!canvas) throw new Error('Canvas not found.');
     const defaultPath = path.join(process.env.USERPROFILE || process.env.HOME || rootDir, `${safeFileBaseName(canvas.title)}.forart-canvas.json`);
-    const result = dialog.showSaveDialogSync({
+    const result = await dialog.showSaveDialog({
       title: 'Export canvas JSON',
       defaultPath,
       filters: [{ name: 'Forart canvas JSON', extensions: ['forart-canvas.json', 'json'] }],
     });
-    if (!result) return { ok: true, canceled: true };
+    if (result.canceled || !result.filePath) return { ok: true, canceled: true };
     const cleaned = sanitizeCanvasForJsonOnly(canvas);
-    writeJsonFile(result, cleaned);
-    return { ok: true, canceled: false, filePath: result, warnings: [] };
+    reportProgress(options.onProgress, 'preparing', 5);
+    try {
+      await runPackageWorker({
+        operation: 'write-json',
+        targetPath: result.filePath,
+        json: JSON.stringify(cleaned, null, 2) + '\n',
+      }, {
+        signal: options.signal,
+        onProgress: mapWorkerProgress(options.onProgress, 5, 100),
+      });
+    } catch (error) {
+      await fs.promises.rm(`${result.filePath}.part`, { force: true }).catch(() => undefined);
+      throw error;
+    }
+    return { ok: true, canceled: false, filePath: result.filePath, warnings: [] };
   }
 
-  function exportPackage(canvasId) {
+  function packagePayload(canvas) {
+    const collected = collectAssets(canvas);
+    const rewritten = rewriteCanvasAssetUrls(canvas, collected.assets);
+    const cleanedCanvas = sanitizeCanvasForPackage(rewritten.canvas, { preservePackageUrls: true });
+    const manifestAssets = rewritten.manifestAssets.map(({ sourceFilePath: _sourceFilePath, ...asset }) => asset);
+    const manifest = {
+      format: PACKAGE_FORMAT,
+      version: PACKAGE_VERSION,
+      exportedAt: nowMs(),
+      appVersion: appVersion(rootDir),
+      mode: 'with-resources',
+      canvas: {
+        id: canvas.id,
+        title: canvas.title,
+        nodeCount: Array.isArray(canvas.nodes) ? canvas.nodes.length : 0,
+      },
+      assets: manifestAssets,
+      warnings: collected.warnings,
+    };
+    return {
+      assets: rewritten.manifestAssets.map((asset) => ({
+        sourceFilePath: asset.sourceFilePath,
+        packagePath: asset.packagePath,
+        sizeBytes: asset.sizeBytes,
+      })),
+      canvasJson: JSON.stringify(cleanedCanvas, null, 2) + '\n',
+      manifestJson: JSON.stringify(manifest, null, 2) + '\n',
+      warnings: collected.warnings,
+    };
+  }
+
+  async function writeCanvasPackageToPath(canvasId, targetPath, options = {}) {
+    const canvas = canvasStore.readCanvas(canvasId);
+    if (!canvas) throw new Error('Canvas not found.');
+    if (!targetPath) throw new Error('Target package path is required.');
+    reportProgress(options.onProgress, 'scanning', options.rangeStart || 0);
+    const payload = packagePayload(canvas);
+    const rangeStart = Number(options.rangeStart || 0);
+    const rangeEnd = Number(options.rangeEnd ?? 100);
+    try {
+      await runPackageWorker({
+        operation: 'pack',
+        targetPath,
+        manifestJson: payload.manifestJson,
+        canvasJson: payload.canvasJson,
+        assets: payload.assets,
+      }, {
+        signal: options.signal,
+        onProgress: mapWorkerProgress(options.onProgress, Math.min(rangeEnd, rangeStart + 5), rangeEnd),
+      });
+      return { ok: true, canceled: false, filePath: targetPath, warnings: payload.warnings };
+    } catch (error) {
+      await fs.promises.rm(`${targetPath}.part`, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async function exportPackage(canvasId, options = {}) {
     const canvas = canvasStore.readCanvas(canvasId);
     if (!canvas) throw new Error('Canvas not found.');
     const defaultPath = path.join(process.env.USERPROFILE || process.env.HOME || rootDir, `${safeFileBaseName(canvas.title)}.forartcanvas`);
-    const result = dialog.showSaveDialogSync({
+    const result = await dialog.showSaveDialog({
       title: 'Export canvas with resources',
       defaultPath,
       filters: [{ name: 'Forart canvas package', extensions: ['forartcanvas'] }],
     });
-    if (!result) return { ok: true, canceled: true };
-
-    const collected = collectAssets(canvas);
-    const rewritten = rewriteCanvasAssetUrls(canvas, collected.assets);
-    const cleanedCanvas = sanitizeCanvasForPackage(rewritten.canvas, { preservePackageUrls: true });
-    const zip = new AdmZip();
-    const manifestAssets = rewritten.manifestAssets.map(({ sourceFilePath: _sourceFilePath, ...asset }) => asset);
-    const manifest = {
-      format: PACKAGE_FORMAT,
-      version: PACKAGE_VERSION,
-      exportedAt: nowMs(),
-      appVersion: appVersion(rootDir),
-      mode: 'with-resources',
-      canvas: {
-        id: canvas.id,
-        title: canvas.title,
-        nodeCount: Array.isArray(canvas.nodes) ? canvas.nodes.length : 0,
-      },
-      assets: manifestAssets,
-      warnings: collected.warnings,
-    };
-    zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2) + '\n', 'utf8'));
-    zip.addFile('canvas.json', Buffer.from(JSON.stringify(cleanedCanvas, null, 2) + '\n', 'utf8'));
-    for (const asset of rewritten.manifestAssets) {
-      zip.addFile(asset.packagePath, fs.readFileSync(asset.sourceFilePath));
-    }
-    zip.writeZip(result);
-    return { ok: true, canceled: false, filePath: result, warnings: collected.warnings };
+    if (result.canceled || !result.filePath) return { ok: true, canceled: true };
+    return writeCanvasPackageToPath(canvasId, result.filePath, options);
   }
 
-  function writeCanvasPackageToPath(canvasId, targetPath) {
-    const canvas = canvasStore.readCanvas(canvasId);
-    if (!canvas) throw new Error('Canvas not found.');
-    if (!targetPath) throw new Error('Target package path is required.');
-    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-    const collected = collectAssets(canvas);
-    const rewritten = rewriteCanvasAssetUrls(canvas, collected.assets);
-    const cleanedCanvas = sanitizeCanvasForPackage(rewritten.canvas, { preservePackageUrls: true });
-    const zip = new AdmZip();
-    const manifestAssets = rewritten.manifestAssets.map(({ sourceFilePath: _sourceFilePath, ...asset }) => asset);
-    const manifest = {
-      format: PACKAGE_FORMAT,
-      version: PACKAGE_VERSION,
-      exportedAt: nowMs(),
-      appVersion: appVersion(rootDir),
-      mode: 'with-resources',
-      canvas: {
-        id: canvas.id,
-        title: canvas.title,
-        nodeCount: Array.isArray(canvas.nodes) ? canvas.nodes.length : 0,
-      },
-      assets: manifestAssets,
-      warnings: collected.warnings,
-    };
-    zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2) + '\n', 'utf8'));
-    zip.addFile('canvas.json', Buffer.from(JSON.stringify(cleanedCanvas, null, 2) + '\n', 'utf8'));
-    for (const asset of rewritten.manifestAssets) {
-      zip.addFile(asset.packagePath, fs.readFileSync(asset.sourceFilePath));
-    }
-    zip.writeZip(targetPath);
-    return { ok: true, canceled: false, filePath: targetPath, warnings: collected.warnings };
-  }
-
-  function createPackageForUpload(canvasId) {
+  function createPackageForUpload(canvasId, options = {}) {
     const targetPath = path.join(
       canvasAssetsRoot(),
       'tmp',
       `${safeFileBaseName(canvasId || 'canvas')}-${Date.now().toString(36)}.forartcanvas`,
     );
-    return writeCanvasPackageToPath(canvasId, targetPath);
+    return writeCanvasPackageToPath(canvasId, targetPath, options);
   }
 
-  async function uploadPackageToRemote(payload = {}) {
+  async function uploadPackageToRemote(payload = {}, options = {}) {
     const filePath = String(payload.filePath || '');
     const uploadUrl = String(payload.uploadUrl || '');
     if (!filePath || !fs.existsSync(filePath)) throw new Error('Canvas package file not found.');
-    if (!/^https?:\/\//i.test(uploadUrl)) throw new Error('Remote upload URL is invalid.');
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: fs.readFileSync(filePath),
-    });
-    const contentType = response.headers.get('content-type') || '';
-    const body = contentType.includes('application/json') ? await response.json() : await response.text();
-    if (!response.ok) {
-      const message = body && typeof body === 'object' && 'detail' in body ? String(body.detail) : String(body || `Upload failed with ${response.status}`);
-      throw new Error(message);
+    const temporaryRoot = path.join(canvasAssetsRoot(), 'tmp');
+    try {
+      if (!/^https?:\/\//i.test(uploadUrl)) throw new Error('Remote upload URL is invalid.');
+      if (!net?.request) throw new Error('Electron network service is unavailable.');
+      const stat = await fs.promises.stat(filePath);
+      const rangeStart = Number(options.rangeStart || 0);
+      const rangeEnd = Number(options.rangeEnd ?? 100);
+      return await new Promise((resolve, reject) => {
+        if (options.signal?.aborted) return reject(abortError());
+        const request = net.request({ method: 'POST', url: uploadUrl });
+        const stream = fs.createReadStream(filePath);
+        let uploadedBytes = 0;
+        const onAbort = () => {
+          stream.destroy(abortError());
+          request.abort();
+          reject(abortError());
+        };
+        options.signal?.addEventListener('abort', onAbort, { once: true });
+        request.setHeader('Content-Type', 'application/octet-stream');
+        request.setHeader('Content-Length', String(stat.size));
+        request.on('response', (response) => {
+          const chunks = [];
+          response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+          response.on('end', () => {
+            options.signal?.removeEventListener('abort', onAbort);
+            const text = Buffer.concat(chunks).toString('utf8');
+            const contentType = String(response.headers['content-type'] || '');
+            let body = text;
+            if (contentType.includes('application/json')) {
+              try { body = JSON.parse(text); } catch { body = text; }
+            }
+            if (response.statusCode < 200 || response.statusCode >= 300) {
+              const message = body && typeof body === 'object' && 'detail' in body ? String(body.detail) : String(body || `Upload failed with ${response.statusCode}`);
+              reject(new Error(message));
+              return;
+            }
+            reportProgress(options.onProgress, 'uploading', rangeEnd, stat.size, stat.size);
+            resolve(body);
+          });
+        });
+        request.on('error', (error) => {
+          options.signal?.removeEventListener('abort', onAbort);
+          reject(error);
+        });
+        stream.on('data', (chunk) => {
+          uploadedBytes += chunk.length;
+          const ratio = stat.size > 0 ? uploadedBytes / stat.size : 1;
+          reportProgress(options.onProgress, 'uploading', rangeStart + ((rangeEnd - rangeStart) * ratio), uploadedBytes, stat.size);
+        });
+        stream.on('error', reject);
+        reportProgress(options.onProgress, 'uploading', rangeStart, 0, stat.size);
+        stream.pipe(request);
+      });
+    } finally {
+      if (isInsideOrEqual(temporaryRoot, filePath)) {
+        await fs.promises.rm(filePath, { force: true }).catch(() => undefined);
+      }
     }
-    return body;
   }
 
-  async function downloadPackageFromRemote(payload = {}) {
+  async function downloadPackageFromRemote(payload = {}, options = {}) {
     const downloadUrl = String(payload.downloadUrl || '');
     if (!/^https?:\/\//i.test(downloadUrl)) throw new Error('Remote download URL is invalid.');
-    const response = await fetch(downloadUrl);
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(text || `Download failed with ${response.status}`);
-    }
+    if (!net?.request) throw new Error('Electron network service is unavailable.');
     const directory = path.join(canvasAssetsRoot(), 'tmp');
-    fs.mkdirSync(directory, { recursive: true });
+    await fs.promises.mkdir(directory, { recursive: true });
     const targetPath = uniqueFilePath(directory, `remote-canvas-${Date.now().toString(36)}.forartcanvas`);
-    fs.writeFileSync(targetPath, Buffer.from(await response.arrayBuffer()));
+    const partPath = `${targetPath}.part`;
+    await new Promise((resolve, reject) => {
+      if (options.signal?.aborted) return reject(abortError());
+      const request = net.request({ method: 'GET', url: downloadUrl });
+      let output = null;
+      const rangeStart = Number(options.rangeStart || 0);
+      const rangeEnd = Number(options.rangeEnd ?? 100);
+      const onAbort = () => {
+        output?.destroy(abortError());
+        request.abort();
+        reject(abortError());
+      };
+      options.signal?.addEventListener('abort', onAbort, { once: true });
+      request.on('response', (response) => {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          const chunks = [];
+          response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+          response.on('end', () => reject(new Error(Buffer.concat(chunks).toString('utf8') || `Download failed with ${response.statusCode}`)));
+          return;
+        }
+        const totalBytes = Number(response.headers['content-length'] || 0);
+        let loadedBytes = 0;
+        output = fs.createWriteStream(partPath);
+        response.on('data', (chunk) => {
+          loadedBytes += chunk.length;
+          const ratio = totalBytes > 0 ? loadedBytes / totalBytes : 0;
+          reportProgress(options.onProgress, 'downloading', rangeStart + ((rangeEnd - rangeStart) * ratio), loadedBytes, totalBytes);
+        });
+        response.pipe(output);
+        output.on('close', () => {
+          options.signal?.removeEventListener('abort', onAbort);
+          resolve();
+        });
+        output.on('error', reject);
+      });
+      request.on('error', reject);
+      reportProgress(options.onProgress, 'downloading', rangeStart);
+      request.end();
+    }).catch(async (error) => {
+      await fs.promises.rm(partPath, { force: true }).catch(() => undefined);
+      throw error;
+    });
+    await fs.promises.rename(partPath, targetPath);
     return { ok: true, filePath: targetPath };
   }
 
@@ -507,10 +650,18 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore }) 
     });
   }
 
-  function importJsonFile(filePath, projectId) {
-    const parsed = readJsonFile(filePath);
-    const cleaned = sanitizeCanvasForJsonOnly(upgradeCanvasDocument(parsed).canvas);
-    return createImportedCanvas(cleaned, projectId);
+  async function importJsonFile(filePath, projectId, options = {}) {
+    const rangeStart = Number(options.rangeStart || 0);
+    const rangeEnd = Number(options.rangeEnd ?? 100);
+    const parsed = await runPackageWorker({ operation: 'read-json', filePath }, {
+      signal: options.signal,
+      onProgress: mapWorkerProgress(options.onProgress, rangeStart, Math.max(rangeStart, rangeEnd - 10)),
+    });
+    reportProgress(options.onProgress, 'saving', Math.max(rangeStart, rangeEnd - 5));
+    const cleaned = sanitizeCanvasForJsonOnly(upgradeCanvasDocument(parsed.value).canvas);
+    const created = createImportedCanvas(cleaned, projectId);
+    reportProgress(options.onProgress, 'saving', rangeEnd);
+    return created;
   }
 
   function rewriteImportedPackageUrls(canvas, urlByAssetId, urlByOriginalUrl) {
@@ -524,40 +675,46 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore }) 
     });
   }
 
-  function importPackageFile(filePath, projectId) {
-    const zip = new AdmZip(filePath);
-    const manifestEntry = zip.getEntry('manifest.json');
-    const canvasEntry = zip.getEntry('canvas.json');
-    if (!manifestEntry || !canvasEntry) throw new Error('Invalid Forart canvas package.');
-    const manifest = JSON.parse(manifestEntry.getData().toString('utf8'));
-    if (manifest?.format !== PACKAGE_FORMAT) throw new Error('Unsupported canvas package format.');
-    const canvas = upgradeCanvasDocument(JSON.parse(canvasEntry.getData().toString('utf8'))).canvas;
-    const urlByAssetId = new Map();
-    const urlByOriginalUrl = new Map();
-    for (const asset of Array.isArray(manifest.assets) ? manifest.assets : []) {
-      const packagePath = safePackagePath(asset.packagePath);
-      const entry = packagePath ? zip.getEntry(packagePath) : null;
-      if (!entry) continue;
-      const kind = asset.kind === 'output' ? 'output' : 'input';
-      const directory = assetStore.assetDirectory(kind);
-      const sourceName = path.basename(asset.fileName || packagePath);
-      const fileName = safeFileBaseName(path.basename(sourceName, path.extname(sourceName)), 'canvas-image') + extensionFromPath(sourceName);
-      const target = uniqueFilePath(directory, fileName);
-      fs.writeFileSync(target, entry.getData());
-      const nextUrl = assetStore.assetUrl(target);
-      if (asset.id) urlByAssetId.set(String(asset.id), nextUrl);
-      if (asset.originalUrl) urlByOriginalUrl.set(String(asset.originalUrl), nextUrl);
+  async function importPackageFile(filePath, projectId, options = {}) {
+    const rangeStart = Number(options.rangeStart || 0);
+    const rangeEnd = Number(options.rangeEnd ?? 100);
+    const stagingRoot = path.join(canvasAssetsRoot(), 'tmp', `import-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+    const temporaryPackage = isInsideOrEqual(path.join(canvasAssetsRoot(), 'tmp'), filePath);
+    try {
+      const unpacked = await runPackageWorker({ operation: 'unpack', filePath, stagingRoot }, {
+        signal: options.signal,
+        onProgress: mapWorkerProgress(options.onProgress, rangeStart, Math.max(rangeStart, rangeEnd - 10)),
+      });
+      const canvas = upgradeCanvasDocument(unpacked.canvas).canvas;
+      const urlByAssetId = new Map();
+      const urlByOriginalUrl = new Map();
+      reportProgress(options.onProgress, 'saving', Math.max(rangeStart, rangeEnd - 10));
+      for (const asset of unpacked.extractedAssets || []) {
+        if (options.signal?.aborted) throw abortError();
+        const directory = assetStore.assetDirectory(asset.kind);
+        const sourceName = path.basename(asset.fileName || asset.stagedFilePath);
+        const fileName = safeFileBaseName(path.basename(sourceName, path.extname(sourceName)), 'canvas-image') + extensionFromPath(sourceName);
+        const target = uniqueFilePath(directory, fileName);
+        await fs.promises.rename(asset.stagedFilePath, target);
+        const nextUrl = assetStore.assetUrl(target);
+        if (asset.id) urlByAssetId.set(String(asset.id), nextUrl);
+        if (asset.originalUrl) urlByOriginalUrl.set(String(asset.originalUrl), nextUrl);
+      }
+      const rewritten = rewriteImportedPackageUrls(canvas, urlByAssetId, urlByOriginalUrl);
+      const created = createImportedCanvas(sanitizeCanvasForPackage(rewritten, { preserveLocalAssetUrls: true, preservePackageUrls: false }), projectId);
+      reportProgress(options.onProgress, 'saving', rangeEnd);
+      return {
+        ...created,
+        warnings: Array.isArray(unpacked.manifest?.warnings) ? unpacked.manifest.warnings : [],
+      };
+    } finally {
+      await fs.promises.rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
+      if (temporaryPackage) await fs.promises.rm(filePath, { force: true }).catch(() => undefined);
     }
-    const rewritten = rewriteImportedPackageUrls(canvas, urlByAssetId, urlByOriginalUrl);
-    const created = createImportedCanvas(sanitizeCanvasForPackage(rewritten, { preserveLocalAssetUrls: true, preservePackageUrls: false }), projectId);
-    return {
-      ...created,
-      warnings: Array.isArray(manifest.warnings) ? manifest.warnings : [],
-    };
   }
 
-  function importCanvas(payload = {}) {
-    const selected = dialog.showOpenDialogSync({
+  async function importCanvas(payload = {}, options = {}) {
+    const selected = await dialog.showOpenDialog({
       title: 'Import canvas',
       properties: ['openFile'],
       filters: [
@@ -566,22 +723,39 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore }) 
         { name: 'Forart canvas JSON', extensions: ['json'] },
       ],
     });
-    if (!selected?.length) return { ok: true, canceled: true };
-    const filePath = selected[0];
+    if (selected.canceled || !selected.filePaths?.length) return { ok: true, canceled: true };
+    const filePath = selected.filePaths[0];
     const ext = path.extname(filePath).toLowerCase();
     const result = ext === '.forartcanvas'
-      ? importPackageFile(filePath, payload.projectId)
-      : importJsonFile(filePath, payload.projectId);
+      ? await importPackageFile(filePath, payload.projectId, options)
+      : await importJsonFile(filePath, payload.projectId, options);
     return { ...result, canceled: false };
   }
 
+  async function cleanupTemporaryFiles(maxAgeMs = 24 * 60 * 60 * 1000) {
+    const directory = path.join(canvasAssetsRoot(), 'tmp');
+    const entries = await fs.promises.readdir(directory, { withFileTypes: true }).catch(() => []);
+    const cutoff = Date.now() - maxAgeMs;
+    await Promise.all(entries.map(async (entry) => {
+      const target = path.join(directory, entry.name);
+      const removablePart = entry.isFile() && entry.name.endsWith('.part');
+      const removableImportDirectory = entry.isDirectory() && entry.name.startsWith('import-');
+      const removablePackage = entry.isFile() && entry.name.endsWith('.forartcanvas');
+      if (!removablePart && !removableImportDirectory && !removablePackage) return;
+      const stat = await fs.promises.stat(target).catch(() => null);
+      if (!stat || stat.mtimeMs > cutoff) return;
+      await fs.promises.rm(target, { recursive: entry.isDirectory(), force: true }).catch(() => undefined);
+    }));
+  }
+
   return {
+    cleanupTemporaryFiles,
     createPackageForUpload,
     downloadPackageFromRemote,
     exportJson,
     exportPackage,
     importCanvas,
-    importPackageFile: (filePath, projectId) => ({ ...importPackageFile(filePath, projectId), canceled: false }),
+    importPackageFile: async (filePath, projectId, options) => ({ ...await importPackageFile(filePath, projectId, options), canceled: false }),
     uploadPackageToRemote,
   };
 }

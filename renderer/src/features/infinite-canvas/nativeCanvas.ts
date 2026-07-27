@@ -1,8 +1,8 @@
 import type { Edge, Node, XYPosition } from "@xyflow/react";
-import { Bot, ImageIcon, ImagePlus, Split, TextCursorInput, type LucideIcon } from "lucide-react";
+import { Bot, ImageIcon, ImagePlus, Split, TextCursorInput, Type, type LucideIcon } from "lucide-react";
 import type { ActionFissionState } from "./action-fission/actionFissionTypes";
 
-export type NativeCanvasNodeKind = "imageGenerator" | "imageLoader" | "prompt" | "llm" | "actionFission";
+export type NativeCanvasNodeKind = "imageGenerator" | "imageLoader" | "prompt" | "annotation" | "llm" | "actionFission";
 
 export interface NativeGenerationResult {
   url?: string;
@@ -15,12 +15,20 @@ export interface NativeGenerationResult {
   downloadedAt?: number;
 }
 
+export interface NativeCanvasAnnotationStyle {
+  color?: string;
+  fontSize?: number;
+  bold?: boolean;
+  textAlign?: "left" | "center" | "right";
+}
+
 export interface NativeCanvasNodeData extends Record<string, unknown> {
   kind: NativeCanvasNodeKind;
   label: string;
   imageUrl?: string;
   thumbUrl?: string;
   text?: string;
+  annotationStyle?: NativeCanvasAnnotationStyle;
   imageProviderId?: string;
   imageModel?: string;
   imageResolution?: string;
@@ -87,7 +95,7 @@ export interface NativeCanvasNodeResizeConfig {
 
 interface NativeCanvasNodeDefinition {
   icon: LucideIcon;
-  labelKey: "imageGenerator" | "imageNode" | "prompt" | "llm" | "actionFission";
+  labelKey: "imageGenerator" | "imageNode" | "prompt" | "annotation" | "llm" | "actionFission";
   size: { width: number; height: number };
   acceptsInput: boolean;
   providesOutput: boolean;
@@ -121,6 +129,13 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
       maxWidth: 640,
       maxHeight: 520,
     },
+  },
+  annotation: {
+    icon: Type,
+    labelKey: "annotation",
+    size: { width: 64, height: 40 },
+    acceptsInput: false,
+    providesOutput: false,
   },
   llm: {
     icon: Bot,

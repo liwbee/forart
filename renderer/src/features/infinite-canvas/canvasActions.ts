@@ -7,10 +7,12 @@ import type {
 } from "./generation/imageGenerationInputs";
 
 export interface NativeCanvasActions {
+  readOnly: boolean;
   addImageReferenceFiles: (nodeId: string, files: File[]) => Promise<void>;
   cropNodeImage: (nodeId: string, crop: CanvasImageCropRect) => Promise<void>;
   downloadActionFissionResult: (nodeId: string, rowId: string) => Promise<void>;
-  downloadGeneratedImage: (nodeId: string, imageIndex: number) => Promise<void>;
+  downloadNodeImage: (nodeId: string, imageIndex: number) => Promise<void>;
+  discardActionFissionRow: (nodeId: string, rowId: string) => Promise<void>;
   getImageGeneratorPrompts: (nodeId: string) => ImageGeneratorPromptInput[];
   getImageGeneratorReferences: (nodeId: string) => ImageGeneratorReferenceInput[];
   openLibraryForNode: (nodeId: string) => void;

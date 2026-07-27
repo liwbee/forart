@@ -18,6 +18,7 @@ import {
   useGenerationTaskCache,
   watchGenerationTask,
 } from "../generation/generationTaskCache";
+import { nativeResultsFromTask } from "../generation/generationResultDownloadState";
 
 function collectConnectedPrompt(nodeId: string, nodes: NativeCanvasNode[], edges: NativeCanvasEdge[]) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
@@ -83,19 +84,15 @@ export function useNativeLibtvGeneration({
         if ((handledTerminalVersionsRef.current.get(dto.id) || -1) >= dto.version) return;
         handledTerminalVersionsRef.current.set(dto.id, dto.version);
         if (dto.status === "succeeded" && dto.result?.images.length) {
-          const images = dto.result.images.map((image) => ({
-            url: image.assetUrl,
-            localUrl: image.assetUrl,
-            thumbUrl: image.thumbUrl,
-            fileName: image.fileName,
-            width: image.width,
-            height: image.height,
-            downloadState: "pending" as const,
-            downloadedAt: undefined,
-          }));
+          const currentData = nodes.find((node) => node.id === nodeId)?.data;
+          const images = nativeResultsFromTask(
+            currentData ? nativeCanvasNodeTaskId(currentData) : "",
+            dto.id,
+            currentData?.generatedImages || [],
+            dto.result.images,
+          );
           const primary = images[0];
           patchNodeData(nodeId, {
-            label: primary.fileName || "LibTV generated image",
             generatedImages: images,
             imageNaturalWidth: primary.width,
             imageNaturalHeight: primary.height,
@@ -111,7 +108,7 @@ export function useNativeLibtvGeneration({
     } finally {
       taskControllersRef.current.delete(taskId);
     }
-  }, [canvasId, patchNodeData]);
+  }, [canvasId, nodes, patchNodeData]);
 
   const runLibtvGeneration = useCallback(async (nodeId: string, options?: { promptOverride?: string }) => {
     const node = nodes.find((item) => item.id === nodeId && item.data.kind === "imageGenerator");
@@ -204,9 +201,9 @@ export function useNativeLibtvGeneration({
     }
   }, [canvasId, edges, nodes, patchLibtvState, patchNodeData, t, watchTask]);
 
-  const stopLibtvGeneration = useCallback(async (nodeId: string) => {
+  const stopLibtvGeneration = useCallback(async (nodeId: string, taskIdOverride?: string) => {
     const data = nodes.find((node) => node.id === nodeId)?.data;
-    const taskId = data ? nativeCanvasNodeTaskId(data) : "";
+    const taskId = taskIdOverride || (data ? nativeCanvasNodeTaskId(data) : "");
     const task = taskId ? useGenerationTaskCache.getState().tasksById[taskId] : undefined;
     if (!taskId || !isGenerationTaskActive(task)) return;
     taskControllersRef.current.get(taskId)?.abort();

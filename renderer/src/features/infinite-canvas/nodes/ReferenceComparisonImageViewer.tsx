@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -7,6 +7,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../c
 import { Switch } from "../../../components/ui/switch";
 import {
   ImageViewerActionButtons,
+  useImageViewerDialog,
   type ImageViewerAction,
   type ImageViewerNavigation,
 } from "../../../lib/ImageViewer";
@@ -52,56 +53,11 @@ export function ReferenceComparisonImageViewer({
 }: ReferenceComparisonImageViewerProps) {
   const { t } = useTranslation();
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
-  const [isClosing, setIsClosing] = useState(false);
-  const closeTimerRef = useRef<number | null>(null);
+  const { isClosing, requestClose } = useImageViewerDialog({ sourceKey: src, onClose, navigation });
   const isResizingRef = useRef(false);
   const hasNavigation = Boolean(navigation && navigation.total > 1);
   const showComparison = Boolean(reference && comparisonEnabled);
   const resolutionText = naturalSize.width && naturalSize.height ? `${naturalSize.width} x ${naturalSize.height}` : "";
-
-  const requestClose = useCallback(() => {
-    if (isClosing) return;
-    setIsClosing(true);
-    if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = window.setTimeout(() => {
-      closeTimerRef.current = null;
-      onClose();
-    }, 180);
-  }, [isClosing, onClose]);
-
-  useEffect(() => {
-    setIsClosing(false);
-  }, [src]);
-
-  useEffect(() => {
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        requestClose();
-        return;
-      }
-      if (!navigation || navigation.total <= 1) return;
-      if (event.key === "ArrowLeft" && navigation.index > 0) {
-        event.preventDefault();
-        navigation.onPrevious();
-        return;
-      }
-      if (event.key === "ArrowRight" && navigation.index < navigation.total - 1) {
-        event.preventDefault();
-        navigation.onNext();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [navigation, requestClose]);
-
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, []);
 
   const isolatePointerEvent = (event: React.SyntheticEvent) => {
     if (isResizingRef.current || (event.target as Element | null)?.closest?.("[data-separator]")) return;
@@ -141,7 +97,7 @@ export function ReferenceComparisonImageViewer({
 
   return createPortal(
     <div
-      className={cn("model-image-viewer-backdrop", isClosing && "closing")}
+      className={cn("image-viewer-backdrop", isClosing && "closing")}
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel}
@@ -162,7 +118,7 @@ export function ReferenceComparisonImageViewer({
       }}
     >
       <div
-        className={cn("model-image-viewer-stage", "rf-reference-comparison-viewer-stage", isClosing && "closing")}
+        className={cn("image-viewer-stage", "rf-reference-comparison-viewer-stage", isClosing && "closing")}
         onClick={(event) => {
           event.stopPropagation();
           if (event.target === event.currentTarget) requestClose();
@@ -222,15 +178,15 @@ export function ReferenceComparisonImageViewer({
           </>
         )}
 
-        <div className="model-image-viewer-top-left" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-          <Button className="model-image-viewer-back-button" type="button" variant="ghost" size="icon" aria-label={t("common:actions.back")} title={t("common:actions.back")} onClick={requestClose}>
+        <div className="image-viewer-top-left" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+          <Button className="image-viewer-back-button" type="button" variant="ghost" size="icon" aria-label={t("common:actions.back")} title={t("common:actions.back")} onClick={requestClose}>
             <ArrowLeft aria-hidden="true" />
           </Button>
-          <span className="model-image-viewer-resolution" aria-live="polite">{resolutionText}</span>
+          <span className="image-viewer-resolution" aria-live="polite">{resolutionText}</span>
         </div>
 
-        <div className="model-image-viewer-top-center" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-          {hasNavigation && navigation ? <span className="model-image-viewer-counter">{navigation.index + 1} / {navigation.total}</span> : null}
+        <div className="image-viewer-top-center" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+          {hasNavigation && navigation ? <span className="image-viewer-counter">{navigation.index + 1} / {navigation.total}</span> : null}
           {reference ? (
             <label className="rf-reference-comparison-viewer-toggle">
               <span>{comparisonLabel}</span>

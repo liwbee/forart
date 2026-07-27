@@ -1,7 +1,7 @@
 import { Handle, NodeToolbar, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import ImageAiFillIcon from "@iconify-react/ri/image-ai-fill";
 import { ArrowLeft, Check, ChevronUp, CircleAlert, Copy, Crop, Download, Images, LoaderCircle, Maximize2, Trash2, Upload, X } from "lucide-react";
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AppSelect } from "../../../components/AppSelect";
@@ -32,6 +32,9 @@ import {
 import { isGenerationTaskActive, useGenerationTaskCache } from "../generation/generationTaskCache";
 import { ImageNodeCropEditor, type ImageCropAspect } from "./ImageNodeCropEditor";
 import { ImageGeneratorImageViewer } from "./ImageGeneratorImageViewer";
+import { NativeNodeCaption } from "./NativeNodeCaption";
+import { AnnotationNodeBody } from "./AnnotationNodeBody";
+import { AnnotationNodeToolbarControls } from "./AnnotationNodeToolbarControls";
 
 function GenerationErrorStatus({ message }: { message: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -68,11 +71,11 @@ function GenerationErrorStatus({ message }: { message: string }) {
   );
 }
 
-export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selected }: NodeProps<NativeCanvasNodeType>) {
+export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selected, dragging }: NodeProps<NativeCanvasNodeType>) {
   const { t } = useTranslation();
   const { deleteElements, getNode, setNodes } = useReactFlow<NativeCanvasNodeType, NativeCanvasEdge>();
   const updateNodeInternals = useUpdateNodeInternals();
-  const toolbarOffset = useStore((state) => state.transform[2]) * 20;
+  const zoom = useStore((state) => state.transform[2]);
   const actions = useNativeCanvasActions();
   const nodeFrameRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -82,14 +85,16 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const beginNodeEditing = useNativeCanvasInteractionStore((state) => state.beginNodeEditing);
   const endNodeEditing = useNativeCanvasInteractionStore((state) => state.endNodeEditing);
   const definition = NATIVE_CANVAS_NODE_DEFINITIONS[data.kind];
+  const nodeTypeLabel = t(`infiniteCanvas:${definition.labelKey}`);
   const displayLabel = data.kind === "imageLoader" && data.imageUrl && data.label
     ? data.label
-    : t(`infiniteCanvas:${definition.labelKey}`);
+    : nodeTypeLabel;
   const Icon = definition.icon;
   const isImageNode = data.kind === "imageLoader" || data.kind === "imageGenerator";
   const isPromptNode = data.kind === "prompt";
+  const isAnnotationNode = data.kind === "annotation";
   const isActionFissionNode = data.kind === "actionFission";
-  const isContentOnlyNode = isImageNode || isPromptNode || isActionFissionNode;
+  const captionTitle = String(data.label || "").trim() || nodeTypeLabel;
   const isLaunching = useGenerationRuntimeStore((state) => isImageNodeLaunching(state.launchingKeys, id));
   const taskId = nativeCanvasNodeTaskId(data);
   const activeGenerationTask = useGenerationTaskCache((state) => taskId ? state.tasksById[taskId] : undefined);
@@ -126,6 +131,11 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const showGeneratorDownload = data.kind === "imageGenerator" && Boolean(primaryImageUrl) && !isGenerating && !hasGenerationError;
   const isPendingDownload = showGeneratorDownload && primaryImage?.downloadState !== "downloaded";
   const canUseImageActions = isImageNode && Boolean(primaryImageUrl) && !isGenerating && !hasGenerationError;
+  const toolbarVisible = selected && isNodeToolbarActive && !dragging;
+  const toolbarOffset = zoom * (isAnnotationNode ? 12 : 36);
+  const annotationFrameStyle = isAnnotationNode
+    ? { "--rf-annotation-outline-width": `${(1 / Math.max(zoom, 0.01)).toFixed(2)}px` } as CSSProperties
+    : undefined;
   const resolvedImageUrl = primaryImageUrl ? resolveLibraryImageUrl(primaryImageUrl) : "";
   const resolvedPreviewUrl = primaryImage?.thumbUrl ? resolveLibraryImageUrl(primaryImage.thumbUrl) : resolvedImageUrl;
   const hasMultipleGeneratedImages = generatedImages.length > 1;
@@ -153,7 +163,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const downloadImage = () => {
     if (isDownloadBusy) return;
     setIsDownloadBusy(true);
-    void actions.downloadGeneratedImage(id, 0).catch(() => undefined).finally(() => setIsDownloadBusy(false));
+    void actions.downloadNodeImage(id, 0).catch(() => undefined).finally(() => setIsDownloadBusy(false));
   };
 
   const cancelCrop = () => {
@@ -253,9 +263,21 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
 
   return (
     <>
-      {selected && isNodeToolbarActive ? (
+      {!isAnnotationNode ? (
+        <NativeNodeCaption
+          icon={Icon}
+          title={captionTitle}
+          editable
+          renameLabel={t("common:actions.rename")}
+          onRename={(label) => actions.patchNodeData(id, { label })}
+        />
+      ) : null}
+
+      {toolbarVisible ? (
         <NodeToolbar nodeId={id} position={Position.Top} offset={toolbarOffset} className="rf-native-node-toolbar">
-          {isCropping ? (
+          {isAnnotationNode ? (
+            <AnnotationNodeToolbarControls nodeId={id} style={data.annotationStyle} />
+          ) : isCropping ? (
             <>
               <AppSelect
                 className="rf-native-image-crop-aspect nodrag nopan nowheel"
@@ -341,7 +363,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               <Crop aria-hidden="true" />
             </Button>
           ) : null}
-          {data.kind === "imageGenerator" && canUseImageActions ? (
+          {canUseImageActions ? (
             <Button
               type="button"
               variant="ghost"
@@ -405,26 +427,24 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
 
       <div ref={nodeFrameRef} className={cn(
         "rf-native-node-frame",
-        isContentOnlyNode && "rf-native-node-frame--content-only",
+        isAnnotationNode && "rf-native-node-frame--annotation",
+        isAnnotationNode && dragging && "is-dragging",
         isGenerating && "is-generating",
-      )}>
-        {!isContentOnlyNode ? (
-          <header className="rf-native-node-header">
-            <Icon aria-hidden="true" />
-            <span>{displayLabel}</span>
-          </header>
-        ) : null}
+      )} style={annotationFrameStyle}>
         <div className={cn(
           "rf-native-node-content",
           isImageNode && "rf-native-node-content--image",
           isPromptNode && "rf-native-node-content--prompt",
+          isAnnotationNode && "rf-native-node-content--annotation",
           isActionFissionNode && "rf-native-node-content--action-fission",
           isCropping && "is-cropping",
           isGenerating && "is-generating",
           hasGenerationError && "has-generation-error",
         )}>
-          {isActionFissionNode ? (
-            <ActionFissionNodeBody nodeId={id} data={data} paramPanelVisible={selected && isNodeToolbarActive} />
+          {isAnnotationNode ? (
+            <AnnotationNodeBody nodeId={id} text={String(data.text || "")} textStyle={data.annotationStyle} />
+          ) : isActionFissionNode ? (
+            <ActionFissionNodeBody nodeId={id} data={data} paramPanelVisible={toolbarVisible} />
           ) : isPromptNode ? (
             <>
               <Textarea
@@ -501,7 +521,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                           title={t("infiniteCanvas:downloadImage")}
                           onClick={(event) => {
                             event.stopPropagation();
-                            void actions.downloadGeneratedImage(id, index);
+                            void actions.downloadNodeImage(id, index);
                           }}
                         >
                           <Download aria-hidden="true" />
@@ -687,7 +707,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
       </div>
 
       {data.kind === "imageGenerator" ? (
-        <ImageGeneratorParamPanel nodeId={id} data={data} visible={selected && isNodeToolbarActive} />
+        <ImageGeneratorParamPanel nodeId={id} data={data} visible={toolbarVisible} />
       ) : null}
 
       {definition.providesOutput ? <Handle type="source" position={Position.Right} id="output" /> : null}

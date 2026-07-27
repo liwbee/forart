@@ -208,6 +208,18 @@ test('GitHub 0.1.34 canvas upgrades to the canonical v2 document', () => {
 
 test('canvas schema v2 reads idempotently and rejects future schemas', () => {
   const v2 = upgradeCanvasDocument(github0134Canvas()).canvas;
+  v2.nodes.push({
+    id: 'annotation-1',
+    type: 'canvasNode',
+    position: { x: 320, y: 180 },
+    style: { width: 360, height: 140 },
+    data: {
+      kind: 'annotation',
+      label: '',
+      text: 'Review this area',
+      annotationStyle: { color: '#3b82f6', fontSize: 28, bold: true, textAlign: 'center' },
+    },
+  });
   v2.connections.push({
     id: 'edge-additional-prompt',
     type: 'default',
@@ -220,6 +232,7 @@ test('canvas schema v2 reads idempotently and rejects future schemas', () => {
   const current = upgradeCanvasDocument(v2);
   assert.equal(current.migrated, false);
   assert.deepEqual(current.canvas, v2);
+  assert.deepEqual(current.canvas.nodes.at(-1), v2.nodes.at(-1));
   assert.deepEqual(current.canvas.connections[1].data, { inputKind: 'additionalReferencePrompt' });
   assert.throws(
     () => upgradeCanvasDocument({ ...v2, canvasSchemaVersion: 3 }),

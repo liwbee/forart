@@ -548,6 +548,10 @@ function createLibtvGenerationRunner({
         taskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'libtv.generating', messageParams: null });
         let startBusy = false;
         try {
+          const currentTask = taskStore.getTask(task.id);
+          if (!Number(currentTask?.remoteExecutionStartedAt || 0)) {
+            taskStore.updateTask(task.id, { remoteExecutionStartedAt: Date.now() });
+          }
           runAttempted = true;
           run = await libtv.runNode(project.projectUuid, remoteNodeId, { signal });
         } catch (error) {

@@ -19,12 +19,13 @@ import {
   type OnConnectEnd,
   type OnNodeDrag,
 } from "@xyflow/react";
-import { Copy, Crosshair, Eye, EyeOff, Grid3X3, Image, Images, Map as MapIcon, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Copy, Crosshair, Download, Eye, EyeOff, Grid3X3, Image, Images, Map as MapIcon, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../../components/ui/alert-dialog";
 import { Button } from "../../components/ui/button";
-import { ContextMenu, ContextMenuContent, ContextMenuGroup, ContextMenuItem, ContextMenuTrigger } from "../../components/ui/context-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuGroup, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "../../components/ui/context-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { LibraryAssetPickerRail } from "../library-asset-picker/LibraryAssetPickerRail";
 import type { LibraryAssetSelection } from "../library-asset-picker/types";
@@ -46,7 +47,6 @@ import {
   nativeCanvasNodePrimaryImage,
   nativeCanvasNodeTaskId,
   NATIVE_CANVAS_NODE_DEFINITIONS,
-  NATIVE_CANVAS_NODE_KINDS,
   type NativeCanvasEdge,
   type NativeCanvasNode,
   type NativeCanvasNodeKind,
@@ -66,6 +66,14 @@ import {
 } from "./generation/imageGenerationInputs";
 import { useGenerationRuntimeStore } from "./generation/generationRuntimeStore";
 import {
+  isGenerationTaskActive,
+  loadGenerationTasks,
+  partitionGenerationStopTasks,
+  requiresGenerationStopConfirmation,
+} from "./generation/generationTaskCache";
+import { buildGenerationDownloadName, buildTaskDownloadName } from "./generation/generationDownloadName";
+import { loadApiSettings } from "../settings/apiProviders";
+import {
   beginInfiniteCanvasHistoryGesture,
   commitInfiniteCanvasHistoryGesture,
   recordInfiniteCanvasHistory,
@@ -77,8 +85,15 @@ import {
 } from "./canvasHistoryStore";
 import { rememberedGenerationNodeData } from "./generation/generationPreferenceStore";
 import { useInfiniteCanvasSettings } from "./infiniteCanvasSettings";
+import { ViewportMomentumController } from "./viewportMomentum";
 
 const NODE_TYPES: NodeTypes = { canvasNode: NativeCanvasNodeComponent };
+
+const CONTEXT_CANVAS_NODE_GROUPS: NativeCanvasNodeKind[][] = [
+  ["imageLoader", "prompt"],
+  ["imageGenerator", "llm", "actionFission"],
+  ["annotation"],
+];
 
 interface ContextPoint {
   flowX: number;
@@ -100,9 +115,15 @@ interface ActionFissionSettingsTarget {
   rowId: string;
 }
 
+interface PendingGenerationStop {
+  kind: "imageGenerator" | "actionFission";
+  nodeId: string;
+  rowId?: string;
+  taskIds: string[];
+}
+
 const CANVAS_CLIPBOARD_KIND = "forart.reactflow.nodes";
 const CANVAS_CLIPBOARD_MIME = "application/x-forart-canvas-nodes";
-
 interface CanvasClipboardPayload {
   edges: NativeCanvasEdge[];
   kind: typeof CANVAS_CLIPBOARD_KIND;
@@ -138,7 +159,9 @@ const SAVE_STATUS_LABEL_KEYS: Record<CanvasSaveStatus, string> = {
 };
 
 function isEditingTarget(target: EventTarget | null) {
-  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.closest("input, textarea, select")) return true;
+  return Boolean(target.closest<HTMLElement>("[contenteditable]")?.isContentEditable);
 }
 
 function parseCanvasClipboard(serialized: string): CanvasClipboardPayload | null {
@@ -273,6 +296,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   const [nodeContextTarget, setNodeContextTarget] = useState<NodeContextTarget | null>(null);
   const [edgeToolbarPoint, setEdgeToolbarPoint] = useState<EdgeToolbarPoint | null>(null);
   const [actionFissionSettingsTarget, setActionFissionSettingsTarget] = useState<ActionFissionSettingsTarget | null>(null);
+  const [pendingGenerationStop, setPendingGenerationStop] = useState<PendingGenerationStop | null>(null);
+  const [generationStopPending, setGenerationStopPending] = useState(false);
   const pasteSequenceRef = useRef<PasteSequence | null>(null);
   const altDragCloneGestureRef = useRef<AltDragCloneGesture | null>(null);
   const historyGestureRef = useRef<NativeCanvasHistorySnapshot | null>(null);
@@ -280,7 +305,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   const edgeToolbarFrameRef = useRef<number | null>(null);
   const edgeToolbarHideTimerRef = useRef<number | null>(null);
   const pendingEdgePointerRef = useRef<{ edgeId: string; clientX: number; clientY: number } | null>(null);
-  const { deleteElements, getEdges, getIntersectingNodes, getNodes, screenToFlowPosition } = useReactFlow<NativeCanvasNode, NativeCanvasEdge>();
+  const { deleteElements, getEdges, getIntersectingNodes, getNodes, screenToFlowPosition, setViewport } = useReactFlow<NativeCanvasNode, NativeCanvasEdge>();
   const syncSelection = useNativeCanvasInteractionStore((state) => state.syncSelection);
   const beginSelectionGesture = useNativeCanvasInteractionStore((state) => state.beginSelectionGesture);
   const endSelectionGesture = useNativeCanvasInteractionStore((state) => state.endSelectionGesture);
@@ -301,6 +326,31 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     if (contextNode?.data.kind !== "imageLoader" && contextNode?.data.kind !== "imageGenerator") return null;
     return nativeCanvasNodePrimaryImage(contextNode.data);
   }, [contextNode]);
+
+  const readOnlyRef = useRef(readOnly);
+  const onSnapshotChangeRef = useRef(onSnapshotChange);
+  readOnlyRef.current = readOnly;
+  onSnapshotChangeRef.current = onSnapshotChange;
+  const viewportMomentumRef = useRef<ViewportMomentumController | null>(null);
+  if (!viewportMomentumRef.current) {
+    viewportMomentumRef.current = new ViewportMomentumController({
+      initialViewport: initialSnapshot.viewport,
+      applyViewport: (viewport) => {
+        viewportRef.current = viewport;
+        void setViewport(viewport, { duration: 0 });
+      },
+      settleViewport: (viewport) => {
+        viewportRef.current = viewport;
+        if (!readOnlyRef.current) {
+          onSnapshotChangeRef.current?.({ nodes: nodesRef.current, edges: edgesRef.current, viewport });
+        }
+      },
+    });
+  }
+  const viewportMomentum = viewportMomentumRef.current;
+  const stopViewportMomentum = useCallback(() => viewportMomentum.stop(), [viewportMomentum]);
+
+  useEffect(() => () => viewportMomentum.dispose(), [viewportMomentum]);
 
   useEffect(() => resetInteractions, [resetInteractions]);
   useEffect(() => () => clearCanvasLaunching(canvasId), [canvasId, clearCanvasLaunching]);
@@ -388,8 +438,9 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   }, [readOnly, redoHistory, undoHistory]);
 
   const beginCanvasSelection = useCallback(() => {
+    stopViewportMomentum();
     beginSelectionGesture();
-  }, [beginSelectionGesture]);
+  }, [beginSelectionGesture, stopViewportMomentum]);
 
   const finishCanvasSelection = useCallback(() => {
     endSelectionGesture();
@@ -421,9 +472,11 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
 
   const addContextNode = useCallback((kind: NativeCanvasNodeKind) => {
     if (!contextPoint) return;
-    addNode(kind, contextPoint.flowX, contextPoint.flowY);
+    addNode(kind, contextPoint.flowX, contextPoint.flowY, kind === "annotation"
+      ? { text: t("infiniteCanvas:annotationDefaultText") }
+      : undefined);
     setContextPoint(null);
-  }, [addNode, contextPoint]);
+  }, [addNode, contextPoint, t]);
 
   const copyContextNode = useCallback(async () => {
     if (!contextNode) return;
@@ -466,21 +519,20 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     )));
   }, []);
 
-  const setNodeImage = useCallback((nodeId: string, imageUrl: string, label: string) => {
+  const setNodeImage = useCallback((nodeId: string, imageUrl: string, fileName: string) => {
     const nodeKind = getNodes().find((node) => node.id === nodeId)?.data.kind;
     setNodes((current) => current.map((node) => node.id === nodeId
       ? {
         ...node,
         data: {
           ...node.data,
-          label,
           ...(node.data.kind === "imageGenerator"
             ? {
                 imageUrl: undefined,
                 thumbUrl: undefined,
                 generatedImages: [{
                   localUrl: imageUrl,
-                  fileName: label,
+                  fileName,
                   downloadState: "pending" as const,
                 }],
               }
@@ -492,7 +544,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       let storedUrl = imageUrl;
       let thumbUrl = "";
       if (nodeKind === "imageLoader" && /^data:image\//i.test(imageUrl) && window.easyTool?.saveCanvasAsset) {
-        const stored = await window.easyTool.saveCanvasAsset({ dataUrl: imageUrl, defaultName: label, kind: "input" });
+        const stored = await window.easyTool.saveCanvasAsset({ dataUrl: imageUrl, defaultName: fileName, kind: "input" });
         storedUrl = stored.url;
         thumbUrl = stored.thumbUrl || "";
       } else if (window.easyTool?.ensureCanvasAssetThumbnail) {
@@ -515,7 +567,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
                       ...(node.data.generatedImages?.[0] || {}),
                       localUrl: storedUrl,
                       thumbUrl: thumbUrl || undefined,
-                      fileName: node.data.generatedImages?.[0]?.fileName || label,
+                      fileName: node.data.generatedImages?.[0]?.fileName || fileName,
                       width,
                       height,
                       downloadState: node.data.generatedImages?.[0]?.downloadState || "pending" as const,
@@ -633,7 +685,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     patchNodeData,
     t,
   });
-  const { runActionFission, stopActionFission } = useNativeActionFissionGeneration({
+  const { runActionFission, stopActionFission: stopActionFissionImmediately } = useNativeActionFissionGeneration({
     canvasId,
     edges,
     nodes,
@@ -645,11 +697,67 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     if (node?.data.imageGenerationBackend === "libtv") await runLibtvGeneration(nodeId, options);
     else await runApiImageGeneration(nodeId, options);
   }, [nodes, runApiImageGeneration, runLibtvGeneration]);
+  const stopImageGenerationTaskImmediately = useCallback(async (nodeId: string, taskId: string, executorKind: "api" | "libtv") => {
+    if (executorKind === "libtv") await stopLibtvGeneration(nodeId, taskId);
+    else await stopApiImageGeneration(nodeId, taskId);
+  }, [stopApiImageGeneration, stopLibtvGeneration]);
+
   const stopImageGeneration = useCallback(async (nodeId: string) => {
-    const node = nodes.find((item) => item.id === nodeId);
-    if (node?.data.imageGenerationBackend === "libtv") await stopLibtvGeneration(nodeId);
-    else await stopApiImageGeneration(nodeId);
-  }, [nodes, stopApiImageGeneration, stopLibtvGeneration]);
+    const data = nodes.find((item) => item.id === nodeId)?.data;
+    const taskId = data ? nativeCanvasNodeTaskId(data) : "";
+    if (!taskId) return;
+    const [task] = await loadGenerationTasks([taskId]);
+    if (!isGenerationTaskActive(task)) return;
+    if (requiresGenerationStopConfirmation(task)) {
+      setPendingGenerationStop({ kind: "imageGenerator", nodeId, taskIds: [task.id] });
+      return;
+    }
+    await stopImageGenerationTaskImmediately(nodeId, task.id, task.executorKind);
+  }, [nodes, stopImageGenerationTaskImmediately]);
+
+  const stopActionFission = useCallback(async (nodeId: string, rowId?: string) => {
+    await stopActionFissionImmediately(nodeId, rowId, []);
+    const rows = nodes.find((item) => item.id === nodeId)?.data.actionFission?.rows || [];
+    const taskIds = (rowId ? rows.filter((row) => row.id === rowId) : rows)
+      .map(actionFissionRowTaskId)
+      .filter(Boolean);
+    const tasks = await loadGenerationTasks(taskIds);
+    const { safeTasks, confirmationTasks } = partitionGenerationStopTasks(tasks);
+    if (safeTasks.length) {
+      await stopActionFissionImmediately(nodeId, rowId, safeTasks.map((task) => task.id));
+    }
+    if (confirmationTasks.length) {
+      setPendingGenerationStop({
+        kind: "actionFission",
+        nodeId,
+        rowId,
+        taskIds: confirmationTasks.map((task) => task.id),
+      });
+    }
+  }, [nodes, stopActionFissionImmediately]);
+
+  const confirmGenerationStop = useCallback(async () => {
+    if (!pendingGenerationStop || generationStopPending) return;
+    setGenerationStopPending(true);
+    try {
+      const tasks = await loadGenerationTasks(pendingGenerationStop.taskIds);
+      const activeTasks = tasks.filter(isGenerationTaskActive);
+      if (pendingGenerationStop.kind === "imageGenerator") {
+        await Promise.all(activeTasks.map((task) => (
+          stopImageGenerationTaskImmediately(pendingGenerationStop.nodeId, task.id, task.executorKind)
+        )));
+      } else if (activeTasks.length) {
+        await stopActionFissionImmediately(
+          pendingGenerationStop.nodeId,
+          pendingGenerationStop.rowId,
+          activeTasks.map((task) => task.id),
+        );
+      }
+      setPendingGenerationStop(null);
+    } finally {
+      setGenerationStopPending(false);
+    }
+  }, [generationStopPending, pendingGenerationStop, stopActionFissionImmediately, stopImageGenerationTaskImmediately]);
 
   const saveGeneratedImage = useCallback(async (imageUrl: string, defaultName: string) => {
     try {
@@ -678,26 +786,74 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     }
   }, [imageDownloadPath, t]);
 
-  const downloadGeneratedImage = useCallback(async (nodeId: string, imageIndex: number) => {
+  const downloadNodeImage = useCallback(async (nodeId: string, imageIndex: number) => {
     const node = nodes.find((item) => item.id === nodeId);
+    if (!node) return;
+    if (node.data.kind === "imageLoader") {
+      const image = nativeCanvasNodePrimaryImage(node.data);
+      const imageUrl = String(image?.localUrl || image?.url || "");
+      if (!image || !imageUrl) return;
+      await saveGeneratedImage(imageUrl, buildGenerationDownloadName({
+        platform: "Forart",
+        model: "Local",
+        sourceFileName: image.fileName,
+        sourceUrl: imageUrl,
+      }));
+      return;
+    }
+
     const images = node?.data.generatedImages || [];
     const image = images[imageIndex];
     const imageUrl = String(image?.localUrl || image?.url || "");
-    if (!node || !image || !imageUrl) return;
-    await saveGeneratedImage(imageUrl, image.fileName || `generated-image-${imageIndex + 1}.png`);
+    if (!image || !imageUrl) return;
+    const taskId = nativeCanvasNodeTaskId(node.data);
+    const [task] = taskId ? await loadGenerationTasks([taskId]) : [];
+    const apiSettings = task?.executorKind === "libtv" || node.data.imageGenerationBackend === "libtv"
+      ? null
+      : await loadApiSettings();
+    const provider = apiSettings?.providers.find((item) => item.id === (task?.providerId || node.data.imageProviderId));
+    await saveGeneratedImage(imageUrl, task
+      ? buildTaskDownloadName(task, image.fileName, imageUrl)
+      : buildGenerationDownloadName({
+        platform: node.data.imageGenerationBackend === "libtv" ? "LibTV" : provider?.name || node.data.imageProviderId,
+        model: node.data.imageGenerationBackend === "libtv"
+          ? node.data.libtvImageGeneration?.modelName
+          : node.data.imageModel,
+        sourceFileName: image.fileName,
+        sourceUrl: imageUrl,
+      }));
     patchNodeData(nodeId, {
       generatedImages: images.map((item, index) => index === imageIndex
         ? { ...item, downloadState: "downloaded", downloadedAt: Date.now() }
         : item),
-    });
+      });
   }, [nodes, patchNodeData, saveGeneratedImage]);
 
+  const downloadContextNodeImage = useCallback(async () => {
+    if (!contextNodeImage || !contextNode) return;
+    await downloadNodeImage(contextNode.id, 0);
+  }, [contextNode, contextNodeImage, downloadNodeImage]);
+
   const downloadActionFissionResult = useCallback(async (nodeId: string, rowId: string) => {
-    const row = nodes.find((node) => node.id === nodeId)?.data.actionFission?.rows.find((item) => item.id === rowId);
+    const node = nodes.find((item) => item.id === nodeId);
+    const actionFission = node?.data.actionFission;
+    const row = actionFission?.rows.find((item) => item.id === rowId);
     const imageUrl = String(row?.resultUrl || "");
     if (!row || !imageUrl) return;
-    const defaultName = String(row.resultFileName || row.selectedActionName || `generated-image-${Date.now()}.png`);
-    await saveGeneratedImage(imageUrl, defaultName);
+    const taskId = actionFissionRowTaskId(row);
+    const [task] = taskId ? await loadGenerationTasks([taskId]) : [];
+    const apiSettings = task?.executorKind === "libtv" || actionFission?.apiType === "libtv-api"
+      ? null
+      : await loadApiSettings();
+    const provider = apiSettings?.providers.find((item) => item.id === (task?.providerId || actionFission?.providerId));
+    await saveGeneratedImage(imageUrl, task
+      ? buildTaskDownloadName(task, row.resultFileName, imageUrl)
+      : buildGenerationDownloadName({
+        platform: actionFission?.apiType === "libtv-api" ? "LibTV" : provider?.name || actionFission?.providerId,
+        model: actionFission?.apiType === "libtv-api" ? actionFission?.libtvModelName : actionFission?.model,
+        sourceFileName: row.resultFileName,
+        sourceUrl: imageUrl,
+      }));
     patchActionFissionRow(nodeId, rowId, { resultDownloadState: "downloaded", resultDownloadedAt: Date.now() });
   }, [nodes, patchActionFissionRow, saveGeneratedImage]);
 
@@ -795,7 +951,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   const canvasActionHandlersRef = useRef({
     addImageReferenceFiles,
     downloadActionFissionResult,
-    downloadGeneratedImage,
+    downloadNodeImage,
+    discardActionFissionRow: stopActionFissionImmediately,
     runImageGeneration,
     runActionFission,
     stopImageGeneration,
@@ -804,7 +961,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   canvasActionHandlersRef.current = {
     addImageReferenceFiles,
     downloadActionFissionResult,
-    downloadGeneratedImage,
+    downloadNodeImage,
+    discardActionFissionRow: stopActionFissionImmediately,
     runImageGeneration,
     runActionFission,
     stopImageGeneration,
@@ -812,10 +970,12 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   };
 
   const canvasActions = useMemo<NativeCanvasActions>(() => ({
+    readOnly,
     addImageReferenceFiles: (nodeId, files) => canvasActionHandlersRef.current.addImageReferenceFiles(nodeId, files),
     cropNodeImage,
     downloadActionFissionResult: (nodeId, rowId) => canvasActionHandlersRef.current.downloadActionFissionResult(nodeId, rowId),
-    downloadGeneratedImage: (nodeId, imageIndex) => canvasActionHandlersRef.current.downloadGeneratedImage(nodeId, imageIndex),
+    downloadNodeImage: (nodeId, imageIndex) => canvasActionHandlersRef.current.downloadNodeImage(nodeId, imageIndex),
+    discardActionFissionRow: (nodeId, rowId) => canvasActionHandlersRef.current.discardActionFissionRow(nodeId, rowId),
     getImageGeneratorPrompts: (nodeId: string) => collectImageGeneratorPrompts(nodeId, nodesRef.current, edgesRef.current, t("infiniteCanvas:prompt")),
     getImageGeneratorReferences: (nodeId: string) => collectImageGeneratorReferences(nodeId, nodesRef.current, edgesRef.current, t("infiniteCanvas:referenceImage")),
     openLibraryForNode: (nodeId: string) => {
@@ -847,7 +1007,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     setNodeText: (nodeId: string, text: string) => patchNodeData(nodeId, { text }),
     stopImageGeneration: (nodeId) => canvasActionHandlersRef.current.stopImageGeneration(nodeId),
     stopActionFission: (nodeId, rowId) => canvasActionHandlersRef.current.stopActionFission(nodeId, rowId),
-  }), [cropNodeImage, patchNodeData, setEdges, setNodeImage, t]);
+  }), [cropNodeImage, patchNodeData, readOnly, setEdges, setNodeImage, t]);
 
   const connectNodes = useCallback((connection: Connection) => {
     setEdges((current) => {
@@ -1025,6 +1185,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
 
   const handleNodeDragStart = useCallback<OnNodeDrag<NativeCanvasNode>>((event, draggedNode, draggedNodes) => {
     if (readOnly) return;
+    stopViewportMomentum();
     historyGestureRef.current = beginInfiniteCanvasHistoryGesture();
     altDragCloneGestureRef.current = null;
     const draggedIds = new Set([draggedNode.id, ...draggedNodes.map((node) => node.id)]);
@@ -1063,7 +1224,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       const elevated = current.map((node) => draggedIds.has(node.id) ? { ...node, zIndex: nextZIndex } : node);
       return cloned ? [...elevated, ...cloned.nodes] : elevated;
     });
-  }, [getEdges, getNodes, readOnly, setNodes]);
+  }, [getEdges, getNodes, readOnly, setNodes, stopViewportMomentum]);
 
   const handleNodeDragStop = useCallback<OnNodeDrag<NativeCanvasNode>>((_event, draggedNode, draggedNodes) => {
     if (readOnly) return;
@@ -1136,6 +1297,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
         <ContextMenuTrigger asChild disabled={readOnly}>
           <div
             className="rf-native-flow-surface"
+            onPointerDown={stopViewportMomentum}
             onPointerMove={(event) => {
               lastPointerRef.current = { x: event.clientX, y: event.clientY };
             }}
@@ -1187,9 +1349,34 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
               onViewportChange={({ zoom }) => {
                 wrapperRef.current?.style.setProperty("--rf-selection-inverse-zoom", String(1 / zoom));
               }}
-              onMoveEnd={(_event, viewport) => {
+              onMoveStart={(event, viewport) => {
+                if (!event && viewportMomentum.isInternalViewport(viewport)) return;
                 viewportRef.current = viewport;
-                if (!readOnly) onSnapshotChange?.({ nodes, edges, viewport });
+                if (!event) {
+                  viewportMomentum.stop();
+                  viewportMomentum.syncViewport(viewport);
+                  return;
+                }
+                viewportMomentum.beginUserMove(viewport);
+              }}
+              onMove={(event, viewport) => {
+                if (!event && viewportMomentum.isInternalViewport(viewport)) return;
+                viewportRef.current = viewport;
+                if (!event) {
+                  viewportMomentum.syncViewport(viewport);
+                  return;
+                }
+                viewportMomentum.updateUserMove(viewport);
+              }}
+              onMoveEnd={(event, viewport) => {
+                if (!event && viewportMomentum.isInternalViewport(viewport)) return;
+                viewportRef.current = viewport;
+                if (!event) {
+                  viewportMomentum.syncViewport(viewport);
+                  if (!readOnly) onSnapshotChange?.({ nodes: nodesRef.current, edges: edgesRef.current, viewport });
+                  return;
+                }
+                viewportMomentum.endUserMove(viewport);
               }}
               onNodeDragStart={handleNodeDragStart}
               onNodeDragStop={handleNodeDragStop}
@@ -1260,25 +1447,36 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
                 <span>{t("common:actions.copyNode")}</span>
               </ContextMenuItem>
               {contextNode.data.kind === "imageLoader" || contextNode.data.kind === "imageGenerator" ? (
-                <ContextMenuItem disabled={!contextNodeImage} onSelect={() => void copyContextNodeImage()}>
-                  <Image aria-hidden="true" />
-                  <span>{t("common:actions.copyImage")}</span>
-                </ContextMenuItem>
+                <>
+                  <ContextMenuItem disabled={!contextNodeImage} onSelect={() => void copyContextNodeImage()}>
+                    <Image aria-hidden="true" />
+                    <span>{t("common:actions.copyImage")}</span>
+                  </ContextMenuItem>
+                  <ContextMenuItem disabled={!contextNodeImage} onSelect={() => void downloadContextNodeImage()}>
+                    <Download aria-hidden="true" />
+                    <span>{t("infiniteCanvas:downloadImage")}</span>
+                  </ContextMenuItem>
+                </>
               ) : null}
               <ContextMenuItem variant="destructive" onSelect={deleteContextNode}>
                 <Trash2 aria-hidden="true" />
                 <span>{t("common:actions.delete")}</span>
               </ContextMenuItem>
-            </> : NATIVE_CANVAS_NODE_KINDS.map((kind) => {
-              const definition = NATIVE_CANVAS_NODE_DEFINITIONS[kind];
-              const Icon = definition.icon;
-              return (
-                <ContextMenuItem key={kind} className="rf-native-context-item" onSelect={() => addContextNode(kind)}>
-                  <Icon aria-hidden="true" />
-                  <span>{t(`infiniteCanvas:${definition.labelKey}`)}</span>
-                </ContextMenuItem>
-              );
-            })}
+            </> : CONTEXT_CANVAS_NODE_GROUPS.map((group, groupIndex) => (
+              <ContextMenuGroup key={groupIndex}>
+                {group.map((kind) => {
+                  const definition = NATIVE_CANVAS_NODE_DEFINITIONS[kind];
+                  const Icon = definition.icon;
+                  return (
+                    <ContextMenuItem key={kind} className="rf-native-context-item" onSelect={() => addContextNode(kind)}>
+                      <Icon aria-hidden="true" />
+                      <span>{t(`infiniteCanvas:${definition.labelKey}`)}</span>
+                    </ContextMenuItem>
+                  );
+                })}
+                {groupIndex < CONTEXT_CANVAS_NODE_GROUPS.length - 1 ? <ContextMenuSeparator className="mx-2" /> : null}
+              </ContextMenuGroup>
+            ))}
           </ContextMenuGroup>
         </ContextMenuContent>
         </ContextMenu>
@@ -1311,6 +1509,39 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
             }));
           }}
         /> : null}
+
+        <AlertDialog
+          open={Boolean(pendingGenerationStop)}
+          onOpenChange={(open) => {
+            if (!open && !generationStopPending) setPendingGenerationStop(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("infiniteCanvas:stopGenerationConfirmTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {pendingGenerationStop?.kind === "actionFission"
+                  ? t("infiniteCanvas:stopActionFissionConfirmDescription", { count: pendingGenerationStop.taskIds.length })
+                  : t("infiniteCanvas:stopGenerationConfirmDescription")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={generationStopPending}>
+                {t("common:actions.cancel")}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                disabled={generationStopPending}
+                onClick={(event) => {
+                  event.preventDefault();
+                  void confirmGenerationStop();
+                }}
+              >
+                {t("common:actions.confirm")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <Button
           type="button"

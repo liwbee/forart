@@ -96,6 +96,9 @@ function createGenerationTaskDto(record = {}) {
     ...(errorMessage ? { errorMessage } : {}),
     startedAt: Number(task.startedAt || task.createdAt || 0),
     ...(Number(task.runningAt || 0) ? { runningAt: Number(task.runningAt) } : {}),
+    ...(Number(task.remoteExecutionStartedAt || 0)
+      ? { remoteExecutionStartedAt: Number(task.remoteExecutionStartedAt) }
+      : {}),
     updatedAt: Number(task.updatedAt || 0),
     ...(Number(task.completedAt || 0) ? { completedAt: Number(task.completedAt) } : {}),
     ...(Number.isFinite(Number(task.durationMs)) && Number(task.durationMs) >= 0

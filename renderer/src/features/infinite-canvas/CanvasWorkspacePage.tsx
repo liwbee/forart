@@ -2,6 +2,7 @@ import { ListTodo, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import type { CanvasTransferProgress, CanvasTransferType } from "../../app/appConfig";
 import { Alert, AlertDescription } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -9,6 +10,7 @@ import { Skeleton } from "../../components/ui/skeleton";
 import { Tabs, TabsContent } from "../../components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { CanvasDocumentTabs } from "./CanvasDocumentTabs";
+import { CanvasTransferProgressDialog, type ActiveCanvasTransfer } from "./CanvasTransferProgressDialog";
 import { ReactFlowCanvasPage, type CanvasSaveStatus } from "./ReactFlowCanvasPage";
 import { CanvasWorkspaceHome } from "./CanvasWorkspaceHome";
 import { CanvasFloatingPanel } from "./components/CanvasFloatingPanel";
@@ -99,6 +101,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
   const [errorMessage, setErrorMessage] = useState("");
   const [saveStatus, setSaveStatus] = useState<CanvasSaveStatus>("saved");
   const [taskCenterOpen, setTaskCenterOpen] = useState(false);
+  const [activeCanvasTransfer, setActiveCanvasTransfer] = useState<ActiveCanvasTransfer | null>(null);
   const activeTaskCount = useGenerationTaskCache((state) => Object.values(state.tasksById).filter(isGenerationTaskActive).length);
   const activeCanvasIdRef = useRef("");
   const activeDocumentRef = useRef<NativeCanvasDocument | null>(null);
@@ -122,6 +125,12 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
   useEffect(() => {
     if (!sharedCanvasesEnabled) setHomeSource("local");
   }, [sharedCanvasesEnabled]);
+
+  useEffect(() => window.easyTool?.onCanvasTransferProgress?.((progress: CanvasTransferProgress) => {
+    setActiveCanvasTransfer((current) => current?.operationId === progress.operationId
+      ? { ...progress, canceling: current.canceling }
+      : current);
+  }), []);
 
   const upsertCanvas = useCallback((record: CanvasRecord) => {
     setCanvases((current) => current.some((item) => item.id === record.id)
@@ -444,6 +453,39 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     }
   };
 
+  const runCanvasTransfer = async <T,>(transferType: CanvasTransferType, work: (operationId: string) => Promise<T>) => {
+    if (activeCanvasTransfer) return undefined;
+    const operationId = crypto.randomUUID();
+    setBusy(true);
+    setActiveCanvasTransfer({
+      operationId,
+      transferType,
+      phase: "queued",
+      percent: 0,
+      loadedBytes: 0,
+      totalBytes: 0,
+    });
+    try {
+      const result = await work(operationId);
+      setErrorMessage("");
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/Canvas transfer canceled/i.test(message)) setErrorMessage(message);
+      return undefined;
+    } finally {
+      setActiveCanvasTransfer((current) => current?.operationId === operationId ? null : current);
+      setBusy(false);
+    }
+  };
+
+  const cancelCanvasTransfer = () => {
+    const operationId = activeCanvasTransfer?.operationId;
+    if (!operationId || activeCanvasTransfer.canceling) return;
+    setActiveCanvasTransfer((current) => current?.operationId === operationId ? { ...current, canceling: true } : current);
+    void window.easyTool?.cancelCanvasTransfer?.(operationId);
+  };
+
   const createCanvas = () => void runBusy(async () => {
     if (!window.easyTool?.createCanvas || !activeProjectId) return;
     const result = await window.easyTool.createCanvas({
@@ -553,25 +595,27 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     await refreshSharedWorkspace();
   });
 
-  const copySharedCanvasToLocal = (canvasId: string, projectId: string) => void runBusy(async () => {
+  const copySharedCanvasToLocal = (canvasId: string, projectId: string) => void runCanvasTransfer("import", async (operationId) => {
     const baseUrl = serverUrl.trim().replace(/\/+$/, "");
     if (!baseUrl || !window.easyTool?.downloadCanvasPackageFromRemote || !window.easyTool.importCanvasPackageFromPath) return;
     const downloaded = await window.easyTool.downloadCanvasPackageFromRemote({
       downloadUrl: `${baseUrl}/api/canvas-exchange/canvases/${encodeURIComponent(canvasId)}/package`,
+      operationId,
     });
-    await window.easyTool.importCanvasPackageFromPath({ filePath: downloaded.filePath, projectId });
+    await window.easyTool.importCanvasPackageFromPath({ filePath: downloaded.filePath, projectId, operationId });
     await refreshWorkspace();
     toast.success(t("infiniteCanvas:canvasImported"));
   });
 
-  const uploadCanvasToShared = (canvasId: string, projectId: string) => void runBusy(async () => {
+  const uploadCanvasToShared = (canvasId: string, projectId: string) => void runCanvasTransfer("upload", async (operationId) => {
     const baseUrl = serverUrl.trim().replace(/\/+$/, "");
     if (!baseUrl || !window.easyTool?.createCanvasPackageForUpload || !window.easyTool.uploadCanvasPackageToRemote) return;
-    const created = await window.easyTool.createCanvasPackageForUpload(canvasId);
+    const created = await window.easyTool.createCanvasPackageForUpload(canvasId, operationId);
     if (created.canceled || !created.filePath) return;
     const uploaded = objectValue(await window.easyTool.uploadCanvasPackageToRemote({
       filePath: created.filePath,
       uploadUrl: `${baseUrl}/api/canvas-exchange/canvases?project_id=${encodeURIComponent(projectId)}`,
+      operationId,
     }));
     const warnings = Array.isArray(uploaded.warnings) ? uploaded.warnings : created.warnings || [];
     await refreshSharedWorkspace();
@@ -637,8 +681,9 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     if (created) await openCanvas(created.id);
   });
 
-  const importCanvas = () => void runBusy(async () => {
-    const result = await window.easyTool?.importCanvas?.({ projectId: activeProjectId });
+  const importCanvas = () => void runCanvasTransfer("import", async (operationId) => {
+    const result = await window.easyTool?.importCanvas?.({ projectId: activeProjectId, operationId });
+    if (result?.canceled) return;
     await refreshWorkspace();
     const imported = normalizeCanvasDocument(objectValue(result).canvas);
     if (imported) await openCanvas(imported.id);
@@ -719,9 +764,9 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
           onDeleteProject={homeSource === "shared" ? deleteSharedProject : deleteProject}
           onDuplicateCanvas={duplicateCanvas}
           onCopyCanvasToLocal={copySharedCanvasToLocal}
-          onExportCanvas={(id, withResources) => void runBusy(async () => {
-            if (withResources) await window.easyTool?.exportCanvasPackage?.(id);
-            else await window.easyTool?.exportCanvasJson?.(id);
+          onExportCanvas={(id, withResources) => void runCanvasTransfer("export", async (operationId) => {
+            if (withResources) await window.easyTool?.exportCanvasPackage?.(id, operationId);
+            else await window.easyTool?.exportCanvasJson?.(id, operationId);
           })}
           onImportCanvas={importCanvas}
           onMoveCanvas={moveCanvas}
@@ -756,6 +801,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
           ) : null}
         </TabsContent>
       ))}
+      <CanvasTransferProgressDialog transfer={activeCanvasTransfer} onCancel={cancelCanvasTransfer} />
       <CanvasFloatingPanel
         open={taskCenterOpen}
         title={t("infiniteCanvas:taskCenter")}

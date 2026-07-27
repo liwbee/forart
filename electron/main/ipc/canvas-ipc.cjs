@@ -34,6 +34,28 @@ async function stopMissingGenerationTargets(canvasId, canvasStore, generationTas
 
 function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskService }) {
   const canvasSaveSessions = new Map();
+  const canvasTransferJobs = new Map();
+  const runCanvasTransfer = async (event, operationId, transferType, work) => {
+    const id = String(operationId || '').trim();
+    const controller = new AbortController();
+    if (id) {
+      canvasTransferJobs.get(id)?.abort();
+      canvasTransferJobs.set(id, controller);
+    }
+    const onProgress = (progress) => {
+      if (!id || event.sender.isDestroyed()) return;
+      event.sender.send('canvas:transfer-progress', {
+        operationId: id,
+        transferType,
+        ...progress,
+      });
+    };
+    try {
+      return await work({ signal: controller.signal, onProgress });
+    } finally {
+      if (id && canvasTransferJobs.get(id) === controller) canvasTransferJobs.delete(id);
+    }
+  };
   ipcMain.handle('save-result', async (_event, payload) => assetStore.saveResult(payload, app.getPath('downloads')));
   ipcMain.handle('canvas:list', async () => ({ canvases: canvasStore.listCanvases(), projects: canvasStore.listProjects() }));
   ipcMain.handle('canvas:create', async (_event, payload) => canvasStore.createCanvas(payload));
@@ -84,13 +106,48 @@ function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackag
   });
   ipcMain.handle('canvas:delete-project', async (_event, projectId) => canvasStore.deleteProject(projectId));
   ipcMain.handle('canvas:move-to-project', async (_event, canvasId, projectId) => canvasStore.moveCanvasToProject(canvasId, projectId));
-  ipcMain.handle('canvas:export-json', async (_event, canvasId) => canvasPackageStore.exportJson(canvasId));
-  ipcMain.handle('canvas:export-package', async (_event, canvasId) => canvasPackageStore.exportPackage(canvasId));
-  ipcMain.handle('canvas:import', async (_event, payload) => canvasPackageStore.importCanvas(payload));
-  ipcMain.handle('canvas:create-package-for-upload', async (_event, canvasId) => canvasPackageStore.createPackageForUpload(canvasId));
-  ipcMain.handle('canvas:import-package-from-path', async (_event, payload = {}) => canvasPackageStore.importPackageFile(payload.filePath, payload.projectId));
-  ipcMain.handle('canvas:upload-package-to-remote', async (_event, payload = {}) => canvasPackageStore.uploadPackageToRemote(payload));
-  ipcMain.handle('canvas:download-package-from-remote', async (_event, payload = {}) => canvasPackageStore.downloadPackageFromRemote(payload));
+  ipcMain.handle('canvas:export-json', async (event, canvasId, operationId) => (
+    runCanvasTransfer(event, operationId, 'export', (options) => canvasPackageStore.exportJson(canvasId, options))
+  ));
+  ipcMain.handle('canvas:export-package', async (event, canvasId, operationId) => (
+    runCanvasTransfer(event, operationId, 'export', (options) => canvasPackageStore.exportPackage(canvasId, options))
+  ));
+  ipcMain.handle('canvas:import', async (event, payload = {}) => (
+    runCanvasTransfer(event, payload.operationId, 'import', (options) => canvasPackageStore.importCanvas(payload, options))
+  ));
+  ipcMain.handle('canvas:create-package-for-upload', async (event, canvasId, operationId) => (
+    runCanvasTransfer(event, operationId, 'upload', (options) => canvasPackageStore.createPackageForUpload(canvasId, {
+      ...options,
+      rangeStart: 0,
+      rangeEnd: 55,
+    }))
+  ));
+  ipcMain.handle('canvas:import-package-from-path', async (event, payload = {}) => (
+    runCanvasTransfer(event, payload.operationId, 'import', (options) => canvasPackageStore.importPackageFile(payload.filePath, payload.projectId, {
+      ...options,
+      rangeStart: payload.operationId ? 50 : 0,
+      rangeEnd: 100,
+    }))
+  ));
+  ipcMain.handle('canvas:upload-package-to-remote', async (event, payload = {}) => (
+    runCanvasTransfer(event, payload.operationId, 'upload', (options) => canvasPackageStore.uploadPackageToRemote(payload, {
+      ...options,
+      rangeStart: 55,
+      rangeEnd: 100,
+    }))
+  ));
+  ipcMain.handle('canvas:download-package-from-remote', async (event, payload = {}) => (
+    runCanvasTransfer(event, payload.operationId, 'import', (options) => canvasPackageStore.downloadPackageFromRemote(payload, {
+      ...options,
+      rangeStart: 0,
+      rangeEnd: 50,
+    }))
+  ));
+  ipcMain.handle('canvas:cancel-transfer', async (_event, operationId) => {
+    const controller = canvasTransferJobs.get(String(operationId || '').trim());
+    controller?.abort();
+    return { ok: true, canceled: Boolean(controller) };
+  });
   ipcMain.handle('canvas:save-asset', async (_event, payload) => assetStore.saveAsset(payload));
   ipcMain.handle('canvas:save-asset-thumbnail', async (_event, payload) => assetStore.saveAssetThumbnail(payload));
   ipcMain.handle('canvas:ensure-asset-thumbnail', async (_event, payload) => assetStore.ensureAssetThumbnail(payload));

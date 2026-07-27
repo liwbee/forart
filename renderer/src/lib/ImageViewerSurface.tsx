@@ -154,7 +154,7 @@ export function ImageViewerSurface({ src, alt, activity, onNaturalSizeChange, on
   return (
     <div
       ref={viewportRef}
-      className={cn("model-image-viewer-viewport", isDragging && "dragging")}
+      className={cn("image-viewer-viewport", isDragging && "dragging")}
       onClick={(event) => {
         event.stopPropagation();
         if (event.target === event.currentTarget) onBlankClick();
@@ -162,7 +162,7 @@ export function ImageViewerSurface({ src, alt, activity, onNaturalSizeChange, on
     >
       {naturalSize.width && naturalSize.height ? (
         <div
-          className={cn("model-image-viewer", activity?.state === "running" && "is-generating")}
+          className={cn("image-viewer", activity?.state === "running" && "is-generating")}
           style={{
             width: naturalSize.width,
             height: naturalSize.height,
@@ -179,7 +179,7 @@ export function ImageViewerSurface({ src, alt, activity, onNaturalSizeChange, on
         </div>
       ) : null}
       {activity?.state === "running" ? (
-        <div className="model-image-viewer-activity" role="status" aria-live="polite">
+        <div className="image-viewer-activity" role="status" aria-live="polite">
           {activity.label}
         </div>
       ) : null}

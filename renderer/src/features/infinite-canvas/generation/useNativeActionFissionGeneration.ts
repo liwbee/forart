@@ -34,6 +34,7 @@ import {
   useGenerationTaskCache,
   watchGenerationTask,
 } from "./generationTaskCache";
+import { downloadMarkerForTaskResult } from "./generationResultDownloadState";
 
 interface UseNativeActionFissionGenerationOptions {
   canvasId: string;
@@ -91,14 +92,25 @@ export function useNativeActionFissionGeneration({
         handledTerminalVersionsRef.current.set(dto.id, dto.version);
         if (dto.status !== "succeeded" || !dto.result?.images.length) return;
         const image = dto.result.images[0];
+        const currentRow = nodes
+          .find((node) => node.id === nodeId && node.data.kind === "actionFission")
+          ?.data.actionFission?.rows.find((row) => row.id === rowId);
+        const downloadMarker = downloadMarkerForTaskResult(
+          currentRow ? actionFissionRowTaskId(currentRow) : "",
+          dto.id,
+          String(currentRow?.resultUrl || ""),
+          image.assetUrl,
+          currentRow?.resultDownloadState,
+          currentRow?.resultDownloadedAt,
+        );
         patchRow(nodeId, rowId, {
           resultUrl: image.assetUrl,
           resultThumbUrl: image.thumbUrl,
           resultFileName: image.fileName,
           resultWidth: image.width,
           resultHeight: image.height,
-          resultDownloadState: "pending",
-          resultDownloadedAt: undefined,
+          resultDownloadState: downloadMarker.downloadState,
+          resultDownloadedAt: downloadMarker.downloadedAt,
         });
       });
     } catch (error) {
@@ -108,7 +120,7 @@ export function useNativeActionFissionGeneration({
     } finally {
       taskControllersRef.current.delete(taskId);
     }
-  }, [canvasId, patchRow]);
+  }, [canvasId, nodes, patchRow]);
 
   const runApiRows = useCallback(async (
     node: NativeCanvasNode,
@@ -117,9 +129,11 @@ export function useNativeActionFissionGeneration({
     additionalReferences: string[],
     connectedPrompt: string,
     additionalPrompts: string[],
+    signal: AbortSignal,
   ) => {
     if (!window.forartGenerationTasks?.startMany) throw new Error(t("infiniteCanvas:canvasDesktopRequired"));
     const settings = await loadApiSettings();
+    if (signal.aborted) return;
     const providers = orderedApiProviders(settings.providers, settings.providerOrder).filter(isImageProviderConfigured);
     const provider = providers.find((item) => item.id === node.data.imageProviderId)
       || providers.find((item) => item.id === settings.defaultImageProviderId)
@@ -156,6 +170,7 @@ export function useNativeActionFissionGeneration({
         status: "submitting",
       };
     });
+    if (signal.aborted) return;
     const tasks = await window.forartGenerationTasks.startMany("api", payloads);
     if (tasks.length !== rows.length) throw new Error(t("infiniteCanvas:generationTaskCreateFailed"));
     if (!mountedRef.current) return;
@@ -295,6 +310,7 @@ export function useNativeActionFissionGeneration({
           additionalReferences.map((item) => item.imageUrl),
           connectedPrompt,
           additionalPrompts.map((item) => item.text),
+          queueController.signal,
         );
       }
     } catch (error) {
@@ -309,17 +325,17 @@ export function useNativeActionFissionGeneration({
     }
   }, [canvasId, edges, nodes, runApiRows, runLibtvRows, t]);
 
-  const stopActionFission = useCallback(async (nodeId: string, rowId?: string) => {
-    if (!rowId) {
-      const prefix = `${nodeId}:`;
-      nodeQueueControllersRef.current.forEach((controller, key) => {
-        if (key.startsWith(prefix)) controller.abort();
-      });
-    }
+  const stopActionFission = useCallback(async (nodeId: string, rowId?: string, taskIds?: string[]) => {
+    const runPrefix = `${nodeId}:`;
+    nodeQueueControllersRef.current.forEach((controller, key) => {
+      if ((!rowId && key.startsWith(runPrefix)) || key === `${nodeId}:${rowId}`) controller.abort();
+    });
+    const selectedTaskIds = taskIds ? new Set(taskIds) : null;
     const rows = nodes.find((node) => node.id === nodeId)?.data.actionFission?.rows || [];
     const targets = rowId ? rows.filter((row) => row.id === rowId) : rows;
     await Promise.allSettled(targets.map(async (row) => {
       const taskId = actionFissionRowTaskId(row);
+      if (selectedTaskIds && !selectedTaskIds.has(taskId)) return;
       const task = taskId ? useGenerationTaskCache.getState().tasksById[taskId] : undefined;
       if (!taskId || !isGenerationTaskActive(task)) return;
       taskControllersRef.current.get(taskId)?.abort();

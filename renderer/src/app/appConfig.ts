@@ -93,6 +93,7 @@ export interface GenerationTaskDto {
   errorMessage?: string;
   startedAt: number;
   runningAt?: number;
+  remoteExecutionStartedAt?: number;
   updatedAt: number;
   completedAt?: number;
   durationMs?: number;
@@ -254,6 +255,18 @@ export interface ForartWindowApi {
   onMaximizedChanged: (callback: (maximized: boolean) => void) => () => void;
 }
 
+export type CanvasTransferType = "export" | "import" | "upload";
+export type CanvasTransferPhase = "queued" | "preparing" | "reading" | "scanning" | "packing" | "writing" | "uploading" | "downloading" | "extracting" | "saving" | "working";
+
+export interface CanvasTransferProgress {
+  operationId: string;
+  transferType: CanvasTransferType;
+  phase: CanvasTransferPhase;
+  percent: number;
+  loadedBytes: number;
+  totalBytes: number;
+}
+
 export interface EasyToolApi {
   saveResult: (payload: { dataUrl?: string; url?: string; defaultName?: string; directory?: string }) => Promise<{ canceled: boolean; filePath?: string }>;
   listCanvases: () => Promise<{
@@ -269,13 +282,15 @@ export interface EasyToolApi {
   deleteCanvas: (canvasId: string) => Promise<{ ok: true; filePath?: string }>;
   deleteCanvasProject: (projectId: string) => Promise<{ ok: true; deletedCanvasIds?: string[] }>;
   moveCanvasToProject: (canvasId: string, projectId: string) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
-  exportCanvasJson: (canvasId: string) => Promise<CanvasPackageExportResult>;
-  exportCanvasPackage: (canvasId: string) => Promise<CanvasPackageExportResult>;
-  importCanvas: (payload: { projectId?: string }) => Promise<CanvasPackageImportResult>;
-  createCanvasPackageForUpload: (canvasId: string) => Promise<CanvasPackageExportResult>;
-  importCanvasPackageFromPath: (payload: { filePath: string; projectId?: string }) => Promise<CanvasPackageImportResult>;
-  uploadCanvasPackageToRemote: (payload: { filePath: string; uploadUrl: string }) => Promise<unknown>;
-  downloadCanvasPackageFromRemote: (payload: { downloadUrl: string }) => Promise<{ ok: true; filePath: string }>;
+  exportCanvasJson: (canvasId: string, operationId?: string) => Promise<CanvasPackageExportResult>;
+  exportCanvasPackage: (canvasId: string, operationId?: string) => Promise<CanvasPackageExportResult>;
+  importCanvas: (payload: { projectId?: string; operationId?: string }) => Promise<CanvasPackageImportResult>;
+  createCanvasPackageForUpload: (canvasId: string, operationId?: string) => Promise<CanvasPackageExportResult>;
+  importCanvasPackageFromPath: (payload: { filePath: string; projectId?: string; operationId?: string }) => Promise<CanvasPackageImportResult>;
+  uploadCanvasPackageToRemote: (payload: { filePath: string; uploadUrl: string; operationId?: string }) => Promise<unknown>;
+  downloadCanvasPackageFromRemote: (payload: { downloadUrl: string; operationId?: string }) => Promise<{ ok: true; filePath: string }>;
+  cancelCanvasTransfer: (operationId: string) => Promise<{ ok: true; canceled: boolean }>;
+  onCanvasTransferProgress: (callback: (progress: CanvasTransferProgress) => void) => () => void;
   saveCanvasAsset: (payload: { dataUrl?: string; url?: string; defaultName?: string; kind?: "input" | "output"; type?: string }) => Promise<{ url: string; thumbUrl?: string; fileName: string; filePath?: string; thumbFilePath?: string }>;
   saveCanvasAssetThumbnail: (payload: { url?: string; filePath?: string }) => Promise<{ thumbUrl?: string; thumbFilePath?: string }>;
   ensureCanvasAssetThumbnail: (payload: { url?: string; filePath?: string }) => Promise<{ thumbUrl?: string; thumbFilePath?: string }>;

@@ -451,6 +451,7 @@ async function generateGeminiImage(context, provider, model, prompt, referenceIm
     const part = dataUriToGeminiPart(ref);
     if (part) parts.push(part);
   });
+  markRemoteExecutionStarted(context, taskId);
   const payload = await requestJson(context.net, geminiGenerateContentUrl(provider, model), {
     method: 'POST',
     headers: {
@@ -537,12 +538,19 @@ function updateTaskWithRemoteAnchor(context, taskId, patch) {
   return context.generationTaskStore.updateTask(taskId, patch);
 }
 
+function markRemoteExecutionStarted(context, taskId) {
+  const current = context.generationTaskStore.getTask(taskId);
+  if (!current || ['interrupted', 'superseded'].includes(current.status)) throw new Error('Interrupted');
+  if (Number(current.remoteExecutionStartedAt || 0)) return current;
+  return context.generationTaskStore.updateTask(taskId, { remoteExecutionStartedAt: Date.now() });
+}
+
 function writeTaskTerminalToCanvas(context, task, status, result, error) {
   if (!task?.canvasId || !task.target?.nodeId) return;
   context.resultCommitter.commit(task, { status, result, error, backend: 'api' });
 }
 
-async function submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, size, quality, imageCount, signal) {
+async function submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, size, quality, imageCount, taskId, signal) {
   const formData = new FormData();
   formData.append('model', model);
   formData.append('prompt', prompt);
@@ -555,6 +563,7 @@ async function submitOpenAiEditTask(context, provider, headers, model, prompt, r
     formData.append('image', file.blob, file.fileName);
   }
   const { 'Content-Type': _contentType, ...multipartHeaders } = headers;
+  markRemoteExecutionStarted(context, taskId);
   return requestJson(context.net, imageEditsUrl(provider), {
     method: 'POST',
     headers: multipartHeaders,
@@ -614,7 +623,7 @@ async function executeImageTask(context, task, payload, signal) {
     if (referenceImages.length && requestMode === 'openai') {
       context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.editSubmitting', messageParams: null });
       try {
-        submitPayload = await submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, requestSize, quality, imageCount, signal);
+        submitPayload = await submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, requestSize, quality, imageCount, task.id, signal);
       } catch (error) {
         if (isGptImage2Model(model)) throw error;
         context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.jsonReferenceRetrying', messageParams: null });
@@ -633,6 +642,7 @@ async function executeImageTask(context, task, payload, signal) {
         ...(refs.length ? { image: refs } : {}),
       };
       context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.generationSubmitting', messageParams: null });
+      markRemoteExecutionStarted(context, task.id);
       submitPayload = await requestJson(context.net, submitUrl, {
         method: 'POST',
         headers,
@@ -686,6 +696,7 @@ async function executeImageTask(context, task, payload, signal) {
 
   context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.generationSubmitting', messageParams: null });
   const submitUrl = providerEndpointUrl(provider, 'imageGenerationEndpoint', '/v1/images/generations') || imageGenerationsUrl(baseUrl);
+  markRemoteExecutionStarted(context, task.id);
   const submitPayload = await requestJson(context.net, submitUrl, {
     method: 'POST',
     headers,

@@ -84,6 +84,33 @@ export function isGenerationTaskActive(task: GenerationTaskDto | undefined) {
   return Boolean(task && ACTIVE_STATUSES.has(task.status));
 }
 
+export function requiresGenerationStopConfirmation(task: GenerationTaskDto | undefined) {
+  return Boolean(isGenerationTaskActive(task) && Number(task?.remoteExecutionStartedAt || 0));
+}
+
+export function partitionGenerationStopTasks(tasks: GenerationTaskDto[]) {
+  const activeTasks = tasks.filter((task) => isGenerationTaskActive(task));
+  return {
+    safeTasks: activeTasks.filter((task) => !requiresGenerationStopConfirmation(task)),
+    confirmationTasks: activeTasks.filter(requiresGenerationStopConfirmation),
+  };
+}
+
+export async function loadGenerationTasks(taskIds: string[]) {
+  const ids = [...new Set(taskIds.filter(Boolean))];
+  if (!ids.length) return [];
+  const taskApi = window.forartGenerationTasks;
+  if (taskApi?.getMany) {
+    const tasks = await taskApi.getMany(ids);
+    useGenerationTaskCache.getState().mergeTasks(tasks);
+  } else if (taskApi?.get) {
+    const tasks = (await Promise.all(ids.map((taskId) => taskApi.get(taskId)))).filter((task): task is GenerationTaskDto => Boolean(task));
+    useGenerationTaskCache.getState().mergeTasks(tasks);
+  }
+  const tasksById = useGenerationTaskCache.getState().tasksById;
+  return ids.map((taskId) => tasksById[taskId]).filter((task): task is GenerationTaskDto => Boolean(task));
+}
+
 export async function watchGenerationTask(
   taskId: string,
   signal: AbortSignal,

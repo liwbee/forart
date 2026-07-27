@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
 
+const { createAppTray, registerCloseToTray, showAppWindow } = require('./app-tray.cjs');
 const { createWindow, registerAppWindowIpc } = require('./app-window.cjs');
 const { registerCanvasIpc } = require('./ipc/canvas-ipc.cjs');
 const { registerConfigIpc } = require('./ipc/config-ipc.cjs');
@@ -51,7 +52,7 @@ const assetStore = createAssetStore({ rootDir: portableRootDir, net });
 const canvasStore = createCanvasStore({ rootDir: portableRootDir });
 const generationTaskRepository = createGenerationTaskRepository({ rootDir: portableRootDir });
 const canvasCacheStore = createCanvasCacheStore({ assetStore, canvasStore, generationTaskRepository, shell });
-const canvasPackageStore = createCanvasPackageStore({ rootDir: appRootDir, dialog, canvasStore, assetStore });
+const canvasPackageStore = createCanvasPackageStore({ rootDir: appRootDir, dialog, canvasStore, assetStore, net });
 const configStore = createConfigStore({ app, rootDir: portableRootDir });
 const generationResultCommitter = createGenerationResultCommitter({ repository: generationTaskRepository, canvasStore });
 const generationTaskService = createGenerationTaskService({ repository: generationTaskRepository });
@@ -90,6 +91,9 @@ generationTaskService.registerExecutor('libtv', {
 const portableUpdater = createPortableUpdater({ app, rootDir: appRootDir, dataRoot: portableRootDir, net });
 let localApi = null;
 let mainWindow = null;
+let appTray = null;
+let disposeCloseToTray = null;
+let isQuitting = false;
 const disposeGenerationTaskIpc = registerGenerationTaskIpc({
   ipcMain,
   generationTaskService,
@@ -157,6 +161,11 @@ app.whenReady().then(async () => {
   registerCanvasAssetProtocol();
   registerImageReviewProtocol();
   try {
+    await canvasPackageStore.cleanupTemporaryFiles();
+  } catch (error) {
+    console.error('Canvas transfer temporary file cleanup failed:', error);
+  }
+  try {
     const commitRecovery = generationResultCommitter.recoverPending();
     if (commitRecovery.errors.length) {
       console.error('Generation result commit recovery completed with errors:', commitRecovery.errors);
@@ -178,23 +187,31 @@ app.whenReady().then(async () => {
   }
   generationTaskCleanup.start();
   mainWindow = await createWindow({ rootDir: appRootDir, isDev });
+  disposeCloseToTray = registerCloseToTray(mainWindow, { shouldQuit: () => isQuitting });
+  appTray = createAppTray({
+    app,
+    mainWindow,
+    iconPath: path.join(appRootDir, 'build', 'icon.ico'),
+    language: configStore.load()?.language,
+  });
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
   localApi?.close?.();
 });
 app.on('will-quit', () => {
+  disposeCloseToTray?.();
+  appTray?.destroy();
   generationTaskCleanup.stop();
   disposeGenerationTaskIpc();
   generationTaskRepository.close();
 });
 
 app.on('second-instance', () => {
-  if (!mainWindow) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.focus();
+  showAppWindow(mainWindow);
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+app.on('activate', () => {
+  showAppWindow(mainWindow);
 });

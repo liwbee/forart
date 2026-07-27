@@ -84,7 +84,7 @@ function compactTerminalTask(task = {}) {
     if (value) compact[key] = value;
   }
   if (task.messageParams && typeof task.messageParams === 'object') compact.messageParams = { ...task.messageParams };
-  for (const key of ['runningAt', 'completedAt', 'durationMs']) {
+  for (const key of ['runningAt', 'remoteExecutionStartedAt', 'completedAt', 'durationMs']) {
     const value = Number(task[key] || 0);
     if (value > 0 || (key === 'durationMs' && Number.isFinite(Number(task[key])))) compact[key] = Number(task[key]);
   }

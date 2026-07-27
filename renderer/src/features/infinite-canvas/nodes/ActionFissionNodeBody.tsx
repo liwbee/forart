@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useEdges, useNodes } from "@xyflow/react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
@@ -12,7 +12,6 @@ import {
   Play,
   Plus,
   Shuffle,
-  Split,
   Square,
   Settings2,
   Trash2,
@@ -20,7 +19,6 @@ import {
 import { AppScrollArea } from "../../../components/AppScrollArea";
 import { Button } from "../../../components/ui/button";
 import { ButtonGroup } from "../../../components/ui/button-group";
-import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "../../../components/ui/toggle-group";
 import { ImageViewer } from "../../../lib/ImageViewer";
@@ -360,11 +358,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   const [viewerImage, setViewerImage] = useState<ViewerImage | null>(null);
   const [viewerReferenceNodeId, setViewerReferenceNodeId] = useState("");
   const [downloadBusyRowId, setDownloadBusyRowId] = useState("");
-  const [isRenaming, setIsRenaming] = useState(false);
-  const [titleDraft, setTitleDraft] = useState("");
   const [timerNow, setTimerNow] = useState(Date.now());
-  const titleInputRef = useRef<HTMLInputElement | null>(null);
-  const cancelRenameRef = useRef(false);
   const canvasNodes = useNodes<NativeCanvasNode>();
   const canvasEdges = useEdges<NativeCanvasEdge>();
   const state = useMemo(() => normalizeActionFissionState(data.actionFission), [data.actionFission]);
@@ -437,7 +431,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
     actions.patchNodeData(nodeId, { actionFission: nextState });
   }, [actions, nodeId]);
   const deleteRow = useCallback((rowId: string) => {
-    void actions.stopActionFission(nodeId, rowId);
+    void actions.discardActionFissionRow(nodeId, rowId);
     setState(removeActionFissionRow(state, rowId));
   }, [actions, nodeId, setState, state]);
   const canSwitchAnyRow = rowData.some(({ categoryGroups }) => hasCategoryCandidates(categoryGroups));
@@ -478,8 +472,6 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
     return hasResult && !launchingRowIds.has(row.id) && !isRowRunning(task)
       && toneForRow(row, task, false, runtimeErrorsByRowId[row.id]) !== "error";
   });
-  const defaultTitle = t("infiniteCanvas:actionFission");
-  const title = String(data.label || "").trim() || defaultTitle;
   const candidatesByRowId = useMemo(
     () => new Map(rowData.map((item) => [item.row.id, item.categoryGroups])),
     [rowData],
@@ -496,16 +488,6 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   useEffect(() => {
     if (!data.actionFission) actions.patchNodeData(nodeId, { actionFission: state });
   }, [actions, data.actionFission, nodeId, state]);
-
-  useEffect(() => {
-    if (!isRenaming) return;
-    titleInputRef.current?.focus();
-    titleInputRef.current?.select();
-  }, [isRenaming]);
-
-  useEffect(() => {
-    if (!isRenaming) setTitleDraft(title);
-  }, [isRenaming, title]);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -644,19 +626,6 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
     }
   };
 
-  const commitTitleRename = () => {
-    if (cancelRenameRef.current) {
-      cancelRenameRef.current = false;
-      setTitleDraft(title);
-      setIsRenaming(false);
-      return;
-    }
-    const nextTitle = titleDraft.trim();
-    setIsRenaming(false);
-    if (nextTitle && nextTitle !== title) actions.patchNodeData(nodeId, { label: nextTitle });
-    else setTitleDraft(title);
-  };
-
   return (
     <section
       className="rf-action-fission"
@@ -665,46 +634,9 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
       data-has-additional-references={hasAdditionalReferences || undefined}
     >
       <header className="rf-action-fission-header">
-        <div className="rf-action-fission-title">
-          <Split aria-hidden="true" />
-          {isRenaming ? (
-            <Input
-              ref={titleInputRef}
-              className="rf-action-fission-title-input nodrag nopan nowheel"
-              value={titleDraft}
-              maxLength={80}
-              aria-label={t("infiniteCanvas:renameActionFission")}
-              onPointerDown={(event) => event.stopPropagation()}
-              onChange={(event) => setTitleDraft(event.currentTarget.value)}
-              onBlur={commitTitleRename}
-              onKeyDown={(event) => {
-                event.stopPropagation();
-                if (event.key === "Enter") event.currentTarget.blur();
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  cancelRenameRef.current = true;
-                  event.currentTarget.blur();
-                }
-              }}
-            />
-          ) : (
-            <span
-              title={title}
-              onDoubleClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                cancelRenameRef.current = false;
-                setTitleDraft(title);
-                setIsRenaming(true);
-              }}
-            >
-              {title}
-            </span>
-          )}
-          <span className="rf-action-fission-status rf-action-fission-group-status" data-tone={groupTone}>
-            {groupStatus}
-          </span>
-        </div>
+        <span className="rf-action-fission-status rf-action-fission-group-status rf-action-fission-header-status" data-tone={groupTone}>
+          {groupStatus}
+        </span>
         <Button className="nodrag" type="button" variant="ghost" size="sm" disabled={state.rows.length >= MAX_ACTION_FISSION_ROWS} onClick={() => setState(addActionFissionRow(state))}>
           <Plus data-icon="inline-start" aria-hidden="true" />
           {t("infiniteCanvas:actionFissionAddRow")}

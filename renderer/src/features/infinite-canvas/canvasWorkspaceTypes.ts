@@ -130,6 +130,10 @@ function normalizeLibtvImageGeneration(input: unknown): NativeCanvasNode["data"]
 
 function normalizeCurrentNodeData(data: Record<string, unknown>, kind: NativeCanvasNodeKind) {
   const normalized = { ...data, kind } as NativeCanvasNode["data"];
+  if (!String(normalized.label || "").trim() && String(data.title || "").trim()) {
+    normalized.label = String(data.title).trim();
+  }
+  delete normalized.title;
   normalized.latestGenerationTaskId = String(data.latestGenerationTaskId || "") || undefined;
   if (kind !== "imageGenerator") return normalized;
   normalized.libtvImageGeneration = normalizeLibtvImageGeneration(data.libtvImageGeneration);

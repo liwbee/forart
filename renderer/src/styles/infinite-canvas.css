@@ -464,7 +464,7 @@
   width: 100%;
   height: 100%;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
@@ -484,35 +484,70 @@
   outline-offset: 2px;
 }
 
-.rf-native-node-frame--content-only {
-  grid-template-rows: minmax(0, 1fr);
-}
-
-.rf-native-node-header {
-  min-width: 0;
-  min-height: 38px;
+.rf-native-node-caption {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 4px);
+  height: 24px;
   display: flex;
+  max-width: 100%;
   align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid var(--border-subtle);
-  padding: 0 12px;
-  color: var(--text-primary);
-  background: var(--surface-control);
+  gap: 6px;
+  color: var(--text-secondary);
   font-size: 12px;
-  font-weight: var(--font-weight-semibold);
+  font-weight: var(--font-weight-medium);
+  line-height: 20px;
+  pointer-events: none;
+  transition: color 150ms ease;
 }
 
-.rf-native-node-header svg {
-  width: 15px;
-  height: 15px;
+.rf-native-node-caption.is-editable {
+  pointer-events: auto;
+}
+
+.rf-native-canvas .react-flow__node:hover .rf-native-node-caption,
+.rf-native-canvas .react-flow__node.selected .rf-native-node-caption {
+  color: var(--text-primary);
+}
+
+.rf-native-node-caption > svg {
+  width: 14px;
+  height: 14px;
   flex: 0 0 auto;
 }
 
-.rf-native-node-header span {
+.rf-native-node-caption-title {
   min-width: 0;
   overflow: hidden;
+  padding-block: 2px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.rf-native-node-caption:has(.rf-native-node-caption-title.is-editing) {
+  max-width: none;
+}
+
+.rf-native-node-caption-title.is-editing {
+  width: max-content;
+  min-width: 1ch;
+  max-width: none;
+  flex: 0 0 auto;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+  text-overflow: clip;
+  white-space: pre;
+  cursor: text;
+  user-select: text;
+}
+
+.rf-native-canvas .react-flow__node:has(.rf-native-node-caption-title.is-editing) .rf-native-node-frame {
+  outline: 0;
 }
 
 .rf-native-node-content {
@@ -821,40 +856,13 @@
   background: var(--surface-control);
 }
 
-.rf-action-fission-title {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, auto) auto;
-  align-items: center;
-  gap: 8px;
-  margin-right: auto;
-}
-
 .rf-action-fission-group-status {
   flex: 0 0 auto;
   white-space: nowrap;
 }
 
-.rf-action-fission-title > svg {
-  width: 16px;
-  height: 16px;
-}
-
-.rf-action-fission-title > span {
-  max-width: 240px;
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: var(--font-weight-semibold);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rf-action-fission-title-input {
-  width: min(240px, 32cqi);
-  height: 28px;
-  padding-inline: 8px;
-  font-size: 12px;
-  font-weight: var(--font-weight-semibold);
+.rf-action-fission-header-status {
+  margin-right: auto;
 }
 
 .rf-action-fission-layout-toggle {
@@ -1799,7 +1807,7 @@
   padding: 4px 6px;
   color: var(--media-overlay-foreground);
   background: var(--media-overlay-bg-strong);
-  font-size: 11px;
+  font-size: 8px;
   font-variant-numeric: tabular-nums;
   line-height: 1;
   pointer-events: none;
@@ -2007,6 +2015,192 @@
   align-items: stretch;
   justify-items: stretch;
   padding: 6px;
+}
+
+.rf-native-node-frame--annotation {
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.rf-native-canvas .react-flow__node:hover .rf-native-node-frame--annotation {
+  outline: var(--rf-annotation-outline-width, 1px) solid var(--border-subtle);
+  outline-offset: 0;
+}
+
+.rf-native-canvas .react-flow__node.selected .rf-native-node-frame--annotation {
+  outline: var(--rf-annotation-outline-width, 1px) solid var(--state-active-border);
+  outline-offset: 0;
+}
+
+.rf-native-canvas .react-flow__node.dragging .rf-native-node-frame--annotation,
+.rf-native-canvas .react-flow__node.dragging .rf-native-node-frame--annotation.is-dragging {
+  overflow: hidden;
+  border: 0;
+  outline: 0;
+  transition: none;
+}
+
+.rf-native-node-content--annotation {
+  position: relative;
+  display: block;
+  overflow: visible;
+  padding: 0;
+}
+
+.rf-native-annotation-text,
+.rf-native-annotation-input,
+.rf-native-annotation-measure {
+  margin: 0;
+  padding: 2px;
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.5;
+  letter-spacing: 0;
+  white-space: pre;
+  box-sizing: border-box;
+}
+
+.rf-native-annotation-text {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+  cursor: default;
+  user-select: none;
+}
+
+.rf-native-annotation-measure {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  width: max-content;
+  height: auto;
+  min-width: 1ch;
+  max-width: none;
+  visibility: hidden;
+  pointer-events: none;
+  contain: layout style;
+}
+
+.rf-native-annotation-input {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  field-sizing: fixed;
+  resize: none;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: text;
+  user-select: text;
+  overflow: hidden;
+  caret-color: currentColor;
+}
+
+.rf-native-annotation-input:focus,
+.rf-native-annotation-input:focus-visible {
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+}
+
+.rf-native-annotation-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.rf-native-annotation-toolbar [data-slot="toggle"] {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.rf-native-annotation-toolbar [data-slot="toggle-group-item"] {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.rf-native-annotation-font-size {
+  width: 72px;
+}
+
+.rf-native-annotation-font-size [data-slot="select-trigger"] {
+  height: 28px;
+  min-height: 28px;
+  padding-inline: 8px;
+  font-size: 12px;
+}
+
+.rf-native-annotation-toolbar-separator {
+  width: 1px;
+  height: 18px;
+  margin-inline: 3px;
+  background: var(--border-subtle);
+}
+
+.rf-native-annotation-color-trigger {
+  position: relative;
+}
+
+.rf-native-annotation-color-trigger > span {
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  width: 8px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--annotation-color);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface-card) 72%, transparent);
+}
+
+.rf-native-annotation-color-panel {
+  width: auto;
+  border-color: color-mix(in srgb, var(--border-subtle) 58%, transparent);
+  padding: 8px;
+}
+
+.rf-native-annotation-color-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 28px);
+  gap: 6px;
+}
+
+.rf-native-annotation-color-swatch {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  background: transparent;
+}
+
+.rf-native-annotation-color-swatch > span {
+  width: 100%;
+  height: 100%;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: var(--annotation-color);
+}
+
+.rf-native-annotation-color-swatch:hover {
+  border-color: var(--state-hover-border);
+}
+
+.rf-native-annotation-color-swatch[data-state="on"] {
+  border-color: var(--state-active-border);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--state-active-border) 20%, transparent);
 }
 
 .rf-native-prompt-input {
