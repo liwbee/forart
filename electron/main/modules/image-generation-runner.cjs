@@ -344,7 +344,37 @@ async function uploadReferenceImage(context, uploadUrl, headers, source, index, 
   const data = payload?.data && typeof payload.data === 'object' ? payload.data : null;
   const uploadedUrl = firstString(payload?.url, data?.url);
   if (!uploadedUrl || !isHttpImageUrl(uploadedUrl)) throw new Error(`Image upload did not return a usable URL (${summarizePayloadShape(payload)}).`);
+  await verifyUploadedImageUrl(context.net, uploadedUrl, signal);
   return uploadedUrl;
+}
+
+async function verifyUploadedImageUrl(net, uploadedUrl, signal) {
+  const retryDelays = [0, 250, 750, 1500, 2500];
+  let lastError;
+  for (const delay of retryDelays) {
+    if (delay) await wait(delay, signal);
+    try {
+      const response = await net.fetch(uploadedUrl, {
+        method: 'GET',
+        headers: {
+          Range: 'bytes=0-0',
+          'Cache-Control': 'no-cache',
+        },
+        signal,
+      });
+      if (response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        return;
+      }
+      await response.body?.cancel().catch(() => undefined);
+      lastError = new Error(`${response.status} ${response.statusText}`.trim());
+    } catch (error) {
+      if (signal?.aborted) throw new Error('Aborted');
+      lastError = error;
+    }
+  }
+  const reason = lastError instanceof Error ? lastError.message : String(lastError || 'unknown error');
+  throw new Error(`Uploaded reference image is not accessible: ${reason}`);
 }
 
 function blobToDataUri(blob, mimeType) {
@@ -372,17 +402,13 @@ async function normalizeReferenceImages(context, baseUrl, uploadHeaders, referen
       throw new Error('Reference images must be http(s) or Forart asset URLs. Base64 is not supported.');
     }
     seen.add(value);
-    if (/^https:\/\/upload\.apimart\.ai\//i.test(value)) {
-      normalized.push(value);
-    } else {
-      context.generationTaskStore.updateTask(taskId, {
-        status: 'running',
-        message: '',
-        messageCode: 'image.referenceUploading',
-        messageParams: { current: normalized.length + 1, total: referenceImages.length },
-      });
-      normalized.push(await uploadReferenceImage(context, imageUploadsUrl(baseUrl), uploadHeaders, value, normalized.length, signal));
-    }
+    context.generationTaskStore.updateTask(taskId, {
+      status: 'running',
+      message: '',
+      messageCode: 'image.referenceUploading',
+      messageParams: { current: normalized.length + 1, total: referenceImages.length },
+    });
+    normalized.push(await uploadReferenceImage(context, imageUploadsUrl(baseUrl), uploadHeaders, value, normalized.length, signal));
   }
   return normalized;
 }
