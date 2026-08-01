@@ -535,7 +535,6 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, ne
         };
         options.signal?.addEventListener('abort', onAbort, { once: true });
         request.setHeader('Content-Type', 'application/octet-stream');
-        request.setHeader('Content-Length', String(stat.size));
         request.on('response', (response) => {
           const chunks = [];
           response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));

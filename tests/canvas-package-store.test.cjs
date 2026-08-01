@@ -164,6 +164,7 @@ test('canvas upload streams package bytes, reports progress, and removes the tem
   fs.writeFileSync(packagePath, packageBuffer);
 
   let receivedBytes = 0;
+  const requestHeaders = new Map();
   const net = {
     request() {
       const request = new Writable({
@@ -181,7 +182,12 @@ test('canvas upload streams package bytes, reports progress, and removes the tem
           });
         },
       });
-      request.setHeader = () => undefined;
+      request.setHeader = (name, value) => {
+        if (String(name).toLowerCase() === 'content-length') {
+          throw new Error('Electron net.request forbids the Content-Length header.');
+        }
+        requestHeaders.set(String(name).toLowerCase(), String(value));
+      };
       request.abort = () => request.destroy();
       return request;
     },
@@ -196,6 +202,7 @@ test('canvas upload streams package bytes, reports progress, and removes the tem
   });
 
   assert.deepEqual(result, { ok: true });
+  assert.equal(requestHeaders.get('content-type'), 'application/octet-stream');
   assert.equal(receivedBytes, packageBuffer.length);
   assert.equal(progress.at(-1).percent, 100);
   assert.ok(progress.some((value) => value.loadedBytes > 0));
