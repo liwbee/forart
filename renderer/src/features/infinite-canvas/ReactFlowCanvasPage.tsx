@@ -39,10 +39,10 @@ import {
 } from "./canvasActions";
 import { useNativeCanvasInteractionStore } from "./canvasInteractionStore";
 import { CanvasFloatingPanel } from "./components/CanvasFloatingPanel";
+import { applyNativeNodeDataPatch } from "./applyNativeNodeDataPatch";
 import {
   cloneNativeCanvasNodeData,
   createNativeCanvasNode,
-  getImageGeneratorNodeSize,
   getImageNodeSize,
   nativeCanvasNodePrimaryImage,
   nativeCanvasNodeTaskId,
@@ -624,26 +624,9 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   }, [getNodes, setNodes, t]);
 
   const patchNodeData = useCallback((nodeId: string, patch: Partial<NativeCanvasNode["data"]>) => {
-    setNodes((current) => current.map((node) => {
-      if (node.id !== nodeId) return node;
-      const data = { ...node.data, ...patch };
-      if (data.kind !== "imageGenerator" || nativeCanvasNodePrimaryImage(data) || patch.imageAspectRatio === undefined) {
-        return { ...node, data };
-      }
-
-      const size = getImageGeneratorNodeSize(data.imageAspectRatio);
-      const currentWidth = typeof node.style?.width === "number" ? node.style.width : node.measured?.width || size.width;
-      const currentHeight = typeof node.style?.height === "number" ? node.style.height : node.measured?.height || size.height;
-      return {
-        ...node,
-        data,
-        position: {
-          x: node.position.x + (currentWidth - size.width) / 2,
-          y: node.position.y + (currentHeight - size.height) / 2,
-        },
-        style: { ...node.style, ...size },
-      };
-    }));
+    setNodes((current) => current.map((node) => node.id === nodeId
+      ? applyNativeNodeDataPatch(node, patch)
+      : node));
   }, [setNodes]);
 
   const patchActionFissionRow = useCallback((nodeId: string, rowId: string, patch: Partial<ActionFissionRow>) => {

@@ -10,6 +10,35 @@ function nowMs() {
   return Date.now();
 }
 
+function imageNodeSize(naturalWidth, naturalHeight) {
+  const width = Number(naturalWidth || 0);
+  const height = Number(naturalHeight || 0);
+  if (!(width > 0) || !(height > 0)) return null;
+  const targetArea = 240 * 320;
+  let scale = Math.sqrt(targetArea / (width * height));
+  if (width * scale > 420) scale = 420 / width;
+  if (height * scale > 420) scale = 420 / height;
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+function resizeNodeAroundCenter(node, size) {
+  if (!size) return node;
+  const currentWidth = Number(node?.style?.width || node?.width || node?.measured?.width || size.width);
+  const currentHeight = Number(node?.style?.height || node?.height || node?.measured?.height || size.height);
+  const position = node?.position && typeof node.position === 'object' ? node.position : { x: 0, y: 0 };
+  return {
+    ...node,
+    position: {
+      x: Number(position.x || 0) + (currentWidth - size.width) / 2,
+      y: Number(position.y || 0) + (currentHeight - size.height) / 2,
+    },
+    style: { ...(node?.style || {}), ...size },
+  };
+}
+
 function readJsonFile(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return null;
   try {
@@ -368,19 +397,25 @@ function createCanvasStore({ rootDir }) {
     return { ok: true, canvas: result.canvas, record: canvasRecord(result.canvas), filePath: result.filePath };
   }
 
-  function updateGenerationNode(canvasId, nodeId, updater) {
+  function updateCanvasNode(canvasId, nodeId, updater) {
     const existing = readCanvas(canvasId);
     if (!existing) return { ok: false, reason: 'canvas_not_found' };
     let matched = false;
     const nodes = existing.nodes.map((node) => {
       if (String(node?.id || '') !== String(nodeId || '')) return node;
       matched = true;
-      const data = node?.data && typeof node.data === 'object' ? node.data : {};
-      return { ...node, data: updater(data) };
+      return updater(node || {});
     });
     if (!matched) return { ok: false, reason: 'node_not_found' };
     const result = writeCanvas({ ...existing, nodes, updatedAt: nowMs(), revision: existing.revision + 1 });
     return { ok: true, canvas: result.canvas, record: canvasRecord(result.canvas), filePath: result.filePath };
+  }
+
+  function updateGenerationNode(canvasId, nodeId, updater) {
+    return updateCanvasNode(canvasId, nodeId, (node) => {
+      const data = node?.data && typeof node.data === 'object' ? node.data : {};
+      return { ...node, data: updater(data) };
+    });
   }
 
   function generationNodeTaskId(data) {
@@ -450,10 +485,11 @@ function createCanvasStore({ rootDir }) {
   function completeGenerationNode(payload = {}) {
     const taskId = String(payload.taskId || '').trim();
     let applied = false;
-    const result = updateGenerationNode(payload.canvasId, payload.nodeId, (data) => {
+    const result = updateCanvasNode(payload.canvasId, payload.nodeId, (node) => {
+      const data = node?.data && typeof node.data === 'object' ? node.data : {};
       const currentTaskId = generationNodeTaskId(data);
       // Only the task currently anchored to this node may commit a result.
-      if (taskId && currentTaskId !== taskId) return data;
+      if (taskId && currentTaskId !== taskId) return node;
       applied = true;
       const next = { ...data };
       if (taskId) next.latestGenerationTaskId = taskId;
@@ -484,8 +520,15 @@ function createCanvasStore({ rootDir }) {
         next.label = String(payload.result.fileName || next.label || 'Generated image');
         delete next.outputDownloadState;
         delete next.outputDownloadedAt;
+
+        const primary = next.generatedImages[0];
+        const width = Number(primary?.width || 0) || undefined;
+        const height = Number(primary?.height || 0) || undefined;
+        next.imageNaturalWidth = width;
+        next.imageNaturalHeight = height;
+        return resizeNodeAroundCenter({ ...node, data: next }, imageNodeSize(width, height));
       }
-      return next;
+      return { ...node, data: next };
     });
     return { ...result, applied };
   }

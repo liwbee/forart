@@ -1,4 +1,8 @@
 export const zhCN = {
+  openInPhotoshop: "使用 Photoshop 打开",
+  photoshopNotFound: "未检测到 Photoshop。",
+  imageFileNotFound: "图片文件不存在。",
+  photoshopOpenFailed: "无法使用 Photoshop 打开图片。",
   choosePathFirst: "请先选择路径",
   choose: "选择",
   refresh: "刷新",
@@ -38,6 +42,10 @@ export const zhCN = {
 } as const;
 
 export const enUS = {
+  openInPhotoshop: "Open in Photoshop",
+  photoshopNotFound: "Photoshop was not detected.",
+  imageFileNotFound: "The image file does not exist.",
+  photoshopOpenFailed: "Unable to open the image in Photoshop.",
   choosePathFirst: "Choose a path first",
   choose: "Choose",
   refresh: "Refresh",

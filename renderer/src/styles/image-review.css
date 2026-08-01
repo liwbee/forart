@@ -607,6 +607,29 @@
   white-space: nowrap;
 }
 
+.review-file-meta .review-file-path {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  overflow: visible;
+}
+
+.review-file-path > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-open-photoshop-button {
+  flex: 0 0 auto;
+}
+
+.review-open-photoshop-button > svg {
+  width: 16px;
+  height: 16px;
+}
+
 .review-product-empty {
   min-height: 120px;
   display: grid;

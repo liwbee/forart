@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { EventEmitter } = require('node:events');
 const { createImageReviewStore } = require('../electron/main/modules/image-review-store.cjs');
 const { registerImageReviewIpc } = require('../electron/main/ipc/image-review-ipc.cjs');
 
@@ -53,4 +54,52 @@ test('image review only reads roots explicitly authorized by the main process', 
   assert.deepEqual(selection, { canceled: false, path: path.resolve(reviewRoot) });
   const ipcProducts = await handlers.get('image-review:products')({}, { root: selection.path, modelFolders: '模特图' });
   assert.equal(ipcProducts.products.length, 1);
+});
+
+test('image review opens an authorized original image with registry Photoshop', async (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-photoshop-open-'));
+  const reviewRoot = path.join(tempRoot, 'review folder');
+  const imagePath = path.join(reviewRoot, 'image with spaces.jpg');
+  const photoshopPath = path.join(tempRoot, 'Adobe Photoshop 2025', 'Photoshop.exe');
+  fs.mkdirSync(path.dirname(photoshopPath), { recursive: true });
+  fs.mkdirSync(reviewRoot, { recursive: true });
+  fs.writeFileSync(imagePath, Buffer.from('image'));
+  fs.writeFileSync(photoshopPath, Buffer.from('exe'));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+
+  const imageReviewStore = createImageReviewStore();
+  imageReviewStore.authorizeRoot(reviewRoot);
+  const imageUrl = `forart-review://image?root=${encodeURIComponent(reviewRoot)}&path=${encodeURIComponent(path.basename(imagePath))}`;
+  const handlers = new Map();
+  let launch = null;
+  registerImageReviewIpc({
+    ipcMain: { handle(channel, handler) { handlers.set(channel, handler); } },
+    dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
+    imageReviewStore,
+    processTools: {
+      platform: 'win32',
+      existsSync: fs.existsSync,
+      execFile(_command, _args, _options, callback) {
+        callback(null, `    (Default)    REG_SZ    ${photoshopPath}\r\n`, '');
+      },
+      spawn(executablePath, args, options) {
+        launch = { executablePath, args, options };
+        const child = new EventEmitter();
+        child.unref = () => {};
+        queueMicrotask(() => child.emit('spawn'));
+        return child;
+      },
+    },
+  });
+
+  const result = await handlers.get('image-review:open-in-photoshop')({}, { url: imageUrl });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(launch.executablePath, photoshopPath);
+  assert.deepEqual(launch.args, [imagePath]);
+  assert.equal(launch.options.detached, true);
+
+  const unauthorized = await handlers.get('image-review:open-in-photoshop')({}, {
+    url: `forart-review://image?root=${encodeURIComponent(tempRoot)}&path=${encodeURIComponent(path.basename(imagePath))}`,
+  });
+  assert.deepEqual(unauthorized, { ok: false, reason: 'image-not-found' });
 });

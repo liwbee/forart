@@ -1,6 +1,14 @@
 import type { Edge, Node, XYPosition } from "@xyflow/react";
 import { Bot, ImageIcon, ImagePlus, Split, TextCursorInput, Type, type LucideIcon } from "lucide-react";
 import type { ActionFissionState } from "./action-fission/actionFissionTypes";
+import {
+  getImageGeneratorNodeSize,
+  getImageNodeSize,
+  IMAGE_GENERATOR_DEFAULT_SIZE,
+  IMAGE_LOADER_DEFAULT_SIZE,
+} from "./imageNodeSizing";
+
+export { getImageGeneratorNodeSize, getImageNodeSize } from "./imageNodeSizing";
 
 export type NativeCanvasNodeKind = "imageGenerator" | "imageLoader" | "prompt" | "annotation" | "llm" | "actionFission";
 
@@ -106,14 +114,14 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
   imageGenerator: {
     icon: ImagePlus,
     labelKey: "imageGenerator",
-    size: { width: 280, height: 280 },
+    size: IMAGE_GENERATOR_DEFAULT_SIZE,
     acceptsInput: true,
     providesOutput: true,
   },
   imageLoader: {
     icon: ImageIcon,
     labelKey: "imageNode",
-    size: { width: 240, height: 320 },
+    size: IMAGE_LOADER_DEFAULT_SIZE,
     acceptsInput: false,
     providesOutput: true,
   },
@@ -158,41 +166,6 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
     },
   },
 };
-
-export function getImageNodeSize(naturalWidth: number, naturalHeight: number) {
-  if (!(naturalWidth > 0) || !(naturalHeight > 0)) return NATIVE_CANVAS_NODE_DEFINITIONS.imageLoader.size;
-  const targetArea = 240 * 320;
-  let scale = Math.sqrt(targetArea / (naturalWidth * naturalHeight));
-  if (naturalWidth * scale > 420) scale = 420 / naturalWidth;
-  if (naturalHeight * scale > 420) scale = 420 / naturalHeight;
-  return {
-    width: Math.max(1, Math.round(naturalWidth * scale)),
-    height: Math.max(1, Math.round(naturalHeight * scale)),
-  };
-}
-
-export function getImageGeneratorNodeSize(aspectRatio: string | undefined) {
-  const match = aspectRatio?.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
-  if (!match) return NATIVE_CANVAS_NODE_DEFINITIONS.imageGenerator.size;
-  const ratioWidth = Number(match[1]);
-  const ratioHeight = Number(match[2]);
-  if (!(ratioWidth > 0) || !(ratioHeight > 0)) return NATIVE_CANVAS_NODE_DEFINITIONS.imageGenerator.size;
-
-  const targetArea = 280 * 280;
-  const ratio = ratioWidth / ratioHeight;
-  let width = Math.sqrt(targetArea * ratio);
-  let height = width / ratio;
-  const maxDimension = Math.max(width, height);
-  if (maxDimension > 420) {
-    const scale = 420 / maxDimension;
-    width *= scale;
-    height *= scale;
-  }
-  return {
-    width: Math.max(1, Math.round(width)),
-    height: Math.max(1, Math.round(height)),
-  };
-}
 
 export const NATIVE_CANVAS_NODE_KINDS = Object.keys(NATIVE_CANVAS_NODE_DEFINITIONS) as NativeCanvasNodeKind[];
 

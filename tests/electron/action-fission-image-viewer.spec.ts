@@ -51,7 +51,7 @@ test("keeps reference and result navigation visible inside their panes", async (
   expect(nextBounds!.x + nextBounds!.width).toBeLessThanOrEqual(rightPaneBounds!.x + rightPaneBounds!.width);
 
   await page.getByRole("button", { name: "Next result" }).click();
-  await expect(page.locator(".model-image-viewer-counter")).toHaveText("2 / 6");
+  await expect(page.locator(".image-viewer-counter")).toHaveText("2 / 6");
 
   const separator = page.locator('[data-slot="resizable-handle"]');
   const beforeDrag = await panes.first().boundingBox();
@@ -63,7 +63,7 @@ test("keeps reference and result navigation visible inside their panes", async (
   await page.mouse.move(beforeDrag!.x + 120, beforeDrag!.y + 120);
   await expect.poll(() => page.evaluate(() => getComputedStyle(document.elementFromPoint(196, 196)!).cursor)).not.toMatch(/col-resize|ew-resize/);
 
-  const viewerImages = page.locator(".model-image-viewer");
+  const viewerImages = page.locator(".image-viewer");
   await expect(viewerImages).toHaveCount(2);
   const leftImageBounds = await viewerImages.first().boundingBox();
   const rightImageBounds = await viewerImages.nth(1).boundingBox();

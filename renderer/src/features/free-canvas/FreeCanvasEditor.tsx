@@ -58,54 +58,7 @@ import type { FreeCanvasEditorItem, FreeCanvasImageItem, FreeCanvasSize, FreeCan
 import { FreeCanvasTextLayer } from "./text-layer/FreeCanvasTextLayer";
 import { measureTextLayer, TEXT_LAYER_LINE_HEIGHT } from "./text-layer/measureTextLayer";
 import { FontSizePanel, TextColorPanel } from "./text-layer/TextStylePanel";
-
-const CANVAS_PRESETS = [
-  {
-    key: "3:4",
-    label: "3:4",
-    sizes: [
-      { key: "1200x1600", label: "1K", width: 1200, height: 1600 },
-      { key: "1500x2000", label: "2K", width: 1500, height: 2000 },
-      { key: "1800x2400", label: "4K", width: 1800, height: 2400 },
-    ],
-  },
-  {
-    key: "1:1",
-    label: "1:1",
-    sizes: [
-      { key: "1200x1200", label: "1K", width: 1200, height: 1200 },
-      { key: "1600x1600", label: "2K", width: 1600, height: 1600 },
-      { key: "2048x2048", label: "4K", width: 2048, height: 2048 },
-    ],
-  },
-  {
-    key: "4:3",
-    label: "4:3",
-    sizes: [
-      { key: "1600x1200", label: "1K", width: 1600, height: 1200 },
-      { key: "2000x1500", label: "2K", width: 2000, height: 1500 },
-      { key: "2400x1800", label: "4K", width: 2400, height: 1800 },
-    ],
-  },
-  {
-    key: "9:16",
-    label: "9:16",
-    sizes: [
-      { key: "720x1280", label: "1K", width: 720, height: 1280 },
-      { key: "1080x1920", label: "2K", width: 1080, height: 1920 },
-      { key: "1440x2560", label: "4K", width: 1440, height: 2560 },
-    ],
-  },
-  {
-    key: "16:9",
-    label: "16:9",
-    sizes: [
-      { key: "1280x720", label: "1K", width: 1280, height: 720 },
-      { key: "1920x1080", label: "2K", width: 1920, height: 1080 },
-      { key: "2560x1440", label: "4K", width: 2560, height: 1440 },
-    ],
-  },
-] as const;
+import { FREE_CANVAS_PRESETS, type FreeCanvasResolution } from "./freeCanvasPresets";
 
 const VIEWPORT_SCALE_MIN = 0.25;
 const VIEWPORT_SCALE_MAX = 4;
@@ -289,8 +242,8 @@ export function FreeCanvasEditor() {
   const [activeTextTool, setActiveTextTool] = useState<{ itemId: string; tool: ActiveTextTool } | null>(null);
   const [activeCanvasTool, setActiveCanvasTool] = useState<ActiveCanvasTool>("select");
   const [editingTextItemId, setEditingTextItemId] = useState("");
-  const [canvasAspectKey, setCanvasAspectKey] = useState<string>(CANVAS_PRESETS[0].key);
-  const [canvasSizeKey, setCanvasSizeKey] = useState<string>(CANVAS_PRESETS[0].sizes[0].key);
+  const [canvasAspectKey, setCanvasAspectKey] = useState<string>(FREE_CANVAS_PRESETS[0].key);
+  const [canvasResolution, setCanvasResolution] = useState<FreeCanvasResolution>("1K");
   const [isCanvasSizePanelOpen, setIsCanvasSizePanelOpen] = useState(false);
   const [viewport, setViewport] = useState<FreeCanvasViewport>({ scale: 1, x: 0, y: 0 });
   const [stageSize, setStageSize] = useState<FreeCanvasSize>({ width: 0, height: 0 });
@@ -304,8 +257,8 @@ export function FreeCanvasEditor() {
   const textEditDocumentRef = useRef<ReturnType<typeof snapshotFreeCanvasDocument> | null>(null);
   const textDoubleClickRef = useRef<{ itemId: string; time: number; x: number; y: number } | null>(null);
 
-  const canvasPreset = CANVAS_PRESETS.find((preset) => preset.key === canvasAspectKey) || CANVAS_PRESETS[0];
-  const canvasSize = canvasPreset.sizes.find((size) => size.key === canvasSizeKey) || canvasPreset.sizes[0];
+  const canvasPreset = FREE_CANVAS_PRESETS.find((preset) => preset.key === canvasAspectKey) || FREE_CANVAS_PRESETS[0];
+  const canvasSize = canvasPreset.sizes.find((size) => size.resolution === canvasResolution) || canvasPreset.sizes[0];
   const selectedItem = items.find((item) => item.id === selectedItemId) || null;
   const fontSizeToolOpen = selectedItem?.type === "text" && activeTextTool?.itemId === selectedItem.id && activeTextTool.tool === "fontSize";
   const colorToolOpen = selectedItem?.type === "text" && activeTextTool?.itemId === selectedItem.id && activeTextTool.tool === "color";
@@ -459,14 +412,12 @@ export function FreeCanvasEditor() {
   }
 
   function changeCanvasAspect(nextAspectKey: string) {
-    const nextPreset = CANVAS_PRESETS.find((preset) => preset.key === nextAspectKey) || CANVAS_PRESETS[0];
     setCanvasAspectKey(nextAspectKey);
-    setCanvasSizeKey(nextPreset.sizes[0].key);
     setViewport({ scale: 1, x: 0, y: 0 });
   }
 
-  function changeCanvasSize(nextSizeKey: string) {
-    setCanvasSizeKey(nextSizeKey);
+  function changeCanvasSize(nextResolution: FreeCanvasResolution) {
+    setCanvasResolution(nextResolution);
     setViewport({ scale: 1, x: 0, y: 0 });
   }
 
@@ -925,10 +876,10 @@ export function FreeCanvasEditor() {
           <div className="free-canvas-editor__stage-settings" aria-label={t("freeCanvasEditor:canvasSettings")}>
             <SizePresetPicker
               open={isCanvasSizePanelOpen}
-              resolution={canvasSizeKey}
+              resolution={canvasResolution}
               aspectRatio={canvasAspectKey}
-              resolutionOptions={canvasPreset.sizes.map((size) => ({ value: size.key, label: size.label }))}
-              aspectRatioOptions={CANVAS_PRESETS.map((preset) => ({ value: preset.key, label: preset.label }))}
+              resolutionOptions={canvasPreset.sizes.map((size) => ({ value: size.resolution, label: size.label }))}
+              aspectRatioOptions={FREE_CANVAS_PRESETS.map((preset) => ({ value: preset.key, label: preset.label }))}
               labels={{
                 trigger: `${t("freeCanvasEditor:resolution")} / ${t("freeCanvasEditor:aspectRatio")}`,
                 resolution: t("freeCanvasEditor:resolution"),

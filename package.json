@@ -1,7 +1,7 @@
 {
   "name": "forart-main",
   "private": true,
-  "version": "0.1.38",
+  "version": "0.1.39",
   "type": "module",
   "main": "electron/main/electron-main.cjs",
   "scripts": {
@@ -90,7 +90,7 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^10.0.0",
-    "electron": "^42.3.0",
+    "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.1.0",

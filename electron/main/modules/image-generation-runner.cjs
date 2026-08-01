@@ -542,6 +542,8 @@ async function saveOutputAsset(context, result, taskId) {
     localUrl: saved.url,
     thumbUrl: saved.thumbUrl || '',
     fileName: saved.fileName || result.fileName || 'generated-image.png',
+    width: Number(saved.width || result.width || 0) || undefined,
+    height: Number(saved.height || result.height || 0) || undefined,
   };
 }
 

@@ -395,6 +395,9 @@ export interface ImageReviewApi {
   chooseRoot: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
   products: (payload: { root: string; modelFolders: string }) => Promise<{ products: ImageReviewProduct[] }>;
   productImages: (payload: { root: string; productId: string; modelFolders: string; detailFolders: string }) => Promise<{ product: ImageReviewProduct }>;
+  openInPhotoshop: (payload: { url: string }) => Promise<
+    { ok: true } | { ok: false; reason: "unsupported-platform" | "image-not-found" | "photoshop-not-found" | "launch-failed" }
+  >;
 }
 
 export interface ForartLocalApiRequestPayload {

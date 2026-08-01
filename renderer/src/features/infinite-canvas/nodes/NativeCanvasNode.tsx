@@ -192,8 +192,8 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     if (!hasMultipleGeneratedImages) return;
     const node = getNode(id);
     const collapsedSize = data.multiImageCollapsedSize || {
-      width: Math.max(1, Number(node?.measured?.width || node?.width || 0)),
-      height: Math.max(1, Number(node?.measured?.height || node?.height || 0)),
+      width: Math.max(1, Number(node?.style?.width || node?.measured?.width || node?.width || 0)),
+      height: Math.max(1, Number(node?.style?.height || node?.measured?.height || node?.height || 0)),
     };
     actions.patchNodeData(id, {
       multiImageExpanded: expanded,
@@ -214,11 +214,40 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     return () => window.clearInterval(interval);
   }, [isGenerating, isLaunching]);
 
+  useEffect(() => {
+    if (data.kind !== "imageGenerator" || !primaryImage || (imageWidth > 0 && imageHeight > 0)) return;
+    const embeddedWidth = Math.round(Number(primaryImage.width || 0));
+    const embeddedHeight = Math.round(Number(primaryImage.height || 0));
+    if (embeddedWidth > 0 && embeddedHeight > 0) {
+      actions.patchNodeData(id, {
+        imageNaturalWidth: embeddedWidth,
+        imageNaturalHeight: embeddedHeight,
+      });
+      return;
+    }
+    if (!resolvedImageUrl) return;
+
+    let active = true;
+    const image = new window.Image();
+    image.onload = () => {
+      if (!active || !image.naturalWidth || !image.naturalHeight) return;
+      actions.patchNodeData(id, {
+        imageNaturalWidth: image.naturalWidth,
+        imageNaturalHeight: image.naturalHeight,
+      });
+    };
+    image.src = resolvedImageUrl;
+    return () => {
+      active = false;
+      image.onload = null;
+    };
+  }, [actions, data.kind, id, imageHeight, imageWidth, primaryImage, resolvedImageUrl]);
+
   useLayoutEffect(() => {
     if (data.kind !== "imageGenerator" || !hasMultipleGeneratedImages) return;
     const node = getNode(id);
-    const measuredWidth = Math.max(1, Number(node?.measured?.width || node?.width || 0));
-    const measuredHeight = Math.max(1, Number(node?.measured?.height || node?.height || 0));
+    const measuredWidth = Math.max(1, Number(node?.style?.width || node?.measured?.width || node?.width || 0));
+    const measuredHeight = Math.max(1, Number(node?.style?.height || node?.measured?.height || node?.height || 0));
     const collapsedSize = data.multiImageCollapsedSize || { width: measuredWidth, height: measuredHeight };
     const rows = generatedImages.length > 2 ? 2 : 1;
     const gap = 8;
@@ -589,7 +618,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 }}
                 onLoad={(event) => {
                   const image = event.currentTarget;
-                  if (primaryImage?.thumbUrl) return;
+                  if (data.kind === "imageGenerator" || primaryImage?.thumbUrl) return;
                   if (!image.naturalWidth || !image.naturalHeight) return;
                   if (image.naturalWidth === imageWidth && image.naturalHeight === imageHeight) return;
                   actions.patchNodeData(id, {

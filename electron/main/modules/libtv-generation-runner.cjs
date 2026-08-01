@@ -449,8 +449,11 @@ function createLibtvGenerationRunner({
     return {
       url: resultUrl,
       localUrl: saved.url,
+      thumbUrl: saved.thumbUrl || '',
       fileName: saved.fileName,
       filePath: saved.filePath,
+      width: Number(saved.width || 0) || undefined,
+      height: Number(saved.height || 0) || undefined,
     };
   }
 

@@ -93,6 +93,7 @@ contextBridge.exposeInMainWorld('forartReview', {
   chooseRoot: (payload) => ipcRenderer.invoke('image-review:choose-root', payload),
   products: (payload) => ipcRenderer.invoke('image-review:products', payload),
   productImages: (payload) => ipcRenderer.invoke('image-review:product-images', payload),
+  openInPhotoshop: (payload) => ipcRenderer.invoke('image-review:open-in-photoshop', payload),
 });
 
 contextBridge.exposeInMainWorld('forartActionImport', {

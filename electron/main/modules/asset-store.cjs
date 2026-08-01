@@ -26,6 +26,17 @@ function extensionFromMime(mimeType) {
   return `.${subtype.replace('jpeg', 'jpg').replace(/[^a-z0-9.+-]/gi, '')}`;
 }
 
+async function readImageDimensions(buffer) {
+  const { default: sharp } = await import('sharp');
+  const metadata = await sharp(buffer, { animated: false }).metadata();
+  let width = Number(metadata.width || 0);
+  let height = Number(metadata.height || 0);
+  if ([5, 6, 7, 8].includes(Number(metadata.orientation || 0))) {
+    [width, height] = [height, width];
+  }
+  return { width, height };
+}
+
 function createAssetStore({ rootDir, net }) {
   function canvasAssetsRoot() {
     const root = path.join(rootDir, 'CanvasAssests');
@@ -111,12 +122,14 @@ function createAssetStore({ rootDir, net }) {
     const defaultName = payload.defaultName || ('canvas-image' + (source.extension || '.png'));
     const filePath = uniqueFilePath(directory, defaultName);
     fs.writeFileSync(filePath, source.buffer);
+    const dimensions = await readImageDimensions(source.buffer);
     const thumb = await thumbnailStore.ensureCanvasAssetThumbnail({ filePath });
     return {
       url: assetUrl(filePath),
       ...thumb,
       fileName: path.basename(filePath),
       filePath,
+      ...dimensions,
     };
   }
 
@@ -126,14 +139,18 @@ function createAssetStore({ rootDir, net }) {
     const directory = assetDirectory(payload.kind);
     const filePath = uniqueFilePath(directory, payload.defaultName || 'canvas-image.png');
     fs.writeFileSync(filePath, buffer);
+    const suppliedWidth = Number(payload.width || 0);
+    const suppliedHeight = Number(payload.height || 0);
+    const dimensions = suppliedWidth > 0 && suppliedHeight > 0
+      ? { width: suppliedWidth, height: suppliedHeight }
+      : await readImageDimensions(buffer);
     const thumb = await thumbnailStore.ensureCanvasAssetThumbnail({ filePath, mimeType: payload.mimeType || 'image/png' });
     return {
       url: assetUrl(filePath),
       ...thumb,
       fileName: path.basename(filePath),
       filePath,
-      width: Number(payload.width || 0),
-      height: Number(payload.height || 0),
+      ...dimensions,
     };
   }
 
