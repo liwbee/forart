@@ -15,25 +15,60 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Home, Layers3, X } from "lucide-react";
+import { Copy, Download, FileJson, FolderInput, Home, Layers3, Pencil, Plus, Trash2, UploadCloud, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../../components/ui/dropdown-menu";
+import {
+  ConfirmingContextMenuItem,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuGroup,
+  ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "../../components/ui/context-menu";
 import { Input } from "../../components/ui/input";
 import { TabsList, TabsTrigger } from "../../components/ui/tabs";
-import type { CanvasDocumentTab } from "./canvasWorkspaceTypes";
+import { restrictCanvasTabDragToHorizontalAxis } from "./canvasTabDrag";
+import type { CanvasDocumentTab, CanvasProjectRecord } from "./canvasWorkspaceTypes";
+
+interface CanvasDocumentTabMenuActions {
+  localProjects: CanvasProjectRecord[];
+  projects: CanvasProjectRecord[];
+  sharedCanvasesEnabled: boolean;
+  sharedProjects: CanvasProjectRecord[];
+  onCopyToLocal: (tab: CanvasDocumentTab, projectId: string) => void;
+  onDelete: (tab: CanvasDocumentTab) => void;
+  onDuplicate: (tab: CanvasDocumentTab) => void;
+  onExport: (tab: CanvasDocumentTab, withResources: boolean) => void;
+  onMove: (tab: CanvasDocumentTab, projectId: string) => void;
+  onUpload: (tab: CanvasDocumentTab, projectId: string) => void;
+}
 
 interface CanvasDocumentTabsProps {
   tabs: CanvasDocumentTab[];
   activeValue: string;
   onClose: (canvasId: string) => void;
+  onCreateCanvas: (projectId: string) => void;
   onRename: (canvasId: string, title: string) => void;
   onReorder: (tabs: CanvasDocumentTab[]) => void;
+  menuActions: CanvasDocumentTabMenuActions;
 }
 
-function SortableCanvasTab({ tab, active, onClose, onRename }: {
+function SortableCanvasTab({ tab, active, menuActions, onClose, onRename }: {
   tab: CanvasDocumentTab;
   active: boolean;
+  menuActions: CanvasDocumentTabMenuActions;
   onClose: (canvasId: string) => void;
   onRename: (canvasId: string, title: string) => void;
 }) {
@@ -74,71 +109,170 @@ function SortableCanvasTab({ tab, active, onClose, onRename }: {
     else setRenameDraft(tab.title);
   };
 
+  const startRename = () => {
+    cancelRenameRef.current = false;
+    setRenameDraft(tab.title);
+    setRenaming(true);
+  };
+
   return (
-    <div
-      ref={setNodeRef}
-      className="rf-workspace-tab"
-      data-active={active || undefined}
-      data-dragging={isDragging || undefined}
-      style={style}
-      {...listeners}
-    >
-      {renaming ? (
-        <div className="rf-workspace-tab__trigger rf-workspace-tab__editor">
-          <Layers3 aria-hidden="true" />
-          <Input
-            ref={renameInputRef}
-            className="rf-workspace-tab__rename-input"
-            value={renameDraft}
-            maxLength={80}
-            aria-label={t("infiniteCanvas:renameCanvas")}
-            onPointerDown={(event) => event.stopPropagation()}
-            onChange={(event) => setRenameDraft(event.currentTarget.value)}
-            onBlur={commitRename}
-            onKeyDown={(event) => {
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          ref={setNodeRef}
+          className="rf-workspace-tab"
+          data-active={active || undefined}
+          data-dragging={isDragging || undefined}
+          style={style}
+          {...listeners}
+        >
+          {renaming ? (
+            <div className="rf-workspace-tab__trigger rf-workspace-tab__editor">
+              <Layers3 aria-hidden="true" />
+              <Input
+                ref={renameInputRef}
+                className="rf-workspace-tab__rename-input"
+                value={renameDraft}
+                maxLength={80}
+                aria-label={t("infiniteCanvas:renameCanvas")}
+                onPointerDown={(event) => event.stopPropagation()}
+                onChange={(event) => setRenameDraft(event.currentTarget.value)}
+                onBlur={commitRename}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (event.key === "Enter") event.currentTarget.blur();
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelRenameRef.current = true;
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
+            </div>
+          ) : (
+            <TabsTrigger className="rf-workspace-tab__trigger" value={tab.id} title={tab.title}>
+              <Layers3 aria-hidden="true" />
+              <span
+                onDoubleClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  startRename();
+                }}
+              >
+                {tab.title}
+              </span>
+            </TabsTrigger>
+          )}
+          <Button
+            className="rf-workspace-tab__close"
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`${t("common:actions.close")}: ${tab.title}`}
+            title={t("common:actions.close")}
+            onPointerDown={stopClosePointer}
+            onClick={(event) => {
               event.stopPropagation();
-              if (event.key === "Enter") event.currentTarget.blur();
-              if (event.key === "Escape") {
-                event.preventDefault();
-                cancelRenameRef.current = true;
-                event.currentTarget.blur();
-              }
-            }}
-          />
-        </div>
-      ) : (
-        <TabsTrigger className="rf-workspace-tab__trigger" value={tab.id} title={tab.title}>
-          <Layers3 aria-hidden="true" />
-          <span
-            onDoubleClick={(event) => {
-              if (tab.readOnly) return;
-              event.preventDefault();
-              event.stopPropagation();
-              cancelRenameRef.current = false;
-              setRenameDraft(tab.title);
-              setRenaming(true);
+              onClose(tab.id);
             }}
           >
-            {tab.title}
-          </span>
-        </TabsTrigger>
-      )}
-      <Button
-        className="rf-workspace-tab__close"
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        aria-label={`${t("common:actions.close")}: ${tab.title}`}
-        title={t("common:actions.close")}
-        onPointerDown={stopClosePointer}
-        onClick={(event) => {
-          event.stopPropagation();
-          onClose(tab.id);
-        }}
-      >
-        <X aria-hidden="true" />
-      </Button>
-    </div>
+            <X aria-hidden="true" />
+          </Button>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuGroup>
+          <ContextMenuItem onSelect={startRename}>
+            <Pencil aria-hidden="true" />
+            {t("common:actions.rename")}
+          </ContextMenuItem>
+          {tab.readOnly ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Copy aria-hidden="true" />
+                {t("infiniteCanvas:copyToLocal")}
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent>
+                {menuActions.localProjects.length ? menuActions.localProjects.map((project) => (
+                  <ContextMenuItem key={project.id} onSelect={() => menuActions.onCopyToLocal(tab, project.id)}>
+                    {project.title}
+                  </ContextMenuItem>
+                )) : <ContextMenuItem disabled>{t("common:empty.noProjects")}</ContextMenuItem>}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : (
+            <ContextMenuItem onSelect={() => menuActions.onDuplicate(tab)}>
+              <Copy aria-hidden="true" />
+              {t("infiniteCanvas:duplicateCanvas")}
+            </ContextMenuItem>
+          )}
+          {!tab.readOnly ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <FolderInput aria-hidden="true" />
+                {t("infiniteCanvas:moveTo")}
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent>
+                {menuActions.projects.map((project) => (
+                  <ContextMenuItem
+                    key={project.id}
+                    disabled={project.id === tab.projectId}
+                    onSelect={() => menuActions.onMove(tab, project.id)}
+                  >
+                    {project.title}
+                  </ContextMenuItem>
+                ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : null}
+          {!tab.readOnly && menuActions.sharedCanvasesEnabled ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <UploadCloud aria-hidden="true" />
+                {t("infiniteCanvas:uploadToShared")}
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent>
+                {menuActions.sharedProjects.length ? menuActions.sharedProjects.map((project) => (
+                  <ContextMenuItem key={project.id} onSelect={() => menuActions.onUpload(tab, project.id)}>
+                    {project.title}
+                  </ContextMenuItem>
+                )) : <ContextMenuItem disabled>{t("common:empty.noProjects")}</ContextMenuItem>}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : null}
+          {!tab.readOnly ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Download aria-hidden="true" />
+                {t("infiniteCanvas:exportCanvas")}
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent>
+                <ContextMenuItem onSelect={() => menuActions.onExport(tab, false)}>
+                  <FileJson aria-hidden="true" />
+                  {t("infiniteCanvas:exportCanvasOnly")}
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => menuActions.onExport(tab, true)}>
+                  <Download aria-hidden="true" />
+                  {t("infiniteCanvas:exportCanvasWithResources")}
+                </ContextMenuItem>
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : null}
+          <ConfirmingContextMenuItem
+            confirmChildren={(
+              <>
+                <Trash2 aria-hidden="true" />
+                {t("common:confirm.delete")}
+              </>
+            )}
+            onConfirm={() => menuActions.onDelete(tab)}
+          >
+            <Trash2 aria-hidden="true" />
+            {t("common:actions.delete")}
+          </ConfirmingContextMenuItem>
+        </ContextMenuGroup>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -154,18 +288,12 @@ function CanvasTabOverlay({ tab }: { tab: CanvasDocumentTab }) {
   );
 }
 
-export function CanvasDocumentTabs({ tabs, activeValue, onClose, onRename, onReorder }: CanvasDocumentTabsProps) {
+export function CanvasDocumentTabs({ tabs, activeValue, menuActions, onClose, onCreateCanvas, onRename, onReorder }: CanvasDocumentTabsProps) {
   const { t } = useTranslation();
   const [draggedId, setDraggedId] = useState("");
-  const listRef = useRef<HTMLDivElement | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const tabIds = useMemo(() => tabs.map((tab) => tab.id), [tabs]);
   const draggedTab = tabs.find((tab) => tab.id === draggedId) || null;
-
-  useEffect(() => {
-    const active = listRef.current?.querySelector<HTMLElement>('[data-state="active"]');
-    active?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [activeValue, tabs.length]);
 
   const finishDrag = ({ active, over }: DragEndEvent) => {
     setDraggedId("");
@@ -177,7 +305,7 @@ export function CanvasDocumentTabs({ tabs, activeValue, onClose, onRename, onReo
   };
 
   return (
-    <div ref={listRef} className="rf-workspace-tabs-scroll">
+    <div className="rf-workspace-tabs-scroll">
       <TabsList className="rf-workspace-tabs" variant="line" aria-label={t("infiniteCanvas:title")}>
         <TabsTrigger className="rf-workspace-home-tab" value="home" title={t("infiniteCanvas:homeTitle")}>
           <Home aria-hidden="true" />
@@ -186,6 +314,7 @@ export function CanvasDocumentTabs({ tabs, activeValue, onClose, onRename, onReo
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
+          modifiers={[restrictCanvasTabDragToHorizontalAxis]}
           onDragStart={({ active }: DragStartEvent) => setDraggedId(String(active.id))}
           onDragCancel={() => setDraggedId("")}
           onDragEnd={finishDrag}
@@ -196,6 +325,7 @@ export function CanvasDocumentTabs({ tabs, activeValue, onClose, onRename, onReo
                 key={tab.id}
                 tab={tab}
                 active={activeValue === tab.id}
+                menuActions={menuActions}
                 onClose={onClose}
                 onRename={onRename}
               />
@@ -203,6 +333,29 @@ export function CanvasDocumentTabs({ tabs, activeValue, onClose, onRename, onReo
           </SortableContext>
           <DragOverlay dropAnimation={null}>{draggedTab ? <CanvasTabOverlay tab={draggedTab} /> : null}</DragOverlay>
         </DndContext>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              className="rf-workspace-tab-add"
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("infiniteCanvas:newCanvas")}
+              title={t("infiniteCanvas:newCanvas")}
+            >
+              <Plus aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" sideOffset={4}>
+            <DropdownMenuGroup>
+              {menuActions.localProjects.length ? menuActions.localProjects.map((project) => (
+                <DropdownMenuItem key={project.id} onSelect={() => onCreateCanvas(project.id)}>
+                  {project.title}
+                </DropdownMenuItem>
+              )) : <DropdownMenuItem disabled>{t("common:empty.noProjects")}</DropdownMenuItem>}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </TabsList>
     </div>
   );

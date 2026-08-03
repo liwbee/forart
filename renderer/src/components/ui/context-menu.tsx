@@ -154,6 +154,37 @@ function ContextMenuItem({
   )
 }
 
+function ConfirmingContextMenuItem({
+  children,
+  confirmChildren,
+  onConfirm,
+  ...props
+}: Omit<React.ComponentProps<typeof ContextMenuItem>, "children" | "onSelect" | "variant"> & {
+  children: React.ReactNode
+  confirmChildren: React.ReactNode
+  onConfirm: () => void | Promise<void>
+}) {
+  const [confirming, setConfirming] = React.useState(false)
+
+  return (
+    <ContextMenuItem
+      {...props}
+      variant="destructive"
+      data-confirming={confirming ? "true" : undefined}
+      onSelect={(event) => {
+        if (!confirming) {
+          event.preventDefault()
+          setConfirming(true)
+          return
+        }
+        void onConfirm()
+      }}
+    >
+      {confirming ? confirmChildren : children}
+    </ContextMenuItem>
+  )
+}
+
 function ContextMenuCheckboxItem({
   className,
   children,
@@ -258,6 +289,7 @@ export {
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
+  ConfirmingContextMenuItem,
   ContextMenuCheckboxItem,
   ContextMenuRadioItem,
   ContextMenuLabel,

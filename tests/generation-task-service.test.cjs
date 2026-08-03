@@ -96,6 +96,34 @@ test('generation task service exposes one query and event stream for both execut
   ]);
 });
 
+test('generation task service paginates task-center results in groups of thirty', () => {
+  const repository = createMemoryGenerationTaskRepository();
+  const service = createGenerationTaskService({ repository });
+  const api = service.createStoreAdapter('api');
+  for (let index = 0; index < 65; index += 1) {
+    api.createTask({
+      id: `task-${String(index).padStart(2, '0')}`,
+      canvasId: 'canvas',
+      target: { type: 'imageGenerator', nodeId: `node-${index}` },
+      status: index % 3 === 0 ? 'succeeded' : index % 3 === 1 ? 'failed' : 'running',
+    });
+  }
+
+  const first = service.listTaskCenterPage({ limit: 30, offset: 0, filter: 'all' });
+  const second = service.listTaskCenterPage({ limit: 30, offset: 30, filter: 'all' });
+  const third = service.listTaskCenterPage({ limit: 30, offset: 60, filter: 'all' });
+  assert.equal(first.tasks.length, 30);
+  assert.equal(second.tasks.length, 30);
+  assert.equal(third.tasks.length, 5);
+  assert.equal(first.total, 65);
+  assert.equal(new Set([...first.tasks, ...second.tasks, ...third.tasks].map((task) => task.id)).size, 65);
+  assert.deepEqual(first.counts, { all: 65, active: 21, succeeded: 22, exceptional: 22 });
+
+  const active = service.listTaskCenterPage({ limit: 30, offset: 0, filter: 'active' });
+  assert.equal(active.total, 21);
+  assert.equal(active.tasks.every((task) => task.status === 'running'), true);
+});
+
 test('generation task service routes stop and coalesces concurrent startup recovery', async () => {
   const repository = createMemoryGenerationTaskRepository();
   const service = createGenerationTaskService({ repository });

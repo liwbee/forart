@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld('easyTool', {
   revealCanvasCacheAsset: (payload) => ipcRenderer.invoke('canvas-cache:reveal', payload),
   openCanvasCacheRoot: () => ipcRenderer.invoke('canvas-cache:open-root'),
   writeCanvasClipboard: (payload) => ipcRenderer.invoke('canvas:write-clipboard', payload),
+  getCanvasClipboardStatus: () => ipcRenderer.invoke('canvas:clipboard-status'),
+  pasteCanvasClipboard: () => ipcRenderer.invoke('canvas:paste-clipboard'),
 });
 
 contextBridge.exposeInMainWorld('forartGenerationTasks', {
@@ -53,6 +55,7 @@ contextBridge.exposeInMainWorld('forartGenerationTasks', {
   getMany: (taskIds) => ipcRenderer.invoke('generation-task-system:get-many', taskIds),
   listForCanvas: (canvasId) => ipcRenderer.invoke('generation-task-system:list-for-canvas', canvasId),
   listRecent: (limit) => ipcRenderer.invoke('generation-task-system:list-recent', limit),
+  listPage: (payload) => ipcRenderer.invoke('generation-task-system:list-page', payload),
   start: (executorKind, payload) => ipcRenderer.invoke('generation-task-system:start', executorKind, payload),
   startMany: (executorKind, payloads) => ipcRenderer.invoke('generation-task-system:start-many', executorKind, payloads),
   stop: (taskId) => ipcRenderer.invoke('generation-task-system:stop', taskId),
@@ -93,6 +96,7 @@ contextBridge.exposeInMainWorld('forartReview', {
   chooseRoot: (payload) => ipcRenderer.invoke('image-review:choose-root', payload),
   products: (payload) => ipcRenderer.invoke('image-review:products', payload),
   productImages: (payload) => ipcRenderer.invoke('image-review:product-images', payload),
+  openProductFolder: (payload) => ipcRenderer.invoke('image-review:open-product-folder', payload),
   openInPhotoshop: (payload) => ipcRenderer.invoke('image-review:open-in-photoshop', payload),
 });
 

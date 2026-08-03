@@ -11,6 +11,9 @@ function registerGenerationTaskIpc({ ipcMain, generationTaskService, getWebConte
   ipcMain.handle('generation-task-system:list-recent', async (_event, limit) => (
     generationTaskService.listRecentTasks(limit)
   ));
+  ipcMain.handle('generation-task-system:list-page', async (_event, payload = {}) => (
+    generationTaskService.listTaskCenterPage(payload)
+  ));
   ipcMain.handle('generation-task-system:start', async (_event, executorKind, payload) => {
     const task = await generationTaskService.startTask(executorKind, payload);
     return task?.id ? generationTaskService.getTask(task.id) : null;

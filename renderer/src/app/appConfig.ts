@@ -113,6 +113,15 @@ export interface ForartGenerationTasksApi {
   getMany: (taskIds: string[]) => Promise<GenerationTaskDto[]>;
   listForCanvas: (canvasId: string) => Promise<GenerationTaskDto[]>;
   listRecent: (limit?: number) => Promise<GenerationTaskDto[]>;
+  listPage: (payload: {
+    limit: number;
+    offset: number;
+    filter: "all" | "active" | "succeeded" | "exceptional";
+  }) => Promise<{
+    tasks: GenerationTaskDto[];
+    total: number;
+    counts: { all: number; active: number; succeeded: number; exceptional: number };
+  }>;
   start: (executorKind: "api" | "libtv", payload: unknown) => Promise<GenerationTaskDto | null>;
   startMany: (executorKind: "api" | "libtv", payloads: unknown[]) => Promise<GenerationTaskDto[]>;
   stop: (taskId: string) => Promise<unknown>;
@@ -300,6 +309,8 @@ export interface EasyToolApi {
   revealCanvasCacheAsset: (payload: { id?: string; filePath?: string }) => Promise<{ ok: true }>;
   openCanvasCacheRoot: () => Promise<{ ok: true }>;
   writeCanvasClipboard: (payload: unknown) => Promise<{ ok: true }>;
+  getCanvasClipboardStatus: () => Promise<{ hasImage: boolean; hasNodes: boolean }>;
+  pasteCanvasClipboard: () => Promise<{ ok: true }>;
 }
 
 export interface CanvasPackageWarning {
@@ -395,6 +406,9 @@ export interface ImageReviewApi {
   chooseRoot: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
   products: (payload: { root: string; modelFolders: string }) => Promise<{ products: ImageReviewProduct[] }>;
   productImages: (payload: { root: string; productId: string; modelFolders: string; detailFolders: string }) => Promise<{ product: ImageReviewProduct }>;
+  openProductFolder: (payload: { root: string; productId: string }) => Promise<
+    { ok: true } | { ok: false; reason: "product-folder-not-found" | "open-failed" }
+  >;
   openInPhotoshop: (payload: { url: string }) => Promise<
     { ok: true } | { ok: false; reason: "unsupported-platform" | "image-not-found" | "photoshop-not-found" | "launch-failed" }
   >;

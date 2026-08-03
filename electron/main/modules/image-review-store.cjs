@@ -136,6 +136,16 @@ function loadProductImages({ root, productId, modelFolders, detailFolders }) {
   return product;
 }
 
+function resolveProductDirectory({ root, productId }) {
+  const normalizedProductId = String(productId || '').trim();
+  if (!normalizedProductId || normalizedProductId === '.' || normalizedProductId === '..' || /[\\/]/.test(normalizedProductId)) {
+    throw new Error('Invalid product path');
+  }
+  const productDir = reviewAbsolutePath(root, normalizedProductId);
+  if (!fs.existsSync(productDir) || !fs.statSync(productDir).isDirectory()) return null;
+  return productDir;
+}
+
 function resolveImageUrl(urlText, authorizeRoot) {
   const url = new URL(urlText);
   const root = authorizeRoot(url.searchParams.get('root') || '');
@@ -170,6 +180,7 @@ module.exports = {
       authorizeRoot,
       loadProductImages: (payload = {}) => loadProductImages({ ...payload, root: requireAuthorizedRoot(payload.root) }),
       loadProducts: (payload = {}) => loadProducts({ ...payload, root: requireAuthorizedRoot(payload.root) }),
+      resolveProductDirectory: (payload = {}) => resolveProductDirectory({ ...payload, root: requireAuthorizedRoot(payload.root) }),
       resolveImageUrl: (urlText) => resolveImageUrl(urlText, requireAuthorizedRoot),
     };
   },

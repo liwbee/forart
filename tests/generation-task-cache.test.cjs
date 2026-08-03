@@ -92,3 +92,25 @@ test('generation task cache ignores stale versions and resolves terminal events 
     global.window = previousWindow;
   }
 });
+
+test('generation task cache bounds terminal history while retaining active tasks', () => {
+  const previousWindow = global.window;
+  const cache = loadTaskCache({});
+  try {
+    const terminalTasks = Array.from({ length: 160 }, (_, index) => ({
+      ...task(`terminal-${index}`, 1, 'succeeded'),
+      updatedAt: index + 1,
+    }));
+    const activeTasks = [task('active-a', 1), task('active-b', 1, 'queued')];
+    cache.useGenerationTaskCache.getState().mergeTasks([...terminalTasks, ...activeTasks]);
+    const tasksById = cache.useGenerationTaskCache.getState().tasksById;
+
+    assert.equal(Object.keys(tasksById).length, 122);
+    assert.equal(tasksById['active-a'].status, 'running');
+    assert.equal(tasksById['active-b'].status, 'queued');
+    assert.equal(tasksById['terminal-159'].status, 'succeeded');
+    assert.equal(tasksById['terminal-0'], undefined);
+  } finally {
+    global.window = previousWindow;
+  }
+});

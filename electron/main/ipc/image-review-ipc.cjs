@@ -49,7 +49,7 @@ function launchDetached(spawn, executablePath, imagePath) {
   });
 }
 
-function registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, processTools = {} }) {
+function registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, shell, processTools = {} }) {
   const execFile = processTools.execFile || defaultExecFile;
   const spawn = processTools.spawn || defaultSpawn;
   const existsSync = processTools.existsSync || fs.existsSync;
@@ -80,6 +80,28 @@ function registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, processTool
       detailFolders: payload.detailFolders,
     }),
   }));
+
+  ipcMain.handle('image-review:open-product-folder', async (_event, payload = {}) => {
+    let productDirectory = '';
+    try {
+      productDirectory = imageReviewStore.resolveProductDirectory({
+        root: payload.root,
+        productId: payload.productId,
+      }) || '';
+    } catch {
+      return { ok: false, reason: 'product-folder-not-found' };
+    }
+    if (!productDirectory) return { ok: false, reason: 'product-folder-not-found' };
+
+    try {
+      const errorMessage = await shell.openPath(productDirectory);
+      return errorMessage
+        ? { ok: false, reason: 'open-failed' }
+        : { ok: true };
+    } catch {
+      return { ok: false, reason: 'open-failed' };
+    }
+  });
 
   ipcMain.handle('image-review:open-in-photoshop', async (_event, payload = {}) => {
     if (platform !== 'win32') return { ok: false, reason: 'unsupported-platform' };

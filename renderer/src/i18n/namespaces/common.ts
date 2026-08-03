@@ -16,7 +16,8 @@ export const zhCN = {
     downloadOriginalImage: "下载原图",
     copyNode: "复制节点",
     copyImage: "复制图片",
-    copyError: "复制完整报错信息"
+    copyError: "复制完整报错信息",
+    paste: "粘贴"
   },
   confirm: {
     delete: "确认删除?"
@@ -117,7 +118,8 @@ export const enUS = {
     downloadOriginalImage: "Download original image",
     copyNode: "Copy node",
     copyImage: "Copy image",
-    copyError: "Copy full error message"
+    copyError: "Copy full error message",
+    paste: "Paste"
   },
   confirm: {
     delete: "Confirm delete?"

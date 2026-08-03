@@ -40,6 +40,8 @@ test('image review only reads roots explicitly authorized by the main process', 
   assert.equal(product.modelImages.length, 1);
   assert.equal(product.detailImages.length, 1);
   assert.equal(store.resolveImageUrl(product.modelImages[0].url), path.join(modelRoot, 'model.jpg'));
+  assert.equal(store.resolveProductDirectory({ root: reviewRoot, productId: 'SKU-001' }), productRoot);
+  assert.throws(() => store.resolveProductDirectory({ root: reviewRoot, productId: '../outside' }), /Invalid product path/);
 
   assert.throws(() => store.resolveImageUrl(`forart-review://image?root=${encodeURIComponent(outsideRoot)}&path=secret.jpg`), /not authorized/);
   assert.throws(() => store.loadProductImages({ root: reviewRoot, productId: '../outside', modelFolders: '', detailFolders: '' }), /Invalid review path/);
@@ -54,6 +56,43 @@ test('image review only reads roots explicitly authorized by the main process', 
   assert.deepEqual(selection, { canceled: false, path: path.resolve(reviewRoot) });
   const ipcProducts = await handlers.get('image-review:products')({}, { root: selection.path, modelFolders: '模特图' });
   assert.equal(ipcProducts.products.length, 1);
+});
+
+test('image review opens only an authorized product folder', async (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-product-folder-open-'));
+  const reviewRoot = path.join(tempRoot, 'review');
+  const productRoot = path.join(reviewRoot, 'SKU-001');
+  fs.mkdirSync(productRoot, { recursive: true });
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+
+  const imageReviewStore = createImageReviewStore();
+  imageReviewStore.authorizeRoot(reviewRoot);
+  const handlers = new Map();
+  let openedPath = '';
+  registerImageReviewIpc({
+    ipcMain: { handle(channel, handler) { handlers.set(channel, handler); } },
+    dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
+    imageReviewStore,
+    shell: {
+      async openPath(folderPath) {
+        openedPath = folderPath;
+        return '';
+      },
+    },
+  });
+
+  const result = await handlers.get('image-review:open-product-folder')({}, {
+    root: reviewRoot,
+    productId: 'SKU-001',
+  });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(openedPath, productRoot);
+
+  const invalid = await handlers.get('image-review:open-product-folder')({}, {
+    root: reviewRoot,
+    productId: '../outside',
+  });
+  assert.deepEqual(invalid, { ok: false, reason: 'product-folder-not-found' });
 });
 
 test('image review opens an authorized original image with registry Photoshop', async (t) => {

@@ -19,9 +19,11 @@ const ACTIVE_STATUSES = new Set<GenerationTaskStatus>([
   "running",
   "result_processing",
 ]);
+const MAX_CACHED_TERMINAL_TASKS = 120;
 
 interface GenerationTaskCacheState {
   tasksById: Record<string, GenerationTaskDto>;
+  revision: number;
   mergeTask: (task: GenerationTaskDto) => void;
   mergeTasks: (tasks: GenerationTaskDto[]) => void;
 }
@@ -32,15 +34,44 @@ function mergeTaskRecord(
 ) {
   const existing = current[task.id];
   if (existing && existing.version >= task.version) return current;
-  return { ...current, [task.id]: task };
+  return pruneTerminalTasks({ ...current, [task.id]: task });
+}
+
+function mergeTaskRecords(
+  current: Record<string, GenerationTaskDto>,
+  tasks: GenerationTaskDto[],
+) {
+  let next: Record<string, GenerationTaskDto> | null = null;
+  for (const task of tasks) {
+    const existing = (next || current)[task.id];
+    if (existing && existing.version >= task.version) continue;
+    if (!next) next = { ...current };
+    next[task.id] = task;
+  }
+  return next ? pruneTerminalTasks(next) : current;
+}
+
+function pruneTerminalTasks(tasksById: Record<string, GenerationTaskDto>) {
+  const terminalTasks = Object.values(tasksById)
+    .filter((task) => TERMINAL_STATUSES.has(task.status))
+    .sort((left, right) => right.updatedAt - left.updatedAt);
+  if (terminalTasks.length <= MAX_CACHED_TERMINAL_TASKS) return tasksById;
+  const next = { ...tasksById };
+  for (const task of terminalTasks.slice(MAX_CACHED_TERMINAL_TASKS)) delete next[task.id];
+  return next;
 }
 
 export const useGenerationTaskCache = create<GenerationTaskCacheState>((set) => ({
   tasksById: {},
-  mergeTask: (task) => set((state) => ({ tasksById: mergeTaskRecord(state.tasksById, task) })),
-  mergeTasks: (tasks) => set((state) => ({
-    tasksById: tasks.reduce(mergeTaskRecord, state.tasksById),
-  })),
+  revision: 0,
+  mergeTask: (task) => set((state) => {
+    const tasksById = mergeTaskRecord(state.tasksById, task);
+    return tasksById === state.tasksById ? state : { tasksById, revision: state.revision + 1 };
+  }),
+  mergeTasks: (tasks) => set((state) => {
+    const tasksById = mergeTaskRecords(state.tasksById, tasks);
+    return tasksById === state.tasksById ? state : { tasksById, revision: state.revision + 1 };
+  }),
 }));
 
 let eventSubscribers = 0;

@@ -889,6 +889,26 @@ export function ImageReviewPage() {
     }
   }
 
+  async function openActiveProductFolder() {
+    if (!activeProduct || !selectedReviewRoot) return;
+    if (!window.forartReview?.openProductFolder) {
+      toast.error(t("imageReview:bridgeUnavailable"));
+      return;
+    }
+    try {
+      const result = await window.forartReview.openProductFolder({
+        root: selectedReviewRoot,
+        productId: activeProduct.id,
+      });
+      if (result.ok) return;
+      toast.error(result.reason === "product-folder-not-found"
+        ? t("imageReview:productFolderNotFound")
+        : t("imageReview:openProductFolderFailed"));
+    } catch {
+      toast.error(t("imageReview:openProductFolderFailed"));
+    }
+  }
+
   return (
     <section className="image-review-page" aria-labelledby="image-review-title">
       <div className="image-review-header">
@@ -917,9 +937,27 @@ export function ImageReviewPage() {
 
         <div className="review-product-workspace">
           <div className="review-product-head">
-            <div>
-              <span>{t("imageReview:currentProduct")}</span>
-              <strong>{activeProduct?.id || t("common:labels.notSelected")}</strong>
+            <div className="review-product-head__summary">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    className="review-product-folder-button"
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={!activeProduct || !selectedReviewRoot}
+                    aria-label={t("imageReview:openProductFolder")}
+                    onClick={() => void openActiveProductFolder()}
+                  >
+                    <FolderOpen aria-hidden="true" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("imageReview:openProductFolder")}</TooltipContent>
+              </Tooltip>
+              <div className="review-product-head__identity">
+                <span>{t("imageReview:currentProduct")}</span>
+                <strong>{activeProduct?.id || t("common:labels.notSelected")}</strong>
+              </div>
             </div>
           </div>
 

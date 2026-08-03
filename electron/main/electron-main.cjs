@@ -16,6 +16,7 @@ const { createActionFolderImportStore } = require('./modules/action-folder-impor
 const { createAssetStore } = require('./modules/asset-store.cjs');
 const { createCanvasCacheStore } = require('./modules/canvas-cache-store.cjs');
 const { createCanvasPackageStore } = require('./modules/canvas-package-store.cjs');
+const { registerCanvasClipboardIpc } = require('./modules/canvas-clipboard.cjs');
 const { createCanvasStore } = require('./modules/canvas-store.cjs');
 const { createConfigStore } = require('./modules/config-store.cjs');
 const { createGenerationTaskRepository } = require('./modules/generation/generation-task-repository.cjs');
@@ -36,8 +37,6 @@ const portableRootDir = configuredDataRoot
   ? path.resolve(configuredDataRoot)
   : isDev ? appRootDir : path.dirname(app.getPath('exe'));
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
-const CANVAS_NODES_CLIPBOARD_KIND = 'forart.canvas.nodes';
-
 if (!gotSingleInstanceLock) {
   app.quit();
   return;
@@ -136,27 +135,19 @@ ipcMain.handle('canvas-cache:delete', async (_event, payload) => {
 });
 ipcMain.handle('canvas-cache:reveal', async (_event, payload) => canvasCacheStore.revealAsset(payload));
 ipcMain.handle('canvas-cache:open-root', async () => canvasCacheStore.openRoot());
-registerImageReviewIpc({ ipcMain, dialog, imageReviewStore });
+registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, shell });
 registerLibtvIpc({ ipcMain, libtv });
 localApi = registerLocalApiIpc({ ipcMain, configStore, app, dataRoot: portableRootDir });
 registerConfigIpc({ ipcMain, dialog, configStore, app, net });
 registerUpdaterIpc({ ipcMain, updater: portableUpdater });
 registerAppWindowIpc({ ipcMain });
+registerCanvasClipboardIpc({ clipboard, ipcMain });
 ipcMain.handle('action-import:choose-folder', async (_event, payload = {}) => actionFolderImportStore.chooseFolder(payload));
 ipcMain.handle('action-import:scan', async (_event, payload = {}) => actionFolderImportStore.scan(payload));
 ipcMain.handle('action-import:start-scan', async (event, payload = {}) => actionFolderImportStore.startScan(event.sender, payload));
 ipcMain.handle('action-import:cancel-scan', async (_event, payload = {}) => actionFolderImportStore.cancelScan(payload));
 ipcMain.handle('action-import:read-entry', async (_event, payload = {}) => actionFolderImportStore.readEntry(payload));
 ipcMain.handle('action-import:clear-preview', async () => actionFolderImportStore.clearPreview());
-ipcMain.handle('canvas:write-clipboard', async (_event, payload = {}) => {
-  clipboard.writeText(JSON.stringify({
-    kind: CANVAS_NODES_CLIPBOARD_KIND,
-    version: 1,
-    ...payload,
-  }));
-  return { ok: true };
-});
-
 app.whenReady().then(async () => {
   registerCanvasAssetProtocol();
   registerImageReviewProtocol();

@@ -27,8 +27,7 @@
 .rf-workspace-tabs-scroll {
   flex: 0 0 auto;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   background: var(--surface-card);
@@ -40,13 +39,17 @@
 }
 
 .rf-workspace-tabs {
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
+  min-width: 0;
   height: 40px;
   justify-content: flex-start;
   gap: 2px;
   border-radius: inherit;
   padding: 4px;
+}
+
+.rf-workspace-tab-add {
+  flex: 0 0 auto;
 }
 
 .rf-workspace-home-tab,
@@ -105,9 +108,11 @@
 
 .rf-workspace-tab {
   position: relative;
-  width: clamp(132px, 15vw, 220px);
-  min-width: 132px;
+  width: 220px;
+  min-width: 0;
+  max-width: 220px;
   height: 32px;
+  flex: 1 1 220px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 28px;
   align-items: center;
@@ -115,6 +120,7 @@
   border-radius: var(--radius);
   color: var(--text-secondary);
   background: transparent;
+  overflow: hidden;
   touch-action: none;
 }
 
@@ -171,6 +177,8 @@
 }
 
 .rf-workspace-tab--overlay {
+  width: 100%;
+  min-width: 0;
   border-color: var(--border-subtle);
   background: var(--background);
   box-shadow: var(--shadow-popover);
@@ -3070,12 +3078,25 @@
   padding: 0 6px 8px 8px;
 }
 
-.generation-task-center__list {
-  display: flex;
-  flex-direction: column;
+.generation-task-center__virtual-spacer {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.generation-task-center__virtual-track {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+}
+
+.generation-task-center__virtual-item {
+  width: 100%;
+  height: 69px;
 }
 
 .generation-task-center__item {
+  height: 100%;
   min-width: 0;
   display: flex;
   align-items: flex-start;
@@ -3084,7 +3105,7 @@
   padding: 10px 4px;
 }
 
-.generation-task-center__item:last-child {
+.generation-task-center__virtual-item:last-child .generation-task-center__item {
   border-bottom: 0;
 }
 
@@ -3222,6 +3243,25 @@
 
 .generation-task-center__empty [data-slot="empty-description"] {
   font-size: 11px;
+}
+
+.generation-task-center__pagination {
+  min-height: 42px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+  padding: 4px 8px;
+}
+
+.generation-task-center__pagination span {
+  min-width: 78px;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 @keyframes canvas-floating-panel-in {

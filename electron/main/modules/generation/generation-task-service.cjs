@@ -5,6 +5,8 @@ const {
 } = require('./generation-task-types.cjs');
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'canceled', 'interrupted', 'superseded']);
+const ACTIVE_STATUSES = new Set(['queued', 'preparing', 'submitting', 'uploading', 'running', 'result_processing']);
+const TASK_CENTER_FILTERS = new Set(['all', 'active', 'succeeded', 'exceptional']);
 
 function safeString(value) {
   return String(value || '').trim();
@@ -285,12 +287,43 @@ function createGenerationTaskService({ repository } = {}) {
     return repository.listTaskRecords({ canvasId: safeString(canvasId) }).map(createGenerationTaskDto);
   }
 
+  function listTaskCenterPage(payload = {}) {
+    const limit = Math.min(500, Math.max(1, Math.round(Number(payload.limit) || 30)));
+    const offset = Math.max(0, Math.round(Number(payload.offset) || 0));
+    const requestedFilter = safeString(payload.filter);
+    const filter = TASK_CENTER_FILTERS.has(requestedFilter) ? requestedFilter : 'all';
+    const sortedRecords = [...tasks.values()].sort((left, right) => {
+      const updatedDifference = Number(right.task.updatedAt || 0) - Number(left.task.updatedAt || 0);
+      return updatedDifference || String(right.task.id || '').localeCompare(String(left.task.id || ''));
+    });
+    const matches = (record, targetFilter) => {
+      const status = safeString(record.task.status);
+      const active = ACTIVE_STATUSES.has(status);
+      if (targetFilter === 'active') return active;
+      if (targetFilter === 'succeeded') return status === 'succeeded';
+      if (targetFilter === 'exceptional') return !active && status !== 'succeeded';
+      return true;
+    };
+    const counts = {
+      all: sortedRecords.length,
+      active: sortedRecords.filter((record) => matches(record, 'active')).length,
+      succeeded: sortedRecords.filter((record) => matches(record, 'succeeded')).length,
+      exceptional: sortedRecords.filter((record) => matches(record, 'exceptional')).length,
+    };
+    const filteredRecords = filter === 'all'
+      ? sortedRecords
+      : sortedRecords.filter((record) => matches(record, filter));
+    return {
+      tasks: filteredRecords.slice(offset, offset + limit)
+        .map(({ executorKind, task }) => createGenerationTaskDto({ executorKind, task })),
+      total: filteredRecords.length,
+      counts,
+    };
+  }
+
   function listRecentTasks(limit = 100) {
     const safeLimit = Math.min(500, Math.max(1, Math.round(Number(limit) || 100)));
-    return [...tasks.values()]
-      .sort((left, right) => Number(right.task.updatedAt || 0) - Number(left.task.updatedAt || 0))
-      .slice(0, safeLimit)
-      .map(({ executorKind, task }) => createGenerationTaskDto({ executorKind, task }));
+    return listTaskCenterPage({ limit: safeLimit, filter: 'all' }).tasks;
   }
 
   function removeTasks(taskIds = []) {
@@ -352,6 +385,7 @@ function createGenerationTaskService({ repository } = {}) {
     createStoreAdapter,
     getTask,
     listRecentTasks,
+    listTaskCenterPage,
     listTasksForCanvas,
     removeTasks,
     recoverActiveTasks,

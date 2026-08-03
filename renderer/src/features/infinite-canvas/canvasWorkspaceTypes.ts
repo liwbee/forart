@@ -29,6 +29,7 @@ export interface CanvasDocumentTab {
   id: string;
   title: string;
   updatedAt: number;
+  projectId?: string;
   readOnly?: boolean;
   remoteCanvasId?: string;
 }
@@ -83,7 +84,7 @@ export function normalizeCanvasProject(input: unknown): CanvasProjectRecord | nu
 }
 
 export function tabFromRecord(record: CanvasRecord): CanvasDocumentTab {
-  return { id: record.id, title: record.title, updatedAt: record.updatedAt };
+  return { id: record.id, title: record.title, updatedAt: record.updatedAt, projectId: record.projectId };
 }
 
 function isNodeKind(value: unknown): value is NativeCanvasNodeKind {

@@ -1,11 +1,12 @@
-import { CircleAlert, Download, Image as ImageIcon, LoaderCircle, RefreshCw, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight, CircleAlert, Download, Image as ImageIcon, LoaderCircle, RefreshCw, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 import type { GenerationTaskDto, GenerationTaskStatus } from "../../../app/appConfig";
 import { NativeTabs, type NativeTabItem } from "../../../components/NativeTabs";
 import { copyText } from "../../../components/ErrorCopyLine";
+import { VirtualList } from "../../../components/VirtualList";
 import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
 import {
@@ -15,7 +16,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../../../components/ui/empty";
-import { ScrollArea } from "../../../components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip";
 import {
   getModelDisplayName,
@@ -27,13 +27,15 @@ import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import { formatGenerationDuration } from "./generationStatus";
 import { buildTaskDownloadName } from "./generationDownloadName";
 import {
-  hydrateRecentGenerationTasks,
   isGenerationTaskActive,
   useGenerationTaskCache,
 } from "./generationTaskCache";
 
 type TaskFilter = "all" | "active" | "succeeded" | "exceptional";
 type TaskTone = "queued" | "running" | "succeeded" | "failed" | "neutral";
+const TASK_PAGE_SIZE = 30;
+const TASK_ROW_HEIGHT = 69;
+const EMPTY_TASK_COUNTS = { all: 0, active: 0, succeeded: 0, exceptional: 0 };
 
 function taskTone(status: GenerationTaskStatus): TaskTone {
   if (status === "queued" || status === "preparing" || status === "submitting") return "queued";
@@ -61,28 +63,34 @@ interface GenerationTaskCenterProps {
 
 export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProps) {
   const { t, i18n } = useTranslation();
-  const tasks = useGenerationTaskCache(useShallow((state) => Object.values(state.tasksById)));
   const [filter, setFilter] = useState<TaskFilter>("all");
+  const [page, setPage] = useState(0);
+  const [pageTasks, setPageTasks] = useState<GenerationTaskDto[]>([]);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState(EMPTY_TASK_COUNTS);
   const [refreshing, setRefreshing] = useState(false);
   const [downloadingTaskId, setDownloadingTaskId] = useState("");
   const [loadError, setLoadError] = useState("");
   const [apiProviders, setApiProviders] = useState<ApiProvider[]>([]);
   const [viewer, setViewer] = useState<{ taskId: string; index: number } | null>(null);
+  const requestSequenceRef = useRef(0);
+  const taskCacheRevision = useGenerationTaskCache((state) => state.revision);
+  const observedCacheRevisionRef = useRef(taskCacheRevision);
 
-  const sortedTasks = useMemo(
-    () => [...tasks].sort((left, right) => right.updatedAt - left.updatedAt),
-    [tasks],
-  );
-  const counts = useMemo(() => ({
-    all: sortedTasks.length,
-    active: sortedTasks.filter((task) => isGenerationTaskActive(task)).length,
-    succeeded: sortedTasks.filter((task) => task.status === "succeeded").length,
-    exceptional: sortedTasks.filter((task) => !isGenerationTaskActive(task) && task.status !== "succeeded").length,
-  }), [sortedTasks]);
+  const pageTaskIds = useMemo(() => pageTasks.map((task) => task.id), [pageTasks]);
+  const livePageTasks = useGenerationTaskCache(useShallow((state) => (
+    pageTaskIds.map((taskId) => state.tasksById[taskId])
+  )));
   const visibleTasks = useMemo(
-    () => sortedTasks.filter((task) => taskMatchesFilter(task, filter)),
-    [filter, sortedTasks],
+    () => pageTasks
+      .map((task, index) => {
+        const liveTask = livePageTasks[index];
+        return liveTask && liveTask.version > task.version ? liveTask : task;
+      })
+      .filter((task) => taskMatchesFilter(task, filter)),
+    [filter, livePageTasks, pageTasks],
   );
+  const pageCount = Math.max(1, Math.ceil(total / TASK_PAGE_SIZE));
   const tabs = useMemo<NativeTabItem<TaskFilter>[]>(() => [
     { value: "all", label: t("infiniteCanvas:taskFilterAll"), meta: counts.all },
     { value: "active", label: t("infiniteCanvas:taskFilterActive"), meta: counts.active },
@@ -90,26 +98,66 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
     { value: "exceptional", label: t("infiniteCanvas:taskFilterExceptional"), meta: counts.exceptional },
   ], [counts, t]);
 
-  const refresh = useCallback(() => {
-    setRefreshing(true);
+  const refresh = useCallback(async (showRefreshing = true) => {
+    const taskApi = window.forartGenerationTasks;
+    if (!taskApi?.listPage) return;
+    const requestSequence = ++requestSequenceRef.current;
+    if (showRefreshing) setRefreshing(true);
     setLoadError("");
-    return Promise.all([
-      hydrateRecentGenerationTasks(100),
-      loadApiSettings().catch(() => null),
-    ])
-      .then(([, settings]) => {
-        if (settings) setApiProviders(settings.providers);
-      })
-      .catch((error) => setLoadError(error instanceof Error ? error.message : String(error)))
-      .finally(() => setRefreshing(false));
-  }, []);
+    try {
+      const result = await taskApi.listPage({
+        limit: TASK_PAGE_SIZE,
+        offset: page * TASK_PAGE_SIZE,
+        filter,
+      });
+      if (requestSequence !== requestSequenceRef.current) return;
+      const nextTotal = Math.max(0, Number(result.total || 0));
+      const nextPageCount = Math.max(1, Math.ceil(nextTotal / TASK_PAGE_SIZE));
+      if (page >= nextPageCount && page > 0) {
+        setPage(nextPageCount - 1);
+        return;
+      }
+      setPageTasks(result.tasks);
+      setTotal(nextTotal);
+      setCounts(result.counts);
+    } catch (error) {
+      if (requestSequence === requestSequenceRef.current) {
+        setLoadError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (requestSequence === requestSequenceRef.current) setRefreshing(false);
+    }
+  }, [filter, page]);
 
   useEffect(() => {
     if (open) void refresh();
-    else setViewer(null);
+    else {
+      requestSequenceRef.current += 1;
+      setViewer(null);
+    }
   }, [open, refresh]);
 
-  const viewerTask = viewer ? tasks.find((task) => task.id === viewer.taskId) : undefined;
+  useEffect(() => {
+    if (!open) {
+      observedCacheRevisionRef.current = taskCacheRevision;
+      return;
+    }
+    if (observedCacheRevisionRef.current === taskCacheRevision) return;
+    observedCacheRevisionRef.current = taskCacheRevision;
+    const timeout = window.setTimeout(() => void refresh(false), 400);
+    return () => window.clearTimeout(timeout);
+  }, [open, refresh, taskCacheRevision]);
+
+  useEffect(() => {
+    if (!open) return;
+    void loadApiSettings()
+      .then((settings) => setApiProviders(settings.providers))
+      .catch(() => undefined);
+  }, [open]);
+
+  useEffect(() => setViewer(null), [filter, page]);
+
+  const viewerTask = viewer ? visibleTasks.find((task) => task.id === viewer.taskId) : undefined;
   const viewerImages = viewerTask?.result?.images || [];
   const viewerIndex = Math.min(viewer?.index || 0, Math.max(0, viewerImages.length - 1));
   const viewerImage = viewerImages[viewerIndex];
@@ -174,17 +222,21 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
       <NativeTabs
         items={tabs}
         value={filter}
-        onChange={setFilter}
+        onChange={(nextFilter) => {
+          setPage(0);
+          setFilter(nextFilter);
+        }}
         ariaLabel={t("infiniteCanvas:taskFilter")}
         className="generation-task-center__tabs"
       />
 
       {loadError ? <p className="generation-task-center__error" role="alert">{loadError}</p> : null}
 
-      <ScrollArea className="generation-task-center__scroll" viewportClassName="generation-task-center__viewport">
-        {visibleTasks.length ? (
-          <div className="generation-task-center__list">
-            {visibleTasks.map((task) => {
+      <VirtualList
+        items={visibleTasks}
+        estimateSize={TASK_ROW_HEIGHT}
+        getItemKey={(task) => task.id}
+        renderItem={(task) => {
               const active = isGenerationTaskActive(task);
               const image = task.result?.images[0];
               const sourceLabel = t(task.target.kind === "actionFissionRow"
@@ -215,7 +267,7 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
                 ? formatGenerationDuration(Number(task.durationMs))
                 : "";
               return (
-                <article key={task.id} className="generation-task-center__item">
+                <article className="generation-task-center__item">
                   {task.errorMessage ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -231,14 +283,16 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
                       </TooltipTrigger>
                       <TooltipContent side="left" className="max-w-80 whitespace-pre-wrap break-words">{task.errorMessage}</TooltipContent>
                     </Tooltip>
-                  ) : image?.thumbUrl || image?.assetUrl ? (
+                  ) : image?.assetUrl ? (
                     <button
                       type="button"
                       className="generation-task-center__preview generation-task-center__preview--image"
                       aria-label={t("shared:imagePreview")}
                       onClick={() => setViewer({ taskId: task.id, index: 0 })}
                     >
-                      <img src={resolveLibraryImageUrl(image.thumbUrl || image.assetUrl)} alt="" />
+                      {image.thumbUrl ? (
+                        <img src={resolveLibraryImageUrl(image.thumbUrl)} alt="" loading="lazy" decoding="async" />
+                      ) : <ImageIcon aria-hidden="true" />}
                     </button>
                   ) : (
                     <div className="generation-task-center__preview">
@@ -276,9 +330,15 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
                   </div>
                 </article>
               );
-            })}
-          </div>
-        ) : (
+        }}
+        className="generation-task-center__scroll"
+        viewportClassName="generation-task-center__viewport"
+        itemMode="flow"
+        overscan={4}
+        spacerClassName="generation-task-center__virtual-spacer"
+        trackClassName="generation-task-center__virtual-track"
+        itemClassName="generation-task-center__virtual-item"
+        empty={(
           <Empty className="generation-task-center__empty">
             <EmptyHeader>
               <EmptyMedia variant="icon"><ImageIcon aria-hidden="true" /></EmptyMedia>
@@ -287,7 +347,34 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
             </EmptyHeader>
           </Empty>
         )}
-      </ScrollArea>
+      />
+      {total > 0 ? (
+        <footer className="generation-task-center__pagination">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            disabled={refreshing || page === 0}
+            aria-label={t("infiniteCanvas:taskCenterPreviousPage")}
+            title={t("infiniteCanvas:taskCenterPreviousPage")}
+            onClick={() => setPage((current) => Math.max(0, current - 1))}
+          >
+            <ChevronLeft aria-hidden="true" />
+          </Button>
+          <span>{t("infiniteCanvas:taskCenterPage", { page: page + 1, pages: pageCount })}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            disabled={refreshing || page + 1 >= pageCount}
+            aria-label={t("infiniteCanvas:taskCenterNextPage")}
+            title={t("infiniteCanvas:taskCenterNextPage")}
+            onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+          >
+            <ChevronRight aria-hidden="true" />
+          </Button>
+        </footer>
+      ) : null}
       {viewerImage ? (
         <ImageViewer
           src={resolveLibraryImageUrl(viewerImage.assetUrl)}

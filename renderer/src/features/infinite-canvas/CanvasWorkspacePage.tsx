@@ -336,7 +336,14 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
       setShowHome(false);
       setTabs((current) => current.some((tab) => tab.id === tabId)
         ? current
-        : [...current, { id: tabId, title: document.title, updatedAt: document.updatedAt, readOnly: true, remoteCanvasId }]);
+        : [...current, {
+            id: tabId,
+            title: document.title,
+            updatedAt: document.updatedAt,
+            projectId: document.projectId,
+            readOnly: true,
+            remoteCanvasId,
+          }]);
       setErrorMessage("");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -486,11 +493,11 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     void window.easyTool?.cancelCanvasTransfer?.(operationId);
   };
 
-  const createCanvas = () => void runBusy(async () => {
-    if (!window.easyTool?.createCanvas || !activeProjectId) return;
+  const createCanvas = (projectId = activeProjectId) => void runBusy(async () => {
+    if (!window.easyTool?.createCanvas || !projectId) return;
     const result = await window.easyTool.createCanvas({
       title: `${t("infiniteCanvas:canvasBaseName")} ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
-      projectId: activeProjectId,
+      projectId,
       ...snapshotForStorage(emptyCanvasSnapshot()),
     });
     const document = normalizeCanvasDocument(objectValue(result).canvas);
@@ -689,6 +696,11 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     if (imported) await openCanvas(imported.id);
   });
 
+  const exportCanvas = (canvasId: string, withResources: boolean) => void runCanvasTransfer("export", async (operationId) => {
+    if (withResources) await window.easyTool?.exportCanvasPackage?.(canvasId, operationId);
+    else await window.easyTool?.exportCanvasJson?.(canvasId, operationId);
+  });
+
   const moveCanvas = (canvasId: string, projectId: string) => void runBusy(async () => {
     const result = await window.easyTool?.moveCanvasToProject?.(canvasId, projectId);
     const record = normalizeCanvasRecord(objectValue(result).record);
@@ -740,8 +752,30 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
         tabs={tabs}
         activeValue={activeValue}
         onClose={(id) => void closeTab(id)}
-        onRename={renameCanvas}
+        onCreateCanvas={createCanvas}
+        onRename={(id, title) => {
+          const tab = tabs.find((item) => item.id === id);
+          if (tab?.readOnly && tab.remoteCanvasId) renameSharedCanvas(tab.remoteCanvasId, title);
+          else renameCanvas(id, title);
+        }}
         onReorder={setTabs}
+        menuActions={{
+          localProjects: projects,
+          projects,
+          sharedCanvasesEnabled,
+          sharedProjects,
+          onCopyToLocal: (tab, projectId) => {
+            if (tab.remoteCanvasId) copySharedCanvasToLocal(tab.remoteCanvasId, projectId);
+          },
+          onDelete: (tab) => {
+            if (tab.readOnly && tab.remoteCanvasId) deleteSharedCanvas(tab.remoteCanvasId);
+            else deleteCanvas(tab.id);
+          },
+          onDuplicate: (tab) => duplicateCanvas(tab.id),
+          onExport: (tab, withResources) => exportCanvas(tab.id, withResources),
+          onMove: (tab, projectId) => moveCanvas(tab.id, projectId),
+          onUpload: (tab, projectId) => uploadCanvasToShared(tab.id, projectId),
+        }}
       />
       {errorMessage ? (
         <Alert variant="destructive" className="rf-workspace__error">
@@ -758,16 +792,13 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
           sharedProjects={sharedProjects}
           activeProjectId={homeSource === "shared" ? activeSharedProjectId : activeProjectId}
           busy={busy}
-          onCreateCanvas={createCanvas}
+          onCreateCanvas={() => createCanvas()}
           onCreateProject={homeSource === "shared" ? createSharedProject : createProject}
           onDeleteCanvas={homeSource === "shared" ? deleteSharedCanvas : deleteCanvas}
           onDeleteProject={homeSource === "shared" ? deleteSharedProject : deleteProject}
           onDuplicateCanvas={duplicateCanvas}
           onCopyCanvasToLocal={copySharedCanvasToLocal}
-          onExportCanvas={(id, withResources) => void runCanvasTransfer("export", async (operationId) => {
-            if (withResources) await window.easyTool?.exportCanvasPackage?.(id, operationId);
-            else await window.easyTool?.exportCanvasJson?.(id, operationId);
-          })}
+          onExportCanvas={exportCanvas}
           onImportCanvas={importCanvas}
           onMoveCanvas={moveCanvas}
           onUploadCanvas={uploadCanvasToShared}

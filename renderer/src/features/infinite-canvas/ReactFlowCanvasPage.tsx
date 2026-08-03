@@ -19,7 +19,7 @@ import {
   type OnConnectEnd,
   type OnNodeDrag,
 } from "@xyflow/react";
-import { Copy, Crosshair, Download, Eye, EyeOff, Grid3X3, Image, Images, Map as MapIcon, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ClipboardPaste, Copy, Crosshair, Download, Eye, EyeOff, Grid3X3, Image, Images, Map as MapIcon, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -86,6 +86,10 @@ import {
 import { rememberedGenerationNodeData } from "./generation/generationPreferenceStore";
 import { useInfiniteCanvasSettings } from "./infiniteCanvasSettings";
 import { ViewportMomentumController } from "./viewportMomentum";
+import {
+  projectAltDragOntoClones,
+  type AltDragCloneGestureState,
+} from "./canvasAltDragClone";
 
 const NODE_TYPES: NodeTypes = { canvasNode: NativeCanvasNodeComponent };
 
@@ -137,14 +141,8 @@ interface PasteSequence {
   serialized: string;
 }
 
-interface AltDragCloneGesture {
-  cloneIdBySourceId: Map<string, string>;
+interface AltDragCloneGesture extends AltDragCloneGestureState {
   clonedEdges: NativeCanvasEdge[];
-  sourceNodes: Array<{
-    id: string;
-    position: { x: number; y: number };
-    zIndex?: number;
-  }>;
 }
 
 const PASTE_POINTER_RESET_DISTANCE = 8;
@@ -298,7 +296,9 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   const [actionFissionSettingsTarget, setActionFissionSettingsTarget] = useState<ActionFissionSettingsTarget | null>(null);
   const [pendingGenerationStop, setPendingGenerationStop] = useState<PendingGenerationStop | null>(null);
   const [generationStopPending, setGenerationStopPending] = useState(false);
+  const [canvasClipboardAvailable, setCanvasClipboardAvailable] = useState(false);
   const pasteSequenceRef = useRef<PasteSequence | null>(null);
+  const pendingContextPastePointRef = useRef<{ x: number; y: number } | null>(null);
   const altDragCloneGestureRef = useRef<AltDragCloneGesture | null>(null);
   const historyGestureRef = useRef<NativeCanvasHistorySnapshot | null>(null);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -477,6 +477,33 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       : undefined);
     setContextPoint(null);
   }, [addNode, contextPoint, t]);
+
+  const refreshCanvasClipboardStatus = useCallback(async () => {
+    setCanvasClipboardAvailable(false);
+    if (!window.easyTool?.getCanvasClipboardStatus) return;
+    try {
+      const status = await window.easyTool.getCanvasClipboardStatus();
+      setCanvasClipboardAvailable(status.hasNodes || status.hasImage);
+    } catch {
+      setCanvasClipboardAvailable(false);
+    }
+  }, []);
+
+  const pasteContextClipboard = useCallback(async () => {
+    if (!contextPoint || !window.easyTool?.pasteCanvasClipboard) return;
+    const pastePoint = { x: contextPoint.flowX, y: contextPoint.flowY };
+    pendingContextPastePointRef.current = pastePoint;
+    setContextPoint(null);
+    try {
+      await window.easyTool.pasteCanvasClipboard();
+    } finally {
+      window.setTimeout(() => {
+        if (pendingContextPastePointRef.current === pastePoint) {
+          pendingContextPastePointRef.current = null;
+        }
+      }, 1000);
+    }
+  }, [contextPoint]);
 
   const copyContextNode = useCallback(async () => {
     if (!contextNode) return;
@@ -1050,13 +1077,12 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     });
   }, [connectNodes, getIntersectingNodes, screenToFlowPosition]);
 
-  const addImageFilesAtClientPoint = useCallback(async (
+  const addImageFilesAtFlowPoint = useCallback(async (
     files: File[],
-    clientPoint: { x: number; y: number },
+    flowPoint: { x: number; y: number },
   ) => {
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
     if (!imageFiles.length) return;
-    const flowPoint = screenToFlowPosition(clientPoint);
     const images = await Promise.all(imageFiles.map(async (file, index) => {
       const dataUrl = await readImageFileAsDataUrl(file);
       const stored = window.easyTool?.saveCanvasAsset
@@ -1083,7 +1109,12 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       ...current.map((node) => node.selected ? { ...node, selected: false } : node),
       ...imageNodes,
     ]);
-  }, [screenToFlowPosition, setNodes, t]);
+  }, [setNodes, t]);
+
+  const addImageFilesAtClientPoint = useCallback((
+    files: File[],
+    clientPoint: { x: number; y: number },
+  ) => addImageFilesAtFlowPoint(files, screenToFlowPosition(clientPoint)), [addImageFilesAtFlowPoint, screenToFlowPosition]);
 
   useEffect(() => {
     function isCanvasAvailable() {
@@ -1105,6 +1136,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
 
     function handlePaste(event: ClipboardEvent) {
       if (readOnly || !isCanvasAvailable() || isEditingTarget(event.target)) return;
+      const contextPastePoint = pendingContextPastePointRef.current;
+      pendingContextPastePointRef.current = null;
       const serialized = event.clipboardData?.getData(CANVAS_CLIPBOARD_MIME)
         || event.clipboardData?.getData("text/plain")
         || "";
@@ -1124,7 +1157,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
           : 0;
         pasteSequenceRef.current = { serialized, count: pasteCount, pointer: { ...pointer } };
         const cascadeOffset = pasteCount * PASTE_CASCADE_OFFSET;
-        const targetCenter = screenToFlowPosition({
+        const targetCenter = contextPastePoint || screenToFlowPosition({
           x: pointer.x + cascadeOffset,
           y: pointer.y + cascadeOffset,
         });
@@ -1155,7 +1188,11 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       const clientPoint = lastPointerRef.current || (rect
         ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
         : { x: 0, y: 0 });
-      void addImageFilesAtClientPoint(imageFiles, clientPoint);
+      if (contextPastePoint) {
+        void addImageFilesAtFlowPoint(imageFiles, contextPastePoint);
+      } else {
+        void addImageFilesAtClientPoint(imageFiles, clientPoint);
+      }
     }
 
     window.addEventListener("copy", handleCopy);
@@ -1164,7 +1201,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       window.removeEventListener("copy", handleCopy);
       window.removeEventListener("paste", handlePaste);
     };
-  }, [addImageFilesAtClientPoint, getEdges, getNodes, readOnly, screenToFlowPosition, setEdges, setNodes, t]);
+  }, [addImageFilesAtClientPoint, addImageFilesAtFlowPoint, getEdges, getNodes, readOnly, screenToFlowPosition, setEdges, setNodes, t]);
 
   const handleNodeDragStart = useCallback<OnNodeDrag<NativeCanvasNode>>((event, draggedNode, draggedNodes) => {
     if (readOnly) return;
@@ -1190,8 +1227,14 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       : null;
 
     if (cloned) {
+      const cloneZIndex = Math.max(
+        0,
+        ...sourceNodes.map((node) => node.zIndex || 0),
+        ...getNodes().map((node) => node.zIndex || 0),
+      ) + 1;
       altDragCloneGestureRef.current = {
         cloneIdBySourceId: cloned.idMap,
+        cloneZIndex,
         clonedEdges: cloned.edges,
         sourceNodes: sourceNodesAtDragStart.map((node) => ({
           id: node.id,
@@ -1204,10 +1247,33 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
 
     setNodes((current) => {
       const nextZIndex = Math.max(0, ...current.map((node) => node.zIndex || 0)) + 1;
-      const elevated = current.map((node) => draggedIds.has(node.id) ? { ...node, zIndex: nextZIndex } : node);
-      return cloned ? [...elevated, ...cloned.nodes] : elevated;
+      if (!cloned || !altDragCloneGestureRef.current) {
+        return current.map((node) => draggedIds.has(node.id) ? { ...node, zIndex: nextZIndex } : node);
+      }
+      const prepared = [
+        ...current.map((node) => node.selected && !draggedIds.has(node.id) ? { ...node, selected: false } : node),
+        ...cloned.nodes,
+      ];
+      return projectAltDragOntoClones(
+        prepared,
+        altDragCloneGestureRef.current,
+        sourceNodesAtDragStart.map((node) => ({ ...node, zIndex: nextZIndex })),
+        true,
+      );
     });
-  }, [getEdges, getNodes, readOnly, setNodes, stopViewportMomentum]);
+    if (cloned) syncSelection([...cloned.idMap.values()]);
+  }, [getEdges, getNodes, readOnly, setNodes, stopViewportMomentum, syncSelection]);
+
+  const handleNodeDrag = useCallback<OnNodeDrag<NativeCanvasNode>>((_event, draggedNode, draggedNodes) => {
+    const cloneGesture = altDragCloneGestureRef.current;
+    if (readOnly || !cloneGesture) return;
+    setNodes((current) => projectAltDragOntoClones(
+      current,
+      cloneGesture,
+      [draggedNode, ...draggedNodes],
+      true,
+    ));
+  }, [readOnly, setNodes]);
 
   const handleNodeDragStop = useCallback<OnNodeDrag<NativeCanvasNode>>((_event, draggedNode, draggedNodes) => {
     if (readOnly) return;
@@ -1217,43 +1283,16 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     if (cloneGesture) {
       const currentNodes = getNodes();
       const currentEdges = getEdges();
-      const sourceStateById = new Map(cloneGesture.sourceNodes.map((node) => [node.id, node]));
-      const finalSourceById = new Map(
-        currentNodes
-          .filter((node) => sourceStateById.has(node.id))
-          .map((node) => [node.id, node]),
+      const cloneIds = new Set(cloneGesture.cloneIdBySourceId.values());
+      const projectedNodes = projectAltDragOntoClones(
+        currentNodes,
+        cloneGesture,
+        [draggedNode, ...draggedNodes],
+        false,
       );
-      [draggedNode, ...draggedNodes].forEach((node) => {
-        if (sourceStateById.has(node.id)) finalSourceById.set(node.id, node);
-      });
-      const sourceIdByCloneId = new Map(
-        [...cloneGesture.cloneIdBySourceId].map(([sourceId, cloneId]) => [cloneId, sourceId]),
-      );
-      const cloneIds = new Set(sourceIdByCloneId.keys());
-      const finalNodes = currentNodes.map((node) => {
-        const sourceState = sourceStateById.get(node.id);
-        if (sourceState) {
-          return {
-            ...node,
-            position: { ...sourceState.position },
-            zIndex: sourceState.zIndex,
-            selected: false,
-            dragging: false,
-          };
-        }
-        const sourceId = sourceIdByCloneId.get(node.id);
-        if (sourceId) {
-          const finalSource = finalSourceById.get(sourceId);
-          return finalSource ? {
-            ...node,
-            position: { ...finalSource.position },
-            zIndex: finalSource.zIndex,
-            selected: true,
-            dragging: false,
-          } : node;
-        }
-        return node.selected ? { ...node, selected: false } : node;
-      });
+      const finalNodes = projectedNodes.map((node) => (
+        node.selected && !cloneIds.has(node.id) ? { ...node, selected: false } : node
+      ));
       const finalEdges = [
         ...currentEdges.map((edge) => edge.selected ? { ...edge, selected: false } : edge),
         ...cloneGesture.clonedEdges,
@@ -1276,7 +1315,9 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   return (
     <div ref={wrapperRef} className={`rf-native-canvas${readOnly ? " rf-native-canvas--readonly" : ""}`}>
       <NativeCanvasActionsContext.Provider value={canvasActions}>
-        <ContextMenu>
+        <ContextMenu onOpenChange={(open) => {
+          if (open) void refreshCanvasClipboardStatus();
+        }}>
         <ContextMenuTrigger asChild disabled={readOnly}>
           <div
             className="rf-native-flow-surface"
@@ -1362,6 +1403,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
                 viewportMomentum.endUserMove(viewport);
               }}
               onNodeDragStart={handleNodeDragStart}
+              onNodeDrag={handleNodeDrag}
               onNodeDragStop={handleNodeDragStop}
               onNodeContextMenu={(_event, node) => {
                 if (readOnly) return;
@@ -1445,21 +1487,28 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
                 <Trash2 aria-hidden="true" />
                 <span>{t("common:actions.delete")}</span>
               </ContextMenuItem>
-            </> : CONTEXT_CANVAS_NODE_GROUPS.map((group, groupIndex) => (
-              <ContextMenuGroup key={groupIndex}>
-                {group.map((kind) => {
-                  const definition = NATIVE_CANVAS_NODE_DEFINITIONS[kind];
-                  const Icon = definition.icon;
-                  return (
-                    <ContextMenuItem key={kind} className="rf-native-context-item" onSelect={() => addContextNode(kind)}>
-                      <Icon aria-hidden="true" />
-                      <span>{t(`infiniteCanvas:${definition.labelKey}`)}</span>
-                    </ContextMenuItem>
-                  );
-                })}
-                {groupIndex < CONTEXT_CANVAS_NODE_GROUPS.length - 1 ? <ContextMenuSeparator className="mx-2" /> : null}
-              </ContextMenuGroup>
-            ))}
+            </> : <>
+              <ContextMenuItem disabled={!canvasClipboardAvailable} onSelect={() => void pasteContextClipboard()}>
+                <ClipboardPaste aria-hidden="true" />
+                <span>{t("common:actions.paste")}</span>
+              </ContextMenuItem>
+              <ContextMenuSeparator className="mx-2" />
+              {CONTEXT_CANVAS_NODE_GROUPS.map((group, groupIndex) => (
+                <ContextMenuGroup key={groupIndex}>
+                  {group.map((kind) => {
+                    const definition = NATIVE_CANVAS_NODE_DEFINITIONS[kind];
+                    const Icon = definition.icon;
+                    return (
+                      <ContextMenuItem key={kind} className="rf-native-context-item" onSelect={() => addContextNode(kind)}>
+                        <Icon aria-hidden="true" />
+                        <span>{t(`infiniteCanvas:${definition.labelKey}`)}</span>
+                      </ContextMenuItem>
+                    );
+                  })}
+                  {groupIndex < CONTEXT_CANVAS_NODE_GROUPS.length - 1 ? <ContextMenuSeparator className="mx-2" /> : null}
+                </ContextMenuGroup>
+              ))}
+            </>}
           </ContextMenuGroup>
         </ContextMenuContent>
         </ContextMenu>
