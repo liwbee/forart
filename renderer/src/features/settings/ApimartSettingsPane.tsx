@@ -1,6 +1,7 @@
 import { RefreshCw, TestTube2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ConfirmingDeleteButton } from "../../components/ConfirmingDeleteButton";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -17,6 +18,7 @@ interface ApimartSettingsPaneProps {
   status: ApiPanelStatus;
   onProviderChange: (patch: Partial<ApiProvider>) => void;
   onFetchModels: () => void;
+  onRemove: () => void;
 }
 
 type EndpointTest = {
@@ -34,8 +36,10 @@ type BalanceState = {
 export function ApimartLogo() {
   return (
     <>
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="480 500 1100 1040" fill="currentColor" aria-hidden="true">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="480 470 1100 1100" fill="currentColor" aria-hidden="true">
         <path d="M 508 528 L 509 1514 L 586 1514 L 588 1512 L 587 610 L 589 607 L 670 607 L 1022 1009 L 1027 1007 L 1388 607 L 1467 607 L 1469 609 L 1470 738 L 1469 1513 L 1551 1513 L 1551 528 L 1350 528 L 1026 901 L 841 687 L 707 528 Z" />
+        <path d="M 627 646 L 626 1513 L 699 1513 L 700 785 L 1008 1131 L 1025 1147 L 1359 781 L 1360 1513 L 1434 1514 L 1435 646 L 1394 647 L 1240 821 L 1024 1059 L 1009 1045 L 789 795 L 661 646 Z" />
+        <path d="M 732 872 L 732 1513 L 802 1514 L 805 1512 L 805 1052 L 808 1053 L 888 1145 L 1024 1293 L 1250 1047 L 1250 1513 L 1322 1514 L 1324 1512 L 1323 872 L 1304 890 L 1026 1196 L 1021 1195 Z" />
       </svg>
       <span>APIMart</span>
     </>
@@ -49,7 +53,7 @@ function endpointTone(result: EndpointTest | undefined) {
   return "fast";
 }
 
-export function ApimartSettingsPane({ provider, fetchingModels, status, onProviderChange, onFetchModels }: ApimartSettingsPaneProps) {
+export function ApimartSettingsPane({ provider, fetchingModels, status, onProviderChange, onFetchModels, onRemove }: ApimartSettingsPaneProps) {
   const { t } = useTranslation();
   const balanceRequestRef = useRef(0);
   const [testingEndpoints, setTestingEndpoints] = useState(false);
@@ -139,18 +143,29 @@ export function ApimartSettingsPane({ provider, fetchingModels, status, onProvid
           <h2>APImart</h2>
           <p>{t("settings:apimartDescription")}</p>
         </div>
-        <div className="settings-apimart-balance" data-state={balance.status}>
-          <div className="settings-apimart-balance-metric">
-            <span>{t("settings:apimartRemainingCredits")}</span>
-            <strong>{formatBalanceValue(balance.remainCredits)}</strong>
+        <div className="settings-api-content-actions settings-apimart-header-actions">
+          <div className="settings-apimart-balance-actions">
+            <Button type="button" variant="ghost" size="icon-sm" disabled={!provider.apiKey.trim() || balance.status === "loading"} aria-label={t("settings:apimartRefreshBalance")} title={t("settings:apimartRefreshBalance")} onClick={() => void refreshBalance(provider)}>
+              <RefreshCw aria-hidden="true" />
+            </Button>
+            <div className="settings-apimart-balance" data-state={balance.status}>
+              <div className="settings-apimart-balance-metric">
+                <span>{t("settings:apimartRemainingCredits")}</span>
+                <strong>{formatBalanceValue(balance.remainCredits)}</strong>
+              </div>
+              <div className="settings-apimart-balance-metric">
+                <span>{t("settings:apimartTokenUsedCredits")}</span>
+                <strong>{formatBalanceValue(balance.usedCredits)}</strong>
+              </div>
+            </div>
           </div>
-          <div className="settings-apimart-balance-metric">
-            <span>{t("settings:apimartTokenUsedCredits")}</span>
-            <strong>{formatBalanceValue(balance.usedCredits)}</strong>
-          </div>
-          <Button type="button" variant="ghost" size="icon-sm" disabled={!provider.apiKey.trim() || balance.status === "loading"} aria-label={t("settings:apimartRefreshBalance")} title={t("settings:apimartRefreshBalance")} onClick={() => void refreshBalance(provider)}>
-            <RefreshCw aria-hidden="true" />
-          </Button>
+          <ConfirmingDeleteButton
+            label={t("settings:removeProvider")}
+            confirmLabel={t("settings:confirmRemoveProvider")}
+            cancelLabel={t("common:actions.cancel")}
+            resetKey={provider.id}
+            onDelete={onRemove}
+          />
         </div>
       </header>
 

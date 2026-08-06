@@ -49,7 +49,7 @@ function launchDetached(spawn, executablePath, imagePath) {
   });
 }
 
-function registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, shell, processTools = {} }) {
+function registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, imageReviewScaledImageStore, shell, processTools = {} }) {
   const execFile = processTools.execFile || defaultExecFile;
   const spawn = processTools.spawn || defaultSpawn;
   const existsSync = processTools.existsSync || fs.existsSync;
@@ -66,20 +66,25 @@ function registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, shell, proc
   });
 
   ipcMain.handle('image-review:products', async (_event, payload = {}) => ({
-    products: imageReviewStore.loadProducts({
+    products: await imageReviewStore.loadProducts({
       root: payload.root,
       modelFolders: payload.modelFolders,
     }),
   }));
 
   ipcMain.handle('image-review:product-images', async (_event, payload = {}) => ({
-    product: imageReviewStore.loadProductImages({
+    product: await imageReviewStore.loadProductImages({
       root: payload.root,
       productId: String(payload.productId || ''),
       modelFolders: payload.modelFolders,
       detailFolders: payload.detailFolders,
     }),
   }));
+
+  ipcMain.handle('image-review:clear-scaled-image-cache', async () => {
+    imageReviewScaledImageStore?.clear?.();
+    return { ok: true };
+  });
 
   ipcMain.handle('image-review:open-product-folder', async (_event, payload = {}) => {
     let productDirectory = '';
@@ -108,7 +113,7 @@ function registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, shell, proc
 
     let imagePath = '';
     try {
-      imagePath = imageReviewStore.resolveImageUrl(String(payload.url || '')) || '';
+      imagePath = imageReviewStore.resolveImageUrl(String(payload.originalUrl || '')) || '';
     } catch {
       return { ok: false, reason: 'image-not-found' };
     }

@@ -1,5 +1,11 @@
-const { BrowserWindow } = require('electron');
+const { BrowserWindow, shell } = require('electron');
 const path = require('path');
+
+const OFFICIAL_WEBSITE_URLS = Object.freeze({
+  apimart: 'https://apimart.ai/',
+  libtv: 'https://www.liblib.tv/',
+  'tudou-api': 'https://api.ai-tudou.net/',
+});
 
 async function createWindow({ rootDir, isDev, BrowserWindow: BrowserWindowAdapter = BrowserWindow }) {
   const win = new BrowserWindowAdapter({
@@ -37,7 +43,7 @@ async function createWindow({ rootDir, isDev, BrowserWindow: BrowserWindowAdapte
   return win;
 }
 
-function registerAppWindowIpc({ ipcMain, BrowserWindow: BrowserWindowAdapter = BrowserWindow }) {
+function registerAppWindowIpc({ ipcMain, BrowserWindow: BrowserWindowAdapter = BrowserWindow, shell: shellAdapter = shell }) {
   ipcMain.handle('window:is-maximized', (event) => {
     const win = BrowserWindowAdapter.fromWebContents(event.sender);
     if (!win) return { ok: false, maximized: false };
@@ -66,6 +72,13 @@ function registerAppWindowIpc({ ipcMain, BrowserWindow: BrowserWindowAdapter = B
     if (win) win.close();
     return { ok: true };
   });
+
+  ipcMain.handle('window:open-official-website', async (_event, providerId) => {
+    const url = OFFICIAL_WEBSITE_URLS[String(providerId || '').trim().toLowerCase()];
+    if (!url) return { ok: false };
+    await shellAdapter.openExternal(url);
+    return { ok: true };
+  });
 }
 
-module.exports = { createWindow, registerAppWindowIpc };
+module.exports = { createWindow, OFFICIAL_WEBSITE_URLS, registerAppWindowIpc };

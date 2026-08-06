@@ -4,6 +4,7 @@ export type ApiModelKind = "image" | "chat" | "video";
 type ApiProviderOrderItem =
   | { type: "provider"; id: string; provider: ApiProvider }
   | { type: "apimart"; id: "apimart"; provider: ApiProvider }
+  | { type: "tudou"; id: "tudou-api"; provider: ApiProvider }
   | { type: "libtv"; id: "libtv" };
 
 interface ApiModelAliases {
@@ -36,6 +37,8 @@ export interface ApiProvider {
 
 export const API_PROVIDER_CHANGED_EVENT = "forart-api-providers-changed";
 export const APIMART_PROVIDER_ID = "apimart";
+export const TUDOU_PROVIDER_ID = "tudou-api";
+export const TUDOU_BASE_URL = "https://api.ai-tudou.net/v1";
 export const APIMART_BASE_URLS = [
   "https://api.apimart.ai/v1",
   "https://api.apib.ai/v1",
@@ -174,7 +177,7 @@ function isApimartProvider(input: Partial<ApiProvider>) {
     || Boolean(getApimartBaseUrl(input.baseUrl));
 }
 
-function createApimartProvider(input: Partial<ApiProvider> = {}): ApiProvider {
+export function createApimartProvider(input: Partial<ApiProvider> = {}): ApiProvider {
   return {
     id: APIMART_PROVIDER_ID,
     name: "APImart",
@@ -214,8 +217,56 @@ function mergeApimartProviders(inputs: Partial<ApiProvider>[]) {
   }, createApimartProvider());
 }
 
+function isTudouProvider(input: Partial<ApiProvider>) {
+  let host = "";
+  try { host = new URL(String(input.baseUrl || "").trim()).host.toLowerCase(); } catch { /* invalid custom URL */ }
+  return String(input.id || "").trim().toLowerCase() === TUDOU_PROVIDER_ID
+    || String(input.name || "").trim().toLowerCase() === "土豆api"
+    || host === new URL(TUDOU_BASE_URL).host;
+}
+
+export function createTudouProvider(input: Partial<ApiProvider> = {}): ApiProvider {
+  return {
+    id: TUDOU_PROVIDER_ID,
+    name: "土豆API",
+    baseUrl: TUDOU_BASE_URL,
+    apiKey: String(input.apiKey || ""),
+    accessKey: "",
+    secretKey: "",
+    protocol: "gemini",
+    imageRequestMode: "openai",
+    imageGenerationEndpoint: "",
+    imageEditEndpoint: "",
+    imageModels: Array.isArray(input.imageModels) ? uniqueModels(input.imageModels.map(String)) : [],
+    chatModels: Array.isArray(input.chatModels) ? uniqueModels(input.chatModels.map(String)) : [],
+    videoModels: Array.isArray(input.videoModels) ? uniqueModels(input.videoModels.map(String)) : [],
+    modelAliases: normalizeModelAliases(input.modelAliases),
+    modelRules: normalizeModelRules(input.modelRules),
+  };
+}
+
+function mergeTudouProviders(inputs: Partial<ApiProvider>[]) {
+  return inputs.reduce<ApiProvider>((result, input) => {
+    const next = createTudouProvider(input);
+    return createTudouProvider({
+      ...result,
+      apiKey: next.apiKey || result.apiKey,
+      imageModels: uniqueModels([...result.imageModels, ...next.imageModels]),
+      chatModels: uniqueModels([...result.chatModels, ...next.chatModels]),
+      videoModels: uniqueModels([...result.videoModels, ...next.videoModels]),
+      modelAliases: {
+        image: { ...result.modelAliases.image, ...next.modelAliases.image },
+        chat: { ...result.modelAliases.chat, ...next.modelAliases.chat },
+        video: { ...result.modelAliases.video, ...next.modelAliases.video },
+      },
+      modelRules: { image: { ...result.modelRules.image, ...next.modelRules.image } },
+    });
+  }, createTudouProvider());
+}
+
 export function normalizeApiProvider(input: Partial<ApiProvider>, providers: ApiProvider[]): ApiProvider {
   if (isApimartProvider(input)) return createApimartProvider(input);
+  if (isTudouProvider(input)) return createTudouProvider(input);
   const name = String(input.name || "API").trim() || "API";
   return {
     id: String(input.id || createProviderId(name, providers)).trim(),
@@ -236,21 +287,31 @@ export function normalizeApiProvider(input: Partial<ApiProvider>, providers: Api
   };
 }
 
-function normalizeApiSettings(input: Partial<ApiSettings>): ApiSettings {
+export function normalizeApiSettings(input: Partial<ApiSettings>): ApiSettings {
   const rawProviders = Array.isArray(input.providers) ? input.providers : [];
   const apimartInputs = rawProviders.filter(isApimartProvider);
+  const tudouInputs = rawProviders.filter(isTudouProvider);
   const apimartSourceIds = new Set(apimartInputs.map((provider) => String(provider.id || "").trim()).filter(Boolean));
-  const customProviders = rawProviders.filter((provider) => !isApimartProvider(provider)).reduce<ApiProvider[]>((result, item) => {
+  const tudouSourceIds = new Set(tudouInputs.map((provider) => String(provider.id || "").trim()).filter(Boolean));
+  const customProviders = rawProviders.filter((provider) => !isApimartProvider(provider) && !isTudouProvider(provider)).reduce<ApiProvider[]>((result, item) => {
     const next = normalizeApiProvider(item, result);
     return result.some((provider) => provider.id === next.id) ? result : [...result, next];
   }, []);
-  const providers = [mergeApimartProviders(apimartInputs), ...customProviders];
-  const requestedDefaultProviderId = apimartSourceIds.has(String(input.defaultImageProviderId || ""))
+  const providers = [
+    ...(apimartInputs.length ? [mergeApimartProviders(apimartInputs)] : []),
+    ...(tudouInputs.length ? [mergeTudouProviders(tudouInputs)] : []),
+    ...customProviders,
+  ];
+  const rawDefaultProviderId = String(input.defaultImageProviderId || "");
+  const requestedDefaultProviderId = apimartSourceIds.has(rawDefaultProviderId)
     ? APIMART_PROVIDER_ID
-    : String(input.defaultImageProviderId || "");
+    : tudouSourceIds.has(rawDefaultProviderId) ? TUDOU_PROVIDER_ID : rawDefaultProviderId;
   const defaultImageProviderId = providers.some((provider) => provider.id === requestedDefaultProviderId) ? requestedDefaultProviderId : "";
   const requestedOrder = Array.isArray(input.providerOrder)
-    ? input.providerOrder.map((id) => apimartSourceIds.has(String(id)) ? APIMART_PROVIDER_ID : String(id))
+    ? input.providerOrder.map((id) => {
+      const value = String(id);
+      return apimartSourceIds.has(value) ? APIMART_PROVIDER_ID : tudouSourceIds.has(value) ? TUDOU_PROVIDER_ID : value;
+    })
     : [];
   const providerOrder = normalizeApiProviderOrder(requestedOrder, providers);
   return {
@@ -276,15 +337,11 @@ export function readApiSettings(): ApiSettings {
 }
 
 export function normalizeApiProviderOrder(order: string[] | undefined, providers: ApiProvider[]) {
-  const validIds = new Set(["libtv", APIMART_PROVIDER_ID, ...providers.map((provider) => provider.id)]);
+  const validIds = new Set(["libtv", ...providers.map((provider) => provider.id)]);
   const next = uniqueModels((order || []).map(String)).filter((id) => validIds.has(id));
   providers.forEach((provider) => {
     if (!next.includes(provider.id)) next.push(provider.id);
   });
-  if (!next.includes("libtv")) next.unshift("libtv");
-  if (providers.some((provider) => provider.id === APIMART_PROVIDER_ID) && !next.includes(APIMART_PROVIDER_ID)) {
-    next.unshift(APIMART_PROVIDER_ID);
-  }
   return next;
 }
 
@@ -315,14 +372,17 @@ export function orderedApiProviderItems(providers: ApiProvider[], providerOrder:
     if (!provider) return items;
     return provider.id === APIMART_PROVIDER_ID
       ? [...items, { type: "apimart", id: APIMART_PROVIDER_ID, provider }]
-      : [...items, { type: "provider", id, provider }];
+      : provider.id === TUDOU_PROVIDER_ID
+        ? [...items, { type: "tudou", id: TUDOU_PROVIDER_ID, provider }]
+        : [...items, { type: "provider", id, provider }];
   }, []);
-  if (!result.some((item) => item.type === "libtv")) result.unshift({ type: "libtv", id: "libtv" });
   providers.forEach((provider) => {
     if (!result.some((item) => item.id === provider.id)) {
       result.push(provider.id === APIMART_PROVIDER_ID
         ? { type: "apimart", id: APIMART_PROVIDER_ID, provider }
-        : { type: "provider", id: provider.id, provider });
+        : provider.id === TUDOU_PROVIDER_ID
+          ? { type: "tudou", id: TUDOU_PROVIDER_ID, provider }
+          : { type: "provider", id: provider.id, provider });
     }
   });
   return result;

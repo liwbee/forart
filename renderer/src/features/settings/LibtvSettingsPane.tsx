@@ -1,12 +1,15 @@
 import { Download, LogIn, LogOut, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { LibtvAccountRecord } from "../../app/appConfig";
 import { AppSelect as Select } from "../../components/AppSelect";
+import { ConfirmingDeleteButton } from "../../components/ConfirmingDeleteButton";
 import { Button } from "../../components/ui/button";
+import { Skeleton } from "../../components/ui/skeleton";
 import type { LibtvActionFissionConcurrency } from "./apiProviders";
 
 type LibtvAction = "check" | "install" | "login" | "logout" | "";
+type LibtvAvailability = "checking" | "available" | "unavailable";
 
 interface LibtvAccountSummary {
   memberName: string;
@@ -18,11 +21,22 @@ interface LibtvPowerSummary {
   remaining: number | null;
 }
 
+interface LibtvStatusSnapshot {
+  availability: LibtvAvailability;
+  loggedIn: boolean;
+  account: LibtvAccountSummary | null;
+  power: LibtvPowerSummary | null;
+  accounts: LibtvAccountRecord[];
+  activeAccountId: string;
+  status: string;
+}
+
 interface LibtvSettingsPaneProps {
   machineId: string;
   actionFissionConcurrency: LibtvActionFissionConcurrency;
   onMachineIdChange: (machineId: string) => void;
   onActionFissionConcurrencyChange: (concurrency: LibtvActionFissionConcurrency) => void;
+  onRemove: () => void;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -62,57 +76,85 @@ export function LibtvSettingsPane({
   actionFissionConcurrency,
   onMachineIdChange,
   onActionFissionConcurrencyChange,
+  onRemove,
 }: LibtvSettingsPaneProps) {
   const { t } = useTranslation();
+  const statusRequestRef = useRef(0);
   const [action, setAction] = useState<LibtvAction>("");
-  const [status, setStatus] = useState("");
-  const [loggedIn, setLoggedIn] = useState(false);
-  const [available, setAvailable] = useState(false);
-  const [account, setAccount] = useState<LibtvAccountSummary | null>(null);
-  const [power, setPower] = useState<LibtvPowerSummary | null>(null);
-  const [accounts, setAccounts] = useState<LibtvAccountRecord[]>([]);
-  const [activeAccountId, setActiveAccountId] = useState("");
+  const [snapshot, setSnapshot] = useState<LibtvStatusSnapshot>({
+    availability: "checking",
+    loggedIn: false,
+    account: null,
+    power: null,
+    accounts: [],
+    activeAccountId: "",
+    status: "",
+  });
+  const { availability, loggedIn, account, power, accounts, activeAccountId, status } = snapshot;
+  const checking = availability === "checking";
+  const available = availability === "available";
 
   const refreshStatus = useCallback(async () => {
+    const requestId = statusRequestRef.current + 1;
+    statusRequestRef.current = requestId;
+    const commitSnapshot = (nextSnapshot: LibtvStatusSnapshot) => {
+      if (statusRequestRef.current === requestId) setSnapshot(nextSnapshot);
+    };
     setAction("check");
-    setStatus(t("settings:libtvChecking"));
+    setSnapshot((current) => ({ ...current, availability: "checking", status: t("settings:libtvChecking") }));
+    let cliAvailable = false;
     try {
       if (!window.libtv?.status || !window.libtv.account) throw new Error(t("settings:libtvBridgeUnavailable"));
       const statusResult = await window.libtv.status();
-      setAvailable(Boolean(statusResult.available));
       if (!statusResult.available) {
-        setLoggedIn(false); setAccount(null); setPower(null); setAccounts([]); setActiveAccountId("");
-        setStatus(statusResult.error || t("settings:libtvUnavailable"));
+        commitSnapshot({
+          availability: "unavailable",
+          loggedIn: false,
+          account: null,
+          power: null,
+          accounts: [],
+          activeAccountId: "",
+          status: statusResult.error || t("settings:libtvUnavailable"),
+        });
         return;
       }
+      cliAvailable = true;
       const accountResult = await window.libtv.account();
-      setLoggedIn(Boolean(accountResult.loggedIn));
-      setAccount(accountResult.loggedIn ? summarizeAccount(accountResult.account) : null);
-      if (accountResult.loggedIn && window.libtv.power) {
-        const powerResult = await window.libtv.power().catch(() => null);
-        setPower(powerResult ? { total: powerResult.total, remaining: powerResult.remaining } : null);
-      } else {
-        setPower(null);
-      }
-      if (accountResult.loggedIn && window.libtv.accounts) {
-        const accountsResult = await window.libtv.accounts();
-        const nextAccounts = accountsResult.accounts || [];
-        setAccounts(nextAccounts);
-        const active = nextAccounts.find((item) => item.isActive) || nextAccounts[0];
-        setActiveAccountId(active?.accountId !== undefined ? String(active.accountId) : "");
-      } else {
-        setAccounts([]); setActiveAccountId("");
-      }
-      setStatus(accountResult.loggedIn ? t("settings:libtvLoggedIn") : t("settings:libtvNotLoggedIn"));
+      const isLoggedIn = Boolean(accountResult.loggedIn);
+      const [powerResult, accountsResult] = await Promise.all([
+        isLoggedIn && window.libtv.power ? window.libtv.power().catch(() => null) : Promise.resolve(null),
+        isLoggedIn && window.libtv.accounts ? window.libtv.accounts().catch(() => null) : Promise.resolve(null),
+      ]);
+      const nextAccounts = accountsResult?.accounts || [];
+      const active = nextAccounts.find((item) => item.isActive) || nextAccounts[0];
+      commitSnapshot({
+        availability: "available",
+        loggedIn: isLoggedIn,
+        account: isLoggedIn ? summarizeAccount(accountResult.account) : null,
+        power: powerResult ? { total: powerResult.total, remaining: powerResult.remaining } : null,
+        accounts: nextAccounts,
+        activeAccountId: active?.accountId !== undefined ? String(active.accountId) : "",
+        status: isLoggedIn ? t("settings:libtvLoggedIn") : t("settings:libtvNotLoggedIn"),
+      });
     } catch (error) {
-      setLoggedIn(false); setAvailable(false); setAccount(null); setPower(null); setAccounts([]); setActiveAccountId("");
-      setStatus(error instanceof Error ? error.message : String(error));
+      commitSnapshot({
+        availability: cliAvailable ? "available" : "unavailable",
+        loggedIn: false,
+        account: null,
+        power: null,
+        accounts: [],
+        activeAccountId: "",
+        status: error instanceof Error ? error.message : String(error),
+      });
     } finally {
-      setAction("");
+      if (statusRequestRef.current === requestId) setAction("");
     }
   }, [t]);
 
-  useEffect(() => { void refreshStatus(); }, [refreshStatus]);
+  useEffect(() => {
+    void refreshStatus();
+    return () => { statusRequestRef.current += 1; };
+  }, [refreshStatus]);
 
   async function installCli() {
     setAction("install");
@@ -121,7 +163,7 @@ export function LibtvSettingsPane({
       await window.libtv.install();
       await refreshStatus();
     } catch (error) {
-      setStatus(t("settings:libtvInstallFailed", { message: error instanceof Error ? error.message : String(error) }));
+      setSnapshot((current) => ({ ...current, status: t("settings:libtvInstallFailed", { message: error instanceof Error ? error.message : String(error) }) }));
     } finally { setAction(""); }
   }
 
@@ -131,18 +173,18 @@ export function LibtvSettingsPane({
       if (!window.libtv?.loginWeb) throw new Error(t("settings:libtvBridgeUnavailable"));
       await window.libtv.loginWeb();
       await refreshStatus();
-    } catch (error) { setStatus(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { setSnapshot((current) => ({ ...current, status: error instanceof Error ? error.message : String(error) })); }
     finally { setAction(""); }
   }
 
   async function switchAccount(accountId: string) {
     if (!accountId || accountId === activeAccountId) return;
-    setAction("check"); setActiveAccountId(accountId);
+    setAction("check");
     try {
       if (!window.libtv?.useAccount) throw new Error(t("settings:libtvBridgeUnavailable"));
       await window.libtv.useAccount(accountId);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      setSnapshot((current) => ({ ...current, status: error instanceof Error ? error.message : String(error) }));
     } finally { await refreshStatus(); }
   }
 
@@ -151,8 +193,16 @@ export function LibtvSettingsPane({
     try {
       if (!window.libtv?.logout) throw new Error(t("settings:libtvBridgeUnavailable"));
       await window.libtv.logout();
-      setLoggedIn(false); setAccount(null); setPower(null); setAccounts([]); setActiveAccountId("");
-    } catch (error) { setStatus(error instanceof Error ? error.message : String(error)); }
+      setSnapshot({
+        availability: "available",
+        loggedIn: false,
+        account: null,
+        power: null,
+        accounts: [],
+        activeAccountId: "",
+        status: t("settings:libtvNotLoggedIn"),
+      });
+    } catch (error) { setSnapshot((current) => ({ ...current, status: error instanceof Error ? error.message : String(error) })); }
     finally { setAction(""); }
   }
 
@@ -166,7 +216,9 @@ export function LibtvSettingsPane({
       <div className="settings-libtv-brand-panel">
         <span className="settings-api-provider-logo settings-api-provider-logo--head settings-libtv-brand-logo"><LibtvLogo /></span>
         <div className="settings-libtv-install-control">
-          {available ? (
+          {checking ? (
+            <Skeleton className="h-9 w-24" data-libtv-status-loading="install" />
+          ) : available ? (
             <Button type="button" variant="ghost" disabled={action !== ""} onClick={installCli} aria-label={t("settings:libtvUpdateCli")} title={t("settings:libtvUpdateCli")}>
               <RefreshCw data-icon="inline-start" aria-hidden="true" /><span>{action === "install" ? t("settings:libtvInstallingButton") : t("settings:libtvInstalled")}</span>
             </Button>
@@ -181,7 +233,7 @@ export function LibtvSettingsPane({
         <div className="settings-libtv-account-controls">
           <label className="settings-libtv-account-switcher">
             <span>{t("settings:libtvAccountName")}</span>
-            <Select value={activeAccountId} disabled={action !== "" || !accounts.length} onChange={(accountId) => void switchAccount(accountId)} options={accounts.length ? accounts.map((item) => ({ value: String(item.accountId ?? ""), label: `${item.accountName || item.accountId || "-"} · ${accountTypeLabel(item)}` })) : [{ value: "", label: t("settings:libtvNoAccounts") }]} ariaLabel={t("settings:libtvAccountName")} menuPlacement="bottom" />
+            {checking ? <Skeleton className="h-9 w-full" data-libtv-status-loading="account" /> : <Select value={activeAccountId} disabled={action !== "" || !accounts.length} onChange={(accountId) => void switchAccount(accountId)} options={accounts.length ? accounts.map((item) => ({ value: String(item.accountId ?? ""), label: `${item.accountName || item.accountId || "-"} · ${accountTypeLabel(item)}` })) : [{ value: "", label: t("settings:libtvNoAccounts") }]} ariaLabel={t("settings:libtvAccountName")} menuPlacement="bottom" />}
           </label>
           <label className="settings-libtv-account-switcher settings-libtv-machine-id">
             <span>{t("settings:libtvMachineId")}</span>
@@ -215,19 +267,21 @@ export function LibtvSettingsPane({
         <div className="settings-libtv-account-grid">
           <div className="settings-cache-metric settings-libtv-metric">
             <span>{t("settings:libtvPointsInfo")}</span>
-            <strong title={pointsValue}>{pointsValue}</strong>
+            {checking ? <Skeleton className="h-5 w-20" /> : <strong title={pointsValue}>{pointsValue}</strong>}
           </div>
           <div className="settings-cache-metric settings-libtv-metric">
             <span>{t("settings:libtvPlanInfo")}</span>
-            <strong title={account?.memberName || "-"}>{account?.memberName || "-"}</strong>
+            {checking ? <Skeleton className="h-5 w-20" /> : <strong title={account?.memberName || "-"}>{account?.memberName || "-"}</strong>}
           </div>
           <div className="settings-cache-metric settings-libtv-metric">
             <span>{t("settings:libtvAccountUpdatedAt")}</span>
-            <strong title={account?.updatedAt || "-"}>{account?.updatedAt || "-"}</strong>
+            {checking ? <Skeleton className="h-5 w-24" /> : <strong title={account?.updatedAt || "-"}>{account?.updatedAt || "-"}</strong>}
           </div>
         </div>
         <div className="settings-api-test-actions">
-          {loggedIn ? (
+          {checking ? (
+            <Skeleton className="h-9 w-24" data-libtv-status-loading="login" />
+          ) : loggedIn ? (
             <>
               <Button type="button" variant="ghost" disabled={action !== ""} onClick={refreshStatus}><RefreshCw data-icon="inline-start" aria-hidden="true" /><span>{action === "check" ? t("settings:libtvCheckingButton") : t("settings:libtvLoggedInShort")}</span></Button>
               <Button type="button" variant="ghost" disabled={action !== ""} onClick={logout}><LogOut data-icon="inline-start" aria-hidden="true" /><span>{t("settings:libtvLogout")}</span></Button>
@@ -235,6 +289,13 @@ export function LibtvSettingsPane({
           ) : available ? (
             <Button type="button" disabled={action !== ""} onClick={loginWeb}><LogIn data-icon="inline-start" aria-hidden="true" /><span>{action === "login" ? t("settings:libtvLoginWaiting") : t("settings:libtvLoginWeb")}</span></Button>
           ) : null}
+          <ConfirmingDeleteButton
+            label={t("settings:removeProvider")}
+            confirmLabel={t("settings:confirmRemoveProvider")}
+            cancelLabel={t("common:actions.cancel")}
+            resetKey="libtv"
+            onDelete={onRemove}
+          />
         </div>
         {status ? <div className="settings-inline-status" aria-live="polite">{status}</div> : null}
       </div>

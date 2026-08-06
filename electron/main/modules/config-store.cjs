@@ -3,6 +3,8 @@ const fs = require('fs');
 const { normalizeLibtvMachineId } = require('./libtv-workspace.cjs');
 
 const APIMART_PROVIDER_ID = 'apimart';
+const TUDOU_PROVIDER_ID = 'tudou-api';
+const TUDOU_BASE_URL = 'https://api.ai-tudou.net/v1';
 const APIMART_BASE_URLS = [
   'https://api.apimart.ai/v1',
   'https://api.apib.ai/v1',
@@ -54,6 +56,7 @@ function normalizeInfiniteCanvasSettings(payload = {}) {
 
 function normalizeApiProvider(input = {}, providers = []) {
   if (isApimartProvider(input)) return createApimartProvider(input);
+  if (isTudouProvider(input)) return createTudouProvider(input);
   const name = String(input.name || 'API').trim() || 'API';
   const base = (String(input.id || name || 'custom-api')
     .trim()
@@ -97,6 +100,14 @@ function isApimartProvider(input = {}) {
   return String(input.id || '').trim().toLowerCase() === APIMART_PROVIDER_ID
     || String(input.name || '').trim().toLowerCase() === APIMART_PROVIDER_ID
     || Boolean(getApimartBaseUrl(input.baseUrl));
+}
+
+function isTudouProvider(input = {}) {
+  let host = '';
+  try { host = new URL(String(input.baseUrl || '').trim()).host.toLowerCase(); } catch { /* invalid custom URL */ }
+  return String(input.id || '').trim().toLowerCase() === TUDOU_PROVIDER_ID
+    || String(input.name || '').trim().toLowerCase() === '土豆api'
+    || host === new URL(TUDOU_BASE_URL).host;
 }
 
 function uniqueStrings(values = []) {
@@ -143,6 +154,25 @@ function mergeApimartProviders(inputs = []) {
   }, createApimartProvider());
 }
 
+function mergeTudouProviders(inputs = []) {
+  return inputs.reduce((result, input) => {
+    const next = createTudouProvider(input);
+    return createTudouProvider({
+      ...result,
+      apiKey: next.apiKey || result.apiKey,
+      imageModels: uniqueStrings([...result.imageModels, ...next.imageModels]),
+      chatModels: uniqueStrings([...result.chatModels, ...next.chatModels]),
+      videoModels: uniqueStrings([...result.videoModels, ...next.videoModels]),
+      modelAliases: {
+        image: { ...result.modelAliases.image, ...next.modelAliases.image },
+        chat: { ...result.modelAliases.chat, ...next.modelAliases.chat },
+        video: { ...result.modelAliases.video, ...next.modelAliases.video },
+      },
+      modelRules: { image: { ...result.modelRules.image, ...next.modelRules.image } },
+    });
+  }, createTudouProvider());
+}
+
 function normalizeAliasBucket(input = {}) {
   if (!input || typeof input !== 'object') return {};
   return Object.entries(input).reduce((result, [model, alias]) => {
@@ -180,28 +210,37 @@ function normalizeModelRules(input = {}) {
 function normalizeApiSettings(payload = {}) {
   const rawProviders = Array.isArray(payload.providers) ? payload.providers : [];
   const apimartInputs = rawProviders.filter(isApimartProvider);
+  const tudouInputs = rawProviders.filter(isTudouProvider);
   const apimartSourceIds = new Set(apimartInputs.map((provider) => String(provider.id || '').trim()).filter(Boolean));
+  const tudouSourceIds = new Set(tudouInputs.map((provider) => String(provider.id || '').trim()).filter(Boolean));
   const customProviders = rawProviders
-    .filter((provider) => !isApimartProvider(provider))
+    .filter((provider) => !isApimartProvider(provider) && !isTudouProvider(provider))
     .reduce((result, item) => {
       const provider = normalizeApiProvider(item, result);
       return result.some((current) => current.id === provider.id) ? result : [...result, provider];
     }, []);
-  const providers = [mergeApimartProviders(apimartInputs), ...customProviders];
-  const requestedDefaultProviderId = apimartSourceIds.has(String(payload.defaultImageProviderId || ''))
+  const providers = [
+    ...(apimartInputs.length ? [mergeApimartProviders(apimartInputs)] : []),
+    ...(tudouInputs.length ? [mergeTudouProviders(tudouInputs)] : []),
+    ...customProviders,
+  ];
+  const rawDefaultProviderId = String(payload.defaultImageProviderId || '');
+  const requestedDefaultProviderId = apimartSourceIds.has(rawDefaultProviderId)
     ? APIMART_PROVIDER_ID
-    : String(payload.defaultImageProviderId || '');
+    : tudouSourceIds.has(rawDefaultProviderId) ? TUDOU_PROVIDER_ID : rawDefaultProviderId;
   const defaultImageProviderId = providers.some((provider) => provider.id === requestedDefaultProviderId)
     ? requestedDefaultProviderId
     : '';
   const validOrderIds = new Set(['libtv', ...providers.map((provider) => provider.id)]);
   const providerOrder = Array.isArray(payload.providerOrder)
-    ? [...new Set(payload.providerOrder.map((id) => apimartSourceIds.has(String(id)) ? APIMART_PROVIDER_ID : String(id)))].filter((id) => validOrderIds.has(id))
+    ? [...new Set(payload.providerOrder.map((id) => {
+      const value = String(id);
+      return apimartSourceIds.has(value) ? APIMART_PROVIDER_ID : tudouSourceIds.has(value) ? TUDOU_PROVIDER_ID : value;
+    }))].filter((id) => validOrderIds.has(id))
     : [];
   providers.forEach((provider) => {
     if (!providerOrder.includes(provider.id)) providerOrder.push(provider.id);
   });
-  if (!providerOrder.includes('libtv')) providerOrder.unshift('libtv');
   const requestedLibtvConcurrency = Number(payload.libtvActionFissionConcurrency);
   return {
     providers,
@@ -211,6 +250,26 @@ function normalizeApiSettings(payload = {}) {
     libtvActionFissionConcurrency: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(requestedLibtvConcurrency)
       ? requestedLibtvConcurrency
       : 1,
+  };
+}
+
+function createTudouProvider(input = {}) {
+  return {
+    id: TUDOU_PROVIDER_ID,
+    name: '土豆API',
+    baseUrl: TUDOU_BASE_URL,
+    apiKey: String(input.apiKey || ''),
+    accessKey: '',
+    secretKey: '',
+    protocol: 'gemini',
+    imageRequestMode: 'openai',
+    imageGenerationEndpoint: '',
+    imageEditEndpoint: '',
+    imageModels: Array.isArray(input.imageModels) ? uniqueStrings(input.imageModels) : [],
+    chatModels: Array.isArray(input.chatModels) ? uniqueStrings(input.chatModels) : [],
+    videoModels: Array.isArray(input.videoModels) ? uniqueStrings(input.videoModels) : [],
+    modelAliases: normalizeModelAliases(input.modelAliases),
+    modelRules: normalizeModelRules(input.modelRules),
   };
 }
 

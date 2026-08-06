@@ -25,6 +25,34 @@ test('infinite canvas settings use stable defaults for old config files', (t) =>
   });
 });
 
+test('fresh API settings do not install recommended providers', (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-api-provider-defaults-'));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const store = createConfigStore({ app: { isPackaged: false }, rootDir: tempRoot });
+
+  const fresh = store.loadApiSettings();
+  assert.deepEqual(fresh.providers, []);
+  assert.deepEqual(fresh.providerOrder, []);
+
+  const customOnly = store.saveApiSettings({
+    providers: [{ id: 'custom', name: 'Custom', baseUrl: '', apiKey: '' }],
+    providerOrder: ['custom'],
+  });
+  assert.deepEqual(customOnly.providers.map((provider) => provider.id), ['custom']);
+  assert.deepEqual(customOnly.providerOrder, ['custom']);
+
+  const tudou = store.saveApiSettings({
+    providers: [{ id: 'tudou-api', name: 'Custom name', baseUrl: 'https://example.invalid/v1', protocol: 'openai', apiKey: 'secret' }],
+    providerOrder: ['tudou-api'],
+  });
+  assert.deepEqual(tudou.providers.map((provider) => ({ id: provider.id, name: provider.name, baseUrl: provider.baseUrl, protocol: provider.protocol })), [{
+    id: 'tudou-api',
+    name: '土豆API',
+    baseUrl: 'https://api.ai-tudou.net/v1',
+    protocol: 'gemini',
+  }]);
+});
+
 test('config sections preserve sibling data and use atomic replacement', (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-config-store-'));
   const configPath = path.join(tempRoot, 'forart-config.json');

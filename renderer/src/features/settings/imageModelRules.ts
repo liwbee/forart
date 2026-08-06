@@ -73,8 +73,7 @@ interface RuleMatcher {
 const BASIC_ASPECT_RATIOS = ["1:1", "2:3", "3:2", "4:3", "3:4", "16:9", "9:16"];
 const GPT_IMAGE_1_ASPECT_RATIOS = ["1:1", "2:3", "3:2"];
 const GPT_IMAGE_2_ASPECT_RATIOS = ["auto", "1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "3:1", "1:3", "21:9", "9:21"];
-const GEMINI_ASPECT_RATIOS = ["auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "5:4", "4:5", "21:9"];
-const GEMINI_EXTREME_ASPECT_RATIOS = [...GEMINI_ASPECT_RATIOS, "1:4", "4:1", "1:8", "8:1"];
+const GEMINI_ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
 const SEEDREAM_ASPECT_RATIOS = ["auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "9:21"];
 const SEEDREAM_5_LITE_ASPECT_RATIOS = ["auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"];
 const IMAGEN_4_ASPECT_RATIOS = ["1:1", "4:3", "3:4", "16:9", "9:16"];
@@ -221,9 +220,8 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     requestFormat: "standard",
     imageCountRule: SINGLE_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
-      aspectRatios: GEMINI_EXTREME_ASPECT_RATIOS,
+      aspectRatios: GEMINI_ASPECT_RATIOS,
       resolutions: ["1K", "2K", "4K"],
-      allowAutoAspectRatio: true,
       defaultResolution: "1K",
     }),
   },
@@ -243,7 +241,6 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     sizeRule: sizeRule({
       aspectRatios: GEMINI_ASPECT_RATIOS,
       resolutions: ["1K"],
-      allowAutoAspectRatio: true,
       defaultResolution: "1K",
     }),
   },
@@ -263,7 +260,6 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     sizeRule: sizeRule({
       aspectRatios: GEMINI_ASPECT_RATIOS,
       resolutions: ["1K", "2K", "4K"],
-      allowAutoAspectRatio: true,
       defaultResolution: "1K",
     }),
   },
@@ -283,7 +279,6 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     sizeRule: sizeRule({
       aspectRatios: GEMINI_ASPECT_RATIOS,
       resolutions: ["1K"],
-      allowAutoAspectRatio: true,
       defaultResolution: "1K",
     }),
   },

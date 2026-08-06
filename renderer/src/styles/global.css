@@ -1286,6 +1286,69 @@ body {
   width: min(96px, 100%);
 }
 
+.settings-api-provider-logo--tudou svg {
+  width: 28px;
+  height: 28px;
+}
+
+.settings-api-recommended-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.settings-api-recommended-card {
+  min-width: 0;
+  min-height: 180px;
+  gap: var(--space-4);
+  border-color: var(--border-subtle);
+  border-radius: var(--radius);
+  padding-block: var(--space-5);
+  box-shadow: none;
+}
+
+.settings-api-recommended-card > [data-slot="card-header"] {
+  flex: 1;
+  padding-inline: var(--space-5);
+}
+
+.settings-api-recommended-card > [data-slot="card-footer"] {
+  justify-content: flex-end;
+  padding-inline: var(--space-5);
+}
+
+.settings-api-recommended-card-logo {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  color: currentColor;
+}
+
+.settings-api-recommended-card-logo[data-provider="apimart"] {
+  gap: var(--space-2);
+}
+
+.settings-api-recommended-card-logo[data-provider="apimart"] svg {
+  width: 28px;
+  height: 28px;
+}
+
+.settings-api-recommended-card-logo[data-provider="apimart"] > span:not(.sr-only) {
+  font-size: 20px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0;
+}
+
+.settings-api-recommended-card-logo[data-provider="libtv"] svg {
+  width: 104px;
+  height: auto;
+}
+
+.settings-api-recommended-card-logo[data-provider="tudou-api"] svg {
+  width: 34px;
+  height: 34px;
+}
+
 .settings-api-provider-logo--head {
   width: auto;
   min-height: 40px;
@@ -1400,6 +1463,17 @@ body {
 }
 
 .settings-api-content-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.settings-apimart-header-actions {
+  min-width: 0;
+}
+
+.settings-apimart-balance-actions {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -1661,7 +1735,7 @@ body {
 .settings-apimart-balance {
   min-width: 220px;
   display: grid;
-  grid-template-columns: minmax(70px, 1fr) minmax(70px, 1fr) 32px;
+  grid-template-columns: repeat(2, minmax(70px, 1fr));
   align-items: center;
   gap: var(--space-3);
   border-left: 1px solid var(--border-subtle);
@@ -1723,6 +1797,13 @@ body {
 .settings-libtv-account-panel .settings-api-test-actions {
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+.settings-fixed-provider-api-key-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, auto);
+  align-items: stretch;
+  gap: var(--space-2);
 }
 
 .settings-libtv-concurrency {

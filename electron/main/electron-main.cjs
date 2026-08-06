@@ -25,6 +25,10 @@ const { createGenerationTaskCleanup } = require('./modules/generation/generation
 const { createGenerationTaskService } = require('./modules/generation/generation-task-service.cjs');
 const { createImageGenerationRunner } = require('./modules/image-generation-runner.cjs');
 const { createImageReviewStore } = require('./modules/image-review-store.cjs');
+const {
+  createImageReviewScaledImageStore,
+  isImageReviewCacheClearedError,
+} = require('./modules/image-review-scaled-image-store.cjs');
 const { createLibtvAdapter } = require('./modules/libtv-adapter.cjs');
 const { createLibtvGenerationRunner } = require('./modules/libtv-generation-runner.cjs');
 const { createLibtvWorkspaceName } = require('./modules/libtv-workspace.cjs');
@@ -45,6 +49,8 @@ if (!gotSingleInstanceLock) {
 protocol.registerSchemesAsPrivileged([
   { scheme: 'forart-asset', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
   { scheme: 'forart-review', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+  { scheme: 'forart-review-thumb', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+  { scheme: 'forart-review-preview', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
 ]);
 
 const assetStore = createAssetStore({ rootDir: portableRootDir, net });
@@ -65,6 +71,7 @@ const generationTaskCleanup = createGenerationTaskCleanup({
 const actionFolderImportStore = createActionFolderImportStore();
 const imageGenerationRunner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore, resultCommitter: generationResultCommitter });
 const imageReviewStore = createImageReviewStore();
+const imageReviewScaledImageStore = createImageReviewScaledImageStore();
 const libtv = createLibtvAdapter({ rootDir: appRootDir });
 const libtvGenerationRunner = createLibtvGenerationRunner({
   libtv,
@@ -120,6 +127,26 @@ function registerImageReviewProtocol() {
     }
     return net.fetch(pathToFileURL(target).toString());
   });
+  async function handleScaledImageRequest(request) {
+    try {
+      const target = imageReviewStore.resolveScaledImageUrl(request.url);
+      if (!target) return new Response('Image not found', { status: 404 });
+      const result = await imageReviewScaledImageStore.generate(target.filePath, target.size);
+      return new Response(result.buffer, {
+        headers: {
+          'Content-Type': result.contentType,
+          'Cache-Control': 'no-store',
+        },
+      });
+    } catch (error) {
+      if (isImageReviewCacheClearedError(error)) return new Response(null, { status: 499 });
+      console.warn('Image review scaled image failed:', error instanceof Error ? error.message : error);
+      return new Response('Preview not found', { status: 404 });
+    }
+  }
+
+  protocol.handle('forart-review-thumb', handleScaledImageRequest);
+  protocol.handle('forart-review-preview', handleScaledImageRequest);
 }
 
 registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskService });
@@ -135,12 +162,12 @@ ipcMain.handle('canvas-cache:delete', async (_event, payload) => {
 });
 ipcMain.handle('canvas-cache:reveal', async (_event, payload) => canvasCacheStore.revealAsset(payload));
 ipcMain.handle('canvas-cache:open-root', async () => canvasCacheStore.openRoot());
-registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, shell });
+registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, imageReviewScaledImageStore, shell });
 registerLibtvIpc({ ipcMain, libtv });
 localApi = registerLocalApiIpc({ ipcMain, configStore, app, dataRoot: portableRootDir });
 registerConfigIpc({ ipcMain, dialog, configStore, app, net });
 registerUpdaterIpc({ ipcMain, updater: portableUpdater });
-registerAppWindowIpc({ ipcMain });
+registerAppWindowIpc({ ipcMain, shell });
 registerCanvasClipboardIpc({ clipboard, ipcMain });
 ipcMain.handle('action-import:choose-folder', async (_event, payload = {}) => actionFolderImportStore.chooseFolder(payload));
 ipcMain.handle('action-import:scan', async (_event, payload = {}) => actionFolderImportStore.scan(payload));

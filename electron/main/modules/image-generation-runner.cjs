@@ -155,22 +155,34 @@ function findImagesInPayload(payload) {
   return images;
 }
 
-function findGeminiImageInPayload(payload) {
+function findGeminiImagesInPayload(payload) {
   const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
+  const results = [];
+  const seen = new Set();
+  const addResult = (mimeType, data) => {
+    const normalizedData = String(data || '').trim();
+    if (!normalizedData) return;
+    const dataUrl = `data:${mimeType || 'image/png'};base64,${normalizedData}`;
+    if (seen.has(dataUrl)) return;
+    seen.add(dataUrl);
+    results.push({ dataUrl, fileName: `generated-image-${results.length + 1}.png` });
+  };
   for (const candidate of candidates) {
     const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
     for (const part of parts) {
+      if (part?.thought) continue;
       const inline = part?.inlineData || part?.inline_data;
       const data = firstString(inline?.data);
-      if (data) {
-        return {
-          dataUrl: `data:${firstString(inline?.mimeType, inline?.mime_type) || 'image/png'};base64,${data}`,
-          fileName: 'generated-image.png',
-        };
+      if (data) addResult(firstString(inline?.mimeType, inline?.mime_type) || 'image/png', data);
+      if (typeof part?.text === 'string') {
+        const markdownImagePattern = /!\[[^\]]*\]\(data:(image\/[a-zA-Z0-9.+-]+);base64,([^)]+)\)/g;
+        for (const match of part.text.matchAll(markdownImagePattern)) {
+          addResult(match[1], match[2]);
+        }
       }
     }
   }
-  return null;
+  return results;
 }
 
 function summarizePayloadShape(payload) {
@@ -455,11 +467,11 @@ function isGptImage2Model(model) {
 }
 
 function geminiImageConfig(resolution, aspectRatio) {
+  const supportedAspectRatios = new Set(['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']);
   const rawResolution = String(resolution || '').trim().toUpperCase();
   const imageSize = ['1K', '2K', '4K'].includes(rawResolution) ? rawResolution : '2K';
-  const ratio = /^\d+\s*:\s*\d+$/.test(String(aspectRatio || '').trim())
-    ? String(aspectRatio).replace(/\s+/g, '')
-    : '1:1';
+  const requestedRatio = String(aspectRatio || '').replace(/\s+/g, '');
+  const ratio = supportedAspectRatios.has(requestedRatio) ? requestedRatio : '1:1';
   return { aspectRatio: ratio, imageSize };
 }
 
@@ -471,19 +483,20 @@ function dataUriToGeminiPart(dataUri) {
 
 async function generateGeminiImage(context, provider, model, prompt, referenceImages, resolution, aspectRatio, taskId, signal) {
   const apiKey = String(provider.apiKey || '').trim();
-  const parts = [{ text: prompt }];
+  const parts = [];
   const refs = await normalizeReferenceImageDataUris(context, referenceImages, taskId, signal);
   refs.forEach((ref) => {
     const part = dataUriToGeminiPart(ref);
     if (part) parts.push(part);
   });
+  parts.push({ text: prompt });
   markRemoteExecutionStarted(context, taskId);
   const payload = await requestJson(context.net, geminiGenerateContentUrl(provider, model), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      ...(apiKey ? { 'x-goog-api-key': apiKey } : {}),
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     },
     signal,
     body: JSON.stringify({
@@ -494,9 +507,10 @@ async function generateGeminiImage(context, provider, model, prompt, referenceIm
       },
     }),
   });
-  const result = findGeminiImageInPayload(payload) || findImagesInPayload(payload)[0];
-  if (!result) throw new Error(`The Gemini response did not contain an image (${summarizePayloadShape(payload)}).`);
-  return saveOutputAsset(context, result, taskId);
+  const results = findGeminiImagesInPayload(payload);
+  const normalizedResults = results.length ? results : findImagesInPayload(payload);
+  if (!normalizedResults.length) throw new Error(`The Gemini response did not contain an image (${summarizePayloadShape(payload)}).`);
+  return saveOutputAssets(context, normalizedResults, taskId);
 }
 
 async function pollImageTask(context, baseUrl, headers, taskId, upstreamTaskId, initialPayload, signal) {

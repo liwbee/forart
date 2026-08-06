@@ -1,4 +1,4 @@
-import { GripVertical, KeyRound, Plus, RefreshCw, TestTube2, Trash2 } from "lucide-react";
+import { ExternalLink, GripVertical, KeyRound, Plus, RefreshCw, Sparkles, TestTube2, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -11,18 +11,28 @@ import { NativeTabs, type NativeTabItem } from "../../components/NativeTabs";
 import { SearchInput } from "../../components/SearchInput";
 import { VirtualList } from "../../components/VirtualList";
 import { Button } from "../../components/ui/button";
+import {
+  Card,
+  CardAction,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "../../components/ui/card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { ApimartLogo, ApimartSettingsPane, type ApiPanelStatus } from "./ApimartSettingsPane";
-import { APIMART_PROVIDER_ID, createApiProvider, loadApiSettings, normalizeApiProvider, normalizeApiProviderOrder, readApiSettings, saveApiSettings, uniqueModels, type ApiModelKind, type ApiProvider } from "./apiProviders";
+import { APIMART_PROVIDER_ID, createApiProvider, createApimartProvider, createTudouProvider, loadApiSettings, normalizeApiProvider, normalizeApiProviderOrder, readApiSettings, saveApiSettings, TUDOU_PROVIDER_ID, uniqueModels, type ApiModelKind, type ApiProvider } from "./apiProviders";
 import { detectImageModelRuleId, IMAGE_MODEL_RULES, normalizeImageModelRuleId } from "./imageModelRules";
 import { LibtvLogo, LibtvSettingsPane } from "./LibtvSettingsPane";
+import { TudouLogo, TudouSettingsPane } from "./TudouSettingsPane";
 
-type ApiSettingsPane = "provider" | "apimart" | "libtv";
+type ApiSettingsPane = "provider" | "apimart" | "tudou" | "libtv" | "recommended";
 type ApiAction = "verify" | "fetch" | "";
 type ModelPickerTab = ApiModelKind | "all";
 type ApiSidebarItem =
   | { id: "libtv"; type: "libtv" }
   | { id: "apimart"; type: "apimart"; provider: ApiProvider }
+  | { id: "tudou-api"; type: "tudou"; provider: ApiProvider }
   | { id: string; type: "provider"; provider: ApiProvider };
 type FetchedModelEntry = { id: string; kind: ApiModelKind; selected: boolean };
 
@@ -72,8 +82,8 @@ export function ApiSettingsPanel() {
   const [defaultImageProviderId, setDefaultImageProviderId] = useState(initialSettings.defaultImageProviderId || "");
   const [libtvMachineId, setLibtvMachineId] = useState(initialSettings.libtvMachineId || "");
   const [libtvActionFissionConcurrency, setLibtvActionFissionConcurrency] = useState(initialSettings.libtvActionFissionConcurrency ?? 1);
-  const [selectedProviderId, setSelectedProviderId] = useState(APIMART_PROVIDER_ID);
-  const [activePane, setActivePane] = useState<ApiSettingsPane>("apimart");
+  const [selectedProviderId, setSelectedProviderId] = useState("");
+  const [activePane, setActivePane] = useState<ApiSettingsPane>("provider");
   const [action, setAction] = useState<ApiAction>("");
   const [status, setStatus] = useState<ApiPanelStatus>({ tone: "idle", text: t("settings:apiActionReady") });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -81,7 +91,7 @@ export function ApiSettingsPanel() {
   const [modelPickerFilter, setModelPickerFilter] = useState("");
   const [modelPickerTab, setModelPickerTab] = useState<ModelPickerTab>("all");
   const [fetchedModels, setFetchedModels] = useState<FetchedModelEntry[]>([]);
-  const selectedProvider = providers.find((provider) => provider.id === selectedProviderId) || providers[0] || null;
+  const selectedProvider = providers.find((provider) => provider.id === selectedProviderId) || null;
 
   const sidebarItems = useMemo<ApiSidebarItem[]>(() => {
     const providersById = new Map(providers.map((provider) => [provider.id, provider]));
@@ -89,21 +99,35 @@ export function ApiSettingsPanel() {
       if (id === "libtv") return [...items, { id: "libtv", type: "libtv" }];
       const provider = providersById.get(id);
       if (!provider) return items;
-      return provider.id === APIMART_PROVIDER_ID ? [...items, { id: "apimart", type: "apimart", provider }] : [...items, { id, type: "provider", provider }];
+      return provider.id === APIMART_PROVIDER_ID ? [...items, { id: "apimart", type: "apimart", provider }]
+        : provider.id === TUDOU_PROVIDER_ID ? [...items, { id: TUDOU_PROVIDER_ID, type: "tudou", provider }]
+          : [...items, { id, type: "provider", provider }];
     }, []);
   }, [providerOrder, providers]);
+  const apimartAdded = providers.some((provider) => provider.id === APIMART_PROVIDER_ID);
+  const tudouAdded = providers.some((provider) => provider.id === TUDOU_PROVIDER_ID);
+  const libtvAdded = providerOrder.includes("libtv");
 
   useEffect(() => {
     let canceled = false;
     void loadApiSettings()
       .then((settings) => {
         if (canceled) return;
+        const nextOrder = normalizeApiProviderOrder(settings.providerOrder, settings.providers);
+        const firstProviderId = nextOrder[0] || "";
         setProviders(settings.providers);
-        setProviderOrder(normalizeApiProviderOrder(settings.providerOrder, settings.providers));
+        setProviderOrder(nextOrder);
         setDefaultImageProviderId(settings.defaultImageProviderId || "");
         setLibtvMachineId(settings.libtvMachineId || "");
         setLibtvActionFissionConcurrency(settings.libtvActionFissionConcurrency ?? 1);
-        setSelectedProviderId((current) => settings.providers.some((provider) => provider.id === current) ? current : APIMART_PROVIDER_ID);
+        if (firstProviderId === "libtv") {
+          setSelectedProviderId("");
+          setActivePane("libtv");
+        } else {
+          const firstProvider = settings.providers.find((provider) => provider.id === firstProviderId) || null;
+          setSelectedProviderId(firstProvider?.id || "");
+          setActivePane(firstProvider?.id === APIMART_PROVIDER_ID ? "apimart" : firstProvider?.id === TUDOU_PROVIDER_ID ? "tudou" : "provider");
+        }
         setSettingsLoaded(true);
       })
       .catch((error) => {
@@ -132,8 +156,25 @@ export function ApiSettingsPanel() {
   }, [defaultImageProviderId, libtvActionFissionConcurrency, libtvMachineId, providerOrder, providers, settingsLoaded, t]);
 
   useEffect(() => {
-    if (providers.length && !providers.some((provider) => provider.id === selectedProviderId)) setSelectedProviderId(providers[0].id);
-  }, [providers, selectedProviderId]);
+    if (!settingsLoaded) return;
+    const activeItemExists = activePane === "recommended" || (activePane === "libtv"
+      ? providerOrder.includes("libtv")
+      : providers.some((provider) => provider.id === selectedProviderId));
+    if (activeItemExists) return;
+    const firstItem = sidebarItems[0];
+    if (!firstItem) {
+      setSelectedProviderId("");
+      setActivePane("provider");
+      return;
+    }
+    if (firstItem.type === "libtv") {
+      setSelectedProviderId("");
+      setActivePane("libtv");
+      return;
+    }
+    setSelectedProviderId(firstItem.id);
+    setActivePane(firstItem.type === "apimart" ? "apimart" : firstItem.type === "tudou" ? "tudou" : "provider");
+  }, [activePane, providerOrder, providers, selectedProviderId, settingsLoaded, sidebarItems]);
 
   useEffect(() => {
     setStatus({ tone: "idle", text: t("settings:apiActionReady") });
@@ -154,6 +195,42 @@ export function ApiSettingsPanel() {
     });
   }
 
+  function addRecommendedProvider(providerId: "apimart" | "tudou-api" | "libtv") {
+    if (providerId === "libtv") {
+      setProviderOrder((order) => normalizeApiProviderOrder([...order, "libtv"], providers));
+      return;
+    }
+    setProviders((current) => {
+      const fixedId = providerId === "apimart" ? APIMART_PROVIDER_ID : TUDOU_PROVIDER_ID;
+      const existing = current.find((provider) => provider.id === fixedId);
+      const next = existing ? current : [...current, providerId === "apimart" ? createApimartProvider() : createTudouProvider()];
+      setProviderOrder((order) => normalizeApiProviderOrder([...order, fixedId], next));
+      return next;
+    });
+  }
+
+  function removeApimartProvider() {
+    setProviders((current) => current.filter((provider) => provider.id !== APIMART_PROVIDER_ID));
+    setProviderOrder((current) => current.filter((id) => id !== APIMART_PROVIDER_ID));
+    setDefaultImageProviderId((current) => current === APIMART_PROVIDER_ID ? "" : current);
+    setSelectedProviderId("");
+    setActivePane("recommended");
+  }
+
+  function removeTudouProvider() {
+    setProviders((current) => current.filter((provider) => provider.id !== TUDOU_PROVIDER_ID));
+    setProviderOrder((current) => current.filter((id) => id !== TUDOU_PROVIDER_ID));
+    setDefaultImageProviderId((current) => current === TUDOU_PROVIDER_ID ? "" : current);
+    setSelectedProviderId("");
+    setActivePane("recommended");
+  }
+
+  function removeLibtvProvider() {
+    setProviderOrder((current) => current.filter((id) => id !== "libtv"));
+    setSelectedProviderId("");
+    setActivePane("recommended");
+  }
+
   function applySidebarOrder(nextOrder: string[]) {
     const normalizedOrder = normalizeApiProviderOrder(nextOrder, providers);
     setProviderOrder(normalizedOrder);
@@ -170,8 +247,7 @@ export function ApiSettingsPanel() {
 
   async function requestModels(provider: ApiProvider) {
     const headers: HeadersInit = { Accept: "application/json" };
-    if (provider.protocol === "gemini" && provider.apiKey.trim()) headers["x-goog-api-key"] = provider.apiKey.trim();
-    else if (provider.apiKey.trim()) headers.Authorization = `Bearer ${provider.apiKey.trim()}`;
+    if (provider.apiKey.trim()) headers.Authorization = `Bearer ${provider.apiKey.trim()}`;
     const response = await fetch(formatModelsUrl(provider), { method: "GET", headers });
     const text = await response.text();
     let payload: unknown = null;
@@ -259,10 +335,19 @@ export function ApiSettingsPanel() {
     if (!selectedProvider || selectedProvider.id === APIMART_PROVIDER_ID) return;
     setProviders((current) => {
       const next = current.filter((provider) => provider.id !== selectedProvider.id);
-      setProviderOrder((order) => normalizeApiProviderOrder(order.filter((id) => id !== selectedProvider.id), next));
-      const nextProviderId = next[0]?.id || APIMART_PROVIDER_ID;
-      setSelectedProviderId(nextProviderId);
-      setActivePane(nextProviderId === APIMART_PROVIDER_ID ? "apimart" : "provider");
+      setProviderOrder((order) => {
+        const nextOrder = normalizeApiProviderOrder(order.filter((id) => id !== selectedProvider.id), next);
+        const nextProviderId = nextOrder[0] || "";
+        if (nextProviderId === "libtv") {
+          setSelectedProviderId("");
+          setActivePane("libtv");
+        } else {
+          const nextProvider = next.find((provider) => provider.id === nextProviderId) || null;
+          setSelectedProviderId(nextProvider?.id || "");
+          setActivePane(nextProvider?.id === APIMART_PROVIDER_ID ? "apimart" : nextProvider?.id === TUDOU_PROVIDER_ID ? "tudou" : "provider");
+        }
+        return nextOrder;
+      });
       return next;
     });
   }
@@ -347,7 +432,81 @@ export function ApiSettingsPanel() {
         <span className="settings-api-provider-drag-handle" aria-hidden="true" {...dragHandleProps}><GripVertical size={14} /></span>
         {item.type === "libtv" ? <span className="settings-api-provider-logo settings-libtv-sidebar-logo"><LibtvLogo /></span>
           : item.type === "apimart" ? <span className="settings-api-provider-logo settings-api-provider-logo--apimart"><ApimartLogo /></span>
+            : item.type === "tudou" ? <span className="settings-api-provider-logo settings-api-provider-logo--tudou"><TudouLogo /></span>
             : <><span className="settings-api-provider-info"><strong>{item.provider.name || item.provider.id}</strong><small>{item.provider.baseUrl || t("settings:baseUrlNotConfigured")}</small></span><span className="settings-api-provider-pill">{item.provider.protocol}</span></>}
+      </>
+    );
+  }
+
+  function renderRecommendedProviders() {
+    const recommendedProviders = [
+      {
+        id: "apimart" as const,
+        name: "APIMart",
+        added: apimartAdded,
+        description: t("settings:apimartRecommendedDescription"),
+        logo: <ApimartLogo />,
+      },
+      {
+        id: "libtv" as const,
+        name: "LibTV",
+        added: libtvAdded,
+        description: t("settings:libtvRecommendedDescription"),
+        logo: <LibtvLogo />,
+      },
+      {
+        id: "tudou-api" as const,
+        name: t("settings:tudouSettings"),
+        added: tudouAdded,
+        description: t("settings:tudouRecommendedDescription"),
+        logo: <TudouLogo />,
+      },
+    ];
+
+    return (
+      <>
+        <header className="settings-api-content-head">
+          <div>
+            <h2>{t("settings:recommendedProviders")}</h2>
+            <p>{t("settings:recommendedProvidersDescription")}</p>
+          </div>
+        </header>
+        <section className="settings-api-recommended-grid" aria-label={t("settings:recommendedProviders")}>
+          {recommendedProviders.map((provider) => (
+            <Card key={provider.id} className="settings-api-recommended-card" data-recommended-provider-id={provider.id}>
+              <CardHeader>
+                <CardTitle className="settings-api-recommended-card-logo" data-provider={provider.id}>
+                  {provider.logo}
+                  <span className="sr-only">{provider.name}</span>
+                </CardTitle>
+                <CardDescription>{provider.description}</CardDescription>
+                <CardAction>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t("settings:openProviderWebsite", { provider: provider.name })}
+                    title={t("settings:openProviderWebsite", { provider: provider.name })}
+                    onClick={() => void window.forartWindow?.openOfficialWebsite(provider.id)}
+                  >
+                    <ExternalLink aria-hidden="true" />
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardFooter>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={provider.added ? "outline" : "default"}
+                  disabled={provider.added}
+                  onClick={() => addRecommendedProvider(provider.id)}
+                >
+                  {provider.added ? t("settings:providerAdded") : t("settings:addRecommendedProvider")}
+                </Button>
+              </CardFooter>
+            </Card>
+          ))}
+        </section>
       </>
     );
   }
@@ -379,33 +538,39 @@ export function ApiSettingsPanel() {
             className="settings-api-provider-list"
             onReorder={(items) => applySidebarOrder(items.map((item) => item.id))}
             renderItem={(item, { isDragging, dragHandleProps }) => {
-              const selected = item.type === "libtv" ? activePane === "libtv" : item.type === "apimart" ? activePane === "apimart" : activePane === "provider" && item.id === selectedProvider?.id;
+              const selected = item.type === "libtv" ? activePane === "libtv" : item.type === "apimart" ? activePane === "apimart" : item.type === "tudou" ? activePane === "tudou" : activePane === "provider" && item.id === selectedProvider?.id;
               return (
-                <Button type="button" variant={selected ? "default" : "outline"} data-sidebar-item-id={item.id} className={`settings-api-provider-card${item.type !== "provider" ? " settings-api-provider-card--fixed" : ""}${isDragging ? " is-dragging" : ""}`} aria-label={item.type === "libtv" ? t("settings:libtvCliSettings") : item.type === "apimart" ? t("settings:apimartSettings") : undefined} onClick={() => {
-                  if (item.type === "libtv") setActivePane("libtv");
-                  else { setSelectedProviderId(item.id); setActivePane(item.type === "apimart" ? "apimart" : "provider"); }
+                <Button type="button" variant={selected ? "default" : "outline"} data-sidebar-item-id={item.id} className={`settings-api-provider-card${item.type !== "provider" ? " settings-api-provider-card--fixed" : ""}${isDragging ? " is-dragging" : ""}`} aria-label={item.type === "libtv" ? t("settings:libtvCliSettings") : item.type === "apimart" ? t("settings:apimartSettings") : item.type === "tudou" ? t("settings:tudouSettings") : undefined} onClick={() => {
+                  if (item.type === "libtv") { setSelectedProviderId(""); setActivePane("libtv"); }
+                  else { setSelectedProviderId(item.id); setActivePane(item.type === "apimart" ? "apimart" : item.type === "tudou" ? "tudou" : "provider"); }
                 }}>
                   {renderSidebarContent(item, dragHandleProps)}
                 </Button>
               );
             }}
           />
-          <Button type="button" className="w-full" onClick={addProvider}><Plus data-icon="inline-start" aria-hidden="true" /><span>{t("settings:addProvider")}</span></Button>
+          <div className="flex flex-col gap-2">
+            <Button type="button" className="w-full" onClick={addProvider}><Plus data-icon="inline-start" aria-hidden="true" /><span>{t("settings:addProvider")}</span></Button>
+            <Button type="button" variant={activePane === "recommended" ? "default" : "outline"} className="w-full" onClick={() => { setSelectedProviderId(""); setActivePane("recommended"); }}><Sparkles data-icon="inline-start" aria-hidden="true" /><span>{t("settings:recommendedProviders")}</span></Button>
+          </div>
         </aside>
 
         <main className="settings-api-content">
-          {activePane === "libtv" ? (
+          {activePane === "recommended" ? renderRecommendedProviders() : activePane === "libtv" ? (
             <LibtvSettingsPane
               machineId={libtvMachineId}
               actionFissionConcurrency={libtvActionFissionConcurrency}
               onMachineIdChange={setLibtvMachineId}
               onActionFissionConcurrencyChange={setLibtvActionFissionConcurrency}
+              onRemove={removeLibtvProvider}
             />
           ) : activePane === "apimart" && selectedProvider?.id === APIMART_PROVIDER_ID ? (
-            <><ApimartSettingsPane provider={selectedProvider} fetchingModels={action === "fetch"} status={status} onProviderChange={patchSelectedProvider} onFetchModels={fetchModels} />{renderModelList("image")}{renderModelList("chat")}{renderModelList("video")}</>
+            <><ApimartSettingsPane provider={selectedProvider} fetchingModels={action === "fetch"} status={status} onProviderChange={patchSelectedProvider} onFetchModels={fetchModels} onRemove={removeApimartProvider} />{renderModelList("image")}{renderModelList("chat")}{renderModelList("video")}</>
+          ) : activePane === "tudou" && selectedProvider?.id === TUDOU_PROVIDER_ID ? (
+            <><TudouSettingsPane provider={selectedProvider} fetchingModels={action === "fetch"} status={status} onProviderChange={patchSelectedProvider} onFetchModels={fetchModels} onRemove={removeTudouProvider} />{renderModelList("image")}{renderModelList("chat")}{renderModelList("video")}</>
           ) : selectedProvider ? (
             <>
-              <header className="settings-api-content-head"><div><h2>{selectedProvider.name || t("settings:provider")}</h2></div><div className="settings-api-content-actions"><ConfirmingDeleteButton label={t("settings:deleteProvider")} confirmLabel={t("common:bulk.confirmDelete")} resetKey={selectedProvider.id} cancelLabel={t("common:actions.cancel")} onDelete={deleteSelectedProvider} /></div></header>
+              <header className="settings-api-content-head"><div><h2>{selectedProvider.name || t("settings:provider")}</h2></div><div className="settings-api-content-actions"><ConfirmingDeleteButton label={t("settings:removeProvider")} confirmLabel={t("settings:confirmRemoveProvider")} resetKey={selectedProvider.id} cancelLabel={t("common:actions.cancel")} onDelete={deleteSelectedProvider} /></div></header>
               <section className="settings-api-block">
                 <div className="settings-api-block-head"><div><h3>{t("settings:basicInfo")}</h3></div></div>
                 <div className="settings-api-form">

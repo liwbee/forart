@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const fsp = fs.promises;
 
 const REVIEW_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']);
 function normalizeReviewFolderName(value) {
@@ -15,9 +16,9 @@ function parseReviewFolderNames(value) {
   );
 }
 
-function listReviewDirectories(dir) {
+async function listReviewDirectories(dir) {
   try {
-    return fs.readdirSync(dir, { withFileTypes: true })
+    return (await fsp.readdir(dir, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
@@ -30,9 +31,9 @@ function isReviewImageFile(filePath) {
   return REVIEW_IMAGE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
 
-function hasReviewImageInDirectory(dir) {
+async function hasReviewImageInDirectory(dir) {
   try {
-    return fs.readdirSync(dir, { withFileTypes: true }).some((entry) => entry.isFile() && isReviewImageFile(path.join(dir, entry.name)));
+    return (await fsp.readdir(dir, { withFileTypes: true })).some((entry) => entry.isFile() && isReviewImageFile(path.join(dir, entry.name)));
   } catch {
     return false;
   }
@@ -47,7 +48,7 @@ function assertInsideRoot(root, absolutePath) {
   return resolvedPath;
 }
 
-function selectedReviewRoot(rootPath) {
+function validatedReviewRoot(rootPath) {
   const root = path.resolve(String(rootPath || '').trim());
   if (!rootPath) throw new Error('Review root is required');
   if (!fs.existsSync(root)) throw new Error('Review root not found');
@@ -56,63 +57,73 @@ function selectedReviewRoot(rootPath) {
 }
 
 function reviewAbsolutePath(rootPath, relativePath = '') {
-  const root = selectedReviewRoot(rootPath);
+  const root = path.resolve(String(rootPath || '').trim());
+  if (!rootPath) throw new Error('Review root is required');
   const normalized = String(relativePath || '').replace(/\\/g, '/');
   return assertInsideRoot(root, path.resolve(root, ...normalized.split('/').filter(Boolean)));
 }
 
 function reviewRelativePath(rootPath, absolutePath) {
-  return path.relative(selectedReviewRoot(rootPath), absolutePath).split(path.sep).join('/');
+  return path.relative(path.resolve(rootPath), assertInsideRoot(rootPath, absolutePath)).split(path.sep).join('/');
 }
 
-function productHasModelImages(productDir, modelFolderValue) {
-  const modelFolders = parseReviewFolderNames(modelFolderValue);
+async function productHasModelImages(productDir, modelFolders) {
   if (!modelFolders.size) return false;
-  for (const folderName of listReviewDirectories(productDir)) {
-    if (modelFolders.has(normalizeReviewFolderName(folderName)) && hasReviewImageInDirectory(path.join(productDir, folderName))) return true;
+  for (const folderName of await listReviewDirectories(productDir)) {
+    if (modelFolders.has(normalizeReviewFolderName(folderName)) && await hasReviewImageInDirectory(path.join(productDir, folderName))) return true;
   }
   return false;
 }
 
-function collectReviewImages(dir, rootPath) {
+async function collectReviewImages(dir, rootPath) {
   try {
-    return fs.readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && isReviewImageFile(path.join(dir, entry.name)))
-      .map((entry) => {
+    const entries = (await fsp.readdir(dir, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && isReviewImageFile(path.join(dir, entry.name)));
+    const images = await Promise.all(entries.map(async (entry) => {
         const absolutePath = path.join(dir, entry.name);
-        const stats = fs.statSync(absolutePath);
+        const stats = await fsp.stat(absolutePath);
         const relativePath = reviewRelativePath(rootPath, absolutePath);
+        const encodedRoot = encodeURIComponent(path.resolve(rootPath));
+        const encodedPath = encodeURIComponent(relativePath);
+        const originalUrl = `forart-review://image?root=${encodedRoot}&path=${encodedPath}`;
+        const thumbnailUrl = `forart-review-thumb://image?root=${encodedRoot}&path=${encodedPath}&size=132&mtime=${Math.round(stats.mtimeMs)}&bytes=${stats.size}`;
+        const previewUrl = `forart-review-preview://image?root=${encodedRoot}&path=${encodedPath}&size=700&mtime=${Math.round(stats.mtimeMs)}&bytes=${stats.size}`;
         return {
           id: `${relativePath}-${stats.mtimeMs}-${stats.size}`,
           name: entry.name,
           relativePath,
-          url: `forart-review://image?root=${encodeURIComponent(path.resolve(rootPath))}&path=${encodeURIComponent(relativePath)}`,
+          originalUrl,
+          thumbnailUrl,
+          previewUrl,
           size: stats.size,
           lastModified: Math.round(stats.mtimeMs),
         };
-      })
-      .sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' }));
+      }));
+    return images.sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' }));
   } catch {
     return [];
   }
 }
 
-function loadProducts({ root, modelFolders }) {
-  const reviewRoot = selectedReviewRoot(root);
-  return listReviewDirectories(reviewRoot).map((productId) => {
+async function loadProducts({ root, modelFolders }) {
+  const reviewRoot = path.resolve(root);
+  const productIds = await listReviewDirectories(reviewRoot);
+  const modelFolderSet = parseReviewFolderNames(modelFolders);
+  return Promise.all(productIds.map(async (productId) => {
     const productDir = path.join(reviewRoot, productId);
     return {
       id: productId,
-      hasModelImages: productHasModelImages(productDir, modelFolders),
+      hasModelImages: await productHasModelImages(productDir, modelFolderSet),
       modelImages: [],
       detailImages: [],
     };
-  });
+  }));
 }
 
-function loadProductImages({ root, productId, modelFolders, detailFolders }) {
+async function loadProductImages({ root, productId, modelFolders, detailFolders }) {
   const productDir = reviewAbsolutePath(root, productId);
-  if (!fs.existsSync(productDir) || !fs.statSync(productDir).isDirectory()) throw new Error('Product not found');
+  const productStats = await fsp.stat(productDir).catch(() => null);
+  if (!productStats?.isDirectory()) throw new Error('Product not found');
   const modelFolderSet = parseReviewFolderNames(modelFolders);
   const detailFolderSet = parseReviewFolderNames(detailFolders);
   const product = {
@@ -122,16 +133,14 @@ function loadProductImages({ root, productId, modelFolders, detailFolders }) {
     detailImages: [],
   };
 
-  for (const folderName of listReviewDirectories(productDir)) {
+  for (const folderName of await listReviewDirectories(productDir)) {
     const normalized = normalizeReviewFolderName(folderName);
     if (!modelFolderSet.has(normalized) && !detailFolderSet.has(normalized)) continue;
-    const images = collectReviewImages(path.join(productDir, folderName), root);
+    const images = await collectReviewImages(path.join(productDir, folderName), root);
     if (modelFolderSet.has(normalized)) product.modelImages.push(...images);
     else product.detailImages.push(...images);
   }
 
-  product.modelImages.sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' }));
-  product.detailImages.sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' }));
   product.hasModelImages = product.modelImages.length > 0;
   return product;
 }
@@ -155,23 +164,36 @@ function resolveImageUrl(urlText, authorizeRoot) {
   return filePath;
 }
 
+function resolveScaledImageUrl(urlText, authorizeRoot) {
+  const url = new URL(urlText);
+  const root = authorizeRoot(url.searchParams.get('root') || '');
+  const imagePath = url.searchParams.get('path') || '';
+  const filePath = reviewAbsolutePath(root, imagePath);
+  const requestedSize = Number(url.searchParams.get('size') || 132);
+  return {
+    filePath,
+    size: Number.isFinite(requestedSize) ? Math.max(48, Math.min(2048, Math.round(requestedSize))) : 132,
+  };
+}
+
 module.exports = {
   createImageReviewStore: () => {
     const authorizedRoots = new Set();
 
     function rootKey(rootPath) {
-      const root = selectedReviewRoot(rootPath);
+      const root = path.resolve(String(rootPath || '').trim());
       return process.platform === 'win32' ? root.toLocaleLowerCase() : root;
     }
 
     function authorizeRoot(rootPath) {
-      const root = selectedReviewRoot(rootPath);
+      const root = validatedReviewRoot(rootPath);
       authorizedRoots.add(rootKey(root));
       return root;
     }
 
     function requireAuthorizedRoot(rootPath) {
-      const root = selectedReviewRoot(rootPath);
+      const root = path.resolve(String(rootPath || '').trim());
+      if (!rootPath) throw new Error('Review root is required');
       if (!authorizedRoots.has(rootKey(root))) throw new Error('Review root is not authorized');
       return root;
     }
@@ -182,6 +204,7 @@ module.exports = {
       loadProducts: (payload = {}) => loadProducts({ ...payload, root: requireAuthorizedRoot(payload.root) }),
       resolveProductDirectory: (payload = {}) => resolveProductDirectory({ ...payload, root: requireAuthorizedRoot(payload.root) }),
       resolveImageUrl: (urlText) => resolveImageUrl(urlText, requireAuthorizedRoot),
+      resolveScaledImageUrl: (urlText) => resolveScaledImageUrl(urlText, requireAuthorizedRoot),
     };
   },
 };

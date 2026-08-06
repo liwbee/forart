@@ -26,12 +26,12 @@ test('image review only reads roots explicitly authorized by the main process', 
   assert.throws(() => store.loadProducts({ root: reviewRoot, modelFolders: '模特图' }), /not authorized/);
   assert.equal(store.authorizeRoot(reviewRoot), path.resolve(reviewRoot));
 
-  const products = store.loadProducts({ root: reviewRoot, modelFolders: '主图，模特图' });
+  const products = await store.loadProducts({ root: reviewRoot, modelFolders: '主图，模特图' });
   assert.deepEqual(products.map((product) => ({ id: product.id, hasModelImages: product.hasModelImages })), [
     { id: 'SKU-001', hasModelImages: true },
   ]);
 
-  const product = store.loadProductImages({
+  const product = await store.loadProductImages({
     root: reviewRoot,
     productId: 'SKU-001',
     modelFolders: '模特图',
@@ -39,12 +39,12 @@ test('image review only reads roots explicitly authorized by the main process', 
   });
   assert.equal(product.modelImages.length, 1);
   assert.equal(product.detailImages.length, 1);
-  assert.equal(store.resolveImageUrl(product.modelImages[0].url), path.join(modelRoot, 'model.jpg'));
+  assert.equal(store.resolveImageUrl(product.modelImages[0].originalUrl), path.join(modelRoot, 'model.jpg'));
   assert.equal(store.resolveProductDirectory({ root: reviewRoot, productId: 'SKU-001' }), productRoot);
   assert.throws(() => store.resolveProductDirectory({ root: reviewRoot, productId: '../outside' }), /Invalid product path/);
 
   assert.throws(() => store.resolveImageUrl(`forart-review://image?root=${encodeURIComponent(outsideRoot)}&path=secret.jpg`), /not authorized/);
-  assert.throws(() => store.loadProductImages({ root: reviewRoot, productId: '../outside', modelFolders: '', detailFolders: '' }), /Invalid review path/);
+  await assert.rejects(store.loadProductImages({ root: reviewRoot, productId: '../outside', modelFolders: '', detailFolders: '' }), /Invalid review path/);
 
   const handlers = new Map();
   registerImageReviewIpc({
@@ -131,14 +131,14 @@ test('image review opens an authorized original image with registry Photoshop', 
     },
   });
 
-  const result = await handlers.get('image-review:open-in-photoshop')({}, { url: imageUrl });
+  const result = await handlers.get('image-review:open-in-photoshop')({}, { originalUrl: imageUrl });
   assert.deepEqual(result, { ok: true });
   assert.equal(launch.executablePath, photoshopPath);
   assert.deepEqual(launch.args, [imagePath]);
   assert.equal(launch.options.detached, true);
 
   const unauthorized = await handlers.get('image-review:open-in-photoshop')({}, {
-    url: `forart-review://image?root=${encodeURIComponent(tempRoot)}&path=${encodeURIComponent(path.basename(imagePath))}`,
+    originalUrl: `forart-review://image?root=${encodeURIComponent(tempRoot)}&path=${encodeURIComponent(path.basename(imagePath))}`,
   });
   assert.deepEqual(unauthorized, { ok: false, reason: 'image-not-found' });
 });

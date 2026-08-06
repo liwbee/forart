@@ -261,6 +261,7 @@ export interface ForartWindowApi {
   minimize: () => Promise<{ ok: boolean }>;
   toggleMaximize: () => Promise<{ ok: boolean; maximized?: boolean }>;
   close: () => Promise<{ ok: boolean }>;
+  openOfficialWebsite: (providerId: "apimart" | "libtv" | "tudou-api") => Promise<{ ok: boolean }>;
   onMaximizedChanged: (callback: (maximized: boolean) => void) => () => void;
 }
 
@@ -390,7 +391,9 @@ export interface ImageReviewImage {
   id: string;
   name: string;
   relativePath: string;
-  url: string;
+  originalUrl: string;
+  thumbnailUrl: string;
+  previewUrl: string;
   size: number;
   lastModified: number;
 }
@@ -406,10 +409,11 @@ export interface ImageReviewApi {
   chooseRoot: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
   products: (payload: { root: string; modelFolders: string }) => Promise<{ products: ImageReviewProduct[] }>;
   productImages: (payload: { root: string; productId: string; modelFolders: string; detailFolders: string }) => Promise<{ product: ImageReviewProduct }>;
+  clearScaledImageCache: () => Promise<{ ok: true }>;
   openProductFolder: (payload: { root: string; productId: string }) => Promise<
     { ok: true } | { ok: false; reason: "product-folder-not-found" | "open-failed" }
   >;
-  openInPhotoshop: (payload: { url: string }) => Promise<
+  openInPhotoshop: (payload: { originalUrl: string }) => Promise<
     { ok: true } | { ok: false; reason: "unsupported-platform" | "image-not-found" | "photoshop-not-found" | "launch-failed" }
   >;
 }

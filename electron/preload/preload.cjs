@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('forartWindow', {
   minimize: () => ipcRenderer.invoke('window:minimize'),
   toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
   close: () => ipcRenderer.invoke('window:close'),
+  openOfficialWebsite: (providerId) => ipcRenderer.invoke('window:open-official-website', providerId),
   onMaximizedChanged: (callback) => {
     const listener = (_event, maximized) => callback(Boolean(maximized));
     ipcRenderer.on('window:maximized-changed', listener);
@@ -96,6 +97,7 @@ contextBridge.exposeInMainWorld('forartReview', {
   chooseRoot: (payload) => ipcRenderer.invoke('image-review:choose-root', payload),
   products: (payload) => ipcRenderer.invoke('image-review:products', payload),
   productImages: (payload) => ipcRenderer.invoke('image-review:product-images', payload),
+  clearScaledImageCache: () => ipcRenderer.invoke('image-review:clear-scaled-image-cache'),
   openProductFolder: (payload) => ipcRenderer.invoke('image-review:open-product-folder', payload),
   openInPhotoshop: (payload) => ipcRenderer.invoke('image-review:open-in-photoshop', payload),
 });

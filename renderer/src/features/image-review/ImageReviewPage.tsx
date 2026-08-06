@@ -2,6 +2,7 @@ import { PointerEvent, forwardRef, memo, useCallback, useEffect, useId, useImper
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, CircleHelp, FolderOpen, ImageOff, RefreshCw } from "lucide-react";
+import type { ImageReviewImage as ReviewImage, ImageReviewProduct as ReviewProduct } from "../../app/appConfig";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import { SearchInput } from "../../components/SearchInput";
 import { VirtualList, type VirtualListController } from "../../components/VirtualList";
@@ -13,31 +14,15 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "../../components/
 import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
+import { ReviewThumbnail } from "./ReviewThumbnail";
 
-interface ReviewImage {
-  id: string;
-  name: string;
-  relativePath: string;
-  url: string;
-  size: number;
-  lastModified: number;
-}
-
-interface ReviewProduct {
-  id: string;
-  hasModelImages: boolean;
-  modelImages: ReviewImage[];
-  detailImages: ReviewImage[];
-}
-
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const WHEEL_LINE_HEIGHT = 40;
 const THUMB_WHEEL_IMMEDIATE_RATIO = 0.28;
 const THUMB_WHEEL_VELOCITY_RATIO = 0.012;
 const THUMB_WHEEL_FRICTION = 0.9;
 const THUMB_WHEEL_MAX_VELOCITY = 3.2;
 const THUMB_WHEEL_STOP_VELOCITY = 0.02;
-const PRODUCT_ROW_HEIGHT = 80;
+const PRODUCT_ROW_HEIGHT = 76;
 const PRODUCT_COLUMN_WIDTH = 208;
 const THUMB_ITEM_WIDTH = 66;
 const FOLDER_RULE_DEBOUNCE_MS = 450;
@@ -55,6 +40,12 @@ type ProductImagePaneHandle = {
   goImages: (direction: -1 | 1) => void;
 };
 
+type DisplayedReviewImage = {
+  imageId: string;
+  src: string;
+  original: boolean;
+};
+
 function useDebouncedValue<TValue>(value: TValue, delay: number) {
   const [debouncedValue, setDebouncedValue] = useState(value);
 
@@ -64,14 +55,6 @@ function useDebouncedValue<TValue>(value: TValue, delay: number) {
   }, [delay, value]);
 
   return debouncedValue;
-}
-
-function sortImages(images: ReviewImage[]) {
-  return [...images].sort((a, b) => collator.compare(a.relativePath || a.name, b.relativePath || b.name));
-}
-
-function sortProducts(products: ReviewProduct[]) {
-  return [...products].sort((a, b) => collator.compare(a.id, b.id));
 }
 
 function formatBytes(size: number) {
@@ -93,7 +76,7 @@ function formatResolution(width: number, height: number) {
 
 function listReviewProducts(modelFolderValue: string, reviewRootPath: string, bridgeUnavailableMessage: string) {
   if (!window.forartReview?.products) return Promise.reject(new Error(bridgeUnavailableMessage));
-  return window.forartReview.products({ root: reviewRootPath, modelFolders: modelFolderValue }).then((payload) => sortProducts(payload.products));
+  return window.forartReview.products({ root: reviewRootPath, modelFolders: modelFolderValue }).then((payload) => payload.products);
 }
 
 function loadProductImages(productId: string, modelFolderValue: string, detailFolderValue: string, reviewRootPath: string, bridgeUnavailableMessage: string) {
@@ -103,11 +86,7 @@ function loadProductImages(productId: string, modelFolderValue: string, detailFo
     productId,
     modelFolders: modelFolderValue,
     detailFolders: detailFolderValue,
-  }).then((payload) => ({
-    ...payload.product,
-    modelImages: sortImages(payload.product.modelImages),
-    detailImages: sortImages(payload.product.detailImages),
-  }));
+  }).then((payload) => payload.product);
 }
 
 function reviewRootDisplayName(path: string) {
@@ -322,7 +301,7 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
         </TooltipTrigger>
         <TooltipContent>{t("imageReview:scrollThumbsLeft")}</TooltipContent>
       </Tooltip>
-      {loading ? (
+      {loading && !images.length ? (
         <div className="review-thumb-loading" role="status" aria-live="polite" aria-label={t("common:states.loading")}>
           {Array.from({ length: THUMB_SKELETON_COUNT }, (_, index) => (
             <Skeleton className="review-thumb-skeleton" aria-hidden="true" key={index} />
@@ -334,17 +313,7 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
           estimateSize={THUMB_ITEM_WIDTH}
           getItemKey={(image) => image.id}
           renderItem={(item, index) => (
-            <Button
-              className={`review-thumb-button${index === activeIndex ? " active" : ""}`}
-              type="button"
-              variant="outline"
-              size="icon"
-              aria-label={t("imageReview:viewImage", { name: item.name })}
-              aria-current={index === activeIndex ? "true" : undefined}
-              onClick={() => onSelectImage(index)}
-            >
-              <img src={item.url} alt="" loading={index === activeIndex ? "eager" : "lazy"} decoding="async" draggable={false} />
-            </Button>
+            <ReviewThumbnail image={item} active={index === activeIndex} onSelect={() => onSelectImage(index)} />
           )}
           className="review-thumb-strip"
           viewportClassName="review-thumb-strip__viewport"
@@ -352,7 +321,7 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
           virtualizerRef={thumbVirtualizerRef}
           axis="horizontal"
           itemMode="flow"
-          overscan={8}
+          overscan={4}
           spacerClassName="review-thumb-strip__spacer"
           trackClassName="review-thumb-strip__virtual"
           scrollbars="horizontal"
@@ -382,6 +351,39 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
   previous.activeIndex === next.activeIndex
 );
 
+function PhotoshopButton({
+  disabled,
+  label,
+  onClick,
+}: {
+  disabled: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          className="review-open-photoshop-button"
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          disabled={disabled}
+          aria-label={label}
+          onClick={onClick}
+        >
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 128 128">
+            <path d="M0 0h128v128H0z" fill="none" />
+            <path fill="#001e36" d="M22.667 1.6h82.666C117.867 1.6 128 11.733 128 24.267v79.466c0 12.534-10.133 22.667-22.667 22.667H22.667C10.133 126.4 0 116.267 0 103.733V24.267C0 11.733 10.133 1.6 22.667 1.6" />
+            <path fill="#31a8ff" d="M45.867 33.333c-1.6 0-3.2 0-4.853.054c-1.654.053-3.201.053-4.641.107c-1.44.053-2.773.106-4.053.106c-1.227.053-2.08.053-2.987.053c-.373 0-.533.213-.533.587v54.88c0 .48.213.694.64.694h10.347c.373-.054.64-.374.586-.747v-17.12c1.013 0 1.76 0 2.294.053c.533.053 1.386.053 2.666.053c4.374 0 8.374-.48 12-1.813c3.467-1.28 6.454-3.52 8.587-6.507q3.2-4.48 3.2-11.36c0-2.4-.426-4.693-1.226-6.933A17 17 0 0 0 64 39.36a19.05 19.05 0 0 0-7.147-4.374c-2.987-1.12-6.613-1.653-10.986-1.653m1.19 10.505c1.9.036 3.75.368 5.476 1.068c1.547.587 2.827 1.654 3.734 3.04a8.8 8.8 0 0 1 1.227 4.748c0 2.346-.534 4.16-1.654 5.493c-1.174 1.333-2.667 2.347-4.373 2.827c-1.974.64-4.054.959-6.134.959h-2.827c-.64 0-1.332-.053-2.079-.106v-17.92c.373-.054 1.12-.107 2.187-.053c1.013-.054 2.239-.054 3.626-.054q.41-.01.817-.002m44.73 2.723c-3.787 0-6.934.586-9.44 1.866c-2.293 1.067-4.267 2.773-5.6 4.906c-1.173 1.974-1.814 4.16-1.814 6.454a11.45 11.45 0 0 0 1.227 5.44a13.8 13.8 0 0 0 4.054 4.533a32.6 32.6 0 0 0 7.573 3.84c2.613 1.013 4.373 1.813 5.227 2.506c.853.694 1.28 1.387 1.28 2.134c0 .96-.587 1.867-1.44 2.24c-.96.48-2.4.747-4.427.747c-2.133 0-4.267-.267-6.294-.8a22.8 22.8 0 0 0-6.613-2.613c-.16-.107-.32-.16-.48-.053c-.16.106-.213.319-.213.479v9.28c-.053.427.213.8.587 1.013a21.5 21.5 0 0 0 5.44 1.707c2.4.48 4.799.693 7.252.693c3.84 0 7.041-.586 9.654-1.706c2.4-.96 4.48-2.613 5.973-4.747a12.4 12.4 0 0 0 2.08-7.093a11.5 11.5 0 0 0-1.226-5.493c-1.014-1.814-2.454-3.307-4.214-4.427a38.6 38.6 0 0 0-8.213-3.894a49 49 0 0 1-3.787-1.76c-.693-.373-1.333-.853-1.813-1.44c-.32-.427-.533-.906-.533-1.386s.16-1.013.426-1.44c.374-.533.96-.907 1.653-1.067c1.014-.266 2.134-.427 3.2-.374c2.027 0 4 .267 5.974.694c1.814.373 3.52.96 5.12 1.814c.213.106.48.106.96 0a.66.66 0 0 0 .267-.534v-8.693c0-.214-.054-.427-.107-.64c-.107-.213-.32-.427-.533-.48A18.8 18.8 0 0 0 98.4 47.04a46 46 0 0 0-6.613-.48z" />
+          </svg>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   title: string;
   folderValue: string;
@@ -404,10 +406,15 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   const [transform, setTransform] = useState({ scale: 1, x: 0, y: 0 });
   const [dragStart, setDragStart] = useState<{ pointerId: number; x: number; y: number; panX: number; panY: number } | null>(null);
   const [imageResolution, setImageResolution] = useState({ width: 0, height: 0 });
+  const [readyOriginalImageId, setReadyOriginalImageId] = useState("");
+  const [failedPreviewImageId, setFailedPreviewImageId] = useState("");
+  const [displayedImage, setDisplayedImage] = useState<DisplayedReviewImage | null>(null);
   const [photoshopOpening, setPhotoshopOpening] = useState(false);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const thumbStripRef = useRef<HTMLDivElement | null>(null);
+  const originalPreloadsRef = useRef(new Map<string, HTMLImageElement>());
   const thumbMomentumRef = useRef<ThumbScrollMomentum>({ frame: 0, lastTime: 0, velocity: 0 });
+  const originalReady = Boolean(image && readyOriginalImageId === image.id);
   const isZoomed = transform.scale > 1.01;
 
   useEffect(() => {
@@ -440,6 +447,127 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
     setImageResolution({ width: 0, height: 0 });
   }, [image?.id]);
 
+  useEffect(() => {
+    if (!image) {
+      setDisplayedImage(null);
+      return;
+    }
+
+    const imageId = image.id;
+    const preview = new window.Image();
+    let cancelled = false;
+    let settling = false;
+    preview.decoding = "async";
+
+    async function commitPreview() {
+      if (settling) return;
+      settling = true;
+      try {
+        await preview.decode();
+      } catch {
+        if (!preview.complete || preview.naturalWidth <= 0) {
+          if (!cancelled) setFailedPreviewImageId(imageId);
+          return;
+        }
+      }
+      if (cancelled) return;
+      setFailedPreviewImageId((current) => (current === imageId ? "" : current));
+      setDisplayedImage({ imageId, src: image.previewUrl, original: false });
+    }
+
+    const handleLoad = () => void commitPreview();
+    const handleError = () => {
+      if (!cancelled) setFailedPreviewImageId(imageId);
+    };
+    preview.addEventListener("load", handleLoad);
+    preview.addEventListener("error", handleError);
+    preview.src = image.previewUrl;
+    if (preview.complete) void commitPreview();
+
+    return () => {
+      cancelled = true;
+      preview.removeEventListener("load", handleLoad);
+      preview.removeEventListener("error", handleError);
+      preview.removeAttribute("src");
+    };
+  }, [image?.id, image?.previewUrl]);
+
+  useEffect(() => {
+    if (!image) return;
+    const currentImageId = image.id;
+    let cancelled = false;
+    let originalImage = originalPreloadsRef.current.get(currentImageId);
+    if (!originalImage) {
+      originalImage = new window.Image();
+      originalImage.decoding = "async";
+      originalImage.src = image.originalUrl;
+      originalPreloadsRef.current.set(currentImageId, originalImage);
+    }
+    for (const [imageId, preload] of originalPreloadsRef.current) {
+      if (imageId === currentImageId) continue;
+      preload.removeAttribute("src");
+      originalPreloadsRef.current.delete(imageId);
+    }
+
+    const handleLoad = async () => {
+      try {
+        await originalImage.decode();
+      } catch {
+        if (!originalImage.complete || originalImage.naturalWidth <= 0) return;
+      }
+      if (cancelled) return;
+      setImageResolution({ width: originalImage.naturalWidth, height: originalImage.naturalHeight });
+      setReadyOriginalImageId(currentImageId);
+    };
+    const handleOriginalLoad = () => void handleLoad();
+    originalImage.addEventListener("load", handleOriginalLoad);
+    if (originalImage.complete && originalImage.naturalWidth > 0) void handleLoad();
+    return () => {
+      cancelled = true;
+      originalImage.removeEventListener("load", handleOriginalLoad);
+    };
+  }, [image?.id, image?.originalUrl]);
+
+  useEffect(() => {
+    if (!image || !originalReady) return;
+    const previewDisplayed = displayedImage?.imageId === image.id;
+    const previewFailed = failedPreviewImageId === image.id;
+    if (!previewDisplayed && !previewFailed) return;
+    setDisplayedImage((current) => {
+      if (current?.imageId === image.id && current.original) return current;
+      return { imageId: image.id, src: image.originalUrl, original: true };
+    });
+  }, [displayedImage?.imageId, failedPreviewImageId, image?.id, image?.originalUrl, originalReady]);
+
+  useEffect(() => {
+    if (!image || images.length < 2) return;
+    const preloadTimer = window.setTimeout(() => {
+      const desiredImageIds = new Set([image.id]);
+      for (const adjacentImage of [images[activeIndex - 1], images[activeIndex + 1]]) {
+        if (!adjacentImage) continue;
+        desiredImageIds.add(adjacentImage.id);
+        if (originalPreloadsRef.current.has(adjacentImage.id)) continue;
+        const preload = new window.Image();
+        preload.decoding = "async";
+        preload.src = adjacentImage.originalUrl;
+        originalPreloadsRef.current.set(adjacentImage.id, preload);
+      }
+      for (const [imageId, preload] of originalPreloadsRef.current) {
+        if (desiredImageIds.has(imageId)) continue;
+        preload.removeAttribute("src");
+        originalPreloadsRef.current.delete(imageId);
+      }
+    }, 220);
+    return () => {
+      window.clearTimeout(preloadTimer);
+    };
+  }, [activeIndex, image?.id, image?.originalUrl, images]);
+
+  useEffect(() => () => {
+    for (const preload of originalPreloadsRef.current.values()) preload.removeAttribute("src");
+    originalPreloadsRef.current.clear();
+  }, []);
+
   useEffect(() => () => stopThumbMomentum(), []);
 
   function resetView() {
@@ -455,7 +583,7 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
     }
     setPhotoshopOpening(true);
     try {
-      const result = await window.forartReview.openInPhotoshop({ url: image.url });
+      const result = await window.forartReview.openInPhotoshop({ originalUrl: image.originalUrl });
       if (result.ok) return;
       toast.error(result.reason === "photoshop-not-found"
         ? t("imageReview:photoshopNotFound")
@@ -592,7 +720,7 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   }
 
   return (
-    <section className="review-image-pane" aria-label={title} aria-busy={loading}>
+    <section className="review-image-pane" aria-label={title} aria-busy={loading && !image}>
       <div className="review-pane-head">
         <Field className="review-pane-folder-rule">
           <FieldLabel className="sr-only" htmlFor={folderInputId}>{title}</FieldLabel>
@@ -614,23 +742,28 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
         onPointerCancel={handlePointerUp}
       >
         <div className="review-image-frame" ref={frameRef}>
-          {loading ? (
+          {loading && !image && !displayedImage ? (
             <Skeleton className="review-image-skeleton" role="status" aria-live="polite" aria-label={t("common:states.loading")} />
-          ) : image ? (
+          ) : image && displayedImage ? (
             <img
-              src={image.url}
+              src={displayedImage.src}
               alt={image.name}
-              loading="eager"
               decoding="async"
               draggable={false}
               onLoad={(event) => {
+                if (!displayedImage.original || displayedImage.imageId !== image.id) return;
                 setImageResolution({
                   width: event.currentTarget.naturalWidth,
                   height: event.currentTarget.naturalHeight,
                 });
               }}
+              onError={() => {
+                if (!displayedImage.original && displayedImage.imageId === image.id) setFailedPreviewImageId(image.id);
+              }}
               style={{ transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})` }}
             />
+          ) : image ? (
+            <Skeleton className="review-image-skeleton" role="status" aria-live="polite" aria-label={t("common:states.loading")} />
           ) : (
             <Empty className="review-empty-image">
               <EmptyMedia><ImageOff size={34} aria-hidden="true" /></EmptyMedia>
@@ -638,6 +771,30 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
             </Empty>
           )}
         </div>
+        {image ? (
+          <div
+            className="review-image-info"
+            onPointerDown={(event) => event.stopPropagation()}
+            onWheel={(event) => event.stopPropagation()}
+          >
+            <div className="review-image-info__row review-image-info__row--name">
+              <PhotoshopButton
+                disabled={photoshopOpening}
+                label={t("imageReview:openInPhotoshop")}
+                onClick={() => void openInPhotoshop()}
+              />
+              <span title={image.name}>{image.name}</span>
+            </div>
+            <div className="review-image-info__row">
+              <span className="review-image-info__label">{t("imageReview:resolution")}</span>
+              <span>{formatResolution(imageResolution.width, imageResolution.height)}</span>
+            </div>
+            <div className="review-image-info__row">
+              <span className="review-image-info__label">{t("imageReview:size")}</span>
+              <span>{formatBytes(image.size)}</span>
+            </div>
+          </div>
+        ) : null}
       </div>
       <ReviewThumbNav
         title={title}
@@ -649,44 +806,6 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
         onScrollStrip={scrollThumbStrip}
         onWheel={handleThumbWheel}
       />
-      <div className="review-file-meta">
-        <dl>
-          <div>
-            <dt>{t("imageReview:file")}</dt>
-            <dd className="review-file-path">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    className="review-open-photoshop-button"
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    disabled={!image || photoshopOpening}
-                    aria-label={t("imageReview:openInPhotoshop")}
-                    onClick={openInPhotoshop}
-                  >
-                    <svg aria-hidden="true" focusable="false" viewBox="0 0 128 128">
-                      <path d="M0 0h128v128H0z" fill="none" />
-                      <path fill="#001e36" d="M22.667 1.6h82.666C117.867 1.6 128 11.733 128 24.267v79.466c0 12.534-10.133 22.667-22.667 22.667H22.667C10.133 126.4 0 116.267 0 103.733V24.267C0 11.733 10.133 1.6 22.667 1.6" />
-                      <path fill="#31a8ff" d="M45.867 33.333c-1.6 0-3.2 0-4.853.054c-1.654.053-3.201.053-4.641.107c-1.44.053-2.773.053-4.053.106c-1.227.053-2.08.053-2.987.053c-.373 0-.533.213-.533.587v54.88c0 .48.213.694.64.694h10.347c.373-.054.64-.374.586-.747v-17.12c1.013 0 1.76 0 2.294.053c.533.053 1.386.053 2.666.053c4.374 0 8.374-.48 12-1.813c3.467-1.28 6.454-3.52 8.587-6.507q3.2-4.48 3.2-11.36c0-2.4-.426-4.693-1.226-6.933A17 17 0 0 0 64 39.36a19.05 19.05 0 0 0-7.147-4.374c-2.987-1.12-6.613-1.653-10.986-1.653m1.19 10.505c1.9.036 3.75.368 5.476 1.068c1.547.587 2.827 1.654 3.734 3.04a8.8 8.8 0 0 1 1.227 4.748c0 2.346-.534 4.16-1.654 5.493c-1.174 1.333-2.667 2.347-4.373 2.827c-1.974.64-4.054.959-6.134.959h-2.827c-.64 0-1.332-.053-2.079-.106v-17.92c.373-.054 1.12-.107 2.187-.053c1.013-.054 2.239-.054 3.626-.054q.41-.01.817-.002m44.73 2.723c-3.787 0-6.934.586-9.44 1.866c-2.293 1.067-4.267 2.773-5.6 4.906c-1.173 1.974-1.814 4.16-1.814 6.454a11.45 11.45 0 0 0 1.227 5.44a13.8 13.8 0 0 0 4.054 4.533a32.6 32.6 0 0 0 7.573 3.84c2.613 1.013 4.373 1.813 5.227 2.506c.853.694 1.28 1.387 1.28 2.134c0 .96-.587 1.867-1.44 2.24c-.96.48-2.4.747-4.427.747c-2.133 0-4.267-.267-6.294-.8a22.8 22.8 0 0 1-6.613-2.613c-.16-.107-.32-.16-.48-.053c-.16.106-.213.319-.213.479v9.28c-.053.427.213.8.587 1.013a21.5 21.5 0 0 0 5.44 1.707c2.4.48 4.799.693 7.252.693c3.84 0 7.041-.586 9.654-1.706c2.4-.96 4.48-2.613 5.973-4.747a12.4 12.4 0 0 0 2.08-7.093a11.5 11.5 0 0 0-1.226-5.493c-1.014-1.814-2.454-3.307-4.214-4.427a38.6 38.6 0 0 0-8.213-3.894a49 49 0 0 1-3.787-1.76c-.693-.373-1.333-.853-1.813-1.44c-.32-.427-.533-.906-.533-1.386s.16-1.013.426-1.44c.374-.533.96-.907 1.653-1.067c1.014-.266 2.134-.427 3.2-.374c2.027 0 4 .267 5.974.694c1.814.373 3.52.96 5.12 1.814c.213.106.48.106.96 0a.66.66 0 0 0 .267-.534v-8.693c0-.214-.054-.427-.107-.64c-.107-.213-.32-.427-.533-.48A18.8 18.8 0 0 0 98.4 47.04a46 46 0 0 0-6.613-.48z" />
-                    </svg>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("imageReview:openInPhotoshop")}</TooltipContent>
-              </Tooltip>
-              <span title={image?.relativePath || ""}>{image?.relativePath || "-"}</span>
-            </dd>
-          </div>
-          <div>
-            <dt>{t("imageReview:resolution")}</dt>
-            <dd>{image ? formatResolution(imageResolution.width, imageResolution.height) : "-"}</dd>
-          </div>
-          <div>
-            <dt>{t("imageReview:size")}</dt>
-            <dd>{image ? formatBytes(image.size) : "-"}</dd>
-          </div>
-        </dl>
-      </div>
     </section>
   );
 }));
@@ -713,12 +832,16 @@ export function ImageReviewPage() {
   const debouncedModelFolderValue = useDebouncedValue(modelFolderValue, FOLDER_RULE_DEBOUNCE_MS);
   const debouncedDetailFolderValue = useDebouncedValue(detailFolderValue, FOLDER_RULE_DEBOUNCE_MS);
 
+  useEffect(() => () => {
+    void window.forartReview?.clearScaledImageCache?.();
+  }, []);
+
   const activeProduct = useMemo(
     () => products.find((product) => product.id === activeProductId) || products[0] || null,
     [activeProductId, products],
   );
-  const modelImages = productImagesLoading ? [] : activeProduct?.modelImages || [];
-  const detailImages = productImagesLoading ? [] : activeProduct?.detailImages || [];
+  const modelImages = activeProduct?.modelImages || [];
+  const detailImages = activeProduct?.detailImages || [];
   const productListActiveId = activeProduct?.id || "";
   const activeProductIndex = activeProduct ? products.findIndex((product) => product.id === activeProduct.id) : -1;
   const goModelPaneImages = useCallback((direction: -1 | 1) => {

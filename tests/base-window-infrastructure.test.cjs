@@ -50,6 +50,22 @@ test('app window IPC tolerates a missing sender window', async () => {
   assert.deepEqual(await handlers.get('window:close')({ sender: {} }), { ok: true });
 });
 
+test('app window IPC opens only registered provider websites', async () => {
+  const { handlers, ipcMain } = createIpcHarness();
+  const openedUrls = [];
+  registerAppWindowIpc({
+    ipcMain,
+    BrowserWindow: { fromWebContents: () => null },
+    shell: { openExternal: async (url) => { openedUrls.push(url); } },
+  });
+
+  assert.deepEqual(await handlers.get('window:open-official-website')({}, 'apimart'), { ok: true });
+  assert.deepEqual(await handlers.get('window:open-official-website')({}, 'libtv'), { ok: true });
+  assert.deepEqual(await handlers.get('window:open-official-website')({}, 'tudou-api'), { ok: true });
+  assert.deepEqual(await handlers.get('window:open-official-website')({}, 'unknown'), { ok: false });
+  assert.deepEqual(openedUrls, ['https://apimart.ai/', 'https://www.liblib.tv/', 'https://api.ai-tudou.net/']);
+});
+
 test('app window publishes maximize and restore changes to the renderer', async () => {
   const sent = [];
   class FakeBrowserWindow {
