@@ -11,6 +11,7 @@ import { NativeTabs, type NativeTabItem } from "../../components/NativeTabs";
 import { SearchInput } from "../../components/SearchInput";
 import { VirtualList } from "../../components/VirtualList";
 import { Button } from "../../components/ui/button";
+import { Checkbox } from "../../components/ui/checkbox";
 import {
   Card,
   CardAction,
@@ -438,6 +439,60 @@ export function ApiSettingsPanel() {
     );
   }
 
+  function renderTudouImageModelList() {
+    if (!selectedProvider || selectedProvider.id !== TUDOU_PROVIDER_ID) return null;
+    const models = selectedProvider.modelCatalogOrder?.image || [];
+    const enabledModels = new Set(selectedProvider.imageModels);
+    const rows = models.map((model) => ({ id: `tudou-image-${model}`, model }));
+    return (
+      <section className="settings-api-model-card">
+        <div className="settings-api-model-head"><div><h3>{t("settings:imageModels")}</h3></div></div>
+        <div className="settings-api-model-list-wrap">
+          <AppScrollArea className="settings-api-model-list" viewportClassName="settings-api-model-list__viewport" viewportRef={imageModelListViewportRef} scrollbars={models.length > 1 ? "vertical" : "none"}>
+            <DraggableList
+              items={rows}
+              getId={(row) => row.id}
+              className="settings-api-model-sortable-list"
+              scrollContainerRef={imageModelListViewportRef}
+              onReorder={(nextRows) => {
+                const imageModelOrder = nextRows.map((row) => row.model);
+                patchSelectedProvider({
+                  modelCatalogOrder: { image: imageModelOrder },
+                  imageModels: imageModelOrder.filter((model) => enabledModels.has(model)),
+                });
+              }}
+              renderItem={(row, { dragHandleProps }) => {
+                const { model } = row;
+                const enabled = enabledModels.has(model);
+                const imageRuleId = normalizeImageModelRuleId(selectedProvider.modelRules.image[model] || detectImageModelRuleId(model));
+                return (
+                  <div className="settings-api-model-row settings-api-model-row--catalog has-rule" data-enabled={enabled}>
+                    <span className="settings-api-model-drag-handle" aria-hidden="true" {...dragHandleProps}><GripVertical size={14} /></span>
+                    <Checkbox
+                      checked={enabled}
+                      aria-label={t("settings:enableModel", { model })}
+                      onCheckedChange={(checked) => {
+                        const nextEnabled = new Set(enabledModels);
+                        if (checked === true) nextEnabled.add(model);
+                        else nextEnabled.delete(model);
+                        patchSelectedProvider({ imageModels: models.filter((item) => nextEnabled.has(item)) });
+                      }}
+                    />
+                    <label className="settings-api-model-alias">
+                      <input value={selectedProvider.modelAliases.image[model] ?? model} onChange={(event) => updateModelAlias("image", model, event.target.value)} onBlur={() => clearEmptyModelAlias("image", model)} placeholder={model} title={model} />
+                      <small title={model}>{model}</small>
+                    </label>
+                    <label className="settings-api-model-rule"><Select value={imageRuleId} options={IMAGE_MODEL_RULES.map((rule) => ({ value: rule.id, label: rule.labelKey ? t(`settings:${rule.labelKey}`) : rule.label }))} onChange={(ruleId) => patchSelectedProvider({ modelRules: { ...selectedProvider.modelRules, image: { ...selectedProvider.modelRules.image, [model]: normalizeImageModelRuleId(ruleId) } } })} ariaLabel={t("settings:modelRule")} menuPlacement="bottom" /></label>
+                  </div>
+                );
+              }}
+            />
+          </AppScrollArea>
+        </div>
+      </section>
+    );
+  }
+
   function renderRecommendedProviders() {
     const recommendedProviders = [
       {
@@ -567,7 +622,7 @@ export function ApiSettingsPanel() {
           ) : activePane === "apimart" && selectedProvider?.id === APIMART_PROVIDER_ID ? (
             <><ApimartSettingsPane provider={selectedProvider} fetchingModels={action === "fetch"} status={status} onProviderChange={patchSelectedProvider} onFetchModels={fetchModels} onRemove={removeApimartProvider} />{renderModelList("image")}{renderModelList("chat")}{renderModelList("video")}</>
           ) : activePane === "tudou" && selectedProvider?.id === TUDOU_PROVIDER_ID ? (
-            <><TudouSettingsPane provider={selectedProvider} fetchingModels={action === "fetch"} status={status} onProviderChange={patchSelectedProvider} onFetchModels={fetchModels} onRemove={removeTudouProvider} />{renderModelList("image")}{renderModelList("chat")}{renderModelList("video")}</>
+            <><TudouSettingsPane provider={selectedProvider} onProviderChange={patchSelectedProvider} onRemove={removeTudouProvider} />{renderTudouImageModelList()}</>
           ) : selectedProvider ? (
             <>
               <header className="settings-api-content-head"><div><h2>{selectedProvider.name || t("settings:provider")}</h2></div><div className="settings-api-content-actions"><ConfirmingDeleteButton label={t("settings:removeProvider")} confirmLabel={t("settings:confirmRemoveProvider")} resetKey={selectedProvider.id} cancelLabel={t("common:actions.cancel")} onDelete={deleteSelectedProvider} /></div></header>

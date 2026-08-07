@@ -95,8 +95,10 @@ contextBridge.exposeInMainWorld('forartConfig', {
 
 contextBridge.exposeInMainWorld('forartReview', {
   chooseRoot: (payload) => ipcRenderer.invoke('image-review:choose-root', payload),
+  restoreRoot: (payload) => ipcRenderer.invoke('image-review:restore-root', payload),
   products: (payload) => ipcRenderer.invoke('image-review:products', payload),
   productImages: (payload) => ipcRenderer.invoke('image-review:product-images', payload),
+  setReviewStatus: (payload) => ipcRenderer.invoke('image-review:set-review-status', payload),
   clearScaledImageCache: () => ipcRenderer.invoke('image-review:clear-scaled-image-cache'),
   openProductFolder: (payload) => ipcRenderer.invoke('image-review:open-product-folder', payload),
   openInPhotoshop: (payload) => ipcRenderer.invoke('image-review:open-in-photoshop', payload),

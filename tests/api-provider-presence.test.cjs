@@ -49,6 +49,14 @@ test('recommended API providers remain absent until explicitly added', () => {
   assert.equal(tudou.name, '土豆API');
   assert.equal(tudou.baseUrl, 'https://api.ai-tudou.net/v1');
   assert.equal(tudou.protocol, 'gemini');
+  assert.deepEqual(tudou.imageModels, []);
+  assert.deepEqual(tudou.modelCatalogOrder.image, [...providers.TUDOU_IMAGE_MODELS]);
+  const reorderedTudou = providers.createTudouProvider({
+    imageModels: ['grok-imagine-image'],
+    modelCatalogOrder: { image: ['grok-imagine-image', 'gpt-image-2-1k'] },
+  });
+  assert.deepEqual(reorderedTudou.imageModels, ['grok-imagine-image']);
+  assert.deepEqual(reorderedTudou.modelCatalogOrder.image.slice(0, 2), ['grok-imagine-image', 'gpt-image-2-1k']);
   const tudouOnly = providers.normalizeApiSettings({ providers: [tudou] });
   assert.deepEqual(tudouOnly.providerOrder, ['tudou-api']);
   assert.deepEqual(

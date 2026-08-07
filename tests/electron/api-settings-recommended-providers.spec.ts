@@ -36,8 +36,20 @@ test("adds recommended providers on demand from an initially empty list", async 
   await expect(page.locator("html")).toHaveAttribute("data-opened-provider-website", "tudou-api");
   await tudouCard.getByRole("button", { name: /添加|Add/ }).click();
   await expect(page.locator('[data-sidebar-item-id="tudou-api"]')).toBeVisible();
+  await expect(page.locator('[data-sidebar-item-id="tudou-api"]')).toContainText("Potato");
   await expect(tudouCard.getByRole("button", { name: /已添加|Added/ })).toBeDisabled();
   await expect(page.locator("html")).toHaveAttribute("data-provider-order", "apimart,libtv,tudou-api");
+
+  await page.locator('[data-sidebar-item-id="tudou-api"]').click();
+  const tudouModelRows = page.locator(".settings-api-model-row--catalog");
+  const tudouModelToggles = tudouModelRows.locator('[data-slot="checkbox"]');
+  await expect(tudouModelRows).toHaveCount(8);
+  await expect(tudouModelToggles).toHaveCount(8);
+  for (let index = 0; index < 8; index += 1) {
+    await expect(tudouModelToggles.nth(index)).toHaveAttribute("data-state", "unchecked");
+  }
+  await tudouModelToggles.first().click();
+  await expect(tudouModelToggles.first()).toHaveAttribute("data-state", "checked");
 
   await page.locator('[data-sidebar-item-id="apimart"]').click();
   await page.getByRole("button", { name: /移除|Remove/ }).click();

@@ -86,12 +86,12 @@ test('API references are re-uploaded, verified, and submitted with the returned 
     modelRule: {
       requestFormat: 'standard',
       sizeMode: 'ratio',
-      resolutionCase: 'lower',
+      resolutionCase: 'upper',
       imageCountRule: { options: [1], defaultCount: 1 },
     },
     prompt: 'test prompt',
     referenceImages: [sourceUrl],
-    resolution: '1k',
+    resolution: '1K',
     aspectRatio: '3:4',
   });
 
@@ -99,6 +99,7 @@ test('API references are re-uploaded, verified, and submitted with the returned 
 
   assert.equal(generationTaskStore.getTask(task.id)?.status, 'succeeded', generationTaskStore.getTask(task.id)?.error);
   assert.equal(verificationAttempts, 2);
+  assert.equal(submittedBody.resolution, '1K');
   assert.deepEqual(submittedBody.image_urls, [returnedUrl]);
   assert.deepEqual(requests.map(({ method, url }) => `${method} ${url}`), [
     `GET ${sourceUrl}`,

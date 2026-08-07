@@ -396,6 +396,7 @@ export interface ImageReviewImage {
   previewUrl: string;
   size: number;
   lastModified: number;
+  reviewStatus: "approved" | "rejected" | null;
 }
 
 export interface ImageReviewProduct {
@@ -407,8 +408,20 @@ export interface ImageReviewProduct {
 
 export interface ImageReviewApi {
   chooseRoot: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
+  restoreRoot: (payload: { root: string }) => Promise<{ ok: true; path: string } | { ok: false; path: "" }>;
   products: (payload: { root: string; modelFolders: string }) => Promise<{ products: ImageReviewProduct[] }>;
   productImages: (payload: { root: string; productId: string; modelFolders: string; detailFolders: string }) => Promise<{ product: ImageReviewProduct }>;
+  setReviewStatus: (payload: {
+    root: string;
+    productId: string;
+    imageRelativePath: string;
+    status: "approved" | "rejected" | null;
+  }) => Promise<{
+    ok: true;
+    review: {
+      status: "approved" | "rejected" | null;
+    };
+  }>;
   clearScaledImageCache: () => Promise<{ ok: true }>;
   openProductFolder: (payload: { root: string; productId: string }) => Promise<
     { ok: true } | { ok: false; reason: "product-folder-not-found" | "open-failed" }

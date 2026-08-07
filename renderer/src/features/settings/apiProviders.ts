@@ -17,6 +17,10 @@ interface ApiModelRules {
   image: Record<string, string>;
 }
 
+interface ApiModelCatalogOrder {
+  image: string[];
+}
+
 export interface ApiProvider {
   id: string;
   name: string;
@@ -33,12 +37,23 @@ export interface ApiProvider {
   videoModels: string[];
   modelAliases: ApiModelAliases;
   modelRules: ApiModelRules;
+  modelCatalogOrder?: ApiModelCatalogOrder;
 }
 
 export const API_PROVIDER_CHANGED_EVENT = "forart-api-providers-changed";
 export const APIMART_PROVIDER_ID = "apimart";
 export const TUDOU_PROVIDER_ID = "tudou-api";
 export const TUDOU_BASE_URL = "https://api.ai-tudou.net/v1";
+export const TUDOU_IMAGE_MODELS = [
+  "gpt-image-2-1k",
+  "gpt-image-2-2k",
+  "gpt-image-2-4k",
+  "gemini-3.1-flash-image-preview",
+  "gemini-3-pro-image-preview",
+  "grok-imagine-image",
+  "grok-imagine-image-pro",
+  "grok-imagine-image-edit",
+] as const;
 export const APIMART_BASE_URLS = [
   "https://api.apimart.ai/v1",
   "https://api.apib.ai/v1",
@@ -85,6 +100,12 @@ function emptyModelAliases(): ApiModelAliases {
 
 function emptyModelRules(): ApiModelRules {
   return { image: {} };
+}
+
+function normalizeTudouImageModelOrder(values: unknown) {
+  const allowed = new Set<string>(TUDOU_IMAGE_MODELS);
+  const requested = Array.isArray(values) ? uniqueModels(values.map(String)).filter((model) => allowed.has(model)) : [];
+  return [...requested, ...TUDOU_IMAGE_MODELS.filter((model) => !requested.includes(model))];
 }
 
 function normalizeAliasBucket(input: unknown) {
@@ -226,6 +247,11 @@ function isTudouProvider(input: Partial<ApiProvider>) {
 }
 
 export function createTudouProvider(input: Partial<ApiProvider> = {}): ApiProvider {
+  const imageModelOrder = normalizeTudouImageModelOrder([
+    ...(input.modelCatalogOrder?.image || []),
+    ...(input.imageModels || []),
+  ]);
+  const enabledImageModels = new Set(Array.isArray(input.imageModels) ? input.imageModels.map(String) : []);
   return {
     id: TUDOU_PROVIDER_ID,
     name: "土豆API",
@@ -237,11 +263,12 @@ export function createTudouProvider(input: Partial<ApiProvider> = {}): ApiProvid
     imageRequestMode: "openai",
     imageGenerationEndpoint: "",
     imageEditEndpoint: "",
-    imageModels: Array.isArray(input.imageModels) ? uniqueModels(input.imageModels.map(String)) : [],
+    imageModels: imageModelOrder.filter((model) => enabledImageModels.has(model)),
     chatModels: Array.isArray(input.chatModels) ? uniqueModels(input.chatModels.map(String)) : [],
     videoModels: Array.isArray(input.videoModels) ? uniqueModels(input.videoModels.map(String)) : [],
     modelAliases: normalizeModelAliases(input.modelAliases),
     modelRules: normalizeModelRules(input.modelRules),
+    modelCatalogOrder: { image: imageModelOrder },
   };
 }
 
@@ -260,6 +287,7 @@ function mergeTudouProviders(inputs: Partial<ApiProvider>[]) {
         video: { ...result.modelAliases.video, ...next.modelAliases.video },
       },
       modelRules: { image: { ...result.modelRules.image, ...next.modelRules.image } },
+      modelCatalogOrder: next.modelCatalogOrder,
     });
   }, createTudouProvider());
 }

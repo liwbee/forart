@@ -7,6 +7,7 @@ interface ApiGenerationPreference {
   resolution?: string;
   aspectRatio?: string;
   quality?: string;
+  count?: number;
 }
 
 interface LibtvGenerationPreference {
@@ -15,6 +16,7 @@ interface LibtvGenerationPreference {
   resolution?: string;
   aspectRatio?: string;
   quality?: string;
+  count?: number;
 }
 
 interface GenerationPreferenceState {
@@ -50,7 +52,7 @@ export function rememberedGenerationNodeData(kind: NativeCanvasNodeKind): Partia
       imageResolution: state.api.resolution,
       imageAspectRatio: state.api.aspectRatio,
       imageQuality: state.api.quality,
-      imageCount: kind === "actionFission" ? 1 : undefined,
+      imageCount: kind === "actionFission" ? 1 : state.api.count,
     };
   }
   if (state.activeBackend === "libtv") {
@@ -62,7 +64,7 @@ export function rememberedGenerationNodeData(kind: NativeCanvasNodeKind): Partia
         resolution: state.libtv.resolution,
         aspectRatio: state.libtv.aspectRatio,
         quality: state.libtv.quality,
-        count: kind === "actionFission" ? 1 : undefined,
+        count: kind === "actionFission" ? 1 : state.libtv.count,
       },
     };
   }

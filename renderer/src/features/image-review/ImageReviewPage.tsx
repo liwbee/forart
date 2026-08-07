@@ -1,7 +1,7 @@
 import { PointerEvent, forwardRef, memo, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type MutableRefObject, type WheelEvent as ReactWheelEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, CircleHelp, FolderOpen, ImageOff, RefreshCw } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, CircleHelp, FolderOpen, ImageOff, RefreshCw, X } from "lucide-react";
 import type { ImageReviewImage as ReviewImage, ImageReviewProduct as ReviewProduct } from "../../app/appConfig";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import { SearchInput } from "../../components/SearchInput";
@@ -14,6 +14,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "../../components/
 import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
+import { readImageReviewLocation, saveImageReviewLocation } from "./imageReviewLocationStorage";
 import { ReviewThumbnail } from "./ReviewThumbnail";
 
 const WHEEL_LINE_HEIGHT = 40;
@@ -38,6 +39,7 @@ type VirtualAxis = "vertical" | "horizontal";
 
 type ProductImagePaneHandle = {
   goImages: (direction: -1 | 1) => void;
+  setReviewStatus: (status: ReviewImage["reviewStatus"]) => void;
 };
 
 type DisplayedReviewImage = {
@@ -45,6 +47,8 @@ type DisplayedReviewImage = {
   src: string;
   original: boolean;
 };
+
+type ReviewStatus = NonNullable<ReviewImage["reviewStatus"]>;
 
 function useDebouncedValue<TValue>(value: TValue, delay: number) {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -87,6 +91,16 @@ function loadProductImages(productId: string, modelFolderValue: string, detailFo
     modelFolders: modelFolderValue,
     detailFolders: detailFolderValue,
   }).then((payload) => payload.product);
+}
+
+function hasSameReviewImages(current: ReviewProduct, next: ReviewProduct) {
+  if (current.hasModelImages !== next.hasModelImages) return false;
+  if (current.modelImages.length !== next.modelImages.length || current.detailImages.length !== next.detailImages.length) return false;
+  return current.modelImages.every((image, index) => (
+    image.id === next.modelImages[index]?.id && image.reviewStatus === next.modelImages[index]?.reviewStatus
+  )) && current.detailImages.every((image, index) => (
+    image.id === next.detailImages[index]?.id && image.reviewStatus === next.detailImages[index]?.reviewStatus
+  ));
 }
 
 function reviewRootDisplayName(path: string) {
@@ -384,20 +398,59 @@ function PhotoshopButton({
   );
 }
 
+function ReviewStatusButton({
+  status,
+  currentStatus,
+  disabled,
+  label,
+  onClick,
+}: {
+  status: ReviewStatus;
+  currentStatus: ReviewImage["reviewStatus"];
+  disabled: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  const active = currentStatus === status;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          className={`review-status-button is-${status}${active ? " is-active" : ""}`}
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          disabled={disabled}
+          aria-label={label}
+          aria-pressed={active}
+          onClick={onClick}
+        >
+          {status === "approved" ? <Check aria-hidden="true" /> : <X aria-hidden="true" />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   title: string;
   folderValue: string;
   images: ReviewImage[];
   loading: boolean;
   resetKey: string;
+  showReviewActions?: boolean;
   onFolderValueChange: (value: string) => void;
+  onReviewStatusChange: (image: ReviewImage, status: ReviewImage["reviewStatus"]) => Promise<boolean>;
 }>(function ProductImagePane({
   title,
   folderValue,
   images,
   loading,
   resetKey,
+  showReviewActions = false,
   onFolderValueChange,
+  onReviewStatusChange,
 }, ref) {
   const { t } = useTranslation();
   const folderInputId = useId();
@@ -410,6 +463,7 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   const [failedPreviewImageId, setFailedPreviewImageId] = useState("");
   const [displayedImage, setDisplayedImage] = useState<DisplayedReviewImage | null>(null);
   const [photoshopOpening, setPhotoshopOpening] = useState(false);
+  const [reviewStatusSavingImageId, setReviewStatusSavingImageId] = useState("");
   const frameRef = useRef<HTMLDivElement | null>(null);
   const thumbStripRef = useRef<HTMLDivElement | null>(null);
   const originalPreloadsRef = useRef(new Map<string, HTMLImageElement>());
@@ -429,6 +483,17 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
     if (activeIndex > maxIndex) setActiveIndex(maxIndex);
   }, [activeIndex, images.length]);
 
+  const updateReviewStatus = useCallback(async (status: ReviewImage["reviewStatus"]) => {
+    if (!image || reviewStatusSavingImageId) return;
+    const nextStatus = status !== null && image.reviewStatus === status ? null : status;
+    setReviewStatusSavingImageId(image.id);
+    try {
+      await onReviewStatusChange(image, nextStatus);
+    } finally {
+      setReviewStatusSavingImageId("");
+    }
+  }, [image, onReviewStatusChange, reviewStatusSavingImageId]);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -438,8 +503,11 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
           return Math.max(0, Math.min(maxIndex, currentIndex + direction));
         });
       },
+      setReviewStatus(status) {
+        void updateReviewStatus(status);
+      },
     }),
-    [images.length],
+    [images.length, updateReviewStatus],
   );
 
   useEffect(() => {
@@ -777,12 +845,30 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
           >
+            {showReviewActions ? (
+              <div className="review-image-info__row review-image-info__row--actions">
+                <PhotoshopButton
+                  disabled={photoshopOpening}
+                  label={t("imageReview:openInPhotoshop")}
+                  onClick={() => void openInPhotoshop()}
+                />
+                <ReviewStatusButton
+                  status="approved"
+                  currentStatus={image.reviewStatus}
+                  disabled={Boolean(reviewStatusSavingImageId)}
+                  label={t("imageReview:markApproved")}
+                  onClick={() => void updateReviewStatus("approved")}
+                />
+                <ReviewStatusButton
+                  status="rejected"
+                  currentStatus={image.reviewStatus}
+                  disabled={Boolean(reviewStatusSavingImageId)}
+                  label={t("imageReview:markRejected")}
+                  onClick={() => void updateReviewStatus("rejected")}
+                />
+              </div>
+            ) : null}
             <div className="review-image-info__row review-image-info__row--name">
-              <PhotoshopButton
-                disabled={photoshopOpening}
-                label={t("imageReview:openInPhotoshop")}
-                onClick={() => void openInPhotoshop()}
-              />
               <span title={image.name}>{image.name}</span>
             </div>
             <div className="review-image-info__row">
@@ -812,6 +898,7 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
 
 export function ImageReviewPage() {
   const { i18n, t } = useTranslation();
+  const [initialReviewLocation] = useState(readImageReviewLocation);
   const [selectedReviewRoot, setSelectedReviewRoot] = useState("");
   const [products, setProducts] = useState<ReviewProduct[]>([]);
   const [activeProductId, setActiveProductId] = useState("");
@@ -824,11 +911,17 @@ export function ImageReviewPage() {
   const [folderLoading, setFolderLoading] = useState(false);
   const [productImagesLoading, setProductImagesLoading] = useState(false);
   const [folderError, setFolderError] = useState("");
+  const [folderSettingsLoaded, setFolderSettingsLoaded] = useState(false);
   const [productListVersion, setProductListVersion] = useState(0);
   const modelPaneRef = useRef<ProductImagePaneHandle | null>(null);
   const settingsLoadedRef = useRef(false);
   const hasSavedFolderSettingsRef = useRef(false);
   const folderSettingsDirtyRef = useRef(false);
+  const productRefreshRequestRef = useRef(0);
+  const productLoadingRequestRef = useRef(0);
+  const initialReviewLocationRef = useRef(initialReviewLocation);
+  const locationRestoreHandledRef = useRef(false);
+  const restoringProductSelectionRef = useRef(false);
   const debouncedModelFolderValue = useDebouncedValue(modelFolderValue, FOLDER_RULE_DEBOUNCE_MS);
   const debouncedDetailFolderValue = useDebouncedValue(detailFolderValue, FOLDER_RULE_DEBOUNCE_MS);
 
@@ -855,6 +948,67 @@ export function ImageReviewPage() {
     folderSettingsDirtyRef.current = true;
     setDetailFolderValue(value);
   }, []);
+  const refreshActiveProductImages = useCallback(async (showLoading: boolean) => {
+    if (!activeProductId || !selectedReviewRoot) return;
+    const requestId = productRefreshRequestRef.current + 1;
+    productRefreshRequestRef.current = requestId;
+    if (showLoading || productLoadingRequestRef.current !== 0) {
+      productLoadingRequestRef.current = requestId;
+      if (showLoading) setProductImagesLoading(true);
+    }
+    try {
+      const loadedProduct = await loadProductImages(
+        activeProductId,
+        scannedModelFolderValue,
+        debouncedDetailFolderValue,
+        selectedReviewRoot,
+        t("imageReview:bridgeUnavailable"),
+      );
+      if (requestId !== productRefreshRequestRef.current) return;
+      setFolderError("");
+      setProducts((currentProducts) => currentProducts.map((product) => (
+        product.id !== loadedProduct.id || hasSameReviewImages(product, loadedProduct) ? product : loadedProduct
+      )));
+    } catch {
+      if (requestId === productRefreshRequestRef.current) setFolderError(t("imageReview:readProductImagesFailed"));
+    } finally {
+      if (productLoadingRequestRef.current === requestId) {
+        productLoadingRequestRef.current = 0;
+        setProductImagesLoading(false);
+      }
+    }
+  }, [activeProductId, debouncedDetailFolderValue, scannedModelFolderValue, selectedReviewRoot, t]);
+  const updateImageReviewStatus = useCallback(async (image: ReviewImage, status: ReviewImage["reviewStatus"]) => {
+    if (!activeProductId || !selectedReviewRoot || !window.forartReview?.setReviewStatus) {
+      toast.error(t("imageReview:bridgeUnavailable"));
+      return false;
+    }
+    try {
+      const result = await window.forartReview.setReviewStatus({
+        root: selectedReviewRoot,
+        productId: activeProductId,
+        imageRelativePath: image.relativePath,
+        status,
+      });
+      setProducts((currentProducts) => currentProducts.map((product) => {
+        if (product.id !== activeProductId) return product;
+        const updateImages = (images: ReviewImage[]) => images.map((currentImage) => (
+          currentImage.relativePath === image.relativePath
+            ? { ...currentImage, reviewStatus: result.review.status }
+            : currentImage
+        ));
+        return {
+          ...product,
+          modelImages: updateImages(product.modelImages),
+          detailImages: updateImages(product.detailImages),
+        };
+      }));
+      return true;
+    } catch {
+      toast.error(t("imageReview:saveReviewStatusFailed"));
+      return false;
+    }
+  }, [activeProductId, selectedReviewRoot, t]);
   const scanReviewDirectory = useCallback(async (rootPath = selectedReviewRoot) => {
     setFolderError("");
     if (!rootPath) {
@@ -866,10 +1020,21 @@ export function ImageReviewPage() {
     setFolderLoading(true);
     try {
       const nextProducts = await listReviewProducts(debouncedModelFolderValue, rootPath, t("imageReview:bridgeUnavailable"));
+      const rememberedLocation = restoringProductSelectionRef.current
+        && initialReviewLocationRef.current.rootPath === rootPath
+        ? initialReviewLocationRef.current
+        : null;
       setProductImagesLoading(Boolean(nextProducts.length));
       setProducts(nextProducts);
       setScannedModelFolderValue(debouncedModelFolderValue);
-      setActiveProductId((currentProductId) => (nextProducts.some((product) => product.id === currentProductId) ? currentProductId : nextProducts[0]?.id || ""));
+      setActiveProductId((currentProductId) => {
+        if (nextProducts.some((product) => product.id === currentProductId)) return currentProductId;
+        if (rememberedLocation && nextProducts.some((product) => product.id === rememberedLocation.productId)) {
+          return rememberedLocation.productId;
+        }
+        return nextProducts[0]?.id || "";
+      });
+      restoringProductSelectionRef.current = false;
       setSearchQuery("");
       setProductListVersion((version) => version + 1);
     } catch (error) {
@@ -901,6 +1066,7 @@ export function ImageReviewPage() {
       setScannedModelFolderValue(savedModelFolders || initialModelFolderRef.current);
       setDetailFolderValue(savedDetailFolders || initialDetailFolderRef.current);
       settingsLoadedRef.current = true;
+      setFolderSettingsLoaded(true);
     }
 
     void loadFolderSettings();
@@ -930,6 +1096,54 @@ export function ImageReviewPage() {
   }, [debouncedDetailFolderValue, debouncedModelFolderValue, t]);
 
   useEffect(() => {
+    if (
+      locationRestoreHandledRef.current
+      || !folderSettingsLoaded
+      || debouncedModelFolderValue !== modelFolderValue
+      || debouncedDetailFolderValue !== detailFolderValue
+    ) return;
+    locationRestoreHandledRef.current = true;
+    const rememberedLocation = initialReviewLocationRef.current;
+    if (!rememberedLocation.rootPath) return;
+    let canceled = false;
+    void window.forartReview?.restoreRoot({ root: rememberedLocation.rootPath }).then((result) => {
+      if (canceled) return;
+      if (!result.ok) {
+        initialReviewLocationRef.current = { rootPath: "", productId: "" };
+        saveImageReviewLocation(initialReviewLocationRef.current);
+        return;
+      }
+      initialReviewLocationRef.current = {
+        rootPath: result.path,
+        productId: rememberedLocation.productId,
+      };
+      restoringProductSelectionRef.current = Boolean(rememberedLocation.productId);
+      setSelectedReviewRoot(result.path);
+    }).catch(() => {
+      if (canceled) return;
+      initialReviewLocationRef.current = { rootPath: "", productId: "" };
+      saveImageReviewLocation(initialReviewLocationRef.current);
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [
+    debouncedDetailFolderValue,
+    debouncedModelFolderValue,
+    detailFolderValue,
+    folderSettingsLoaded,
+    modelFolderValue,
+  ]);
+
+  useEffect(() => {
+    if (!locationRestoreHandledRef.current || restoringProductSelectionRef.current || !selectedReviewRoot) return;
+    saveImageReviewLocation({
+      rootPath: selectedReviewRoot,
+      productId: activeProductId,
+    });
+  }, [activeProductId, selectedReviewRoot]);
+
+  useEffect(() => {
     if (!selectedReviewRoot) return;
     void scanReviewDirectory(selectedReviewRoot);
   }, [scanReviewDirectory, selectedReviewRoot]);
@@ -949,6 +1163,14 @@ export function ImageReviewPage() {
       const target = event.target as HTMLElement | null;
       if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable) return;
       if (!activeProduct) return;
+
+      if (event.key === "1" || event.key === "2" || event.key === "3") {
+        event.preventDefault();
+        if (!event.repeat) {
+          modelPaneRef.current?.setReviewStatus(event.key === "1" ? "approved" : event.key === "2" ? "rejected" : null);
+        }
+        return;
+      }
 
       if (event.key === "ArrowUp") {
         event.preventDefault();
@@ -974,26 +1196,34 @@ export function ImageReviewPage() {
 
   useEffect(() => {
     if (!activeProductId) return;
-    let ignore = false;
-    setProductImagesLoading(true);
-    loadProductImages(activeProductId, scannedModelFolderValue, debouncedDetailFolderValue, selectedReviewRoot, t("imageReview:bridgeUnavailable"))
-      .then((loadedProduct) => {
-        if (ignore) return;
-        setProducts((currentProducts) => currentProducts.map((product) => (product.id === loadedProduct.id ? loadedProduct : product)));
-      })
-      .catch(() => {
-        if (!ignore) setFolderError(t("imageReview:readProductImagesFailed"));
-      })
-      .finally(() => {
-        if (!ignore) setProductImagesLoading(false);
-      });
-
+    void refreshActiveProductImages(true);
     return () => {
-      ignore = true;
+      productRefreshRequestRef.current += 1;
     };
-  }, [activeProductId, debouncedDetailFolderValue, productListVersion, scannedModelFolderValue, selectedReviewRoot, t]);
+  }, [activeProductId, productListVersion, refreshActiveProductImages]);
+
+  useEffect(() => {
+    let refreshTimer = 0;
+    const scheduleRefresh = () => {
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => void refreshActiveProductImages(false), 200);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") scheduleRefresh();
+    };
+    window.addEventListener("focus", scheduleRefresh);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.clearTimeout(refreshTimer);
+      window.removeEventListener("focus", scheduleRefresh);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [refreshActiveProductImages]);
 
   function selectReviewRoot(rootPath: string) {
+    locationRestoreHandledRef.current = true;
+    restoringProductSelectionRef.current = false;
+    initialReviewLocationRef.current = { rootPath, productId: "" };
     setSelectedReviewRoot(rootPath);
     setActiveProductId("");
     setSearchQuery("");
@@ -1092,7 +1322,9 @@ export function ImageReviewPage() {
               images={modelImages}
               loading={productImagesLoading}
               resetKey={`${activeProduct?.id || ""}:model:${productListVersion}:${productImagesLoading ? "loading" : "ready"}`}
+              showReviewActions
               onFolderValueChange={changeModelFolderValue}
+              onReviewStatusChange={updateImageReviewStatus}
             />
             <ProductImagePane
               title={t("imageReview:detailPaneTitle")}
@@ -1101,6 +1333,7 @@ export function ImageReviewPage() {
               loading={productImagesLoading}
               resetKey={`${activeProduct?.id || ""}:detail:${productListVersion}:${productImagesLoading ? "loading" : "ready"}`}
               onFolderValueChange={changeDetailFolderValue}
+              onReviewStatusChange={updateImageReviewStatus}
             />
           </div>
         </div>

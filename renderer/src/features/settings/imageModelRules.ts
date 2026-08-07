@@ -1,3 +1,10 @@
+import {
+  reconcileAspectRatio,
+  reconcileImageCount,
+  reconcileResolution,
+  reconcileStringOption,
+} from "./imageModelSelection";
+
 type ImageGenerationMode = "text_to_image" | "image_to_image";
 type ImageModelResolutionField = "resolution" | "size" | "none";
 
@@ -53,7 +60,7 @@ export interface ImageModelRule {
   requiresReferenceImages: boolean;
   maxReferenceImages: number;
   referenceImageInput: "none" | "url";
-  resolutionCase: "lower" | "upper";
+  resolutionCase: "upper";
   sizeMode: "ratio" | "pixel";
   requestFormat: "standard" | "openai-json-extra-body";
   sizeRule: ImageModelSizeRule;
@@ -98,9 +105,9 @@ const SEEDREAM_IMAGE_COUNT_RULE: ImageModelImageCountRule = {
 
 const GENERIC_SIZE_RULE: ImageModelSizeRule = {
   aspectRatios: BASIC_ASPECT_RATIOS,
-  resolutions: ["1k", "2k", "4k"],
+  resolutions: ["1K", "2K", "4K"],
   defaultAspectRatio: "1:1",
-  defaultResolution: "1k",
+  defaultResolution: "1K",
   resolutionField: "resolution",
 };
 
@@ -119,7 +126,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     requiresReferenceImages: false,
     maxReferenceImages: 1,
     referenceImageInput: "url",
-    resolutionCase: "lower",
+    resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
     sizeRule: GENERIC_SIZE_RULE,
@@ -134,13 +141,13 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     requiresReferenceImages: false,
     maxReferenceImages: 16,
     referenceImageInput: "url",
-    resolutionCase: "lower",
+    resolutionCase: "upper",
     sizeMode: "pixel",
     requestFormat: "openai-json-extra-body",
     imageCountRule: SINGLE_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: BASIC_ASPECT_RATIOS,
-      resolutions: ["1k", "2k", "4k"],
+      resolutions: ["1K", "2K", "4K"],
       allowPixelSize: true,
     }),
   },
@@ -153,13 +160,13 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     requiresReferenceImages: false,
     maxReferenceImages: 16,
     referenceImageInput: "url",
-    resolutionCase: "lower",
+    resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
     imageCountRule: STANDARD_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: GPT_IMAGE_2_ASPECT_RATIOS,
-      resolutions: ["1k", "2k", "4k"],
+      resolutions: ["1K", "2K", "4K"],
       allowAutoAspectRatio: true,
       allowPixelSize: true,
     }),
@@ -173,14 +180,14 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     requiresReferenceImages: false,
     maxReferenceImages: 16,
     referenceImageInput: "url",
-    resolutionCase: "lower",
+    resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
     qualityRule: GPT_QUALITY_RULE,
     imageCountRule: STANDARD_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: GPT_IMAGE_2_ASPECT_RATIOS,
-      resolutions: ["1k", "2k", "4k"],
+      resolutions: ["1K", "2K", "4K"],
       allowAutoAspectRatio: true,
       allowPixelSize: true,
     }),
@@ -194,7 +201,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     requiresReferenceImages: false,
     maxReferenceImages: 15,
     referenceImageInput: "url",
-    resolutionCase: "lower",
+    resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
     qualityRule: GPT_QUALITY_RULE,
@@ -430,7 +437,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     requiresReferenceImages: false,
     maxReferenceImages: 0,
     referenceImageInput: "none",
-    resolutionCase: "lower",
+    resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
     imageCountRule: STANDARD_IMAGE_COUNT_RULE,
@@ -550,8 +557,8 @@ export function getImageModelRule(ruleId: string | undefined): ImageModelRule {
 export function normalizeImageModelSizeSelection(rule: ImageModelRule, resolution: string | undefined, aspectRatio: string | undefined) {
   const sizeRule = rule.sizeRule;
   return {
-    resolution: sizeRule.resolutions.includes(resolution || "") ? resolution || "" : sizeRule.defaultResolution,
-    aspectRatio: sizeRule.aspectRatios.includes(aspectRatio || "") ? aspectRatio || "" : sizeRule.defaultAspectRatio,
+    resolution: reconcileResolution(sizeRule.resolutions, resolution, sizeRule.defaultResolution),
+    aspectRatio: reconcileAspectRatio(sizeRule.aspectRatios, aspectRatio, sizeRule.defaultAspectRatio),
   };
 }
 
@@ -571,12 +578,8 @@ export function normalizeImageModelGenerationSelection(
   const qualityOptions = rule.qualityRule?.options || [];
   const countOptions = imageModelImageCountOptions(rule, referenceCount);
   return {
-    quality: qualityOptions.includes(quality || "")
-      ? quality || ""
-      : rule.qualityRule?.defaultQuality || "",
-    imageCount: countOptions.includes(Number(imageCount))
-      ? Number(imageCount)
-      : countOptions[0] || rule.imageCountRule.defaultCount,
+    quality: reconcileStringOption(qualityOptions, quality, rule.qualityRule?.defaultQuality || ""),
+    imageCount: reconcileImageCount(countOptions, imageCount, rule.imageCountRule.defaultCount),
   };
 }
 

@@ -40,7 +40,7 @@ export function createDefaultActionFissionState(): ActionFissionState {
     rows: Array.from({ length: DEFAULT_ACTION_FISSION_ROWS }, () => createActionFissionRow()),
     layout: "grid",
     apiType: "third-party-api",
-    resolution: "1k",
+    resolution: "1K",
     aspectRatio: "3:4",
   };
 }

@@ -446,7 +446,7 @@
   position: absolute;
   z-index: 2;
   left: var(--space-3);
-  bottom: var(--space-3);
+  top: var(--space-3);
   min-width: 184px;
   max-width: min(360px, calc(100% - var(--space-6)));
   display: grid;
@@ -480,6 +480,10 @@
 
 .review-image-info__row--name {
   font-weight: var(--font-weight-medium);
+}
+
+.review-image-info__row--actions {
+  gap: 2px;
 }
 
 .review-image-info__label {
@@ -588,6 +592,7 @@
 }
 
 .review-thumb-button {
+  position: relative;
   flex: 0 0 58px;
   width: 58px;
   height: 58px;
@@ -600,8 +605,21 @@
   border-color: var(--state-hover-border);
 }
 
+.review-thumb-button:focus-visible {
+  border-color: var(--state-hover-border);
+  outline: 0;
+  box-shadow: none;
+}
+
 .review-thumb-button.active {
-  border-color: var(--state-active-border);
+  z-index: 2;
+  border-color: oklch(0.78 0.14 65);
+  transform: scale(1.08);
+  transform-origin: center bottom;
+}
+
+.review-thumb-button.active:focus-visible {
+  border-color: oklch(0.78 0.14 65);
 }
 
 .review-thumb-button img {
@@ -619,6 +637,36 @@
   width: 100%;
   height: 100%;
   color: var(--muted-foreground);
+}
+
+.review-thumb-status {
+  position: absolute;
+  z-index: 1;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--surface-card) 78%, transparent);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.review-thumb-status > svg {
+  width: 10px;
+  height: 10px;
+  stroke-width: 3;
+}
+
+.review-thumb-status.is-approved {
+  color: var(--status-success-foreground);
+  background: var(--status-success);
+}
+
+.review-thumb-status.is-rejected {
+  color: var(--destructive-foreground);
+  background: var(--danger);
 }
 
 .review-thumb-empty {
@@ -640,6 +688,22 @@
   height: 16px;
 }
 
+.review-status-button {
+  color: var(--text-secondary);
+}
+
+.review-status-button.is-approved.is-active {
+  color: var(--status-success-text);
+  background: var(--status-success-bg);
+  box-shadow: inset 0 0 0 1px var(--status-success-border);
+}
+
+.review-status-button.is-rejected.is-active {
+  color: var(--danger);
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 38%, var(--border-subtle));
+}
+
 .review-product-empty {
   min-height: 120px;
   display: grid;
@@ -657,8 +721,4 @@
   .review-folder-icon-button.is-spinning svg {
     animation: none;
   }
-}
-
-:root.theme-dark .review-thumb-button.active {
-  border-color: var(--state-active-bg);
 }

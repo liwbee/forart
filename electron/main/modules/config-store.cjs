@@ -114,6 +114,12 @@ function uniqueStrings(values = []) {
   return [...new Set(values.map((value) => String(value).trim()).filter(Boolean))];
 }
 
+function normalizeModelCatalogOrder(input = {}) {
+  return {
+    image: Array.isArray(input.image) ? uniqueStrings(input.image) : [],
+  };
+}
+
 function createApimartProvider(input = {}) {
   return {
     id: APIMART_PROVIDER_ID,
@@ -169,6 +175,7 @@ function mergeTudouProviders(inputs = []) {
         video: { ...result.modelAliases.video, ...next.modelAliases.video },
       },
       modelRules: { image: { ...result.modelRules.image, ...next.modelRules.image } },
+      modelCatalogOrder: next.modelCatalogOrder,
     });
   }, createTudouProvider());
 }
@@ -270,6 +277,7 @@ function createTudouProvider(input = {}) {
     videoModels: Array.isArray(input.videoModels) ? uniqueStrings(input.videoModels) : [],
     modelAliases: normalizeModelAliases(input.modelAliases),
     modelRules: normalizeModelRules(input.modelRules),
+    modelCatalogOrder: normalizeModelCatalogOrder(input.modelCatalogOrder),
   };
 }
 

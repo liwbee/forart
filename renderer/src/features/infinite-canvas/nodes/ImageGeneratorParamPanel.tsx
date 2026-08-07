@@ -44,6 +44,7 @@ import { useGenerationPreferenceStore } from "../generation/generationPreference
 import {
   DEFAULT_LIBTV_CAPABILITIES,
   deriveLibtvModelCapabilities,
+  normalizeLibtvModelSelection,
   normalizeLibtvModels,
 } from "../libtv-generation/libtvModelSchema";
 import { ImageReferenceStrip } from "./ImageReferenceStrip";
@@ -60,6 +61,14 @@ interface ImageGeneratorParamPanelProps {
   taskRunningOverride?: boolean;
   onRun?: () => void | Promise<void>;
   onStop?: () => void | Promise<void>;
+}
+
+interface PendingLibtvSelection {
+  modelId?: string;
+  resolution: string;
+  quality: string;
+  aspectRatio: string;
+  imageCount: number;
 }
 
 export function ImageGeneratorParamPanel({
@@ -83,6 +92,7 @@ export function ImageGeneratorParamPanel({
   const [apiSettings, setApiSettings] = useState<ApiSettings>(() => readApiSettings());
   const [libtvModels, setLibtvModels] = useState<LibtvImageModelRecord[]>([]);
   const [libtvSchema, setLibtvSchema] = useState<unknown>(null);
+  const [libtvSchemaModelId, setLibtvSchemaModelId] = useState("");
   const [libtvLoadError, setLibtvLoadError] = useState("");
   const [sizePickerOpen, setSizePickerOpen] = useState(false);
   const [promptDraft, setPromptDraft] = useState(() => String(data.text || ""));
@@ -93,6 +103,7 @@ export function ImageGeneratorParamPanel({
   const pendingPromptCommitRef = useRef<string | null>(null);
   const committedPromptRef = useRef(String(data.text || ""));
   const wasVisibleRef = useRef(visible);
+  const pendingLibtvSelectionRef = useRef<PendingLibtvSelection | null>(null);
 
   const commitPrompt = useCallback((prompt = promptDraftRef.current) => {
     if (prompt === committedPromptRef.current) return;
@@ -161,30 +172,42 @@ export function ImageGeneratorParamPanel({
   );
   const libtvState = useMemo(() => data.libtvImageGeneration || {}, [data.libtvImageGeneration]);
   const normalizedLibtvModels = useMemo(() => normalizeLibtvModels(libtvModels), [libtvModels]);
-  const libtvModel = normalizedLibtvModels.find((item) => item.modelName === libtvState.modelName)
+  const libtvModel = normalizedLibtvModels.find((item) => (
+    item.modelName === libtvState.modelName || item.modelKey === libtvState.modelKey
+  ))
     || normalizedLibtvModels[0]
     || null;
-  const libtvCapabilities = libtvSchema
+  const libtvModelId = libtvModel?.modelName || libtvModel?.modelKey || "";
+  const libtvSchemaReady = Boolean(libtvModelId && libtvSchemaModelId === libtvModelId);
+  const libtvCapabilities = libtvSchema && libtvSchemaReady
     ? deriveLibtvModelCapabilities(libtvSchema)
     : DEFAULT_LIBTV_CAPABILITIES;
+  const pendingLibtvSelection = pendingLibtvSelectionRef.current;
+  const pendingLibtvSelectionApplies = Boolean(
+    pendingLibtvSelection
+    && (!pendingLibtvSelection.modelId || pendingLibtvSelection.modelId === libtvModelId),
+  );
   const storedLibtvResolution = libtvCapabilities.resolutionField === "resolution"
     ? String(libtvState.resolution || "")
     : String(libtvState.quality || "");
-  const libtvResolution = libtvCapabilities.resolutions.includes(storedLibtvResolution)
-    ? storedLibtvResolution
-    : libtvCapabilities.defaultResolution;
-  const libtvQuality = libtvCapabilities.qualities.includes(String(libtvState.quality || ""))
-    ? String(libtvState.quality)
-    : libtvCapabilities.defaultQuality;
-  const libtvAspectRatio = libtvCapabilities.aspectRatios.includes(String(libtvState.aspectRatio || ""))
-    ? String(libtvState.aspectRatio)
-    : libtvCapabilities.defaultAspectRatio;
-  const storedLibtvImageCount = String(libtvState.count || "");
-  const libtvImageCount = !showImageCount
-    ? "1"
-    : libtvCapabilities.imageCounts.includes(storedLibtvImageCount)
-      ? storedLibtvImageCount
-      : libtvCapabilities.defaultImageCount;
+  const normalizedLibtvSelection = normalizeLibtvModelSelection(libtvCapabilities, {
+    resolution: pendingLibtvSelectionApplies
+      ? pendingLibtvSelection?.resolution
+      : storedLibtvResolution,
+    quality: pendingLibtvSelectionApplies
+      ? pendingLibtvSelection?.quality
+      : String(libtvState.quality || ""),
+    aspectRatio: pendingLibtvSelectionApplies
+      ? pendingLibtvSelection?.aspectRatio
+      : String(libtvState.aspectRatio || ""),
+    imageCount: pendingLibtvSelectionApplies
+      ? pendingLibtvSelection?.imageCount
+      : libtvState.count,
+  }, !showImageCount);
+  const libtvResolution = normalizedLibtvSelection.resolution;
+  const libtvQuality = normalizedLibtvSelection.quality;
+  const libtvAspectRatio = normalizedLibtvSelection.aspectRatio;
+  const libtvImageCount = normalizedLibtvSelection.imageCount;
   const referenceSupported = isLibtv ? libtvCapabilities.supportsReferenceImages : rule.supportsReferenceImages;
   const maxReferences = isLibtv ? libtvCapabilities.maxReferenceImages : rule.maxReferenceImages;
   const taskId = nativeCanvasNodeTaskId(data);
@@ -243,23 +266,35 @@ export function ImageGeneratorParamPanel({
   }, [isLibtv, t, visible]);
 
   useEffect(() => {
-    if (!visible || !isLibtv || !libtvModel || !window.libtv?.imageModelSchema) {
+    if (!visible || !isLibtv || !libtvModelId) {
       setLibtvSchema(null);
+      setLibtvSchemaModelId("");
+      return;
+    }
+    if (!window.libtv?.imageModelSchema) {
+      setLibtvSchema(null);
+      setLibtvSchemaModelId(libtvModelId);
       return;
     }
     let canceled = false;
     setLibtvSchema(null);
-    void window.libtv.imageModelSchema({ model: libtvModel.modelName || libtvModel.modelKey })
+    setLibtvSchemaModelId("");
+    void window.libtv.imageModelSchema({ model: libtvModelId })
       .then((schema) => {
-        if (!canceled) setLibtvSchema(schema);
+        if (canceled) return;
+        setLibtvSchema(schema);
+        setLibtvSchemaModelId(libtvModelId);
       })
       .catch((error) => {
-        if (!canceled) setLibtvLoadError(error instanceof Error ? error.message : String(error));
+        if (canceled) return;
+        setLibtvLoadError(error instanceof Error ? error.message : String(error));
+        setLibtvSchema(null);
+        setLibtvSchemaModelId(libtvModelId);
       });
     return () => {
       canceled = true;
     };
-  }, [isLibtv, libtvModel, visible]);
+  }, [isLibtv, libtvModelId, visible]);
 
   useEffect(() => {
     if (!visible || isLibtv || !provider || !model) return;
@@ -300,10 +335,19 @@ export function ImageGeneratorParamPanel({
   ]);
 
   useEffect(() => {
-    if (!visible || !isLibtv || !libtvModel) return;
+    if (!visible || !isLibtv || !libtvModel || !libtvSchemaReady) return;
     const modelName = libtvModel.modelName || libtvModel.modelKey;
     const resolution = libtvCapabilities.resolutionField === "resolution" ? libtvResolution : undefined;
     const quality = libtvCapabilities.resolutionField === "quality" ? libtvResolution : libtvQuality || undefined;
+    if (pendingLibtvSelectionApplies) pendingLibtvSelectionRef.current = null;
+    useGenerationPreferenceStore.getState().rememberLibtv({
+      modelName,
+      modelKey: libtvModel.modelKey,
+      resolution,
+      quality,
+      aspectRatio: libtvAspectRatio,
+      count: Number(libtvImageCount),
+    });
     if (
       libtvState.modelName === modelName
       && libtvState.modelKey === libtvModel.modelKey
@@ -331,9 +375,11 @@ export function ImageGeneratorParamPanel({
     libtvQuality,
     libtvResolution,
     libtvCapabilities.resolutionField,
+    libtvSchemaReady,
     libtvState,
     nodeId,
     patchNodeData,
+    pendingLibtvSelectionApplies,
     visible,
   ]);
 
@@ -341,29 +387,44 @@ export function ImageGeneratorParamPanel({
     clearNodeGenerationRuntimeErrors(nodeId);
     if (taskId) useGenerationRuntimeStore.getState().dismissTask(taskId);
     if (platformId === "libtv") {
-      useGenerationPreferenceStore.getState().rememberLibtv({
-        modelName: libtvModel?.modelName || libtvModel?.modelKey,
-        modelKey: libtvModel?.modelKey,
-        resolution: libtvCapabilities.resolutionField === "resolution" ? libtvResolution : undefined,
-        quality: libtvCapabilities.resolutionField === "quality" ? libtvResolution : libtvQuality || undefined,
-        aspectRatio: libtvAspectRatio,
-      });
+      pendingLibtvSelectionRef.current = {
+        resolution: sizeSelection.resolution,
+        quality: apiGenerationSelection.quality,
+        aspectRatio: sizeSelection.aspectRatio,
+        imageCount: showImageCount ? apiGenerationSelection.imageCount : 1,
+      };
       patchNodeData(nodeId, { imageGenerationBackend: "libtv" });
       return;
     }
+    pendingLibtvSelectionRef.current = null;
     const providerId = platformId;
     const nextProvider = providers.find((item) => item.id === providerId);
     const nextModel = nextProvider?.imageModels[0];
     if (!nextProvider || !nextModel) return;
     const nextRule = getImageModelRule(nextProvider.modelRules.image[nextModel] || detectImageModelRuleId(nextModel));
-    const nextSize = normalizeImageModelSizeSelection(nextRule, undefined, undefined);
-    const nextGeneration = normalizeImageModelGenerationSelection(nextRule, undefined, undefined, referenceImages.length);
+    const nextSize = normalizeImageModelSizeSelection(
+      nextRule,
+      isLibtv ? libtvResolution : sizeSelection.resolution,
+      isLibtv ? libtvAspectRatio : sizeSelection.aspectRatio,
+    );
+    const nextGeneration = normalizeImageModelGenerationSelection(
+      nextRule,
+      isLibtv ? libtvQuality : apiGenerationSelection.quality,
+      showImageCount
+        ? isLibtv ? Number(libtvImageCount) : apiGenerationSelection.imageCount
+        : 1,
+      referenceImages.length,
+    );
+    const nextImageCount = showImageCount && nextProvider.protocol !== "gemini"
+      ? nextGeneration.imageCount
+      : 1;
     useGenerationPreferenceStore.getState().rememberApi({
       providerId: nextProvider.id,
       model: nextModel,
       resolution: nextSize.resolution,
       aspectRatio: nextSize.aspectRatio,
       quality: nextGeneration.quality || undefined,
+      count: nextImageCount,
     });
     patchNodeData(nodeId, {
       imageGenerationBackend: "api",
@@ -372,7 +433,7 @@ export function ImageGeneratorParamPanel({
       imageResolution: nextSize.resolution,
       imageAspectRatio: nextSize.aspectRatio,
       imageQuality: nextGeneration.quality || undefined,
-      imageCount: nextGeneration.imageCount,
+      imageCount: nextImageCount,
     });
   };
 
@@ -382,13 +443,15 @@ export function ImageGeneratorParamPanel({
     if (isLibtv) {
       const next = normalizedLibtvModels.find((item) => (item.modelName || item.modelKey) === nextModel);
       if (!next) return;
-      useGenerationPreferenceStore.getState().rememberLibtv({
-        modelName: next.modelName || next.modelKey,
-        modelKey: next.modelKey,
-        resolution: libtvCapabilities.resolutionField === "resolution" ? libtvResolution : undefined,
-        quality: libtvCapabilities.resolutionField === "quality" ? libtvResolution : libtvQuality || undefined,
+      pendingLibtvSelectionRef.current = {
+        modelId: next.modelName || next.modelKey,
+        resolution: libtvResolution,
+        quality: libtvQuality,
         aspectRatio: libtvAspectRatio,
-      });
+        imageCount: showImageCount ? Number(libtvImageCount) : 1,
+      };
+      setLibtvSchema(null);
+      setLibtvSchemaModelId("");
       patchNodeData(nodeId, {
         libtvImageGeneration: {
           ...libtvState,
@@ -400,21 +463,34 @@ export function ImageGeneratorParamPanel({
     }
     if (!provider) return;
     const nextRule = getImageModelRule(provider.modelRules.image[nextModel] || detectImageModelRuleId(nextModel));
-    const nextSize = normalizeImageModelSizeSelection(nextRule, undefined, undefined);
-    const nextGeneration = normalizeImageModelGenerationSelection(nextRule, undefined, undefined, referenceImages.length);
+    const nextSize = normalizeImageModelSizeSelection(
+      nextRule,
+      sizeSelection.resolution,
+      sizeSelection.aspectRatio,
+    );
+    const nextGeneration = normalizeImageModelGenerationSelection(
+      nextRule,
+      apiGenerationSelection.quality,
+      showImageCount ? apiGenerationSelection.imageCount : 1,
+      referenceImages.length,
+    );
+    const nextImageCount = showImageCount && provider.protocol !== "gemini"
+      ? nextGeneration.imageCount
+      : 1;
     useGenerationPreferenceStore.getState().rememberApi({
       providerId: provider.id,
       model: nextModel,
       resolution: nextSize.resolution,
       aspectRatio: nextSize.aspectRatio,
       quality: nextGeneration.quality || undefined,
+      count: nextImageCount,
     });
     patchNodeData(nodeId, {
       imageModel: nextModel,
       imageResolution: nextSize.resolution,
       imageAspectRatio: nextSize.aspectRatio,
       imageQuality: nextGeneration.quality || undefined,
-      imageCount: nextGeneration.imageCount,
+      imageCount: nextImageCount,
     });
   };
 
@@ -661,6 +737,7 @@ export function ImageGeneratorParamPanel({
                           resolution: libtvCapabilities.resolutionField === "resolution" ? imageResolution : undefined,
                           quality: libtvCapabilities.resolutionField === "quality" ? imageResolution : libtvQuality || undefined,
                           aspectRatio: libtvAspectRatio,
+                          count: Number(libtvImageCount),
                         });
                       } else {
                         useGenerationPreferenceStore.getState().rememberApi({
@@ -669,6 +746,7 @@ export function ImageGeneratorParamPanel({
                           resolution: imageResolution,
                           aspectRatio: sizeSelection.aspectRatio,
                           quality: apiGenerationSelection.quality || undefined,
+                          count: apiGenerationSelection.imageCount,
                         });
                       }
                       patchNodeData(nodeId, isLibtv ? {
@@ -687,6 +765,7 @@ export function ImageGeneratorParamPanel({
                           resolution: libtvCapabilities.resolutionField === "resolution" ? libtvResolution : undefined,
                           quality,
                           aspectRatio: libtvAspectRatio,
+                          count: Number(libtvImageCount),
                         });
                       } else {
                         useGenerationPreferenceStore.getState().rememberApi({
@@ -695,15 +774,38 @@ export function ImageGeneratorParamPanel({
                           resolution: sizeSelection.resolution,
                           aspectRatio: sizeSelection.aspectRatio,
                           quality,
+                          count: apiGenerationSelection.imageCount,
                         });
                       }
                       patchNodeData(nodeId, isLibtv
                         ? { libtvImageGeneration: { ...libtvState, quality } }
                         : { imageQuality: quality });
                     }}
-                    onImageCountChange={(count) => patchNodeData(nodeId, isLibtv
-                      ? { libtvImageGeneration: { ...libtvState, count: Number(count) } }
-                      : { imageCount: Number(count) })}
+                    onImageCountChange={(count) => {
+                      const imageCount = Number(count);
+                      if (isLibtv) {
+                        useGenerationPreferenceStore.getState().rememberLibtv({
+                          modelName: libtvModel?.modelName || libtvModel?.modelKey,
+                          modelKey: libtvModel?.modelKey,
+                          resolution: libtvCapabilities.resolutionField === "resolution" ? libtvResolution : undefined,
+                          quality: libtvCapabilities.resolutionField === "quality" ? libtvResolution : libtvQuality || undefined,
+                          aspectRatio: libtvAspectRatio,
+                          count: imageCount,
+                        });
+                      } else {
+                        useGenerationPreferenceStore.getState().rememberApi({
+                          providerId: provider?.id,
+                          model,
+                          resolution: sizeSelection.resolution,
+                          aspectRatio: sizeSelection.aspectRatio,
+                          quality: apiGenerationSelection.quality || undefined,
+                          count: imageCount,
+                        });
+                      }
+                      patchNodeData(nodeId, isLibtv
+                        ? { libtvImageGeneration: { ...libtvState, count: imageCount } }
+                        : { imageCount });
+                    }}
                     onAspectRatioChange={(imageAspectRatio) => {
                       if (isLibtv) {
                         useGenerationPreferenceStore.getState().rememberLibtv({
@@ -712,6 +814,7 @@ export function ImageGeneratorParamPanel({
                           resolution: libtvCapabilities.resolutionField === "resolution" ? libtvResolution : undefined,
                           quality: libtvCapabilities.resolutionField === "quality" ? libtvResolution : libtvQuality || undefined,
                           aspectRatio: imageAspectRatio,
+                          count: Number(libtvImageCount),
                         });
                       } else {
                         useGenerationPreferenceStore.getState().rememberApi({
@@ -720,6 +823,7 @@ export function ImageGeneratorParamPanel({
                           resolution: sizeSelection.resolution,
                           aspectRatio: imageAspectRatio,
                           quality: apiGenerationSelection.quality || undefined,
+                          count: apiGenerationSelection.imageCount,
                         });
                       }
                       patchNodeData(nodeId, isLibtv

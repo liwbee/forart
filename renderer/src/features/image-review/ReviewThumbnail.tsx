@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
-import { ImageOff } from "lucide-react";
+import { Check, ImageOff, X } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import type { ImageReviewImage } from "../../app/appConfig";
 
@@ -39,6 +39,16 @@ export const ReviewThumbnail = memo(function ReviewThumbnail({
       <span className="review-thumb-fallback" hidden aria-hidden="true">
         <ImageOff size={16} />
       </span>
+      {image.reviewStatus ? (
+        <span
+          className={`review-thumb-status is-${image.reviewStatus}`}
+          role="img"
+          aria-label={t(image.reviewStatus === "approved" ? "imageReview:reviewApproved" : "imageReview:reviewRejected")}
+          title={t(image.reviewStatus === "approved" ? "imageReview:reviewApproved" : "imageReview:reviewRejected")}
+        >
+          {image.reviewStatus === "approved" ? <Check aria-hidden="true" /> : <X aria-hidden="true" />}
+        </span>
+      ) : null}
     </Button>
   );
 });

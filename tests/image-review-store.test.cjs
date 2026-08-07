@@ -52,6 +52,18 @@ test('image review only reads roots explicitly authorized by the main process', 
     dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [reviewRoot] }) },
     imageReviewStore: createImageReviewStore(),
   });
+  await assert.rejects(
+    handlers.get('image-review:products')({}, { root: reviewRoot, modelFolders: 'model' }),
+    /not authorized/,
+  );
+  const restored = await handlers.get('image-review:restore-root')({}, { root: reviewRoot });
+  assert.deepEqual(restored, { ok: true, path: path.resolve(reviewRoot) });
+  const restoredProducts = await handlers.get('image-review:products')({}, {
+    root: restored.path,
+    modelFolders: 'model',
+  });
+  assert.equal(restoredProducts.products.length, 1);
+
   const selection = await handlers.get('image-review:choose-root')({}, { title: 'Review' });
   assert.deepEqual(selection, { canceled: false, path: path.resolve(reviewRoot) });
   const ipcProducts = await handlers.get('image-review:products')({}, { root: selection.path, modelFolders: '模特图' });

@@ -1261,20 +1261,23 @@ body {
   display: block;
 }
 
-.settings-api-provider-logo--apimart {
+.settings-api-provider-logo--apimart,
+.settings-api-provider-logo--tudou {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
 }
 
-.settings-api-provider-logo.settings-api-provider-logo--apimart svg {
+.settings-api-provider-logo.settings-api-provider-logo--apimart svg,
+.settings-api-provider-logo.settings-api-provider-logo--tudou svg {
   width: 24px;
   height: 24px;
   flex: 0 0 24px;
 }
 
-.settings-api-provider-logo--apimart span {
+.settings-api-provider-logo--apimart span,
+.settings-api-provider-logo--tudou span {
   color: inherit;
   font-size: 20px;
   font-weight: var(--font-weight-bold);
@@ -1284,11 +1287,6 @@ body {
 
 .settings-api-provider-logo.settings-libtv-sidebar-logo svg {
   width: min(96px, 100%);
-}
-
-.settings-api-provider-logo--tudou svg {
-  width: 28px;
-  height: 28px;
 }
 
 .settings-api-recommended-grid {
@@ -1324,16 +1322,19 @@ body {
   color: currentColor;
 }
 
-.settings-api-recommended-card-logo[data-provider="apimart"] {
+.settings-api-recommended-card-logo[data-provider="apimart"],
+.settings-api-recommended-card-logo[data-provider="tudou-api"] {
   gap: var(--space-2);
 }
 
-.settings-api-recommended-card-logo[data-provider="apimart"] svg {
+.settings-api-recommended-card-logo[data-provider="apimart"] svg,
+.settings-api-recommended-card-logo[data-provider="tudou-api"] svg {
   width: 28px;
   height: 28px;
 }
 
-.settings-api-recommended-card-logo[data-provider="apimart"] > span:not(.sr-only) {
+.settings-api-recommended-card-logo[data-provider="apimart"] > span:not(.sr-only),
+.settings-api-recommended-card-logo[data-provider="tudou-api"] > span:not(.sr-only) {
   font-size: 20px;
   font-weight: var(--font-weight-bold);
   letter-spacing: 0;
@@ -1342,11 +1343,6 @@ body {
 .settings-api-recommended-card-logo[data-provider="libtv"] svg {
   width: 104px;
   height: auto;
-}
-
-.settings-api-recommended-card-logo[data-provider="tudou-api"] svg {
-  width: 34px;
-  height: 34px;
 }
 
 .settings-api-provider-logo--head {
@@ -1914,6 +1910,18 @@ body {
 
 .settings-api-model-row.has-rule {
   grid-template-columns: 28px minmax(0, 1fr) minmax(220px, 0.34fr) 40px;
+}
+
+.settings-api-model-row--catalog.has-rule {
+  grid-template-columns: 28px 24px minmax(0, 1fr) minmax(220px, 0.34fr);
+}
+
+.settings-api-model-row--catalog[data-enabled="false"] {
+  opacity: 0.64;
+}
+
+.settings-api-model-row--catalog > [data-slot="checkbox"] {
+  justify-self: center;
 }
 
 .settings-api-model-drag-handle {

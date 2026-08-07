@@ -42,7 +42,15 @@ test('fresh API settings do not install recommended providers', (t) => {
   assert.deepEqual(customOnly.providerOrder, ['custom']);
 
   const tudou = store.saveApiSettings({
-    providers: [{ id: 'tudou-api', name: 'Custom name', baseUrl: 'https://example.invalid/v1', protocol: 'openai', apiKey: 'secret' }],
+    providers: [{
+      id: 'tudou-api',
+      name: 'Custom name',
+      baseUrl: 'https://example.invalid/v1',
+      protocol: 'openai',
+      apiKey: 'secret',
+      imageModels: ['model-b'],
+      modelCatalogOrder: { image: ['model-b', 'model-a'] },
+    }],
     providerOrder: ['tudou-api'],
   });
   assert.deepEqual(tudou.providers.map((provider) => ({ id: provider.id, name: provider.name, baseUrl: provider.baseUrl, protocol: provider.protocol })), [{
@@ -51,6 +59,8 @@ test('fresh API settings do not install recommended providers', (t) => {
     baseUrl: 'https://api.ai-tudou.net/v1',
     protocol: 'gemini',
   }]);
+  assert.deepEqual(tudou.providers[0].imageModels, ['model-b']);
+  assert.deepEqual(tudou.providers[0].modelCatalogOrder, { image: ['model-b', 'model-a'] });
 });
 
 test('config sections preserve sibling data and use atomic replacement', (t) => {

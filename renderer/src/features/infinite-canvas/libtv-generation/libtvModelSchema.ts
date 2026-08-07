@@ -1,4 +1,10 @@
 import type { LibtvImageModelRecord } from "../../../app/appConfig";
+import {
+  reconcileAspectRatio,
+  reconcileImageCount,
+  reconcileResolution,
+  reconcileStringOption,
+} from "../../settings/imageModelSelection";
 
 export interface LibtvModelOption {
   label: string;
@@ -21,6 +27,13 @@ export interface LibtvModelCapabilities {
   resolutions: string[];
   resolutionOptions: LibtvModelOption[];
   supportsReferenceImages: boolean;
+}
+
+export interface LibtvModelSelection {
+  aspectRatio?: string;
+  imageCount?: number | string;
+  quality?: string;
+  resolution?: string;
 }
 
 export const DEFAULT_LIBTV_CAPABILITIES: LibtvModelCapabilities = {
@@ -88,6 +101,38 @@ function qualityRepresentsResolution(property: Record<string, unknown>, options:
 
 export function normalizeLibtvModels(models: LibtvImageModelRecord[]) {
   return models.filter((model) => model.modelName || model.modelKey);
+}
+
+export function normalizeLibtvModelSelection(
+  capabilities: LibtvModelCapabilities,
+  selection: LibtvModelSelection,
+  forceSingleImage = false,
+) {
+  const imageCountOptions = capabilities.imageCounts.map(Number).filter(Number.isFinite);
+  return {
+    resolution: reconcileResolution(
+      capabilities.resolutions,
+      selection.resolution,
+      capabilities.defaultResolution,
+    ),
+    quality: reconcileStringOption(
+      capabilities.qualities,
+      selection.quality,
+      capabilities.defaultQuality,
+    ),
+    aspectRatio: reconcileAspectRatio(
+      capabilities.aspectRatios,
+      selection.aspectRatio,
+      capabilities.defaultAspectRatio,
+    ),
+    imageCount: String(forceSingleImage
+      ? 1
+      : reconcileImageCount(
+          imageCountOptions,
+          Number(selection.imageCount),
+          Number(capabilities.defaultImageCount),
+        )),
+  };
 }
 
 export function deriveLibtvModelCapabilities(input: unknown): LibtvModelCapabilities {

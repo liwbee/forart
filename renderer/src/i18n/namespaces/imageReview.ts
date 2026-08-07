@@ -1,5 +1,10 @@
 export const zhCN = {
   openInPhotoshop: "使用 Photoshop 打开",
+  markApproved: "标记为通过",
+  markRejected: "标记为不通过",
+  reviewApproved: "审核通过",
+  reviewRejected: "审核不通过",
+  saveReviewStatusFailed: "保存图片审核状态失败。",
   photoshopNotFound: "未检测到 Photoshop。",
   imageFileNotFound: "图片文件不存在。",
   photoshopOpenFailed: "无法使用 Photoshop 打开图片。",
@@ -46,6 +51,11 @@ export const zhCN = {
 
 export const enUS = {
   openInPhotoshop: "Open in Photoshop",
+  markApproved: "Mark as approved",
+  markRejected: "Mark as rejected",
+  reviewApproved: "Approved",
+  reviewRejected: "Rejected",
+  saveReviewStatusFailed: "Failed to save the image review status.",
   photoshopNotFound: "Photoshop was not detected.",
   imageFileNotFound: "The image file does not exist.",
   photoshopOpenFailed: "Unable to open the image in Photoshop.",

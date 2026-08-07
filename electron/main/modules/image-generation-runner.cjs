@@ -452,8 +452,8 @@ async function normalizeReferenceImageDataUris(context, referenceImages, taskId,
 }
 
 function openAiSizeFor(resolution, aspectRatio) {
-  const normalizedResolution = String(resolution || '').toLowerCase();
-  const shortEdge = normalizedResolution === '4k' ? 4096 : normalizedResolution === '3k' ? 3072 : normalizedResolution === '2k' ? 2048 : 1024;
+  const normalizedResolution = String(resolution || '').toUpperCase();
+  const shortEdge = normalizedResolution === '4K' ? 4096 : normalizedResolution === '3K' ? 3072 : normalizedResolution === '2K' ? 2048 : 1024;
   const [rawW, rawH] = String(aspectRatio || '1:1').split(':').map(Number);
   const ratioW = rawW || 1;
   const ratioH = rawH || 1;
@@ -619,7 +619,7 @@ async function executeImageTask(context, task, payload, signal) {
   const model = String(payload.model || task.model || '').trim();
   const prompt = String(payload.prompt || task.prompt || '').trim();
   const referenceImages = Array.isArray(payload.referenceImages) ? payload.referenceImages.map(String).filter(Boolean) : [];
-  const resolution = String(payload.resolution || task.resolution || '1k');
+  const resolution = String(payload.resolution || task.resolution || '1K');
   const aspectRatio = String(payload.aspectRatio || task.aspectRatio || '1:1');
   const rule = payload.modelRule && typeof payload.modelRule === 'object' ? payload.modelRule : {};
   const qualityOptions = Array.isArray(rule.qualityRule?.options) ? rule.qualityRule.options.map(String) : [];
@@ -707,10 +707,9 @@ async function executeImageTask(context, task, payload, signal) {
     ? await normalizeReferenceImageDataUris(context, referenceImages, task.id, signal)
     : await normalizeReferenceImages(context, baseUrl, uploadHeaders, referenceImages, task.id, signal);
   const sizeMode = rule.sizeMode || (provider.protocol === 'compatible' ? 'ratio' : 'pixel');
-  const resolutionCase = rule.resolutionCase || 'lower';
   const resolutionField = rule.sizeRule?.resolutionField || rule.resolutionField || 'resolution';
   const requestSize = sizeMode === 'ratio' || provider.protocol === 'compatible' ? aspectRatio : payload.size || openAiSizeFor(resolution, aspectRatio);
-  const requestResolution = resolutionCase === 'upper' ? resolution.toUpperCase() : resolution.toLowerCase();
+  const requestResolution = resolution.toUpperCase();
   const sizePayload = resolutionField === 'size'
     ? { size: requestSize }
     : {

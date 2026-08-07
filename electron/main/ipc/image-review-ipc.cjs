@@ -65,6 +65,14 @@ function registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, imageReview
     return { canceled: false, path: imageReviewStore.authorizeRoot(selectedPath) };
   });
 
+  ipcMain.handle('image-review:restore-root', async (_event, payload = {}) => {
+    try {
+      return { ok: true, path: imageReviewStore.authorizeRoot(payload.root) };
+    } catch {
+      return { ok: false, path: '' };
+    }
+  });
+
   ipcMain.handle('image-review:products', async (_event, payload = {}) => ({
     products: await imageReviewStore.loadProducts({
       root: payload.root,
@@ -78,6 +86,16 @@ function registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, imageReview
       productId: String(payload.productId || ''),
       modelFolders: payload.modelFolders,
       detailFolders: payload.detailFolders,
+    }),
+  }));
+
+  ipcMain.handle('image-review:set-review-status', async (_event, payload = {}) => ({
+    ok: true,
+    review: await imageReviewStore.setImageReviewStatus({
+      root: payload.root,
+      productId: String(payload.productId || ''),
+      imageRelativePath: String(payload.imageRelativePath || ''),
+      status: payload.status === null ? null : String(payload.status || ''),
     }),
   }));
 
