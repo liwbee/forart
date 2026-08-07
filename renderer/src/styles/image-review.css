@@ -406,7 +406,7 @@
   min-width: 0;
   min-height: 48px;
   display: grid;
-  grid-template-columns: minmax(180px, 0.42fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
@@ -440,6 +440,17 @@
 
 .review-image-stage.dragging {
   cursor: grabbing;
+}
+
+.review-pane-position {
+  min-width: 48px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .review-image-info {
@@ -537,13 +548,56 @@
   min-width: 0;
   min-height: 78px;
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
   align-items: center;
   background: var(--surface-card);
 }
 
-.review-thumb-nav-button {
-  justify-self: center;
+.review-thumb-nav--without-summary {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.review-thumb-summary {
+  width: 58px;
+  min-width: 58px;
+  height: 58px;
+  display: grid;
+  align-items: center;
+  padding: 0 var(--space-2);
+}
+
+.review-thumb-summary__statuses {
+  width: 42px;
+  display: grid;
+  gap: 6px;
+}
+
+.review-thumb-summary__count {
+  width: 42px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 0 6px;
+  font-size: 14px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-thumb-summary__count.is-approved {
+  border-color: var(--status-success-border);
+  color: var(--status-success-text);
+  background: var(--status-success-bg);
+}
+
+.review-thumb-summary__count.is-rejected {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .review-thumb-strip {

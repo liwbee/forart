@@ -79,7 +79,7 @@ test('image review stores per-product decisions independently from image metadat
     }),
   ]);
 
-  const statusPath = path.join(productRoot, 'ImageReview.json');
+  const statusPath = path.join(productRoot, 'SKU-001-review.json');
   const statusDocument = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
   assert.equal(statusDocument.schemaVersion, 1);
   assert.equal(statusDocument.images['model/approved.png'].status, 'approved');

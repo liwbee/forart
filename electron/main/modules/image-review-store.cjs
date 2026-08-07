@@ -3,15 +3,19 @@ const path = require('path');
 const fsp = fs.promises;
 
 const REVIEW_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']);
-const REVIEW_STATUS_FILE = 'ImageReview.json';
 const REVIEW_STATUSES = new Set(['approved', 'rejected']);
+
+function reviewStatusFilePath(productDir) {
+  const productId = path.basename(path.resolve(productDir));
+  return path.join(productDir, `${productId}-review.json`);
+}
 
 function emptyReviewStatusDocument() {
   return { schemaVersion: 1, images: Object.create(null) };
 }
 
 async function readReviewStatusDocument(productDir, strict = false) {
-  const statusPath = path.join(productDir, REVIEW_STATUS_FILE);
+  const statusPath = reviewStatusFilePath(productDir);
   let parsed;
   try {
     parsed = JSON.parse(await fsp.readFile(statusPath, 'utf8'));
@@ -39,7 +43,7 @@ async function readReviewStatusDocument(productDir, strict = false) {
 }
 
 async function writeReviewStatusDocument(productDir, document) {
-  const statusPath = path.join(productDir, REVIEW_STATUS_FILE);
+  const statusPath = reviewStatusFilePath(productDir);
   const temporaryPath = `${statusPath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
   try {
     await fsp.writeFile(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, 'utf8');

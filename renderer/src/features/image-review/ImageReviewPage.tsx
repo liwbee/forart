@@ -1,7 +1,7 @@
 import { PointerEvent, forwardRef, memo, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type MutableRefObject, type WheelEvent as ReactWheelEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Check, ChevronLeft, ChevronRight, CircleHelp, FolderOpen, ImageOff, RefreshCw, X } from "lucide-react";
+import { Check, CircleHelp, FolderOpen, ImageOff, RefreshCw, X } from "lucide-react";
 import type { ImageReviewImage as ReviewImage, ImageReviewProduct as ReviewProduct } from "../../app/appConfig";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import { SearchInput } from "../../components/SearchInput";
@@ -286,8 +286,8 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
   activeIndex,
   thumbStripRef,
   onSelectImage,
-  onScrollStrip,
   onWheel,
+  showReviewStatusSummary,
 }: {
   title: string;
   images: ReviewImage[];
@@ -295,26 +295,20 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
   activeIndex: number;
   thumbStripRef: MutableRefObject<HTMLDivElement | null>;
   onSelectImage: (index: number) => void;
-  onScrollStrip: (direction: -1 | 1) => void;
   onWheel: (event: ReactWheelEvent<HTMLDivElement>) => void;
+  showReviewStatusSummary: boolean;
 }) {
   const { t } = useTranslation();
   const thumbVirtualizerRef = useRef<VirtualListController | null>(null);
+  const approvedCount = images.filter((image) => image.reviewStatus === "approved").length;
+  const rejectedCount = images.filter((image) => image.reviewStatus === "rejected").length;
 
   useEffect(() => {
     if (activeIndex >= 0) thumbVirtualizerRef.current?.scrollToIndex(activeIndex, { align: "auto" });
   }, [activeIndex]);
 
   return (
-    <div className="review-thumb-nav">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button className="review-thumb-nav-button" type="button" variant="ghost" size="icon" aria-label={t("imageReview:scrollThumbsLeft")} disabled={loading || !images.length} onClick={() => onScrollStrip(-1)}>
-            <ChevronLeft aria-hidden="true" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("imageReview:scrollThumbsLeft")}</TooltipContent>
-      </Tooltip>
+    <div className={`review-thumb-nav${showReviewStatusSummary ? "" : " review-thumb-nav--without-summary"}`}>
       {loading && !images.length ? (
         <div className="review-thumb-loading" role="status" aria-live="polite" aria-label={t("common:states.loading")}>
           {Array.from({ length: THUMB_SKELETON_COUNT }, (_, index) => (
@@ -348,21 +342,32 @@ const ReviewThumbNav = memo(function ReviewThumbNav({
           )}
         />
       )}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button className="review-thumb-nav-button" type="button" variant="ghost" size="icon" aria-label={t("imageReview:scrollThumbsRight")} disabled={loading || !images.length} onClick={() => onScrollStrip(1)}>
-            <ChevronRight aria-hidden="true" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("imageReview:scrollThumbsRight")}</TooltipContent>
-      </Tooltip>
+      {showReviewStatusSummary ? (
+        <div className="review-thumb-summary" aria-label={t("imageReview:reviewStatusSummary")}>
+          <div className="review-thumb-summary__statuses">
+            <span
+              className="review-thumb-summary__count is-approved"
+              aria-label={t("imageReview:thumbApprovedCount", { count: approvedCount })}
+            >
+              {approvedCount}
+            </span>
+            <span
+              className="review-thumb-summary__count is-rejected"
+              aria-label={t("imageReview:thumbRejectedCount", { count: rejectedCount })}
+            >
+              {rejectedCount}
+            </span>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }, (previous, next) =>
   previous.title === next.title &&
   previous.images === next.images &&
   previous.loading === next.loading &&
-  previous.activeIndex === next.activeIndex
+  previous.activeIndex === next.activeIndex &&
+  previous.showReviewStatusSummary === next.showReviewStatusSummary
 );
 
 function PhotoshopButton({
@@ -456,6 +461,7 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
   const folderInputId = useId();
   const [activeIndex, setActiveIndex] = useState(0);
   const image = images[activeIndex] || null;
+  const currentPosition = images.length ? Math.min(activeIndex + 1, images.length) : 0;
   const [transform, setTransform] = useState({ scale: 1, x: 0, y: 0 });
   const [dragStart, setDragStart] = useState<{ pointerId: number; x: number; y: number; panX: number; panY: number } | null>(null);
   const [imageResolution, setImageResolution] = useState({ width: 0, height: 0 });
@@ -686,13 +692,6 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
     });
   }
 
-  function scrollThumbStrip(direction: -1 | 1) {
-    const strip = thumbStripRef.current;
-    if (!strip) return;
-    stopThumbMomentum();
-    strip.scrollBy({ left: direction * Math.max(240, strip.clientWidth * 0.82), behavior: "smooth" });
-  }
-
   const selectImage = useCallback((index: number) => {
     setActiveIndex(index);
   }, []);
@@ -799,6 +798,11 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
             placeholder={t("imageReview:examplePlaceholder", { title })}
           />
         </Field>
+        {showReviewActions ? (
+          <div className="review-pane-position" aria-label={t("imageReview:thumbPosition", { current: currentPosition, total: images.length })}>
+            {currentPosition} / {images.length}
+          </div>
+        ) : null}
       </div>
       <div
         className={`review-image-stage${isZoomed ? " zoomed" : ""}${dragStart ? " dragging" : ""}`}
@@ -889,8 +893,8 @@ const ProductImagePane = memo(forwardRef<ProductImagePaneHandle, {
         activeIndex={activeIndex}
         thumbStripRef={thumbStripRef}
         onSelectImage={selectImage}
-        onScrollStrip={scrollThumbStrip}
         onWheel={handleThumbWheel}
+        showReviewStatusSummary={showReviewActions}
       />
     </section>
   );
