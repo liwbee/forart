@@ -154,3 +154,49 @@ test('image review opens an authorized original image with registry Photoshop', 
   });
   assert.deepEqual(unauthorized, { ok: false, reason: 'image-not-found' });
 });
+
+test('image review prefers a configured Photoshop executable over registry detection', async (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-custom-photoshop-'));
+  const reviewRoot = path.join(tempRoot, 'review');
+  const imagePath = path.join(reviewRoot, 'image.jpg');
+  const configuredPhotoshopPath = path.join(tempRoot, 'Adobe Photoshop Beta', 'Photoshop.exe');
+  fs.mkdirSync(reviewRoot, { recursive: true });
+  fs.mkdirSync(path.dirname(configuredPhotoshopPath), { recursive: true });
+  fs.writeFileSync(imagePath, Buffer.from('image'));
+  fs.writeFileSync(configuredPhotoshopPath, Buffer.from('exe'));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+
+  const imageReviewStore = createImageReviewStore();
+  imageReviewStore.authorizeRoot(reviewRoot);
+  const imageUrl = `forart-review://image?root=${encodeURIComponent(reviewRoot)}&path=${encodeURIComponent(path.basename(imagePath))}`;
+  const handlers = new Map();
+  let launch = null;
+  let registryQueries = 0;
+  registerImageReviewIpc({
+    ipcMain: { handle(channel, handler) { handlers.set(channel, handler); } },
+    dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
+    imageReviewStore,
+    getPhotoshopExecutablePath: () => configuredPhotoshopPath,
+    processTools: {
+      platform: 'win32',
+      existsSync: fs.existsSync,
+      execFile(_command, _args, _options, callback) {
+        registryQueries += 1;
+        callback(new Error('registry should not be queried'), '', '');
+      },
+      spawn(executablePath, args) {
+        launch = { executablePath, args };
+        const child = new EventEmitter();
+        child.unref = () => {};
+        queueMicrotask(() => child.emit('spawn'));
+        return child;
+      },
+    },
+  });
+
+  const result = await handlers.get('image-review:open-in-photoshop')({}, { originalUrl: imageUrl });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(launch.executablePath, configuredPhotoshopPath);
+  assert.deepEqual(launch.args, [imagePath]);
+  assert.equal(registryQueries, 0);
+});

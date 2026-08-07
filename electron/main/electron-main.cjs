@@ -162,7 +162,14 @@ ipcMain.handle('canvas-cache:delete', async (_event, payload) => {
 });
 ipcMain.handle('canvas-cache:reveal', async (_event, payload) => canvasCacheStore.revealAsset(payload));
 ipcMain.handle('canvas-cache:open-root', async () => canvasCacheStore.openRoot());
-registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, imageReviewScaledImageStore, shell });
+registerImageReviewIpc({
+  ipcMain,
+  dialog,
+  imageReviewStore,
+  imageReviewScaledImageStore,
+  shell,
+  getPhotoshopExecutablePath: () => configStore.load()?.photoshopExecutablePath || '',
+});
 registerLibtvIpc({ ipcMain, libtv });
 localApi = registerLocalApiIpc({ ipcMain, configStore, app, dataRoot: portableRootDir });
 registerConfigIpc({ ipcMain, dialog, configStore, app, net });

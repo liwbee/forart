@@ -5,6 +5,7 @@ export interface ForartAppConfig {
   localLibraryPath: string;
   serverUrl: string;
   imageDownloadPath: string;
+  photoshopExecutablePath: string;
   language: "zh-CN" | "en-US";
 }
 
@@ -202,6 +203,7 @@ export interface ForartConfigApi {
   saveInfiniteCanvasSettings: (settings: ForartInfiniteCanvasSettings) => Promise<{ ok: true; infiniteCanvas: ForartInfiniteCanvasSettings }>;
   defaultPaths: () => Promise<{ imageDownloadPath: string }>;
   chooseDirectory: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
+  chooseFile: (payload?: { title?: string; filterName?: string; extensions?: string[] }) => Promise<{ canceled: boolean; path: string }>;
   testServer: (serverUrl: string) => Promise<{ ok: boolean; status?: number; error?: string; payload?: unknown }>;
   localServerStatus: () => Promise<{ ok: boolean; managed?: boolean; transport?: "ipc" | "http"; localLibraryPath?: string; status?: number; error?: string; payload?: unknown }>;
   appInfo: () => Promise<ForartAppInfo>;
@@ -510,6 +512,7 @@ export const DEFAULT_APP_CONFIG: ForartAppConfig = {
   localLibraryPath: "",
   serverUrl: "",
   imageDownloadPath: "",
+  photoshopExecutablePath: "",
   language: "zh-CN",
 };
 
@@ -521,6 +524,7 @@ export function normalizeConfig(input: Partial<ForartAppConfig>): ForartAppConfi
     localLibraryPath: String(input.localLibraryPath || "").trim(),
     serverUrl: String(input.serverUrl || "").trim().replace(/\/+$/, ""),
     imageDownloadPath: String(input.imageDownloadPath || "").trim(),
+    photoshopExecutablePath: String(input.photoshopExecutablePath || "").trim(),
     language: input.language === "en-US" ? "en-US" : "zh-CN",
   };
 }

@@ -21,6 +21,7 @@ function sameAppConfig(left: ForartAppConfig, right: ForartAppConfig) {
   return left.mode === right.mode
     && left.localLibraryPath === right.localLibraryPath
     && left.imageDownloadPath === right.imageDownloadPath
+    && left.photoshopExecutablePath === right.photoshopExecutablePath
     && left.serverUrl === right.serverUrl
     && left.language === right.language;
 }
@@ -31,6 +32,7 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
   const [runModeExpanded, setRunModeExpanded] = useState(false);
   const [localLibraryPath, setLocalLibraryPath] = useState(config.localLibraryPath);
   const [imageDownloadPath, setImageDownloadPath] = useState(config.imageDownloadPath);
+  const [photoshopExecutablePath, setPhotoshopExecutablePath] = useState(config.photoshopExecutablePath);
   const [defaultImageDownloadPath, setDefaultImageDownloadPath] = useState("");
   const [serverUrl, setServerUrl] = useState(config.serverUrl);
   const [status, setStatus] = useState<StatusState>({ tone: "idle", text: t("settings:connectionChecking") });
@@ -49,6 +51,7 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
     setMode(config.mode);
     setLocalLibraryPath(config.localLibraryPath);
     setImageDownloadPath(config.imageDownloadPath);
+    setPhotoshopExecutablePath(config.photoshopExecutablePath);
     setServerUrl(config.serverUrl);
   }, [config]);
 
@@ -72,6 +75,15 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
   async function chooseImageDownloadDirectory() {
     const result = await window.forartConfig?.chooseDirectory();
     if (result && !result.canceled) setImageDownloadPath(result.path);
+  }
+
+  async function choosePhotoshopExecutable() {
+    const result = await window.forartConfig?.chooseFile({
+      title: t("settings:photoshopExecutableChoose"),
+      filterName: t("settings:photoshopExecutableFilter"),
+      extensions: ["exe"],
+    });
+    if (result && !result.canceled) setPhotoshopExecutablePath(result.path);
   }
 
   const refreshConnectionStatus = useCallback(async (nextMode: ForartMode, nextServerUrl: string) => {
@@ -156,13 +168,14 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
         mode,
         localLibraryPath,
         imageDownloadPath,
+        photoshopExecutablePath,
         serverUrl,
         language: i18n.language === "en-US" ? "en-US" : "zh-CN",
       }));
     }, 450);
 
     return () => window.clearTimeout(timeout);
-  }, [config.mode, config.serverUrl, imageDownloadPath, i18n.language, localLibraryPath, mode, refreshConnectionStatus, saveGeneralSettings, serverUrl]);
+  }, [config.mode, config.serverUrl, imageDownloadPath, i18n.language, localLibraryPath, mode, photoshopExecutablePath, refreshConnectionStatus, saveGeneralSettings, serverUrl]);
 
   return (
     <div hidden={hidden}>
@@ -246,6 +259,21 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
               aria-label={t("settings:imageDownloadDirectory")}
             />
             <Button type="button" variant="ghost" size="icon-lg" title={t("setup:chooseDirectory")} aria-label={t("setup:chooseDirectory")} onClick={chooseImageDownloadDirectory}>
+              <FolderOpen aria-hidden="true" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="settings-subsection settings-download-path-row" aria-label={t("settings:photoshopConfig")}>
+          <h3>{t("settings:photoshopExecutablePath")}</h3>
+          <div className="settings-download-path-control">
+            <input
+              value={photoshopExecutablePath}
+              onChange={(event) => setPhotoshopExecutablePath(event.target.value)}
+              placeholder={t("settings:photoshopExecutableAuto")}
+              aria-label={t("settings:photoshopExecutablePath")}
+            />
+            <Button type="button" variant="ghost" size="icon-lg" title={t("settings:photoshopExecutableChoose")} aria-label={t("settings:photoshopExecutableChoose")} onClick={choosePhotoshopExecutable}>
               <FolderOpen aria-hidden="true" />
             </Button>
           </div>

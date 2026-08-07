@@ -20,7 +20,10 @@ function readPhotoshopRegistryPath(execFile, registryKey) {
   });
 }
 
-async function findPhotoshopExecutable({ execFile, existsSync }) {
+async function findPhotoshopExecutable({ configuredPath, execFile, existsSync }) {
+  const normalizedConfiguredPath = String(configuredPath || '').trim();
+  if (normalizedConfiguredPath && existsSync(normalizedConfiguredPath)) return normalizedConfiguredPath;
+
   for (const registryKey of PHOTOSHOP_REGISTRY_KEYS) {
     const executablePath = await readPhotoshopRegistryPath(execFile, registryKey);
     if (executablePath && existsSync(executablePath)) return executablePath;
@@ -49,7 +52,15 @@ function launchDetached(spawn, executablePath, imagePath) {
   });
 }
 
-function registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, imageReviewScaledImageStore, shell, processTools = {} }) {
+function registerImageReviewIpc({
+  ipcMain,
+  dialog,
+  imageReviewStore,
+  imageReviewScaledImageStore,
+  shell,
+  getPhotoshopExecutablePath = () => '',
+  processTools = {},
+}) {
   const execFile = processTools.execFile || defaultExecFile;
   const spawn = processTools.spawn || defaultSpawn;
   const existsSync = processTools.existsSync || fs.existsSync;
@@ -137,7 +148,11 @@ function registerImageReviewIpc({ ipcMain, dialog, imageReviewStore, imageReview
     }
     if (!imagePath || !existsSync(imagePath)) return { ok: false, reason: 'image-not-found' };
 
-    const photoshopPath = await findPhotoshopExecutable({ execFile, existsSync });
+    const photoshopPath = await findPhotoshopExecutable({
+      configuredPath: getPhotoshopExecutablePath(),
+      execFile,
+      existsSync,
+    });
     if (!photoshopPath) return { ok: false, reason: 'photoshop-not-found' };
 
     try {

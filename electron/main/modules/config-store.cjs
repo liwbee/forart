@@ -20,6 +20,7 @@ function normalizeConfig(payload = {}) {
     localLibraryPath: String(payload.localLibraryPath || '').trim(),
     serverUrl: String(payload.serverUrl || '').trim().replace(/\/+$/, ''),
     imageDownloadPath: String(payload.imageDownloadPath || '').trim(),
+    photoshopExecutablePath: String(payload.photoshopExecutablePath || '').trim(),
     language: payload.language === 'en-US' ? 'en-US' : 'zh-CN',
   };
 }

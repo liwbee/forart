@@ -67,6 +67,24 @@ function registerConfigIpc({ ipcMain, dialog, configStore, app, net }) {
     };
   });
 
+  ipcMain.handle('dialog:choose-file', async (_event, payload = {}) => {
+    const extensions = Array.isArray(payload.extensions)
+      ? payload.extensions.map((extension) => String(extension).replace(/^\./, '').trim()).filter(Boolean)
+      : [];
+    const result = await dialog.showOpenDialog({
+      title: String(payload?.title || 'Choose file'),
+      properties: ['openFile'],
+      filters: extensions.length
+        ? [{ name: String(payload?.filterName || 'Files'), extensions }]
+        : undefined,
+    });
+
+    return {
+      canceled: result.canceled,
+      path: result.filePaths[0] || '',
+    };
+  });
+
   ipcMain.handle('server:test-remote', async (_event, serverUrl) => {
     const baseUrl = String(serverUrl || '').trim();
     if (!baseUrl) return { ok: false, error: 'Server URL is required' };

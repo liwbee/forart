@@ -88,6 +88,7 @@ test('config sections preserve sibling data and use atomic replacement', (t) => 
   }), 'utf8');
 
   const store = createConfigStore({ app: { isPackaged: false }, rootDir: tempRoot });
+  assert.equal(store.load()?.photoshopExecutablePath, '');
   assert.deepEqual(store.loadInfiniteCanvasSettings().referenceComparisonViewer, {
     referenceComparisonEnabled: true,
     referencePanelPercent: 64,
@@ -118,10 +119,12 @@ test('config sections preserve sibling data and use atomic replacement', (t) => 
     localLibraryPath: 'D:/Library',
     serverUrl: 'http://127.0.0.1:6980/',
     imageDownloadPath: 'D:/Downloads',
+    photoshopExecutablePath: 'C:/Adobe/Photoshop.exe',
     language: 'en-US',
   });
   persisted = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   assert.equal(persisted.serverUrl, 'http://127.0.0.1:6980');
+  assert.equal(persisted.photoshopExecutablePath, 'C:/Adobe/Photoshop.exe');
   assert.equal(persisted.apiSettings.providers.find((provider) => provider.id === 'custom').apiKey, 'secret');
   assert.equal(persisted.apiSettings.libtvMachineId, 'PC02');
   assert.deepEqual(persisted.infiniteCanvas, savedInfiniteCanvas);
@@ -153,6 +156,11 @@ test('local status checks that the configured IPC library path is accessible', a
   const status = handlers.get('server:local-status');
   assert.equal(typeof handlers.get('config:load-infinite-canvas-settings'), 'function');
   assert.equal(typeof handlers.get('config:save-infinite-canvas-settings'), 'function');
+  assert.equal(typeof handlers.get('dialog:choose-file'), 'function');
+  assert.deepEqual(await handlers.get('dialog:choose-file')({}, { extensions: ['exe'] }), {
+    canceled: true,
+    path: '',
+  });
   const missing = await status();
   assert.equal(missing.ok, false);
   fs.mkdirSync(libraryPath, { recursive: true });
