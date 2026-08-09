@@ -1242,6 +1242,20 @@ body {
   cursor: grab;
 }
 
+.settings-api-model-toolbar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.settings-api-model-tabs {
+  width: min(100%, 300px);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .settings-api-provider-card:active .settings-api-provider-drag-handle {
   cursor: grabbing;
 }
@@ -1886,6 +1900,11 @@ body {
   gap: var(--space-2);
 }
 
+.settings-api-model-list-content {
+  display: grid;
+  gap: var(--space-2);
+}
+
 .settings-api-model-sortable-list .draggable-list__item {
   min-width: 0;
 }
@@ -1916,6 +1935,19 @@ body {
   grid-template-columns: 28px 24px minmax(0, 1fr) minmax(220px, 0.34fr);
 }
 
+.settings-api-model-row--catalog.has-rule.is-custom {
+  grid-template-columns: 28px 24px minmax(0, 1fr) minmax(220px, 0.34fr) 40px;
+}
+
+.settings-api-model-row--draft {
+  grid-template-columns: 28px minmax(0, 1fr) 32px 32px;
+  border-style: dashed;
+}
+
+.settings-api-model-row--draft.has-rule {
+  grid-template-columns: 28px minmax(0, 1fr) minmax(220px, 0.34fr) 32px 32px;
+}
+
 .settings-api-model-row--catalog[data-enabled="false"] {
   opacity: 0.64;
 }
@@ -1939,6 +1971,19 @@ body {
   cursor: grabbing;
 }
 
+.settings-api-model-draft-marker {
+  width: 28px;
+  height: 36px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.settings-api-model-draft-marker svg {
+  width: 14px;
+  height: 14px;
+}
+
 .settings-api-model-alias {
   min-width: 0;
   display: grid;
@@ -1955,6 +2000,10 @@ body {
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.settings-api-model-alias .settings-api-model-error {
+  color: var(--destructive);
 }
 
 .settings-api-model-rule {
@@ -1990,6 +2039,12 @@ body {
 
 .settings-api-model-row.has-rule > [data-slot="button"] {
   grid-column: 4;
+}
+
+.settings-api-model-row--draft > [data-slot="button"],
+.settings-api-model-row--draft.has-rule > [data-slot="button"],
+.settings-api-model-row--catalog.has-rule.is-custom > [data-slot="button"] {
+  grid-column: auto;
 }
 
 .settings-api-modal-backdrop {

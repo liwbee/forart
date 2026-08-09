@@ -8,9 +8,10 @@ import { SizePresetPicker } from "../../../components/SizePresetPicker";
 import { Alert, AlertDescription } from "../../../components/ui/alert";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent } from "../../../components/ui/card";
-import { Field, FieldGroup } from "../../../components/ui/field";
+import { Field, FieldGroup, FieldLabel } from "../../../components/ui/field";
 import { ScrollArea } from "../../../components/ui/scroll-area";
 import { Separator } from "../../../components/ui/separator";
+import { Switch } from "../../../components/ui/switch";
 import { Textarea } from "../../../components/ui/textarea";
 import { cn } from "../../../lib/utils";
 import {
@@ -27,11 +28,18 @@ import {
   detectImageModelRuleId,
   getImageModelRule,
   imageModelImageCountOptions,
+  normalizeImageModelCustomSize,
   normalizeImageModelGenerationSelection,
   normalizeImageModelSizeSelection,
 } from "../../settings/imageModelRules";
 import { useNativeCanvasActions } from "../canvasActions";
-import { nativeCanvasNodeTaskId, type NativeCanvasEdge, type NativeCanvasNode, type NativeCanvasNodeData } from "../nativeCanvas";
+import {
+  nativeCanvasNodeTaskId,
+  type NativeCanvasEdge,
+  type NativeCanvasNode,
+  type NativeCanvasNodeData,
+  type NativeImagePromptDocument,
+} from "../nativeCanvas";
 import {
   collectActionFissionAdditionalPrompts,
   collectActionFissionAdditionalReferences,
@@ -48,6 +56,8 @@ import {
   normalizeLibtvModels,
 } from "../libtv-generation/libtvModelSchema";
 import { ImageReferenceStrip } from "./ImageReferenceStrip";
+import { normalizeImagePromptDocument } from "../generation/imagePromptReferences";
+import { ImagePromptEditor } from "./ImagePromptEditor";
 
 
 interface ImageGeneratorParamPanelProps {
@@ -96,20 +106,39 @@ export function ImageGeneratorParamPanel({
   const [libtvLoadError, setLibtvLoadError] = useState("");
   const [sizePickerOpen, setSizePickerOpen] = useState(false);
   const [promptDraft, setPromptDraft] = useState(() => String(data.text || ""));
+  const [promptDocumentDraft, setPromptDocumentDraft] = useState<NativeImagePromptDocument | undefined>(
+    () => normalizeImagePromptDocument(data.imagePromptDocument),
+  );
+  const [negativePromptDraft, setNegativePromptDraft] = useState(() => String(data.imageNegativePrompt || ""));
   const referenceInputRef = useRef<HTMLInputElement | null>(null);
   const promptDraftRef = useRef(promptDraft);
+  const promptDocumentDraftRef = useRef(promptDocumentDraft);
+  const negativePromptDraftRef = useRef(negativePromptDraft);
   const promptFocusedRef = useRef(false);
   const promptComposingRef = useRef(false);
   const pendingPromptCommitRef = useRef<string | null>(null);
   const committedPromptRef = useRef(String(data.text || ""));
+  const committedPromptDocumentRef = useRef(JSON.stringify(normalizeImagePromptDocument(data.imagePromptDocument) || null));
+  const committedNegativePromptRef = useRef(String(data.imageNegativePrompt || ""));
   const wasVisibleRef = useRef(visible);
   const pendingLibtvSelectionRef = useRef<PendingLibtvSelection | null>(null);
 
-  const commitPrompt = useCallback((prompt = promptDraftRef.current) => {
-    if (prompt === committedPromptRef.current) return;
+  const commitPrompt = useCallback((
+    prompt = promptDraftRef.current,
+    document = promptDocumentDraftRef.current,
+  ) => {
+    const documentSignature = JSON.stringify(document || null);
+    if (prompt === committedPromptRef.current && documentSignature === committedPromptDocumentRef.current) return;
     committedPromptRef.current = prompt;
+    committedPromptDocumentRef.current = documentSignature;
     pendingPromptCommitRef.current = prompt;
-    patchNodeData(nodeId, { text: prompt });
+    patchNodeData(nodeId, { text: prompt, imagePromptDocument: document });
+  }, [nodeId, patchNodeData]);
+
+  const commitNegativePrompt = useCallback((negativePrompt = negativePromptDraftRef.current) => {
+    if (negativePrompt === committedNegativePromptRef.current) return;
+    committedNegativePromptRef.current = negativePrompt;
+    patchNodeData(nodeId, { imageNegativePrompt: negativePrompt || undefined });
   }, [nodeId, patchNodeData]);
 
   useEffect(() => {
@@ -126,13 +155,43 @@ export function ImageGeneratorParamPanel({
   }, [data.text]);
 
   useEffect(() => {
-    if (wasVisibleRef.current && !visible) commitPrompt();
+    const externalDocument = normalizeImagePromptDocument(data.imagePromptDocument);
+    const externalSignature = JSON.stringify(externalDocument || null);
+    committedPromptDocumentRef.current = externalSignature;
+    if (promptFocusedRef.current || JSON.stringify(promptDocumentDraftRef.current || null) === externalSignature) return;
+    promptDocumentDraftRef.current = externalDocument;
+    setPromptDocumentDraft(externalDocument);
+  }, [data.imagePromptDocument]);
+
+  useEffect(() => {
+    const externalNegativePrompt = String(data.imageNegativePrompt || "");
+    committedNegativePromptRef.current = externalNegativePrompt;
+    if (negativePromptDraftRef.current === externalNegativePrompt) return;
+    negativePromptDraftRef.current = externalNegativePrompt;
+    setNegativePromptDraft(externalNegativePrompt);
+  }, [data.imageNegativePrompt]);
+
+  useEffect(() => {
+    if (wasVisibleRef.current && !visible) {
+      commitPrompt();
+      commitNegativePrompt();
+    }
     wasVisibleRef.current = visible;
-  }, [commitPrompt, visible]);
+  }, [commitNegativePrompt, commitPrompt, visible]);
 
   useEffect(() => () => {
     const prompt = promptDraftRef.current;
-    if (prompt !== committedPromptRef.current) patchNodeData(nodeId, { text: prompt });
+    const document = promptDocumentDraftRef.current;
+    if (
+      prompt !== committedPromptRef.current
+      || JSON.stringify(document || null) !== committedPromptDocumentRef.current
+    ) {
+      patchNodeData(nodeId, { text: prompt, imagePromptDocument: document });
+    }
+    const negativePrompt = negativePromptDraftRef.current;
+    if (negativePrompt !== committedNegativePromptRef.current) {
+      patchNodeData(nodeId, { imageNegativePrompt: negativePrompt || undefined });
+    }
   }, [nodeId, patchNodeData]);
 
   useEffect(() => {
@@ -227,6 +286,16 @@ export function ImageGeneratorParamPanel({
   const additionalReferencePrompts = isActionFission
     ? collectActionFissionAdditionalPrompts(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference"))
     : [];
+  const advancedRule = isLibtv ? undefined : rule.advancedRule;
+  const promptExtendRule = advancedRule?.promptExtend;
+  const hasAnyReferenceImage = referenceImages.length + additionalReferenceImages.length > 0;
+  const promptExtendModes = (promptExtendRule?.modes || []).filter((mode) => (
+    mode !== "agent" || !promptExtendRule?.agentTextToImageOnly || !hasAnyReferenceImage
+  ));
+  const storedPromptExtendMode = data.imagePromptExtendMode || promptExtendRule?.defaultMode || "direct";
+  const promptExtendMode = promptExtendModes.includes(storedPromptExtendMode)
+    ? storedPromptExtendMode
+    : promptExtendModes[0] || "direct";
   const normalizedApiGenerationSelection = normalizeImageModelGenerationSelection(
     rule,
     data.imageQuality,
@@ -423,6 +492,7 @@ export function ImageGeneratorParamPanel({
       model: nextModel,
       resolution: nextSize.resolution,
       aspectRatio: nextSize.aspectRatio,
+      customSize: normalizeImageModelCustomSize(nextRule, data.imageCustomSize) || undefined,
       quality: nextGeneration.quality || undefined,
       count: nextImageCount,
     });
@@ -482,6 +552,7 @@ export function ImageGeneratorParamPanel({
       model: nextModel,
       resolution: nextSize.resolution,
       aspectRatio: nextSize.aspectRatio,
+      customSize: normalizeImageModelCustomSize(nextRule, data.imageCustomSize) || undefined,
       quality: nextGeneration.quality || undefined,
       count: nextImageCount,
     });
@@ -501,8 +572,15 @@ export function ImageGeneratorParamPanel({
       return;
     }
     const prompt = showPrompt ? promptDraftRef.current : undefined;
+    const promptDocument = showPrompt ? promptDocumentDraftRef.current : undefined;
+    const negativePrompt = advancedRule?.supportsNegativePrompt ? negativePromptDraftRef.current : undefined;
     if (prompt !== undefined) commitPrompt(prompt);
-    void (onRun?.() ?? actions.runImageGeneration(nodeId, { promptOverride: prompt }));
+    if (negativePrompt !== undefined) commitNegativePrompt(negativePrompt);
+    void (onRun?.() ?? actions.runImageGeneration(nodeId, {
+      promptOverride: prompt,
+      promptDocumentOverride: promptDocument,
+      negativePromptOverride: negativePrompt,
+    }));
   };
 
   const primaryReferenceStrip = (
@@ -606,35 +684,78 @@ export function ImageGeneratorParamPanel({
 
                   {showPrompt ? (
                     <Field>
-                      <Textarea
+                      <ImagePromptEditor
                         id={`image-generator-prompt-${nodeId}`}
-                        className="rf-image-generator-prompt"
                         value={promptDraft}
+                        document={promptDocumentDraft}
+                        references={referenceImages}
                         placeholder={t("infiniteCanvas:imageComposerPlaceholder")}
-                        aria-label={t("infiniteCanvas:prompt")}
-                        onFocus={() => {
-                          promptFocusedRef.current = true;
+                        ariaLabel={t("infiniteCanvas:prompt")}
+                        onFocusChange={(focused) => {
+                          promptFocusedRef.current = focused;
                         }}
-                        onBlur={() => {
-                          promptFocusedRef.current = false;
-                          commitPrompt();
+                        onCompositionChange={(composing) => {
+                          promptComposingRef.current = composing;
                         }}
-                        onCompositionStart={() => {
-                          promptComposingRef.current = true;
-                        }}
-                        onCompositionEnd={(event) => {
-                          promptComposingRef.current = false;
-                          const prompt = event.currentTarget.value;
+                        onChange={(prompt, document) => {
                           promptDraftRef.current = prompt;
+                          promptDocumentDraftRef.current = document;
                           setPromptDraft(prompt);
-                          commitPrompt(prompt);
+                          setPromptDocumentDraft(document);
+                          commitPrompt(prompt, document);
                         }}
+                        onCommit={() => commitPrompt()}
+                      />
+                    </Field>
+                  ) : null}
+                  {advancedRule?.supportsNegativePrompt ? (
+                    <Field>
+                      <FieldLabel htmlFor={`image-generator-negative-prompt-${nodeId}`}>
+                        {t("infiniteCanvas:negativePrompt")}
+                      </FieldLabel>
+                      <Textarea
+                        id={`image-generator-negative-prompt-${nodeId}`}
+                        className="min-h-16 resize-none"
+                        value={negativePromptDraft}
+                        placeholder={t("infiniteCanvas:negativePromptPlaceholder")}
+                        aria-label={t("infiniteCanvas:negativePrompt")}
+                        disabled={taskBusy}
+                        onBlur={() => commitNegativePrompt()}
                         onChange={(event) => {
-                          const prompt = event.currentTarget.value;
-                          promptDraftRef.current = prompt;
-                          setPromptDraft(prompt);
-                          if (!promptComposingRef.current) commitPrompt(prompt);
+                          const negativePrompt = event.currentTarget.value;
+                          negativePromptDraftRef.current = negativePrompt;
+                          setNegativePromptDraft(negativePrompt);
+                          commitNegativePrompt(negativePrompt);
                         }}
+                      />
+                    </Field>
+                  ) : null}
+                  {promptExtendRule ? (
+                    <Field orientation="horizontal" className="min-h-8">
+                      <FieldLabel htmlFor={`image-generator-prompt-extend-${nodeId}`}>
+                        {t("infiniteCanvas:promptExtend")}
+                      </FieldLabel>
+                      <Switch
+                        id={`image-generator-prompt-extend-${nodeId}`}
+                        size="sm"
+                        checked={Boolean(data.imagePromptExtend)}
+                        disabled={taskBusy}
+                        aria-label={t("infiniteCanvas:promptExtend")}
+                        onCheckedChange={(checked) => patchNodeData(nodeId, { imagePromptExtend: checked })}
+                      />
+                      <AppSelect
+                        className="w-28 shrink-0"
+                        size="sm"
+                        variant="ghost"
+                        value={promptExtendMode}
+                        options={promptExtendModes.map((mode) => ({
+                          value: mode,
+                          label: t(mode === "agent" ? "infiniteCanvas:promptExtendAgent" : "infiniteCanvas:promptExtendDirect"),
+                        }))}
+                        ariaLabel={t("infiniteCanvas:promptExtendMode")}
+                        menuPlacement="top"
+                        disabled={taskBusy || !data.imagePromptExtend}
+                        onChange={(value) => patchNodeData(nodeId, { imagePromptExtendMode: value as "direct" | "agent" })}
                       />
                     </Field>
                   ) : null}
@@ -689,6 +810,8 @@ export function ImageGeneratorParamPanel({
                       ? libtvCapabilities.qualityOptions.length ? libtvQuality : undefined
                       : apiQualityOptions.length ? apiGenerationSelection.quality : undefined}
                     qualityOptions={isLibtv ? libtvCapabilities.qualityOptions : apiQualityOptions}
+                    customSize={isLibtv || !rule.sizeRule.pixelSizeConstraints ? undefined : data.imageCustomSize || ""}
+                    customSizeConstraints={isLibtv ? undefined : rule.sizeRule.pixelSizeConstraints}
                     imageCount={showImageCount
                       ? isLibtv
                         ? libtvCapabilities.imageCountOptions.length ? libtvImageCount : undefined
@@ -716,6 +839,9 @@ export function ImageGeneratorParamPanel({
                       quality: t("infiniteCanvas:quality"),
                       aspectRatio: t("infiniteCanvas:ratio"),
                       imageCount: t("infiniteCanvas:imageCountOption"),
+                      customSize: t("infiniteCanvas:customPixelSize"),
+                      width: t("infiniteCanvas:width"),
+                      height: t("infiniteCanvas:height"),
                     }}
                     formatTrigger={isLibtv ? (() => {
                       const resolutionLabel = libtvCapabilities.resolutionOptions
@@ -745,6 +871,7 @@ export function ImageGeneratorParamPanel({
                           model,
                           resolution: imageResolution,
                           aspectRatio: sizeSelection.aspectRatio,
+                          customSize: undefined,
                           quality: apiGenerationSelection.quality || undefined,
                           count: apiGenerationSelection.imageCount,
                         });
@@ -755,7 +882,7 @@ export function ImageGeneratorParamPanel({
                             [libtvCapabilities.resolutionField === "resolution" ? "resolution" : "quality"]: imageResolution,
                           },
                         }
-                        : { imageResolution });
+                        : { imageResolution, imageCustomSize: undefined });
                     }}
                     onQualityChange={(quality) => {
                       if (isLibtv) {
@@ -773,6 +900,7 @@ export function ImageGeneratorParamPanel({
                           model,
                           resolution: sizeSelection.resolution,
                           aspectRatio: sizeSelection.aspectRatio,
+                          customSize: normalizeImageModelCustomSize(rule, data.imageCustomSize) || undefined,
                           quality,
                           count: apiGenerationSelection.imageCount,
                         });
@@ -798,6 +926,7 @@ export function ImageGeneratorParamPanel({
                           model,
                           resolution: sizeSelection.resolution,
                           aspectRatio: sizeSelection.aspectRatio,
+                          customSize: normalizeImageModelCustomSize(rule, data.imageCustomSize) || undefined,
                           quality: apiGenerationSelection.quality || undefined,
                           count: imageCount,
                         });
@@ -805,6 +934,18 @@ export function ImageGeneratorParamPanel({
                       patchNodeData(nodeId, isLibtv
                         ? { libtvImageGeneration: { ...libtvState, count: imageCount } }
                         : { imageCount });
+                    }}
+                    onCustomSizeChange={isLibtv ? undefined : (imageCustomSize) => {
+                      useGenerationPreferenceStore.getState().rememberApi({
+                        providerId: provider?.id,
+                        model,
+                        resolution: sizeSelection.resolution,
+                        aspectRatio: sizeSelection.aspectRatio,
+                        customSize: normalizeImageModelCustomSize(rule, imageCustomSize) || undefined,
+                        quality: apiGenerationSelection.quality || undefined,
+                        count: apiGenerationSelection.imageCount,
+                      });
+                      patchNodeData(nodeId, { imageCustomSize: imageCustomSize || undefined });
                     }}
                     onAspectRatioChange={(imageAspectRatio) => {
                       if (isLibtv) {
@@ -822,13 +963,14 @@ export function ImageGeneratorParamPanel({
                           model,
                           resolution: sizeSelection.resolution,
                           aspectRatio: imageAspectRatio,
+                          customSize: undefined,
                           quality: apiGenerationSelection.quality || undefined,
                           count: apiGenerationSelection.imageCount,
                         });
                       }
                       patchNodeData(nodeId, isLibtv
                         ? { libtvImageGeneration: { ...libtvState, aspectRatio: imageAspectRatio } }
-                        : { imageAspectRatio });
+                        : { imageAspectRatio, imageCustomSize: undefined });
                     }}
                   />
                   {beforeRunControl}

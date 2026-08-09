@@ -82,8 +82,12 @@ function normalizeApiTask(input = {}, fallback = {}) {
       : Array.isArray(fallback.referenceImages) ? fallback.referenceImages.map(String).filter(Boolean) : [],
     resolution: safeString(input.resolution || fallback.resolution),
     aspectRatio: safeString(input.aspectRatio || fallback.aspectRatio),
+    customSize: safeString(input.customSize || fallback.customSize),
     quality: safeString(input.quality || fallback.quality),
     imageCount: Math.max(1, Math.round(Number(input.imageCount || fallback.imageCount || 1))),
+    negativePrompt: input.negativePrompt !== undefined ? String(input.negativePrompt || '') : fallback.negativePrompt,
+    promptExtend: input.promptExtend !== undefined ? Boolean(input.promptExtend) : Boolean(fallback.promptExtend),
+    promptExtendMode: safeString(input.promptExtendMode || fallback.promptExtendMode),
     message: input.message !== undefined ? String(input.message || '') : fallback.message,
     messageCode: input.messageCode !== undefined ? String(input.messageCode || '') : fallback.messageCode,
     messageParams: input.messageParams !== undefined

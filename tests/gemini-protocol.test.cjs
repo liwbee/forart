@@ -19,8 +19,15 @@ function waitFor(predicate, timeoutMs = 3000) {
 
 function createRunner(fetch, savedAssets) {
   const generationTaskStore = createMemoryGenerationTaskStore('api');
+  const taskUpdates = [];
+  const updateTask = generationTaskStore.updateTask;
+  generationTaskStore.updateTask = (taskId, patch) => {
+    taskUpdates.push(structuredClone(patch));
+    return updateTask(taskId, patch);
+  };
   return {
     generationTaskStore,
+    taskUpdates,
     runner: createImageGenerationRunner({
       net: { fetch },
       assetStore: {
@@ -115,4 +122,36 @@ test('AI-Tudou Gemini responses skip thoughts and parse Markdown and inline base
     'data:image/jpeg;base64,aW5saW5l',
   ]);
   assert.equal(task.result.results.length, 2);
+});
+
+test('AI-Tudou Gemini progress advances through real request phases', async () => {
+  const savedAssets = [];
+  const { runner, generationTaskStore, taskUpdates } = createRunner(async (url) => {
+    if (String(url) === 'https://assets.example.com/reference.jpg') {
+      return new Response(Buffer.from('reference-image'), {
+        headers: { 'Content-Type': 'image/jpeg' },
+      });
+    }
+    return Response.json({
+      candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'cmVzdWx0' } }] } }],
+    });
+  }, savedAssets);
+
+  const task = await runGeminiTask(runner, generationTaskStore, {
+    referenceImages: ['https://assets.example.com/reference.jpg'],
+  });
+  const messageCodes = taskUpdates.map((patch) => patch.messageCode).filter(Boolean);
+  const referenceIndex = messageCodes.indexOf('image.referencePreparing');
+  const generatingIndex = messageCodes.indexOf('image.geminiGenerating');
+  const processingIndex = messageCodes.indexOf('generation.resultProcessing');
+
+  assert.equal(task.status, 'succeeded', task.error);
+  assert.ok(referenceIndex >= 0);
+  assert.ok(generatingIndex > referenceIndex);
+  assert.ok(processingIndex > generatingIndex);
+  assert.equal(messageCodes.includes('image.geminiSubmitting'), false);
+  assert.deepEqual(
+    taskUpdates.find((patch) => patch.messageCode === 'image.referencePreparing')?.messageParams,
+    { current: 1, total: 1 },
+  );
 });

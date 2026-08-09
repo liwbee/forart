@@ -4,11 +4,13 @@ import { isImageProviderConfigured, loadApiSettings, orderedApiProviders } from 
 import {
   detectImageModelRuleId,
   getImageModelRule,
+  normalizeImageModelCustomSize,
   normalizeImageModelSizeSelection,
   normalizeImageModelGenerationSelection,
 } from "../../settings/imageModelRules";
 import {
   nativeCanvasNodeTaskId,
+  type ImageGenerationRunOptions,
   type NativeCanvasEdge,
   type NativeCanvasNode,
 } from "../nativeCanvas";
@@ -27,6 +29,7 @@ import {
 import { activateGenerationHook } from "./generationHookLifecycle";
 import { isGenerationTaskActive, isGenerationTaskTerminal, useGenerationTaskCache, watchGenerationTask } from "./generationTaskCache";
 import { nativeResultsFromTask } from "./generationResultDownloadState";
+import { buildPromptWithImageReferenceDocument } from "./imagePromptReferences";
 
 export function collectConnectedPrompt(nodeId: string, nodes: NativeCanvasNode[], edges: NativeCanvasEdge[]) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
@@ -110,7 +113,7 @@ export function useNativeImageGeneration({
     }
   }, [canvasId, nodes, patchNodeData]);
 
-  const runImageGeneration = useCallback(async (nodeId: string, options?: { promptOverride?: string }) => {
+  const runImageGeneration = useCallback(async (nodeId: string, options?: ImageGenerationRunOptions) => {
     const node = nodes.find((item) => item.id === nodeId && item.data.kind === "imageGenerator");
     const currentTaskId = node ? nativeCanvasNodeTaskId(node.data) : "";
     const currentTask = currentTaskId ? useGenerationTaskCache.getState().tasksById[currentTaskId] : undefined;
@@ -141,6 +144,14 @@ export function useNativeImageGeneration({
 
       const modelRule = getImageModelRule(provider.modelRules.image[model] || detectImageModelRuleId(model));
       const size = normalizeImageModelSizeSelection(modelRule, node.data.imageResolution, node.data.imageAspectRatio);
+      const customSize = normalizeImageModelCustomSize(modelRule, node.data.imageCustomSize);
+      if (modelRule.sizeRule.pixelSizeConstraints && node.data.imageCustomSize && !customSize) {
+        setGenerationRuntimeError(launchKey, t("infiniteCanvas:invalidCustomPixelSize", {
+          min: modelRule.sizeRule.pixelSizeConstraints.minDimension,
+          max: modelRule.sizeRule.pixelSizeConstraints.maxDimension,
+        }));
+        return;
+      }
       const referenceInputs = collectImageGeneratorReferences(nodeId, nodes, edges, t("infiniteCanvas:referenceImage"));
       const generationSelection = normalizeImageModelGenerationSelection(
         modelRule,
@@ -159,9 +170,16 @@ export function useNativeImageGeneration({
         setGenerationRuntimeError(launchKey, message);
         return;
       }
-      const prompt = [String(options?.promptOverride ?? node.data.text ?? "").trim(), collectConnectedPrompt(nodeId, nodes, edges)]
-        .filter(Boolean)
-        .join("\n\n");
+      const prompt = buildPromptWithImageReferenceDocument({
+        document: options?.promptDocumentOverride ?? node.data.imagePromptDocument,
+        fallbackPrompt: String(options?.promptOverride ?? node.data.text ?? ""),
+        additionalPrompt: collectConnectedPrompt(nodeId, nodes, edges),
+        references: referenceInputs,
+        labels: {
+          instruction: (images) => t("infiniteCanvas:referenceImageInstruction", { images }),
+          requestHeader: t("infiniteCanvas:referenceImageRequestHeader"),
+        },
+      });
       if (!prompt) {
         setGenerationRuntimeError(launchKey, t("infiniteCanvas:promptRequired"));
         return;
@@ -188,8 +206,12 @@ export function useNativeImageGeneration({
         referenceImages: referenceInputs.map((item) => item.imageUrl),
         resolution: size.resolution,
         aspectRatio: size.aspectRatio,
+        customSize: customSize || undefined,
         quality: generationSelection.quality || undefined,
         imageCount: generationSelection.imageCount,
+        negativePrompt: String(options?.negativePromptOverride ?? node.data.imageNegativePrompt ?? "").trim() || undefined,
+        promptExtend: Boolean(node.data.imagePromptExtend),
+        promptExtendMode: node.data.imagePromptExtendMode,
         status: "submitting",
       });
       if (!task) throw new Error(t("infiniteCanvas:generationTaskCreateFailed"));

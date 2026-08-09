@@ -57,6 +57,12 @@ test('recommended API providers remain absent until explicitly added', () => {
   });
   assert.deepEqual(reorderedTudou.imageModels, ['grok-imagine-image']);
   assert.deepEqual(reorderedTudou.modelCatalogOrder.image.slice(0, 2), ['grok-imagine-image', 'gpt-image-2-1k']);
+  const tudouWithCustomModel = providers.createTudouProvider({
+    imageModels: ['custom-image-model'],
+    modelCatalogOrder: { image: ['custom-image-model'] },
+  });
+  assert.equal(tudouWithCustomModel.modelCatalogOrder.image[0], 'custom-image-model');
+  assert.deepEqual(tudouWithCustomModel.imageModels, ['custom-image-model']);
   const tudouOnly = providers.normalizeApiSettings({ providers: [tudou] });
   assert.deepEqual(tudouOnly.providerOrder, ['tudou-api']);
   assert.deepEqual(

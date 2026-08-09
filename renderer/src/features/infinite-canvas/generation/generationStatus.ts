@@ -14,7 +14,7 @@ const STATUS_TRANSLATION_KEYS: Record<string, string> = {
   "image.waitingForResult": "imageWaitingForResult",
   "image.referencesPreparing": "imageReferencesPreparing",
   "image.textRequestPreparing": "imageTextRequestPreparing",
-  "image.geminiSubmitting": "imageGeminiSubmitting",
+  "image.geminiGenerating": "imageGeminiGenerating",
   "image.editSubmitting": "imageEditSubmitting",
   "image.jsonReferenceRetrying": "imageJsonReferenceRetrying",
   "image.generationSubmitting": "imageGenerationSubmitting",

@@ -466,6 +466,24 @@ function isGptImage2Model(model) {
   return /gpt[-_. ]?image[-_. ]?(?:v)?2/i.test(String(model || ''));
 }
 
+function normalizeCustomPixelSize(value, constraints) {
+  if (!constraints || typeof constraints !== 'object') return '';
+  const match = String(value || '').trim().match(/^(\d{3,4})\s*[xX×]\s*(\d{3,4})$/);
+  if (!match) return '';
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  const ratio = width / height;
+  if (
+    width < Number(constraints.minDimension)
+    || width > Number(constraints.maxDimension)
+    || height < Number(constraints.minDimension)
+    || height > Number(constraints.maxDimension)
+    || ratio < Number(constraints.minAspectRatio)
+    || ratio > Number(constraints.maxAspectRatio)
+  ) return '';
+  return `${width}x${height}`;
+}
+
 function geminiImageConfig(resolution, aspectRatio) {
   const supportedAspectRatios = new Set(['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']);
   const rawResolution = String(resolution || '').trim().toUpperCase();
@@ -490,6 +508,12 @@ async function generateGeminiImage(context, provider, model, prompt, referenceIm
     if (part) parts.push(part);
   });
   parts.push({ text: prompt });
+  context.generationTaskStore.updateTask(taskId, {
+    status: 'running',
+    message: '',
+    messageCode: 'image.geminiGenerating',
+    messageParams: null,
+  });
   markRemoteExecutionStarted(context, taskId);
   const payload = await requestJson(context.net, geminiGenerateContentUrl(provider, model), {
     method: 'POST',
@@ -622,6 +646,30 @@ async function executeImageTask(context, task, payload, signal) {
   const resolution = String(payload.resolution || task.resolution || '1K');
   const aspectRatio = String(payload.aspectRatio || task.aspectRatio || '1:1');
   const rule = payload.modelRule && typeof payload.modelRule === 'object' ? payload.modelRule : {};
+  const rawCustomSize = String(payload.customSize || task.customSize || '').trim();
+  const customSize = normalizeCustomPixelSize(rawCustomSize, rule.sizeRule?.pixelSizeConstraints);
+  if (rawCustomSize && !customSize) throw new Error('Invalid custom image size.');
+  const advancedRule = rule.advancedRule && typeof rule.advancedRule === 'object' ? rule.advancedRule : {};
+  const negativePrompt = advancedRule.supportsNegativePrompt
+    ? String(payload.negativePrompt || task.negativePrompt || '').trim()
+    : '';
+  const promptExtendRule = advancedRule.promptExtend && typeof advancedRule.promptExtend === 'object'
+    ? advancedRule.promptExtend
+    : null;
+  const promptExtend = Boolean(promptExtendRule && (
+    payload.promptExtend !== undefined
+      ? payload.promptExtend
+      : task.promptExtend !== undefined ? task.promptExtend : promptExtendRule.defaultEnabled
+  ));
+  const promptExtendModes = Array.isArray(promptExtendRule?.modes) ? promptExtendRule.modes.map(String) : [];
+  const requestedPromptExtendMode = String(payload.promptExtendMode || task.promptExtendMode || promptExtendRule?.defaultMode || '');
+  const fallbackPromptExtendMode = String(promptExtendRule?.defaultMode || promptExtendModes[0] || '');
+  let promptExtendMode = promptExtendModes.includes(requestedPromptExtendMode)
+    ? requestedPromptExtendMode
+    : fallbackPromptExtendMode;
+  if (referenceImages.length && promptExtendRule?.agentTextToImageOnly && promptExtendMode === 'agent') {
+    promptExtendMode = promptExtendModes.includes('direct') ? 'direct' : '';
+  }
   const qualityOptions = Array.isArray(rule.qualityRule?.options) ? rule.qualityRule.options.map(String) : [];
   const quality = qualityOptions.includes(String(payload.quality || task.quality || ''))
     ? String(payload.quality || task.quality)
@@ -654,7 +702,6 @@ async function executeImageTask(context, task, payload, signal) {
     messageParams: null,
   });
   if (protocol === 'gemini') {
-    context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.geminiSubmitting', messageParams: null });
     return generateGeminiImage(context, provider, model, prompt, referenceImages, resolution, aspectRatio, task.id, signal);
   }
 
@@ -708,13 +755,13 @@ async function executeImageTask(context, task, payload, signal) {
     : await normalizeReferenceImages(context, baseUrl, uploadHeaders, referenceImages, task.id, signal);
   const sizeMode = rule.sizeMode || (provider.protocol === 'compatible' ? 'ratio' : 'pixel');
   const resolutionField = rule.sizeRule?.resolutionField || rule.resolutionField || 'resolution';
-  const requestSize = sizeMode === 'ratio' || provider.protocol === 'compatible' ? aspectRatio : payload.size || openAiSizeFor(resolution, aspectRatio);
+  const requestSize = customSize || (sizeMode === 'ratio' || provider.protocol === 'compatible' ? aspectRatio : payload.size || openAiSizeFor(resolution, aspectRatio));
   const requestResolution = resolution.toUpperCase();
   const sizePayload = resolutionField === 'size'
     ? { size: requestSize }
     : {
       size: requestSize,
-      ...(resolutionField === 'none' || !requestResolution ? {} : { resolution: requestResolution }),
+      ...(customSize || resolutionField === 'none' || !requestResolution ? {} : { resolution: requestResolution }),
     };
   const requestBody = requestFormat === 'openai-json-extra-body'
     ? {
@@ -733,6 +780,9 @@ async function executeImageTask(context, task, payload, signal) {
       ...(quality ? { quality } : {}),
       ...sizePayload,
       ...(refs.length ? { image_urls: refs } : {}),
+      ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
+      ...(promptExtend ? { prompt_extend: true } : {}),
+      ...(promptExtend && promptExtendMode ? { prompt_extend_mode: promptExtendMode } : {}),
     };
 
   context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.generationSubmitting', messageParams: null });

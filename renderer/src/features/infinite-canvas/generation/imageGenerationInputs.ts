@@ -89,7 +89,7 @@ function collectReferenceInputs(
         edgeId: edge.id,
         nodeId: source.id,
         order: Math.max(1, Number(edge.data?.referenceOrder || 1)),
-        title: String(primaryImage?.fileName || fallbackTitle),
+        title: String(source.data.label || primaryImage?.fileName || fallbackTitle),
         imageUrl: resolveLibraryImageUrl(imageUrl),
         previewUrl: resolveLibraryImageUrl(String(primaryImage?.thumbUrl || imageUrl)),
       }];

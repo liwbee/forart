@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 import { i18n } from "../../i18n";
-import type { NativeCanvasNodeData } from "./nativeCanvas";
+import type { ImageGenerationRunOptions, NativeCanvasNodeData } from "./nativeCanvas";
 import type {
   ImageGeneratorPromptInput,
   ImageGeneratorReferenceInput,
@@ -19,7 +19,7 @@ export interface NativeCanvasActions {
   openLibraryForReference: (nodeId: string) => void;
   openActionFissionRowSettings: (nodeId: string, rowId: string) => void;
   patchNodeData: (nodeId: string, patch: Partial<NativeCanvasNodeData>) => void;
-  runImageGeneration: (nodeId: string, options?: { promptOverride?: string }) => Promise<void>;
+  runImageGeneration: (nodeId: string, options?: ImageGenerationRunOptions) => Promise<void>;
   runActionFission: (nodeId: string, rowId?: string) => Promise<void>;
   removeCanvasEdge: (edgeId: string) => void;
   reorderImageGeneratorReferences: (nodeId: string, orderedEdgeIds: string[]) => void;

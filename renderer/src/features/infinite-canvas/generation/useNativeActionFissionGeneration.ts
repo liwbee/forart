@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { TFunction } from "i18next";
 import { isImageProviderConfigured, loadApiSettings, orderedApiProviders } from "../../settings/apiProviders";
-import { detectImageModelRuleId, getImageModelRule, normalizeImageModelSizeSelection } from "../../settings/imageModelRules";
+import {
+  detectImageModelRuleId,
+  getImageModelRule,
+  normalizeImageModelCustomSize,
+  normalizeImageModelSizeSelection,
+} from "../../settings/imageModelRules";
 import {
   actionFissionRowTaskId,
   type ActionFissionRow,
@@ -144,6 +149,13 @@ export function useNativeActionFissionGeneration({
     if (!provider || !model) throw new Error(t("infiniteCanvas:noImageApiConfigured"));
     const rule = getImageModelRule(provider.modelRules.image[model] || detectImageModelRuleId(model));
     const size = normalizeImageModelSizeSelection(rule, node.data.imageResolution, node.data.imageAspectRatio);
+    const customSize = normalizeImageModelCustomSize(rule, node.data.imageCustomSize);
+    if (rule.sizeRule.pixelSizeConstraints && node.data.imageCustomSize && !customSize) {
+      throw new Error(t("infiniteCanvas:invalidCustomPixelSize", {
+        min: rule.sizeRule.pixelSizeConstraints.minDimension,
+        max: rule.sizeRule.pixelSizeConstraints.maxDimension,
+      }));
+    }
 
     const payloads = rows.map((row) => {
       const references = actionFissionReferenceImages(row, primaryReferences, additionalReferences);
@@ -165,8 +177,12 @@ export function useNativeActionFissionGeneration({
         referenceImages: references,
         resolution: size.resolution,
         aspectRatio: size.aspectRatio,
+        customSize: customSize || undefined,
         quality: node.data.imageQuality,
         imageCount: 1,
+        negativePrompt: String(node.data.imageNegativePrompt || "").trim() || undefined,
+        promptExtend: Boolean(node.data.imagePromptExtend),
+        promptExtendMode: node.data.imagePromptExtendMode,
         status: "submitting",
       };
     });

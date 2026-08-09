@@ -103,8 +103,7 @@ function emptyModelRules(): ApiModelRules {
 }
 
 function normalizeTudouImageModelOrder(values: unknown) {
-  const allowed = new Set<string>(TUDOU_IMAGE_MODELS);
-  const requested = Array.isArray(values) ? uniqueModels(values.map(String)).filter((model) => allowed.has(model)) : [];
+  const requested = Array.isArray(values) ? uniqueModels(values.map(String)) : [];
   return [...requested, ...TUDOU_IMAGE_MODELS.filter((model) => !requested.includes(model))];
 }
 

@@ -45,8 +45,11 @@ export function applyNativeNodeDataPatch(
     }
   }
 
-  if (!primary && Object.prototype.hasOwnProperty.call(patch, "imageAspectRatio")) {
-    return resizeAroundCenter(node, data, getImageGeneratorNodeSize(data.imageAspectRatio));
+  if (!primary && (
+    Object.prototype.hasOwnProperty.call(patch, "imageAspectRatio")
+    || Object.prototype.hasOwnProperty.call(patch, "imageCustomSize")
+  )) {
+    return resizeAroundCenter(node, data, getImageGeneratorNodeSize(data.imageCustomSize || data.imageAspectRatio));
   }
 
   return { ...node, data };

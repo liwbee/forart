@@ -14,7 +14,7 @@ export function getImageNodeSize(naturalWidth: number, naturalHeight: number) {
 }
 
 export function getImageGeneratorNodeSize(aspectRatio: string | undefined) {
-  const match = aspectRatio?.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
+  const match = aspectRatio?.match(/^(\d+(?:\.\d+)?)\s*[:xX×]\s*(\d+(?:\.\d+)?)$/);
   if (!match) return IMAGE_GENERATOR_DEFAULT_SIZE;
   const ratioWidth = Number(match[1]);
   const ratioHeight = Number(match[2]);

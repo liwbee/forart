@@ -30,19 +30,42 @@ export interface NativeCanvasAnnotationStyle {
   textAlign?: "left" | "center" | "right";
 }
 
+export interface NativeImagePromptSerializedNode extends Record<string, unknown> {
+  type: string;
+  version?: number;
+  children?: NativeImagePromptSerializedNode[];
+  text?: string;
+  edgeId?: string;
+}
+
+export interface NativeImagePromptDocument {
+  root: NativeImagePromptSerializedNode;
+}
+
+export interface ImageGenerationRunOptions {
+  promptOverride?: string;
+  promptDocumentOverride?: NativeImagePromptDocument;
+  negativePromptOverride?: string;
+}
+
 export interface NativeCanvasNodeData extends Record<string, unknown> {
   kind: NativeCanvasNodeKind;
   label: string;
   imageUrl?: string;
   thumbUrl?: string;
   text?: string;
+  imagePromptDocument?: NativeImagePromptDocument;
   annotationStyle?: NativeCanvasAnnotationStyle;
   imageProviderId?: string;
   imageModel?: string;
   imageResolution?: string;
   imageAspectRatio?: string;
+  imageCustomSize?: string;
   imageQuality?: string;
   imageCount?: number;
+  imageNegativePrompt?: string;
+  imagePromptExtend?: boolean;
+  imagePromptExtendMode?: "direct" | "agent";
   generatedImages?: NativeGenerationResult[];
   multiImageExpanded?: boolean;
   multiImageCollapsedSize?: { width: number; height: number };

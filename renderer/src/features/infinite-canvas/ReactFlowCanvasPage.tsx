@@ -47,6 +47,7 @@ import {
   nativeCanvasNodePrimaryImage,
   nativeCanvasNodeTaskId,
   NATIVE_CANVAS_NODE_DEFINITIONS,
+  type ImageGenerationRunOptions,
   type NativeCanvasEdge,
   type NativeCanvasNode,
   type NativeCanvasNodeKind,
@@ -702,7 +703,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     patchRow: patchActionFissionRow,
     t,
   });
-  const runImageGeneration = useCallback(async (nodeId: string, options?: { promptOverride?: string }) => {
+  const runImageGeneration = useCallback(async (nodeId: string, options?: ImageGenerationRunOptions) => {
     const node = nodes.find((item) => item.id === nodeId);
     if (node?.data.imageGenerationBackend === "libtv") await runLibtvGeneration(nodeId, options);
     else await runApiImageGeneration(nodeId, options);

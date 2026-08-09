@@ -6,6 +6,7 @@ interface ApiGenerationPreference {
   model?: string;
   resolution?: string;
   aspectRatio?: string;
+  customSize?: string;
   quality?: string;
   count?: number;
 }
@@ -51,6 +52,7 @@ export function rememberedGenerationNodeData(kind: NativeCanvasNodeKind): Partia
       imageModel: state.api.model,
       imageResolution: state.api.resolution,
       imageAspectRatio: state.api.aspectRatio,
+      imageCustomSize: state.api.customSize,
       imageQuality: state.api.quality,
       imageCount: kind === "actionFission" ? 1 : state.api.count,
     };

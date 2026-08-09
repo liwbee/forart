@@ -2315,18 +2315,28 @@
   display: none;
 }
 
-.rf-native-canvas .rf-image-generator-prompt {
+.rf-native-canvas .rf-image-generator-prompt-shell {
+  position: relative;
   height: 120px;
   min-height: 120px;
   max-height: 120px;
+}
+
+.rf-native-canvas .rf-image-generator-prompt {
+  width: 100%;
+  height: 100%;
   box-sizing: border-box;
-  field-sizing: fixed;
-  resize: none;
   overflow-y: auto;
+  padding: 8px 12px;
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .rf-native-canvas .rf-image-generator-prompt:focus,
@@ -2335,6 +2345,63 @@
   outline: 0;
   background: transparent;
   box-shadow: none;
+}
+
+.rf-image-generator-prompt-placeholder {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  right: 12px;
+  pointer-events: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.rf-image-prompt-reference-token {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 5px 2px 2px;
+  border-radius: calc(var(--radius) - 2px);
+  background: color-mix(in srgb, var(--accent) 75%, transparent);
+  color: var(--accent-foreground);
+  line-height: 18px;
+  vertical-align: middle;
+  white-space: nowrap;
+  user-select: all;
+}
+
+.rf-image-prompt-reference-thumbnail {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: calc(var(--radius) - 3px);
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+}
+
+.rf-image-prompt-reference-preview {
+  width: auto;
+  max-width: 240px;
+  padding: 4px;
+}
+
+.rf-image-prompt-reference-preview img {
+  display: block;
+  width: auto;
+  max-width: 220px;
+  height: auto;
+  max-height: 280px;
+  border-radius: calc(var(--radius) - 2px);
+  object-fit: contain;
+}
+
+.rf-image-prompt-reference-token.is-invalid {
+  background: color-mix(in srgb, var(--destructive) 18%, transparent);
+  color: var(--destructive);
 }
 
 .rf-reference-strip {

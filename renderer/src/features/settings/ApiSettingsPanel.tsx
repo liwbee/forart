@@ -1,4 +1,4 @@
-import { ExternalLink, GripVertical, KeyRound, Plus, RefreshCw, Sparkles, TestTube2, Trash2 } from "lucide-react";
+import { Check, ExternalLink, GripVertical, KeyRound, Plus, RefreshCw, Sparkles, TestTube2, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -22,7 +22,7 @@ import {
 } from "../../components/ui/card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { ApimartLogo, ApimartSettingsPane, type ApiPanelStatus } from "./ApimartSettingsPane";
-import { APIMART_PROVIDER_ID, createApiProvider, createApimartProvider, createTudouProvider, loadApiSettings, normalizeApiProvider, normalizeApiProviderOrder, readApiSettings, saveApiSettings, TUDOU_PROVIDER_ID, uniqueModels, type ApiModelKind, type ApiProvider } from "./apiProviders";
+import { APIMART_PROVIDER_ID, createApiProvider, createApimartProvider, createTudouProvider, loadApiSettings, normalizeApiProvider, normalizeApiProviderOrder, readApiSettings, saveApiSettings, TUDOU_IMAGE_MODELS, TUDOU_PROVIDER_ID, uniqueModels, type ApiModelKind, type ApiProvider } from "./apiProviders";
 import { detectImageModelRuleId, IMAGE_MODEL_RULES, normalizeImageModelRuleId } from "./imageModelRules";
 import { LibtvLogo, LibtvSettingsPane } from "./LibtvSettingsPane";
 import { TudouLogo, TudouSettingsPane } from "./TudouSettingsPane";
@@ -30,12 +30,22 @@ import { TudouLogo, TudouSettingsPane } from "./TudouSettingsPane";
 type ApiSettingsPane = "provider" | "apimart" | "tudou" | "libtv" | "recommended";
 type ApiAction = "verify" | "fetch" | "";
 type ModelPickerTab = ApiModelKind | "all";
+type ModelListTab = ApiModelKind;
+type DraftModel = {
+  providerId: string;
+  kind: ApiModelKind;
+  modelId: string;
+  ruleId: string;
+  error: string;
+};
 type ApiSidebarItem =
   | { id: "libtv"; type: "libtv" }
   | { id: "apimart"; type: "apimart"; provider: ApiProvider }
   | { id: "tudou-api"; type: "tudou"; provider: ApiProvider }
   | { id: string; type: "provider"; provider: ApiProvider };
 type FetchedModelEntry = { id: string; kind: ApiModelKind; selected: boolean };
+
+const TUDOU_IMAGE_MODEL_SET = new Set<string>(TUDOU_IMAGE_MODELS);
 
 function formatModelsUrl(provider: ApiProvider) {
   const rawBaseUrl = provider.baseUrl.trim();
@@ -77,6 +87,7 @@ export function ApiSettingsPanel() {
   const imageModelListViewportRef = useRef<HTMLDivElement | null>(null);
   const chatModelListViewportRef = useRef<HTMLDivElement | null>(null);
   const videoModelListViewportRef = useRef<HTMLDivElement | null>(null);
+  const draftModelInputRef = useRef<HTMLInputElement | null>(null);
   const [initialSettings] = useState(readApiSettings);
   const [providers, setProviders] = useState<ApiProvider[]>(initialSettings.providers);
   const [providerOrder, setProviderOrder] = useState<string[]>(() => normalizeApiProviderOrder(initialSettings.providerOrder, initialSettings.providers));
@@ -91,6 +102,8 @@ export function ApiSettingsPanel() {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelPickerFilter, setModelPickerFilter] = useState("");
   const [modelPickerTab, setModelPickerTab] = useState<ModelPickerTab>("all");
+  const [modelListTab, setModelListTab] = useState<ModelListTab>("chat");
+  const [draftModel, setDraftModel] = useState<DraftModel | null>(null);
   const [fetchedModels, setFetchedModels] = useState<FetchedModelEntry[]>([]);
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId) || null;
 
@@ -108,6 +121,11 @@ export function ApiSettingsPanel() {
   const apimartAdded = providers.some((provider) => provider.id === APIMART_PROVIDER_ID);
   const tudouAdded = providers.some((provider) => provider.id === TUDOU_PROVIDER_ID);
   const libtvAdded = providerOrder.includes("libtv");
+  const modelListTabs = useMemo<NativeTabItem<ModelListTab>[]>(() => [
+    { value: "chat", label: t("settings:modelTabLlm") },
+    { value: "image", label: t("settings:modelTabImage") },
+    { value: "video", label: t("settings:modelTabVideo") },
+  ], [t]);
 
   useEffect(() => {
     let canceled = false;
@@ -185,6 +203,22 @@ export function ApiSettingsPanel() {
     setModelPickerFilter("");
     setModelPickerTab("all");
   }, [selectedProviderId, t]);
+
+  useEffect(() => {
+    setDraftModel(null);
+  }, [modelListTab, selectedProviderId]);
+
+  useEffect(() => {
+    if (!draftModel) return;
+    const viewport = draftModel.kind === "image"
+      ? imageModelListViewportRef.current
+      : draftModel.kind === "chat" ? chatModelListViewportRef.current : videoModelListViewportRef.current;
+    const frame = window.requestAnimationFrame(() => {
+      draftModelInputRef.current?.focus();
+      if (viewport) viewport.scrollTop = viewport.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [draftModel?.kind, draftModel?.providerId]);
 
   function addProvider() {
     setProviders((current) => {
@@ -384,7 +418,112 @@ export function ApiSettingsPanel() {
     } as Partial<ApiProvider>);
   }
 
-  function renderModelList(kind: ApiModelKind) {
+  function beginAddModel() {
+    if (!selectedProvider) return;
+    if (draftModel?.providerId === selectedProvider.id && draftModel.kind === modelListTab) {
+      draftModelInputRef.current?.focus();
+      return;
+    }
+    setDraftModel({
+      providerId: selectedProvider.id,
+      kind: modelListTab,
+      modelId: "",
+      ruleId: modelListTab === "image" ? "generic-image" : "",
+      error: "",
+    });
+  }
+
+  function commitDraftModel() {
+    if (!selectedProvider || !draftModel || draftModel.providerId !== selectedProvider.id) return;
+    const model = draftModel.modelId.trim();
+    if (!model) {
+      setDraftModel((current) => current ? { ...current, error: t("settings:modelIdRequired") } : current);
+      draftModelInputRef.current?.focus();
+      return;
+    }
+
+    const kind = draftModel.kind;
+    const key = kind === "image" ? "imageModels" : kind === "chat" ? "chatModels" : "videoModels";
+    const isTudouImage = selectedProvider.id === TUDOU_PROVIDER_ID && kind === "image";
+    const existingModels = isTudouImage ? selectedProvider.modelCatalogOrder?.image || [] : selectedProvider[key];
+    if (existingModels.includes(model)) {
+      setDraftModel((current) => current ? { ...current, error: t("settings:modelAlreadyExists") } : current);
+      draftModelInputRef.current?.select();
+      return;
+    }
+
+    const imageRulePatch = kind === "image" ? {
+      modelRules: {
+        ...selectedProvider.modelRules,
+        image: {
+          ...selectedProvider.modelRules.image,
+          [model]: normalizeImageModelRuleId(draftModel.ruleId || detectImageModelRuleId(model)),
+        },
+      },
+    } : {};
+    patchSelectedProvider(isTudouImage ? {
+      modelCatalogOrder: { image: [...existingModels, model] },
+      imageModels: [...selectedProvider.imageModels, model],
+      ...imageRulePatch,
+    } : {
+      [key]: [...selectedProvider[key], model],
+      ...imageRulePatch,
+    } as Partial<ApiProvider>);
+    setDraftModel(null);
+  }
+
+  function deleteTudouCustomImageModel(model: string) {
+    if (!selectedProvider || selectedProvider.id !== TUDOU_PROVIDER_ID || TUDOU_IMAGE_MODEL_SET.has(model)) return;
+    const aliases = { ...selectedProvider.modelAliases.image };
+    const rules = { ...selectedProvider.modelRules.image };
+    delete aliases[model];
+    delete rules[model];
+    patchSelectedProvider({
+      modelCatalogOrder: { image: (selectedProvider.modelCatalogOrder?.image || []).filter((item) => item !== model) },
+      imageModels: selectedProvider.imageModels.filter((item) => item !== model),
+      modelAliases: { ...selectedProvider.modelAliases, image: aliases },
+      modelRules: { ...selectedProvider.modelRules, image: rules },
+    });
+  }
+
+  function renderDraftModelRow(kind: ApiModelKind) {
+    if (!selectedProvider || !draftModel || draftModel.providerId !== selectedProvider.id || draftModel.kind !== kind) return null;
+    const hasRule = kind === "image";
+    return (
+      <div className={`settings-api-model-row settings-api-model-row--draft${hasRule ? " has-rule" : ""}`}>
+        <span className="settings-api-model-draft-marker" aria-hidden="true"><Plus /></span>
+        <label className="settings-api-model-alias">
+          <input
+            ref={draftModelInputRef}
+            value={draftModel.modelId}
+            aria-invalid={Boolean(draftModel.error)}
+            placeholder={t("settings:modelIdPlaceholder")}
+            onChange={(event) => setDraftModel((current) => current ? { ...current, modelId: event.target.value, error: "" } : current)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") commitDraftModel();
+              if (event.key === "Escape") setDraftModel(null);
+            }}
+          />
+          <small className={draftModel.error ? "settings-api-model-error" : undefined}>{draftModel.error || t("settings:newModel")}</small>
+        </label>
+        {hasRule ? (
+          <label className="settings-api-model-rule">
+            <Select
+              value={draftModel.ruleId}
+              options={IMAGE_MODEL_RULES.map((rule) => ({ value: rule.id, label: rule.labelKey ? t(`settings:${rule.labelKey}`) : rule.label }))}
+              onChange={(ruleId) => setDraftModel((current) => current ? { ...current, ruleId } : current)}
+              ariaLabel={t("settings:modelRule")}
+              menuPlacement="bottom"
+            />
+          </label>
+        ) : null}
+        <Button type="button" variant="ghost" size="icon-sm" aria-label={t("settings:confirmAddModel")} title={t("settings:confirmAddModel")} onClick={commitDraftModel}><Check aria-hidden="true" /></Button>
+        <Button type="button" variant="ghost" size="icon-sm" aria-label={t("settings:cancelAddModel")} title={t("settings:cancelAddModel")} onClick={() => setDraftModel(null)}><X aria-hidden="true" /></Button>
+      </div>
+    );
+  }
+
+  function renderModelList(kind: ApiModelKind, showHeading = true) {
     if (!selectedProvider) return null;
     const key = kind === "image" ? "imageModels" : kind === "chat" ? "chatModels" : "videoModels";
     const title = kind === "image" ? t("settings:imageModels") : kind === "chat" ? t("settings:chatModels") : t("settings:videoModels");
@@ -393,10 +532,11 @@ export function ApiSettingsPanel() {
     const rows = models.map((model, index) => ({ id: `${kind}-${model}`, model, index }));
     return (
       <section className="settings-api-model-card">
-        <div className="settings-api-model-head"><div><h3>{title}</h3></div></div>
+        {showHeading ? <div className="settings-api-model-head"><div><h3>{title}</h3></div></div> : null}
         <div className="settings-api-model-list-wrap">
-          <AppScrollArea className="settings-api-model-list" viewportClassName="settings-api-model-list__viewport" viewportRef={viewportRef} scrollbars={models.length > 1 ? "vertical" : "none"}>
-            <DraggableList
+          <AppScrollArea className="settings-api-model-list" viewportClassName="settings-api-model-list__viewport" viewportRef={viewportRef} scrollbars={models.length > 1 || draftModel?.kind === kind ? "vertical" : "none"}>
+            <div className="settings-api-model-list-content">
+              <DraggableList
               items={rows}
               getId={(row) => row.id}
               className="settings-api-model-sortable-list"
@@ -419,8 +559,10 @@ export function ApiSettingsPanel() {
                   </div>
                 );
               }}
-              empty={<div className="settings-api-empty-row">{t("settings:noModels")}</div>}
-            />
+                empty={draftModel?.kind === kind ? null : <div className="settings-api-empty-row">{t("settings:noModels")}</div>}
+              />
+              {renderDraftModelRow(kind)}
+            </div>
           </AppScrollArea>
         </div>
       </section>
@@ -439,17 +581,18 @@ export function ApiSettingsPanel() {
     );
   }
 
-  function renderTudouImageModelList() {
+  function renderTudouImageModelList(showHeading = true) {
     if (!selectedProvider || selectedProvider.id !== TUDOU_PROVIDER_ID) return null;
     const models = selectedProvider.modelCatalogOrder?.image || [];
     const enabledModels = new Set(selectedProvider.imageModels);
     const rows = models.map((model) => ({ id: `tudou-image-${model}`, model }));
     return (
       <section className="settings-api-model-card">
-        <div className="settings-api-model-head"><div><h3>{t("settings:imageModels")}</h3></div></div>
+        {showHeading ? <div className="settings-api-model-head"><div><h3>{t("settings:imageModels")}</h3></div></div> : null}
         <div className="settings-api-model-list-wrap">
-          <AppScrollArea className="settings-api-model-list" viewportClassName="settings-api-model-list__viewport" viewportRef={imageModelListViewportRef} scrollbars={models.length > 1 ? "vertical" : "none"}>
-            <DraggableList
+          <AppScrollArea className="settings-api-model-list" viewportClassName="settings-api-model-list__viewport" viewportRef={imageModelListViewportRef} scrollbars={models.length > 1 || draftModel?.kind === "image" ? "vertical" : "none"}>
+            <div className="settings-api-model-list-content">
+              <DraggableList
               items={rows}
               getId={(row) => row.id}
               className="settings-api-model-sortable-list"
@@ -464,9 +607,10 @@ export function ApiSettingsPanel() {
               renderItem={(row, { dragHandleProps }) => {
                 const { model } = row;
                 const enabled = enabledModels.has(model);
+                const isCustomModel = !TUDOU_IMAGE_MODEL_SET.has(model);
                 const imageRuleId = normalizeImageModelRuleId(selectedProvider.modelRules.image[model] || detectImageModelRuleId(model));
                 return (
-                  <div className="settings-api-model-row settings-api-model-row--catalog has-rule" data-enabled={enabled}>
+                  <div className={`settings-api-model-row settings-api-model-row--catalog has-rule${isCustomModel ? " is-custom" : ""}`} data-enabled={enabled}>
                     <span className="settings-api-model-drag-handle" aria-hidden="true" {...dragHandleProps}><GripVertical size={14} /></span>
                     <Checkbox
                       checked={enabled}
@@ -483,13 +627,38 @@ export function ApiSettingsPanel() {
                       <small title={model}>{model}</small>
                     </label>
                     <label className="settings-api-model-rule"><Select value={imageRuleId} options={IMAGE_MODEL_RULES.map((rule) => ({ value: rule.id, label: rule.labelKey ? t(`settings:${rule.labelKey}`) : rule.label }))} onChange={(ruleId) => patchSelectedProvider({ modelRules: { ...selectedProvider.modelRules, image: { ...selectedProvider.modelRules.image, [model]: normalizeImageModelRuleId(ruleId) } } })} ariaLabel={t("settings:modelRule")} menuPlacement="bottom" /></label>
+                    {isCustomModel ? <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" aria-label={t("settings:deleteModel")} title={t("settings:deleteModel")} onClick={() => deleteTudouCustomImageModel(model)}><Trash2 aria-hidden="true" /></Button> : null}
                   </div>
                 );
               }}
-            />
+              />
+              {renderDraftModelRow("image")}
+            </div>
           </AppScrollArea>
         </div>
       </section>
+    );
+  }
+
+  function renderProviderModelLists() {
+    if (!selectedProvider) return null;
+    const activeList = selectedProvider.id === TUDOU_PROVIDER_ID && modelListTab === "image"
+      ? renderTudouImageModelList(false)
+      : renderModelList(modelListTab, false);
+    return (
+      <>
+        <div className="settings-api-model-toolbar">
+          <NativeTabs
+            items={modelListTabs}
+            value={modelListTab}
+            onChange={setModelListTab}
+            ariaLabel={t("settings:modelList")}
+            className="settings-api-model-tabs"
+          />
+          <Button type="button" variant="ghost" size="icon-sm" aria-label={t("settings:addModel")} title={t("settings:addModel")} onClick={beginAddModel}><Plus aria-hidden="true" /></Button>
+        </div>
+        {activeList}
+      </>
     );
   }
 
@@ -620,9 +789,9 @@ export function ApiSettingsPanel() {
               onRemove={removeLibtvProvider}
             />
           ) : activePane === "apimart" && selectedProvider?.id === APIMART_PROVIDER_ID ? (
-            <><ApimartSettingsPane provider={selectedProvider} fetchingModels={action === "fetch"} status={status} onProviderChange={patchSelectedProvider} onFetchModels={fetchModels} onRemove={removeApimartProvider} />{renderModelList("image")}{renderModelList("chat")}{renderModelList("video")}</>
+            <><ApimartSettingsPane provider={selectedProvider} fetchingModels={action === "fetch"} status={status} onProviderChange={patchSelectedProvider} onFetchModels={fetchModels} onRemove={removeApimartProvider} />{renderProviderModelLists()}</>
           ) : activePane === "tudou" && selectedProvider?.id === TUDOU_PROVIDER_ID ? (
-            <><TudouSettingsPane provider={selectedProvider} onProviderChange={patchSelectedProvider} onRemove={removeTudouProvider} />{renderTudouImageModelList()}</>
+            <><TudouSettingsPane provider={selectedProvider} onProviderChange={patchSelectedProvider} onRemove={removeTudouProvider} />{renderProviderModelLists()}</>
           ) : selectedProvider ? (
             <>
               <header className="settings-api-content-head"><div><h2>{selectedProvider.name || t("settings:provider")}</h2></div><div className="settings-api-content-actions"><ConfirmingDeleteButton label={t("settings:removeProvider")} confirmLabel={t("settings:confirmRemoveProvider")} resetKey={selectedProvider.id} cancelLabel={t("common:actions.cancel")} onDelete={deleteSelectedProvider} /></div></header>
@@ -641,7 +810,7 @@ export function ApiSettingsPanel() {
                   {status.text && (status.tone === "ready" || status.tone === "error") ? status.tone === "error" ? <ErrorCopyLine className="settings-inline-status settings-api-action-status" text={status.text} ariaLive="polite" /> : <div className="settings-inline-status settings-api-action-status" data-tone={status.tone} aria-live="polite">{status.text}</div> : null}
                 </div>
               </section>
-              {renderModelList("image")}{renderModelList("chat")}{renderModelList("video")}
+              {renderProviderModelLists()}
             </>
           ) : <section className="settings-section settings-section--api"><div className="settings-empty-state"><KeyRound size={22} aria-hidden="true" /><p>{t("settings:noApiProviders")}</p><Button type="button" onClick={addProvider}><Plus data-icon="inline-start" aria-hidden="true" /><span>{t("settings:addProvider")}</span></Button></div></section>}
         </main>

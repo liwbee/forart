@@ -2,6 +2,8 @@ import { ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
+import { Field, FieldLabel } from "./ui/field";
+import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { selectTriggerClassName } from "./ui/select";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
@@ -19,6 +21,9 @@ interface SizePresetPickerLabels {
   aspectRatio: string;
   imageCount?: string;
   quality?: string;
+  customSize?: string;
+  width?: string;
+  height?: string;
 }
 
 interface SizePresetPickerProps<R extends string, A extends string> {
@@ -31,6 +36,8 @@ interface SizePresetPickerProps<R extends string, A extends string> {
   imageCountOptions?: SizePresetOption[];
   quality?: string;
   qualityOptions?: SizePresetOption[];
+  customSize?: string;
+  customSizeConstraints?: { minDimension: number; maxDimension: number };
   labels: SizePresetPickerLabels;
   className?: string;
   triggerClassName?: string;
@@ -40,7 +47,7 @@ interface SizePresetPickerProps<R extends string, A extends string> {
   triggerSize?: "default" | "sm";
   triggerVariant?: "default" | "ghost";
   disabled?: boolean;
-  formatTrigger?: (resolution: R, aspectRatio: A, quality?: string) => string;
+  formatTrigger?: (resolution: R, aspectRatio: A, quality?: string, customSize?: string) => string;
   renderResolutionLabel?: (option: SizePresetOption<R>) => ReactNode;
   renderAspectRatioLabel?: (option: SizePresetOption<A>) => ReactNode;
   renderImageCountLabel?: (option: SizePresetOption) => ReactNode;
@@ -50,6 +57,7 @@ interface SizePresetPickerProps<R extends string, A extends string> {
   onAspectRatioChange: (value: A) => void;
   onImageCountChange?: (value: string) => void;
   onQualityChange?: (value: string) => void;
+  onCustomSizeChange?: (value: string) => void;
 }
 
 function ratioIconStyle(value: string) {
@@ -69,6 +77,10 @@ function ratioIconStyle(value: string) {
   };
 }
 
+function joinCustomSize(width: string, height: string) {
+  return width || height ? `${width}x${height}` : "";
+}
+
 export function SizePresetPicker<R extends string, A extends string>({
   open,
   resolution,
@@ -79,6 +91,8 @@ export function SizePresetPicker<R extends string, A extends string>({
   imageCountOptions = [],
   quality,
   qualityOptions = [],
+  customSize = "",
+  customSizeConstraints,
   labels,
   className,
   triggerClassName,
@@ -88,8 +102,10 @@ export function SizePresetPicker<R extends string, A extends string>({
   triggerSize = "default",
   triggerVariant = "default",
   disabled = false,
-  formatTrigger = (currentResolution, currentAspectRatio, currentQuality) => (
-    [currentResolution.toUpperCase(), currentQuality, currentAspectRatio].filter(Boolean).join(" • ")
+  formatTrigger = (currentResolution, currentAspectRatio, currentQuality, currentCustomSize) => (
+    currentCustomSize
+      ? currentCustomSize
+      : [currentResolution.toUpperCase(), currentQuality, currentAspectRatio].filter(Boolean).join(" • ")
   ),
   renderResolutionLabel,
   renderAspectRatioLabel,
@@ -100,9 +116,13 @@ export function SizePresetPicker<R extends string, A extends string>({
   onAspectRatioChange,
   onImageCountChange,
   onQualityChange,
+  onCustomSizeChange,
 }: SizePresetPickerProps<R, A>) {
   const isOpen = open && !disabled;
   const hasResolutionOptions = resolutionOptions.length > 0;
+  const customSizeMatch = customSize.match(/^(\d*)x(\d*)$/i);
+  const customWidth = customSizeMatch?.[1] || "";
+  const customHeight = customSizeMatch?.[2] || "";
 
   return (
     <Popover
@@ -129,7 +149,7 @@ export function SizePresetPicker<R extends string, A extends string>({
             disabled={disabled}
           >
             <span className="min-w-0 flex-1 truncate text-left tabular-nums">
-              {formatTrigger(resolution, aspectRatio, quality)}
+              {formatTrigger(resolution, aspectRatio, quality, customSize)}
             </span>
             <ChevronDown className="opacity-50 transition-transform duration-150 group-data-[state=open]:rotate-180" aria-hidden="true" />
           </Button>
@@ -206,6 +226,34 @@ export function SizePresetPicker<R extends string, A extends string>({
                 ))}
               </ToggleGroup>
             </div>
+          ) : null}
+          {customSizeConstraints && labels.customSize && onCustomSizeChange ? (
+            <Field>
+              <FieldLabel>{labels.customSize}</FieldLabel>
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                <Input
+                  type="number"
+                  min={customSizeConstraints.minDimension}
+                  max={customSizeConstraints.maxDimension}
+                  inputMode="numeric"
+                  value={customWidth}
+                  placeholder={String(customSizeConstraints.minDimension)}
+                  aria-label={`${labels.customSize} ${labels.width || "Width"}`}
+                  onChange={(event) => onCustomSizeChange(joinCustomSize(event.currentTarget.value, customHeight))}
+                />
+                <span className="text-xs text-muted-foreground" aria-hidden="true">x</span>
+                <Input
+                  type="number"
+                  min={customSizeConstraints.minDimension}
+                  max={customSizeConstraints.maxDimension}
+                  inputMode="numeric"
+                  value={customHeight}
+                  placeholder={String(customSizeConstraints.minDimension)}
+                  aria-label={`${labels.customSize} ${labels.height || "Height"}`}
+                  onChange={(event) => onCustomSizeChange(joinCustomSize(customWidth, event.currentTarget.value))}
+                />
+              </div>
+            </Field>
           ) : null}
           <div className="ic-composer-size__section grid gap-2">
             <span className="text-xs font-medium text-muted-foreground">{labels.aspectRatio}</span>

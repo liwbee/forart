@@ -15,7 +15,23 @@ interface ImageModelSizeRule {
   defaultResolution: string;
   allowAutoAspectRatio?: boolean;
   allowPixelSize?: boolean;
+  pixelSizeConstraints?: {
+    minDimension: number;
+    maxDimension: number;
+    minAspectRatio: number;
+    maxAspectRatio: number;
+  };
   resolutionField: ImageModelResolutionField;
+}
+
+export interface ImageModelAdvancedRule {
+  supportsNegativePrompt?: boolean;
+  promptExtend?: {
+    defaultEnabled: boolean;
+    modes: readonly ("direct" | "agent")[];
+    defaultMode: "direct" | "agent";
+    agentTextToImageOnly?: boolean;
+  };
 }
 
 interface ImageModelQualityRule {
@@ -43,6 +59,7 @@ type ImageModelRuleId =
   | "seedream-4.5"
   | "seedream-5-lite"
   | "seedream-5-pro"
+  | "qwen-image-3"
   | "qwen-image"
   | "z-image-turbo"
   | "imagen-4"
@@ -66,6 +83,7 @@ export interface ImageModelRule {
   sizeRule: ImageModelSizeRule;
   qualityRule?: ImageModelQualityRule;
   imageCountRule: ImageModelImageCountRule;
+  advancedRule?: ImageModelAdvancedRule;
 }
 
 interface RuleMatcher {
@@ -95,6 +113,10 @@ const SINGLE_IMAGE_COUNT_RULE: ImageModelImageCountRule = {
 };
 const STANDARD_IMAGE_COUNT_RULE: ImageModelImageCountRule = {
   options: [1, 2, 4],
+  defaultCount: 1,
+};
+const QWEN_IMAGE_3_COUNT_RULE: ImageModelImageCountRule = {
+  options: [1, 2, 3, 4, 5, 6],
   defaultCount: 1,
 };
 const SEEDREAM_IMAGE_COUNT_RULE: ImageModelImageCountRule = {
@@ -370,6 +392,41 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     }),
   },
   {
+    id: "qwen-image-3",
+    label: "Qwen Image 3.0 / Pro",
+    modes: ["text_to_image", "image_to_image"],
+    supportsReferenceImages: true,
+    requiresPrompt: true,
+    requiresReferenceImages: false,
+    maxReferenceImages: 3,
+    referenceImageInput: "url",
+    resolutionCase: "upper",
+    sizeMode: "ratio",
+    requestFormat: "standard",
+    imageCountRule: QWEN_IMAGE_3_COUNT_RULE,
+    advancedRule: {
+      supportsNegativePrompt: true,
+      promptExtend: {
+        defaultEnabled: false,
+        modes: ["direct", "agent"],
+        defaultMode: "direct",
+        agentTextToImageOnly: true,
+      },
+    },
+    sizeRule: sizeRule({
+      aspectRatios: BASIC_ASPECT_RATIOS,
+      resolutions: ["1K", "2K"],
+      defaultResolution: "1K",
+      allowPixelSize: true,
+      pixelSizeConstraints: {
+        minDimension: 512,
+        maxDimension: 2048,
+        minAspectRatio: 1 / 8,
+        maxAspectRatio: 8,
+      },
+    }),
+  },
+  {
     id: "qwen-image",
     label: "Qwen Image",
     modes: ["text_to_image", "image_to_image"],
@@ -507,6 +564,7 @@ const RULE_MATCHERS: RuleMatcher[] = [
   { ruleId: "gemini-3.1-flash", priority: 88, all: ["gemini", "flash"], any: [["3.1"]], none: ["video", "chat", "lite"] },
   { ruleId: "gemini-3-pro", priority: 87, all: ["gemini", "pro"], any: [["3"]], none: ["video", "chat"] },
   { ruleId: "gemini-2.5-flash", priority: 86, all: ["gemini", "flash"], any: [["2.5"]], none: ["video", "chat"] },
+  { ruleId: "qwen-image-3", priority: 80, regex: /qwen[-_. ]?image[-_. ]?3(?:\.0)?(?:[-_. ]?pro)?/i, none: ["video", "chat"] },
   { ruleId: "qwen-image", priority: 75, all: ["qwen", "image"], none: ["video", "chat"] },
   { ruleId: "z-image-turbo", priority: 70, all: ["z", "image"], any: [["turbo"]], none: ["video"] },
   { ruleId: "imagen-4", priority: 65, all: ["imagen"], any: [["4", "4.0", "v4"]], none: ["video"] },
@@ -560,6 +618,25 @@ export function normalizeImageModelSizeSelection(rule: ImageModelRule, resolutio
     resolution: reconcileResolution(sizeRule.resolutions, resolution, sizeRule.defaultResolution),
     aspectRatio: reconcileAspectRatio(sizeRule.aspectRatios, aspectRatio, sizeRule.defaultAspectRatio),
   };
+}
+
+export function normalizeImageModelCustomSize(rule: ImageModelRule, value: string | undefined) {
+  const constraints = rule.sizeRule.pixelSizeConstraints;
+  if (!rule.sizeRule.allowPixelSize || !constraints) return "";
+  const match = String(value || "").trim().match(/^(\d{3,4})\s*[xX×]\s*(\d{3,4})$/);
+  if (!match) return "";
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  const ratio = width / height;
+  if (
+    width < constraints.minDimension
+    || width > constraints.maxDimension
+    || height < constraints.minDimension
+    || height > constraints.maxDimension
+    || ratio < constraints.minAspectRatio
+    || ratio > constraints.maxAspectRatio
+  ) return "";
+  return `${width}x${height}`;
 }
 
 export function imageModelImageCountOptions(rule: ImageModelRule, referenceCount = 0) {

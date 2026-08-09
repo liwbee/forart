@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { TFunction } from "i18next";
-import { nativeCanvasNodeTaskId, type NativeCanvasEdge, type NativeCanvasNode } from "../nativeCanvas";
+import {
+  nativeCanvasNodeTaskId,
+  type ImageGenerationRunOptions,
+  type NativeCanvasEdge,
+  type NativeCanvasNode,
+} from "../nativeCanvas";
 import { collectImageGeneratorReferences } from "../generation/imageGenerationInputs";
+import { buildPromptWithImageReferenceDocument } from "../generation/imagePromptReferences";
 import {
   beginGenerationLaunching,
   clearGenerationRuntimeError,
@@ -110,7 +116,7 @@ export function useNativeLibtvGeneration({
     }
   }, [canvasId, nodes, patchNodeData]);
 
-  const runLibtvGeneration = useCallback(async (nodeId: string, options?: { promptOverride?: string }) => {
+  const runLibtvGeneration = useCallback(async (nodeId: string, options?: ImageGenerationRunOptions) => {
     const node = nodes.find((item) => item.id === nodeId && item.data.kind === "imageGenerator");
     const state = node?.data.libtvImageGeneration || {};
     const currentTaskId = node ? nativeCanvasNodeTaskId(node.data) : "";
@@ -142,9 +148,16 @@ export function useNativeLibtvGeneration({
       if (references.length > capabilities.maxReferenceImages) {
         throw new Error(t("infiniteCanvas:imageGenerationTooManyReferenceImages", { count: capabilities.maxReferenceImages }));
       }
-      const prompt = [String(options?.promptOverride ?? node.data.text ?? "").trim(), collectConnectedPrompt(nodeId, nodes, edges)]
-        .filter(Boolean)
-        .join("\n\n");
+      const prompt = buildPromptWithImageReferenceDocument({
+        document: options?.promptDocumentOverride ?? node.data.imagePromptDocument,
+        fallbackPrompt: String(options?.promptOverride ?? node.data.text ?? ""),
+        additionalPrompt: collectConnectedPrompt(nodeId, nodes, edges),
+        references,
+        labels: {
+          instruction: (images) => t("infiniteCanvas:referenceImageInstruction", { images }),
+          requestHeader: t("infiniteCanvas:referenceImageRequestHeader"),
+        },
+      });
       if (!prompt) throw new Error(t("infiniteCanvas:promptRequired"));
       const storedResolution = capabilities.resolutionField === "resolution"
         ? String(state.resolution || "")
