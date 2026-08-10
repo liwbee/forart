@@ -114,7 +114,8 @@ function createCanvasCacheStore({ assetStore, canvasStore, generationTaskReposit
         addReference(referenceMap, node.filePath, nodeReference('node.filePath'));
         addReference(referenceMap, data.imageUrl, nodeReference('node.data.imageUrl'));
         for (const image of Array.isArray(data.generatedImages) ? data.generatedImages : []) {
-          addReference(referenceMap, image?.localUrl || image?.url, nodeReference('node.data.generatedImages'));
+          addReference(referenceMap, image?.localUrl, nodeReference('node.data.generatedImages.localUrl'));
+          addReference(referenceMap, image?.url, nodeReference('node.data.generatedImages.url'));
         }
 
         const actionFission = isRecord(data.actionFission) ? data.actionFission : node.actionFission;
@@ -269,6 +270,7 @@ function createCanvasCacheStore({ assetStore, canvasStore, generationTaskReposit
     let failedCount = 0;
     let freedBytes = 0;
     const failures = [];
+    const thumbnailCandidates = new Set();
 
     for (const id of ids) {
       const asset = byId.get(id);
@@ -283,17 +285,33 @@ function createCanvasCacheStore({ assetStore, canvasStore, generationTaskReposit
           continue;
         }
         fs.unlinkSync(asset.filePath);
-        const thumbPath = thumbPathForAsset(asset.filePath);
-        if (fs.existsSync(thumbPath)) {
-          const thumbStats = fs.statSync(thumbPath);
-          fs.unlinkSync(thumbPath);
-          freedBytes += thumbStats.size;
-        }
+        thumbnailCandidates.add(formatAssetId(thumbPathForAsset(asset.filePath)));
         deletedCount += 1;
         freedBytes += stats.size;
       } catch (error) {
         failedCount += 1;
         failures.push({ id, message: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    // Legacy assets with different extensions can share one thumbnail stem.
+    // Remove a thumbnail only after all source deletions, and only when no
+    // remaining source asset still owns that thumbnail.
+    for (const thumbId of thumbnailCandidates) {
+      const thumbPath = thumbId.replace(/\//g, path.sep);
+      const hasRemainingSource = current.assets.some((asset) => (
+        asset.exists
+        && fs.existsSync(asset.filePath)
+        && formatAssetId(thumbPathForAsset(asset.filePath)) === thumbId
+      ));
+      if (hasRemainingSource || !fs.existsSync(thumbPath)) continue;
+      try {
+        const thumbStats = fs.statSync(thumbPath);
+        fs.unlinkSync(thumbPath);
+        freedBytes += thumbStats.size;
+      } catch (error) {
+        failedCount += 1;
+        failures.push({ id: thumbId, message: error instanceof Error ? error.message : String(error) });
       }
     }
 

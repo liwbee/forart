@@ -378,7 +378,7 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
       {viewerImage ? (
         <ImageViewer
           src={resolveLibraryImageUrl(viewerImage.assetUrl)}
-          alt={viewerImage.fileName || viewerTask?.model || t("infiniteCanvas:imageGenerationTask")}
+          alt={viewerTask?.model || t("infiniteCanvas:imageGenerationTask")}
           onClose={() => setViewer(null)}
           navigation={viewerImages.length > 1 ? {
             index: viewerIndex,

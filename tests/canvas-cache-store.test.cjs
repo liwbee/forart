@@ -16,6 +16,7 @@ test('canvas cache protects current canvas assets and SQLite task assets', () =>
 
     const files = {
       canvas: path.join(outputRoot, 'canvas-result.png'),
+      canvasRemoteFallback: path.join(outputRoot, 'canvas-remote-fallback.png'),
       taskResult: path.join(outputRoot, 'task-result.png'),
       taskInput: path.join(inputRoot, 'task-input.png'),
       unused: path.join(outputRoot, 'unused.png'),
@@ -41,7 +42,10 @@ test('canvas cache protects current canvas assets and SQLite task assets', () =>
         nodes: [{
           id: 'node-1',
           data: {
-            generatedImages: [{ localUrl: urlsByPath.get(files.canvas) }],
+            generatedImages: [{
+              localUrl: urlsByPath.get(files.canvas),
+              url: urlsByPath.get(files.canvasRemoteFallback),
+            }],
           },
         }],
       }),
@@ -66,9 +70,56 @@ test('canvas cache protects current canvas assets and SQLite task assets', () =>
 
     const assets = new Map(cache.scan().assets.map((asset) => [asset.fileName, asset]));
     assert.equal(assets.get('canvas-result.png').referenced, true);
+    assert.equal(assets.get('canvas-remote-fallback.png').referenced, true);
     assert.equal(assets.get('task-result.png').referenced, true);
     assert.equal(assets.get('task-input.png').referenced, true);
     assert.equal(assets.get('unused.png').referenced, false);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('cache cleanup does not remove a shared legacy thumbnail used by another asset', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-canvas-cache-thumb-'));
+  try {
+    const inputRoot = path.join(rootDir, 'input');
+    const outputRoot = path.join(rootDir, 'output');
+    const legacyJpg = path.join(inputRoot, 'same-name.jpg');
+    const legacyPng = path.join(inputRoot, 'same-name.png');
+    const sharedThumb = path.join(inputRoot, 'thumb', 'same-name.webp');
+    fs.mkdirSync(path.dirname(sharedThumb), { recursive: true });
+    fs.writeFileSync(legacyJpg, 'jpg');
+    fs.writeFileSync(legacyPng, 'png');
+    fs.writeFileSync(sharedThumb, 'thumb');
+
+    const urlsByPath = new Map([
+      [legacyJpg, 'forart-asset://canvas/input/same-name.jpg'],
+      [legacyPng, 'forart-asset://canvas/input/same-name.png'],
+      [sharedThumb, 'forart-asset://canvas/input/thumb/same-name.webp'],
+    ]);
+    const pathsByUrl = new Map([...urlsByPath].map(([filePath, url]) => [url, filePath]));
+    const cache = createCanvasCacheStore({
+      assetStore: {
+        canvasAssetsRoot: () => rootDir,
+        assetDirectory: (kind) => kind === 'input' ? inputRoot : outputRoot,
+        resolveAssetUrl: (url) => pathsByUrl.get(String(url || '')) || '',
+        assetUrl: (filePath) => urlsByPath.get(path.resolve(filePath)) || '',
+      },
+      canvasStore: {
+        listCanvases: () => [{ id: 'canvas-1' }],
+        readCanvas: () => ({ id: 'canvas-1', nodes: [{ id: 'node-1', data: { imageUrl: urlsByPath.get(legacyPng) } }] }),
+      },
+      generationTaskRepository: { listTaskRecords: () => [] },
+      shell: { openPath() {}, showItemInFolder() {} },
+    });
+
+    const scan = cache.scan();
+    const jpg = scan.assets.find((asset) => asset.filePath === legacyJpg);
+    assert.equal(jpg.referenced, false);
+    const result = cache.deleteAssets({ ids: [jpg.id] });
+    assert.equal(result.deletedCount, 1);
+    assert.equal(fs.existsSync(legacyPng), true);
+    assert.equal(fs.existsSync(sharedThumb), true);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

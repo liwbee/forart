@@ -690,12 +690,12 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, ne
       reportProgress(options.onProgress, 'saving', Math.max(rangeStart, rangeEnd - 10));
       for (const asset of unpacked.extractedAssets || []) {
         if (options.signal?.aborted) throw abortError();
-        const directory = assetStore.assetDirectory(asset.kind);
-        const sourceName = path.basename(asset.fileName || asset.stagedFilePath);
-        const fileName = safeFileBaseName(path.basename(sourceName, path.extname(sourceName)), 'canvas-image') + extensionFromPath(sourceName);
-        const target = uniqueFilePath(directory, fileName);
-        await fs.promises.rename(asset.stagedFilePath, target);
-        const nextUrl = assetStore.assetUrl(target);
+        const importedAsset = await assetStore.importAssetFile({
+          filePath: asset.stagedFilePath,
+          fileName: asset.fileName,
+          kind: asset.kind,
+        });
+        const nextUrl = importedAsset.url;
         if (asset.id) urlByAssetId.set(String(asset.id), nextUrl);
         if (asset.originalUrl) urlByOriginalUrl.set(String(asset.originalUrl), nextUrl);
       }

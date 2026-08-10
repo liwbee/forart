@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('crypto');
 const { createCanvasAssetThumbnailStore } = require('./canvas-asset-thumbnails.cjs');
 
 function uniqueFilePath(directory, fileName) {
@@ -12,6 +13,24 @@ function uniqueFilePath(directory, fileName) {
     candidate = path.join(directory, `${safeBase}-${index}${ext}`);
     index += 1;
   }
+  return candidate;
+}
+
+function normalizeAssetExtension(value, fallback = '.png') {
+  const raw = String(value || '').trim().toLowerCase();
+  const extension = raw.startsWith('.') ? raw : path.extname(raw);
+  if (extension === '.jpeg') return '.jpg';
+  if (extension === '.svg+xml') return '.svg';
+  if (/^\.[a-z0-9]{2,8}$/.test(extension)) return extension;
+  return fallback;
+}
+
+function internalAssetFilePath(directory, extension) {
+  const safeExtension = normalizeAssetExtension(extension);
+  let candidate;
+  do {
+    candidate = path.join(directory, `asset_${randomUUID()}${safeExtension}`);
+  } while (fs.existsSync(candidate));
   return candidate;
 }
 
@@ -119,8 +138,7 @@ function createAssetStore({ rootDir, net }) {
   async function saveAsset(payload = {}) {
     const source = await readImageSource(payload);
     const directory = assetDirectory(payload.kind);
-    const defaultName = payload.defaultName || ('canvas-image' + (source.extension || '.png'));
-    const filePath = uniqueFilePath(directory, defaultName);
+    const filePath = internalAssetFilePath(directory, source.extension);
     fs.writeFileSync(filePath, source.buffer);
     const dimensions = await readImageDimensions(source.buffer);
     const thumb = await thumbnailStore.ensureCanvasAssetThumbnail({ filePath });
@@ -137,7 +155,8 @@ function createAssetStore({ rootDir, net }) {
     const buffer = Buffer.isBuffer(payload.buffer) ? payload.buffer : Buffer.from(payload.buffer || '');
     if (!buffer.length) throw new Error('Image data is empty.');
     const directory = assetDirectory(payload.kind);
-    const filePath = uniqueFilePath(directory, payload.defaultName || 'canvas-image.png');
+    const extension = extensionFromMime(payload.mimeType) || path.extname(payload.defaultName || '') || '.png';
+    const filePath = internalAssetFilePath(directory, extension);
     fs.writeFileSync(filePath, buffer);
     const suppliedWidth = Number(payload.width || 0);
     const suppliedHeight = Number(payload.height || 0);
@@ -151,6 +170,28 @@ function createAssetStore({ rootDir, net }) {
       fileName: path.basename(filePath),
       filePath,
       ...dimensions,
+    };
+  }
+
+  async function importAssetFile(payload = {}) {
+    const sourceValue = String(payload.filePath || '').trim();
+    if (!sourceValue) throw new Error('Imported image not found.');
+    const sourcePath = path.resolve(sourceValue);
+    if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) throw new Error('Imported image not found.');
+    const directory = assetDirectory(payload.kind);
+    const extension = path.extname(payload.fileName || sourcePath) || '.png';
+    const filePath = internalAssetFilePath(directory, extension);
+    try {
+      await fs.promises.rename(sourcePath, filePath);
+    } catch (error) {
+      if (error?.code !== 'EXDEV') throw error;
+      await fs.promises.copyFile(sourcePath, filePath);
+      await fs.promises.unlink(sourcePath);
+    }
+    return {
+      url: assetUrl(filePath),
+      fileName: path.basename(filePath),
+      filePath,
     };
   }
 
@@ -187,8 +228,7 @@ function createAssetStore({ rootDir, net }) {
     const extractWidth = Math.max(1, Math.min(width, sourceWidth - extractLeft));
     const extractHeight = Math.max(1, Math.min(height, sourceHeight - extractTop));
     const directory = assetDirectory('output');
-    const parsedName = path.parse(payload.defaultName || 'cropped-image.png');
-    const filePath = uniqueFilePath(directory, `${parsedName.name || 'cropped-image'}.png`);
+    const filePath = internalAssetFilePath(directory, '.png');
     const output = await sharp(normalized.data)
       .extract({ left: extractLeft, top: extractTop, width: extractWidth, height: extractHeight })
       .png()
@@ -217,6 +257,7 @@ function createAssetStore({ rootDir, net }) {
     assetDirectory,
     assetUrl,
     canvasAssetsRoot,
+    importAssetFile,
     readImageSource,
     resolveAssetUrl,
     saveAsset,
@@ -228,4 +269,4 @@ function createAssetStore({ rootDir, net }) {
   };
 }
 
-module.exports = { createAssetStore, extensionFromMime, isInside, uniqueFilePath };
+module.exports = { createAssetStore, extensionFromMime, internalAssetFilePath, isInside, uniqueFilePath };

@@ -23,7 +23,7 @@ export interface NativeCanvasActions {
   runActionFission: (nodeId: string, rowId?: string) => Promise<void>;
   removeCanvasEdge: (edgeId: string) => void;
   reorderImageGeneratorReferences: (nodeId: string, orderedEdgeIds: string[]) => void;
-  setNodeImage: (nodeId: string, imageUrl: string, label: string) => void;
+  setNodeImage: (nodeId: string, imageUrl: string, fileName: string) => void;
   setNodeText: (nodeId: string, text: string) => void;
   stopImageGeneration: (nodeId: string) => Promise<void>;
   stopActionFission: (nodeId: string, rowId?: string) => Promise<void>;

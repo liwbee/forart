@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import AdmZip from "adm-zip";
-import { safePathPart, safeRelativePath } from "./canvas-exchange-paths.mjs";
+import { safeRelativePath } from "./canvas-exchange-paths.mjs";
 import { PACKAGE_FORMAT, PACKAGE_URL_PREFIX, PACKAGE_VERSION, nowMs } from "./canvas-exchange-types.mjs";
 
 function isRecord(value) {
@@ -48,16 +49,12 @@ function extensionFromPath(value) {
   return path.extname(String(value || "")).toLowerCase() || ".png";
 }
 
-function uniqueFilePath(directory, fileName) {
-  const parsed = path.parse(fileName || "canvas-image.png");
-  const safeBase = safePathPart(parsed.name, "canvas-image");
-  const ext = parsed.ext || ".png";
-  let candidate = path.join(directory, `${safeBase}${ext}`);
-  let index = 2;
-  while (existsSync(candidate)) {
-    candidate = path.join(directory, `${safeBase}-${index}${ext}`);
-    index += 1;
-  }
+function internalAssetFilePath(directory, sourceName) {
+  const extension = extensionFromPath(sourceName);
+  let candidate;
+  do {
+    candidate = path.join(directory, `asset_${randomUUID()}${extension}`);
+  } while (existsSync(candidate));
   return candidate;
 }
 
@@ -89,7 +86,7 @@ export function createCanvasExchangePackages(paths) {
       const kind = asset.kind === "output" ? "output" : "input";
       const directory = paths.assetRootForKind(kind);
       const sourceName = path.basename(asset.fileName || packagePathValue);
-      const target = uniqueFilePath(directory, sourceName);
+      const target = internalAssetFilePath(directory, sourceName);
       writeFileSync(target, entry.getData());
       const relativePath = paths.assetRelativePath(target);
       const nextUrl = serverAssetUrl(canvasId, relativePath);
@@ -179,4 +176,3 @@ export function createCanvasExchangePackages(paths) {
     unpackPackageToServer,
   };
 }
-

@@ -15,7 +15,7 @@ test('unmounted canvas result commit persists the generated image ratio around t
         type: 'canvasNode',
         position: { x: 100, y: 200 },
         style: { width: 280, height: 280 },
-        data: { kind: 'imageGenerator', latestGenerationTaskId: 'task-1' },
+        data: { kind: 'imageGenerator', label: 'Custom title', latestGenerationTaskId: 'task-1' },
       }],
     }).canvas;
 
@@ -40,6 +40,7 @@ test('unmounted canvas result commit persists the generated image ratio around t
     assert.equal(node.data.imageNaturalHeight, 1200);
     assert.equal(node.data.generatedImages[0].width, 900);
     assert.equal(node.data.generatedImages[0].height, 1200);
+    assert.equal(node.data.label, 'Custom title');
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

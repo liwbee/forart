@@ -130,8 +130,11 @@ test('canvas upload packages include resources stored in React Flow node data', 
   });
   assert.equal(imported.canvas.id, 'canvas-imported');
   assert.equal(importedPayload.nodes.length, canvas.nodes.length);
-  assert.match(importedPayload.nodes[0].data.imageUrl, /^forart-asset:\/\/canvas\//);
-  assert.match(importedPayload.nodes[1].data.generatedImages[0].localUrl, /^forart-asset:\/\/canvas\//);
+  const importedAssetUrlPattern = /^forart-asset:\/\/canvas\/(?:input|output)\/asset_[0-9a-f-]{36}\.[a-z0-9]+(?:\?v=\d+)?$/;
+  assert.match(importedPayload.nodes[0].data.imageUrl, importedAssetUrlPattern);
+  assert.match(importedPayload.nodes[1].data.generatedImages[0].localUrl, importedAssetUrlPattern);
+  assert.match(importedPayload.nodes[2].data.actionFission.rows[0].resultUrl, importedAssetUrlPattern);
+  assert.match(importedPayload.nodes[2].data.actionFission.rows[0].selectedActionAssetUrl, importedAssetUrlPattern);
   assert.equal(importProgress.at(-1).percent, 100);
   assert.ok(importProgress.every((progress, index) => index === 0 || progress.percent >= importProgress[index - 1].percent));
   assert.equal(fs.existsSync(created.filePath), false);

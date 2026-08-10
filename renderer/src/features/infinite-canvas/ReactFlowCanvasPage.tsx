@@ -902,7 +902,6 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       thumbUrl: thumbUrl || undefined,
       imageNaturalWidth: dimensions.width,
       imageNaturalHeight: dimensions.height,
-      label: source.label,
     });
     referenceNode.style = size;
     referenceNode.selected = false;
@@ -953,7 +952,6 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       ? screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
       : { x: 0, y: 0 };
     const node = addNode("imageLoader", point.x, point.y, {
-      label: selection.name || t("infiniteCanvas:imageNode"),
       imageUrl: selection.url,
     });
     setNodeImage(node.id, selection.url, selection.name || t("infiniteCanvas:imageNode"));
@@ -1102,7 +1100,6 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
         thumbUrl,
         imageNaturalWidth: dimensions.width,
         imageNaturalHeight: dimensions.height,
-        label: file.name || t("infiniteCanvas:pastedImage"),
       });
       return { ...node, style: size, selected: true };
     }));

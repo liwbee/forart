@@ -111,7 +111,6 @@ export function nativeCanvasNodePrimaryImage(data: NativeCanvasNodeData): Native
   return {
     localUrl: data.imageUrl,
     thumbUrl: data.thumbUrl,
-    fileName: data.label,
     width: data.imageNaturalWidth,
     height: data.imageNaturalHeight,
   };

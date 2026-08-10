@@ -517,7 +517,6 @@ function createCanvasStore({ rootDir }) {
         delete next.multiImageCollapsedSize;
         delete next.imageUrl;
         delete next.thumbUrl;
-        next.label = String(payload.result.fileName || next.label || 'Generated image');
         delete next.outputDownloadState;
         delete next.outputDownloadedAt;
 
