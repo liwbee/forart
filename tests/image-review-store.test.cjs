@@ -68,6 +68,17 @@ test('image review only reads roots explicitly authorized by the main process', 
   assert.deepEqual(selection, { canceled: false, path: path.resolve(reviewRoot) });
   const ipcProducts = await handlers.get('image-review:products')({}, { root: selection.path, modelFolders: '模特图' });
   assert.equal(ipcProducts.products.length, 1);
+  const ipcProductImages = await handlers.get('image-review:product-images')({}, {
+    root: selection.path,
+    productId: 'SKU-001',
+    modelFolders: '模特图',
+    detailFolders: '详情图',
+    requestPriority: 11,
+  });
+  assert.equal(
+    new URL(ipcProductImages.product.modelImages[0].thumbnailUrl).searchParams.get('priority'),
+    '11',
+  );
 });
 
 test('image review opens only an authorized product folder', async (t) => {

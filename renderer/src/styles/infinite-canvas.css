@@ -142,6 +142,10 @@
   opacity: 0.25;
 }
 
+.rf-workspace-tab[data-remote-unavailable] .rf-workspace-tab__trigger > svg {
+  color: var(--destructive);
+}
+
 .rf-workspace-tab__trigger {
   width: 100%;
   min-width: 0;
@@ -367,6 +371,11 @@
   height: 17px;
 }
 
+.rf-canvas-card__icon[data-source="shared"] {
+  color: var(--accent-foreground);
+  background: var(--accent);
+}
+
 .rf-canvas-card [data-slot="card-title"] {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -424,10 +433,6 @@
 }
 
 .rf-native-canvas {
-  --rf-selection-inverse-zoom: 1;
-  --rf-selection-screen-gap: 24px;
-  --rf-selection-screen-stroke: 1px;
-  --rf-selection-screen-radius: var(--radius);
   position: relative;
   overflow: hidden;
 }
@@ -867,6 +872,10 @@
 .rf-action-fission-group-status {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.rf-action-fission--unavailable {
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .rf-action-fission-header-status {
@@ -2846,19 +2855,62 @@
   background: transparent;
 }
 
-.rf-native-canvas .react-flow__nodesselection-rect::after {
-  content: "";
+.rf-native-multi-selection-frame {
   position: absolute;
-  inset: calc(-1 * var(--rf-selection-screen-gap));
+  inset: 0 auto auto 0;
   pointer-events: none;
-  border-width: calc(var(--rf-selection-screen-stroke) * var(--rf-selection-inverse-zoom));
-  border-style: dashed;
-  border-color: var(--primary);
-  border-radius: calc(var(--rf-selection-screen-radius) * var(--rf-selection-inverse-zoom));
+  z-index: 3;
+  box-sizing: border-box;
 }
 
-.rf-native-canvas[data-selection-count="1"] .react-flow__nodesselection-rect::after {
-  display: none;
+.rf-native-group-node {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--primary) 42%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
+  pointer-events: auto;
+  overflow: visible;
+  cursor: grab;
+}
+
+.rf-native-canvas .react-flow__node.dragging .rf-native-group-node {
+  cursor: grabbing;
+}
+
+.rf-native-group-node.is-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 24%, transparent);
+}
+
+.rf-native-canvas .react-flow__node.selected .rf-native-group-node .rf-native-node-resize-control {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.rf-native-multi-selection-toolbar,
+.rf-native-group-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 4px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+}
+
+.rf-native-group-toolbar {
+  z-index: 6;
+}
+
+.rf-native-multi-selection-count {
+  padding: 0 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .rf-native-node-toolbar {
@@ -3142,7 +3194,8 @@
 }
 
 .generation-task-center__viewport {
-  padding: 0 6px 8px 8px;
+  /* The Radix scrollbar is a 10px overlay; keep task content clear of it. */
+  padding: 0 16px 8px 8px;
 }
 
 .generation-task-center__virtual-spacer {

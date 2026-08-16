@@ -124,3 +124,44 @@ test('cache cleanup does not remove a shared legacy thumbnail used by another as
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+test('canvas cache cleanup never scans or deletes resource-library databases and assets', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-canvas-cache-library-isolation-'));
+  try {
+    const inputRoot = path.join(rootDir, 'CanvasAssests', 'input');
+    const outputRoot = path.join(rootDir, 'CanvasAssests', 'output');
+    const libraryRoot = path.join(rootDir, '动作库', '项目 A');
+    const databasePath = path.join(rootDir, '.forart', 'database', 'forart-library.sqlite');
+    const libraryAsset = path.join(libraryRoot, '动作 A.png');
+    const libraryThumbnail = path.join(rootDir, 'forart_data', 'thumb', 'library-assets', 'asset_action.webp');
+    const unusedCanvasAsset = path.join(outputRoot, 'unused.png');
+    for (const filePath of [databasePath, libraryAsset, libraryThumbnail, unusedCanvasAsset]) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, path.basename(filePath));
+    }
+
+    const cache = createCanvasCacheStore({
+      assetStore: {
+        canvasAssetsRoot: () => path.join(rootDir, 'CanvasAssests'),
+        assetDirectory: (kind) => kind === 'input' ? inputRoot : outputRoot,
+        resolveAssetUrl: () => '',
+        assetUrl: (filePath) => `forart-asset://canvas/${path.basename(filePath)}`,
+      },
+      canvasStore: { listCanvases: () => [], readCanvas: () => null },
+      generationTaskRepository: { listTaskRecords: () => [] },
+      shell: { openPath() {}, showItemInFolder() {} },
+    });
+
+    const scan = cache.scan();
+    assert.deepEqual(scan.assets.map((asset) => asset.fileName), ['unused.png']);
+    const result = cache.deleteAssets({ ids: [scan.assets[0].id, databasePath, libraryAsset, libraryThumbnail] });
+    assert.equal(result.deletedCount, 1);
+    assert.equal(result.skippedCount, 3);
+    assert.equal(fs.existsSync(unusedCanvasAsset), false);
+    assert.equal(fs.existsSync(databasePath), true);
+    assert.equal(fs.existsSync(libraryAsset), true);
+    assert.equal(fs.existsSync(libraryThumbnail), true);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});

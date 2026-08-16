@@ -43,10 +43,6 @@
     margin-left: 0;
   }
 
-  .model-inline-editor {
-    padding: var(--space-4);
-  }
-
   .model-inline-editor-placeholder {
     grid-template-columns: 1fr;
   }

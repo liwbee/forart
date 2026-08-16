@@ -41,6 +41,33 @@ function contentTypeFor(filePath) {
   return "application/octet-stream";
 }
 
+export function requiredProjectUpdatePermissions(payload) {
+  const required = [];
+  if (Object.prototype.hasOwnProperty.call(payload, "sortOrder")) required.push("shared_canvas.project_reorder");
+  if (Object.prototype.hasOwnProperty.call(payload, "title") || Object.prototype.hasOwnProperty.call(payload, "color")) {
+    required.push("shared_canvas.project_edit");
+  }
+  return required;
+}
+
+async function authorizeProjectUpdate(req, res, context, payload) {
+  if (process.env.FORART_AUTH_DISABLED === "1" && process.env.NODE_ENV === "test") return true;
+  const auth = context.getAuthRuntime?.();
+  const session = await auth?.requireSession(req);
+  if (!session) {
+    sendJson(res, 401, { detail: "Authentication required", code: "AUTHENTICATION_REQUIRED" });
+    return false;
+  }
+  const required = requiredProjectUpdatePermissions(payload);
+  for (const permission of required) {
+    if (!await auth.authorization.hasPermission(session.user, permission)) {
+      sendJson(res, 403, { detail: "Permission denied", code: "PERMISSION_DENIED", required });
+      return false;
+    }
+  }
+  return true;
+}
+
 export function handleCanvasExchangeApi(req, res, url, context) {
   const method = String(req.method || "GET").toUpperCase();
   const pathname = url.pathname;
@@ -63,7 +90,10 @@ export function handleCanvasExchangeApi(req, res, url, context) {
     const projectId = decodeURIComponent(projectMatch[1]);
     if (method === "PATCH") {
       parseJsonBody(req)
-        .then((payload) => sendJson(res, 200, store.updateProject(projectId, payload)))
+        .then(async (payload) => {
+          if (!await authorizeProjectUpdate(req, res, context, payload)) return;
+          sendJson(res, 200, store.updateProject(projectId, payload));
+        })
         .catch((error) => sendError(res, error));
       return true;
     }
@@ -90,6 +120,12 @@ export function handleCanvasExchangeApi(req, res, url, context) {
 
   if (method === "POST" && pathname === "/api/canvas-exchange/canvases") {
     const projectId = url.searchParams.get("project_id") || "";
+    if (String(req.headers["content-type"] || "").toLowerCase().includes("application/json")) {
+      parseJsonBody(req)
+        .then((payload) => sendJson(res, 200, store.beginCanvasUpload({ ...payload, projectId: payload.projectId || projectId })))
+        .catch((error) => sendError(res, error));
+      return true;
+    }
     const tempName = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}.forartcanvas`;
     const tempPath = path.join(context.paths.tempRoot(), tempName);
     receiveBodyToFile(req, tempPath)
@@ -102,6 +138,32 @@ export function handleCanvasExchangeApi(req, res, url, context) {
         if (existsSync(tempPath)) unlinkSync(tempPath);
         sendError(res, error);
       });
+    return true;
+  }
+
+  const canvasAssetUploadMatch = pathname.match(/^\/api\/canvas-exchange\/canvases\/([^/]+)\/assets\/([^/]+)$/);
+  if (canvasAssetUploadMatch && method === "PUT") {
+    const canvasId = decodeURIComponent(canvasAssetUploadMatch[1]);
+    const assetId = decodeURIComponent(canvasAssetUploadMatch[2]);
+    store.receiveCanvasAsset(canvasId, assetId, req, Number(req.headers["content-length"] || 0))
+      .then((result) => sendJson(res, 200, result))
+      .catch((error) => sendError(res, error));
+    return true;
+  }
+
+  const canvasCompleteMatch = pathname.match(/^\/api\/canvas-exchange\/canvases\/([^/]+)\/complete$/);
+  if (canvasCompleteMatch && method === "POST") {
+    try {
+      sendJson(res, 200, store.completeCanvasUpload(decodeURIComponent(canvasCompleteMatch[1])));
+    } catch (error) {
+      sendError(res, error);
+    }
+    return true;
+  }
+
+  const canvasUploadCancelMatch = pathname.match(/^\/api\/canvas-exchange\/canvases\/([^/]+)\/upload$/);
+  if (canvasUploadCancelMatch && method === "DELETE") {
+    sendJson(res, 200, store.cancelCanvasUpload(decodeURIComponent(canvasUploadCancelMatch[1])));
     return true;
   }
 
@@ -171,6 +233,16 @@ export function handleCanvasExchangeApi(req, res, url, context) {
       }
       return true;
     }
+  }
+
+  const canvasTransferMatch = pathname.match(/^\/api\/canvas-exchange\/canvases\/([^/]+)\/transfer$/);
+  if (canvasTransferMatch && method === "GET") {
+    try {
+      sendJson(res, 200, store.loadCanvasTransfer(decodeURIComponent(canvasTransferMatch[1])));
+    } catch (error) {
+      sendError(res, error, 404);
+    }
+    return true;
   }
 
   return false;

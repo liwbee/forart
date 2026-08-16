@@ -372,7 +372,7 @@ $script:LogPath = [string]$plan.logPath
 $script:StatusPath = [string]$plan.statusPath
 $exePath = [string]$plan.exePath
 $electronPid = [int]$plan.electronPid
-$preserveNames = @("forart-config.json", "CanvasAssests", ".forart-data")
+$preserveNames = @("forart-config.json", "CanvasAssests", ".forart-data", "forart_data")
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Path $script:LogPath -Parent) | Out-Null
 

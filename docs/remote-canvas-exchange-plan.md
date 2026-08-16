@@ -66,10 +66,10 @@ Remote snapshots can be opened from the server canvas list for browsing. This br
    - Canvas JSON document.
    - Referenced local canvas assets.
    - Basic metadata such as title, node count, and updated time.
-5. The app uploads the canvas and all referenced canvas resources to the server using the existing `.forartcanvas` package as a transfer container.
+5. The app creates a remote upload session, sends the canvas document and manifest, then uploads each referenced resource directly as a stream.
 6. If some referenced local resources are missing, the upload continues with warnings and omits those missing resources.
-7. The server unpacks the uploaded package into server-side `canvas.json` and resource files.
-8. The server deletes the temporary uploaded `.forartcanvas` file after successful unpacking.
+7. The server verifies each resource and atomically moves it from the upload staging directory into server storage.
+8. The client submits the upload session; the server writes the final canvas document and manifest atomically.
 9. The remote canvas appears in the server canvas list.
 
 ### Browse Server Canvas
@@ -90,8 +90,8 @@ Remote snapshots can be opened from the server canvas list for browsing. This br
 3. User chooses a remote canvas.
 4. User clicks `Copy to local`.
 5. The user chooses a target local project through a picker similar to local move-canvas behavior.
-6. The app downloads the remote canvas package, including both canvas JSON and resources.
-7. The app imports it into local `CanvasAssests`.
+6. The app requests the remote canvas document and resource manifest.
+7. The app downloads each resource directly into local `CanvasAssests` and rewrites the document URLs.
 8. The imported canvas always appears as a new local canvas in the selected local project.
 9. The imported canvas keeps the original title. If the title conflicts with an existing local canvas title, local creation/import logic should de-duplicate or append a suffix.
 
@@ -185,11 +185,21 @@ interface RemoteCanvasManifest {
 
 This keeps the feature file-based and separate from the existing SQLite-backed library data.
 
-## Package Format
+## Package Format And Direct Exchange
 
-Use the existing canvas import/export package shape for upload transport. The current `.forartcanvas` file is a zip archive generated with `adm-zip`; it contains `manifest.json`, `canvas.json`, and packaged asset files.
+The existing canvas import/export package remains the offline file format. The current `.forartcanvas` file is a zip archive generated with `adm-zip`; it contains `manifest.json`, `canvas.json`, and packaged asset files.
 
-The server should not keep `.forartcanvas` as the long-term storage format. After upload, the server unpacks the package into the server-side `CanvasAssests` layout:
+Shared-canvas network exchange does not use the package as an intermediate container. It uses a three-step upload:
+
+```text
+POST /api/canvas-exchange/canvases
+PUT  /api/canvas-exchange/canvases/:id/assets/:assetId
+POST /api/canvas-exchange/canvases/:id/complete
+```
+
+The server validates each streamed resource, writes it through a `.part` file, and renames it into final storage only after the upload completes. Failed sessions can be canceled and their staging directory removed.
+
+The server should not keep `.forartcanvas` as the long-term storage format. Direct uploads are stored in the server-side `CanvasAssests` layout:
 
 Long-term server snapshot contents:
 
@@ -201,9 +211,7 @@ CanvasAssests/
   manifests/: per-canvas metadata and resource references
 ```
 
-The uploaded `.forartcanvas` package is only an intermediate transfer container. After unpacking succeeds, the temporary package can be deleted.
-
-`canvas.json` should be rewritten on the server so packaged asset URLs become server-readable resource URLs or stable server resource references.
+`canvas.json` is rewritten after direct upload so package placeholder URLs become server-readable resource URLs.
 
 When copying to local, server resource URLs should be rewritten back into local `forart-asset://canvas/...` URLs after files are stored in local `CanvasAssests`.
 
@@ -258,15 +266,19 @@ interface ListRemoteCanvasesResponse {
 POST /api/canvas-exchange/canvases
 ```
 
-Request options:
+Request body:
 
-- Multipart or binary upload of the existing `.forartcanvas` package.
+```json
+{
+  "projectId": "project_xxx",
+  "canvas": {},
+  "manifest": { "format": "forart.canvas.package", "assets": [] }
+}
+```
 
-The upload must include both the canvas document and all referenced canvas resources. No explicit upload size limit is planned for the first version.
+The response contains an upload session and the resource upload URL template. Each declared resource is then sent as an `application/octet-stream` request. The final `complete` request is required before the canvas appears in the server list.
 
-The existing `.forartcanvas` package is already a zip archive. The server should unpack the uploaded package into the file-based exchange storage layout and delete the temporary uploaded package after success.
-
-If the source package contains warnings about missing resources, the server should preserve those warnings in the remote manifest instead of rejecting the upload.
+If resource scanning reports missing local files, the server preserves those warnings in the remote manifest instead of rejecting the upload.
 
 After upload completes, the client should immediately show the user any missing-resource warnings once.
 
@@ -282,10 +294,10 @@ interface UploadRemoteCanvasResponse {
 ### Download Canvas Snapshot
 
 ```text
-GET /api/canvas-exchange/canvases/:remoteCanvasId/package
+GET /api/canvas-exchange/canvases/:remoteCanvasId/transfer
 ```
 
-Generates and returns a `.forartcanvas` package from the stored server-side `canvas.json` and resource files. This is used internally by `Copy to local`. Do not expose a separate direct package download action in the first version.
+Returns the remote canvas JSON and resource manifest. `Copy to local` downloads the resources individually. The existing `/package` endpoint remains available for explicit package export or backward compatibility.
 
 ### Load Canvas Snapshot For Browsing
 
@@ -420,23 +432,23 @@ There is no heartbeat and no always-on connection.
 Resource usage only happens when users perform explicit actions:
 
 - Listing remote canvases reads `CanvasAssests/canvas-index.json`.
-- Upload receives a `.forartcanvas` package, unpacks it, writes `canvas.json` and resource files, deletes the temporary package, and updates `CanvasAssests/canvas-index.json`.
+- Upload creates a staging session, streams each declared resource into a `.part` file, validates it, then commits `canvas.json`, the manifest, and resource files.
 - Browsing reads `canvas.json` and serves resource files.
-- Copy/download generates a `.forartcanvas` package from stored `canvas.json` and resource files.
+- Copy to local reads the transfer manifest, downloads each resource directly, and imports it into local `CanvasAssests`.
 - Delete removes the snapshot JSON, manifest, referenced resource files, and updates `CanvasAssests/canvas-index.json`.
 
-Server memory usage can stay low if uploads/downloads stream data instead of buffering entire large packages in memory.
+Server memory usage stays low because resource uploads and downloads are streamed instead of buffering a complete archive in memory.
 
-No explicit package size limit is planned. Because of that, upload and download handlers should avoid buffering full packages in memory where practical.
+No explicit snapshot size limit is planned. Resource handlers therefore avoid buffering full image files in memory.
 
 ## Risks
 
-- Large canvas packages can be heavy if many images are embedded.
+- Large canvas snapshots can still consume substantial disk and network bandwidth.
 - File-based `CanvasAssests/canvas-index.json` needs careful atomic writes to avoid corruption.
 - Concurrent uploads/deletes need simple serialization around index updates.
 - Remote snapshots can accumulate storage because there is no automatic cleanup.
-- No explicit upload size limit means very large packages can occupy disk and network bandwidth unexpectedly.
-- Remote browsing requires a reliable URL rewrite layer so packaged assets render from server-side resource files.
+- No explicit upload size limit means very large snapshots can occupy disk and network bandwidth unexpectedly.
+- Remote browsing and copy-to-local require reliable URL rewriting between package placeholders, server URLs, and local asset URLs.
 
 ## Code Architecture
 
@@ -490,11 +502,10 @@ Responsibilities:
   - Deletes non-empty projects by deleting contained snapshots and referenced resources.
 
 - `canvas-exchange-packages.mjs`
-  - Reads uploaded `.forartcanvas` zip packages.
-  - Validates `manifest.json` and `canvas.json`.
-  - Unpacks package assets into shared `input/` and `output/` folders.
-  - Rewrites package asset URLs into server resource URLs.
-  - Generates a `.forartcanvas` package for `Copy to local`.
+  - Finalizes directly uploaded resources into shared `input/` and `output/` folders.
+  - Rewrites package placeholder URLs into server resource URLs.
+  - Rolls back moved resources when a direct-upload commit fails.
+  - Retains ZIP read/write support only for explicit offline package import/export and compatibility endpoints.
 
 - `canvas-exchange-assets.mjs`
   - Serves stored resource files.
@@ -557,7 +568,7 @@ Responsibilities:
   - Does not store local canvas state.
 
 - `remoteCanvasPackageActions.ts`
-  - Bridges local IPC package export/import and remote API upload/download.
+  - Bridges local IPC direct upload/import and remote transfer APIs.
   - Owns `uploadLocalCanvasToRemote` and `copyRemoteCanvasToLocal`.
 
 - `remoteCanvasReadOnly.ts`
@@ -639,20 +650,20 @@ This prevents accidental edits through keyboard shortcuts, paste/drop, or less-v
 
 ### IPC Boundary
 
-The existing `canvas-package-store.cjs` exports packages through a save dialog. Remote upload needs a non-dialog package creation path.
+The existing `canvas-package-store.cjs` still owns explicit package import/export. Remote exchange uses separate direct-transfer IPC methods.
 
 Add focused IPC methods instead of overloading the UI export command:
 
 ```text
-canvas:create-package-for-upload
-canvas:import-package-from-path
+canvas:upload-to-remote
+canvas:copy-remote-to-local
 ```
 
 Recommended Electron module additions:
 
-- Add reusable package creation/import helpers inside `electron/main/modules/canvas-package-store.cjs`.
+- Reuse the existing resource scanner and canvas sanitizer without creating an archive.
 - Keep dialog-based `exportPackage` and `importCanvas` as UI commands.
-- Add non-dialog methods for remote exchange workflows.
+- Stream resources in both directions and rewrite URLs only after local/server storage succeeds.
 
 This avoids automating save/open dialogs for remote upload/copy.
 
@@ -660,9 +671,10 @@ This avoids automating save/open dialogs for remote upload/copy.
 
 No upload size limit is planned, so avoid buffering more than necessary:
 
-- Client creates a temporary `.forartcanvas` package and uploads it.
-- Server writes upload to a temp file, then unzips from disk.
-- Server generates copy packages as temp files and cleans them up after response completion.
+- Client posts canvas JSON plus a manifest, then streams each resource independently.
+- Server writes each resource to a `.part` file and atomically renames it after validation.
+- Server commits the snapshot only after every declared resource exists.
+- Copy to local downloads resources independently and stages them only until local import succeeds.
 
 ### Testing Boundaries
 
@@ -690,13 +702,13 @@ Add targeted verification around module boundaries:
 - Add search and sort support for server canvas listing.
 - Add read-only canvas load and asset file APIs.
 
-### Phase 2: Package Reuse
+### Phase 2: Direct Resource Transfer
 
-- Reuse existing `.forartcanvas` zip-based package format.
-- Add helper to upload an exported package to the server.
-- Server unpacks uploaded package into `canvas.json` and resources.
-- Server can regenerate a `.forartcanvas` package for copy/download.
-- Add helper to import a downloaded package into local canvas storage.
+- Reuse the existing package resource scanner and placeholder URL format internally.
+- Upload canvas JSON and manifest without generating a ZIP.
+- Stream each resource into a server upload session and finalize atomically.
+- Copy remote snapshots by downloading manifest resources directly into local storage.
+- Keep `.forartcanvas` only as the explicit offline import/export format.
 
 ### Phase 3: UI
 
@@ -713,7 +725,7 @@ Add targeted verification around module boundaries:
 
 ### Phase 4: Storage Hygiene
 
-- Show package size and upload time.
+- Show total resource size and upload time.
 - Add delete remote snapshot.
 - Optionally add admin cleanup for orphaned or old snapshots.
 
@@ -729,8 +741,8 @@ Add targeted verification around module boundaries:
 - Remote `input/` and `output/` resource folders are shared folders like local mode, not nested per canvas.
 - Uploading local to remote always creates a new remote snapshot.
 - Uploading includes both canvas document and referenced canvas resources.
-- The uploaded `.forartcanvas` package is only a transfer container.
-- The server unpacks uploaded packages and stores `canvas.json` plus resource files.
+- Shared-canvas network exchange does not create or transfer `.forartcanvas` archives.
+- The server stores `canvas.json`, a manifest, and resource files after a direct upload session completes.
 - Server canvas snapshots can be opened for read-only browsing.
 - Server canvas browsing reuses the current main canvas stage and displays `Read-only mode` in the top-left area.
 - Copying remote to local always creates a new local editable canvas.
@@ -743,7 +755,7 @@ Add targeted verification around module boundaries:
 - Server canvas projects/folders support create, rename, and delete.
 - Server canvas project/folder names follow local canvas project naming rules.
 - Deleting a non-empty server project/folder deletes all contained snapshots and their referenced resource files.
-- Upload uses the existing `.forartcanvas` zip-based package format.
+- Explicit local import/export continues to use the existing `.forartcanvas` ZIP format.
 - Upload target selection should feel like the existing local move-canvas flow.
 - Server canvas list supports title search and sorting by upload time and title.
 - Remote snapshots do not need thumbnail display in the first version.

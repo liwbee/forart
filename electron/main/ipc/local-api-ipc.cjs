@@ -43,6 +43,13 @@ let activeActionService = null;
 let activeActionServiceKey = '';
 let activeActionFolderImportService = null;
 let activeActionFolderImportServiceKey = '';
+let runtimeTransition = Promise.resolve();
+
+function enqueueRuntimeTransition(work) {
+  const next = runtimeTransition.then(work, work);
+  runtimeTransition = next.catch(() => {});
+  return next;
+}
 
 function libraryRuntimeModule() {
   if (!runtimeModulePromise) {
@@ -103,27 +110,34 @@ function libraryRouteSchemasModule() {
 async function getLibraryRuntime({ configStore, app, dataRoot }) {
   const config = configStore.load();
   const localLibraryPath = String(config?.localLibraryPath || '').trim();
-  if (!localLibraryPath) return { config, runtime: null };
+  if (!localLibraryPath) {
+    await closeActiveRuntime();
+    return { config, runtime: null };
+  }
 
   const language = config?.language === 'en-US' ? 'en-US' : 'zh-CN';
   const databaseDir = nodePath.join(localLibraryPath, '.forart', 'database');
-  const runtimeKey = [localLibraryPath, databaseDir, dataRoot, language].join('|');
-  if (activeRuntime && activeRuntimeKey === runtimeKey) return { config, runtime: activeRuntime };
-
-  closeActiveRuntime();
-  const { createLibraryRuntime } = await libraryRuntimeModule();
-  activeRuntime = createLibraryRuntime({
-    dataDir: localLibraryPath,
-    databaseDir,
-    canvasStorageRoot: dataRoot,
-    language,
+  const runtimeDataDir = nodePath.join(dataRoot, 'forart_data');
+  const runtimeKey = [localLibraryPath, databaseDir, runtimeDataDir, dataRoot, language].join('|');
+  await enqueueRuntimeTransition(async () => {
+    if (activeRuntime && activeRuntimeKey === runtimeKey) return;
+    await closeActiveRuntimeNow();
+    const { createLibraryRuntime } = await libraryRuntimeModule();
+    const nextRuntime = await createLibraryRuntime({
+      dataDir: localLibraryPath,
+      runtimeDataDir,
+      databaseDir,
+      canvasStorageRoot: dataRoot,
+      language,
+    });
+    activeRuntime = nextRuntime;
+    activeRuntimeKey = runtimeKey;
   });
-  activeRuntimeKey = runtimeKey;
   return { config, runtime: activeRuntime };
 }
 
-function closeActiveRuntime() {
-  activeRuntime?.close?.();
+async function closeActiveRuntimeNow() {
+  await activeRuntime?.close?.();
   activeRuntime = null;
   activeRuntimeKey = '';
   activeModelService = null;
@@ -134,6 +148,10 @@ function closeActiveRuntime() {
   activeActionServiceKey = '';
   activeActionFolderImportService = null;
   activeActionFolderImportServiceKey = '';
+}
+
+function closeActiveRuntime() {
+  return enqueueRuntimeTransition(closeActiveRuntimeNow);
 }
 
 function localLibraryAssetUrl(assetId) {
@@ -226,12 +244,12 @@ async function dispatchTagRoute({ method, url, tagMatch, service, projectNotFoun
   });
   if (!parsedQuery.ok) return parsedQuery;
   const projectId = parsedQuery.value.project_id;
-  if (!service.projectExists(projectId)) return failure(404, projectNotFoundDetail);
-  if (!tagId && (method === 'GET' || method === 'HEAD')) return success({ tags: service.listTags(projectId) });
+  if (!await service.projectExists(projectId)) return failure(404, projectNotFoundDetail);
+  if (!tagId && (method === 'GET' || method === 'HEAD')) return success({ tags: await service.listTags(projectId) });
   if (!tagId && method === 'POST') {
     const parsedBody = await parseLibraryRoutePayload('libraryCreateTagPayloadSchema', url.body || {});
     if (!parsedBody.ok) return parsedBody;
-    return notFoundIfNull(service.createTag(projectId, parsedBody.value), projectNotFoundDetail);
+    return notFoundIfNull(await service.createTag(projectId, parsedBody.value), projectNotFoundDetail);
   }
   if (tagId && (method === 'PATCH' || method === 'DELETE')) {
     const parsedParams = await parseLibraryRoutePayload('libraryTagRouteParamsSchema', {
@@ -243,9 +261,9 @@ async function dispatchTagRoute({ method, url, tagMatch, service, projectNotFoun
   if (tagId && method === 'PATCH') {
     const parsedBody = await parseLibraryRoutePayload('libraryUpdateTagPayloadSchema', url.body || {});
     if (!parsedBody.ok) return parsedBody;
-    return notFoundIfNull(service.updateTag(projectId, tagId, parsedBody.value), 'Tag not found');
+    return notFoundIfNull(await service.updateTag(projectId, tagId, parsedBody.value), 'Tag not found');
   }
-  if (tagId && method === 'DELETE') return success(service.deleteTag(projectId, tagId));
+  if (tagId && method === 'DELETE') return success(await service.deleteTag(projectId, tagId));
   return null;
 }
 
@@ -255,11 +273,11 @@ async function dispatchModelLibraryRoute({ method, url, body, runtime }) {
 
   try {
     if (pathname === '/api/model-projects') {
-      if (method === 'GET' || method === 'HEAD') return success(service.listProjects());
+      if (method === 'GET' || method === 'HEAD') return success(await service.listProjects());
       if (method === 'POST') {
         const parsed = await parseLibraryRoutePayload('libraryCreateProjectPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
-        return success(service.createProject(parsed.value));
+        return success(await service.createProject(parsed.value));
       }
     }
 
@@ -278,21 +296,21 @@ async function dispatchModelLibraryRoute({ method, url, body, runtime }) {
       if (tail === '' && method === 'PATCH') {
         const parsed = await parseLibraryRoutePayload('libraryUpdateProjectPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
-        return notFoundIfNull(service.updateProject(projectId, parsed.value), 'Model project not found');
+        return notFoundIfNull(await service.updateProject(projectId, parsed.value), 'Model project not found');
       }
-      if (tail === '' && method === 'DELETE') return notFoundIfNull(service.deleteProject(projectId), 'Model project not found');
+      if (tail === '' && method === 'DELETE') return notFoundIfNull(await service.deleteProject(projectId), 'Model project not found');
       if (tail === 'cover/upload' && method === 'POST') {
         const parsed = await parseLibraryRoutePayload('libraryAssetUploadPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
         return notFoundIfNull(await service.uploadProjectCover(projectId, parsed.value), 'Model project not found');
       }
       if (tail === 'models' && (method === 'GET' || method === 'HEAD')) {
-        return notFoundIfNull(service.listModels(projectId, searchObject(url)), 'Model project not found');
+        return notFoundIfNull(await service.listModels(projectId, searchObject(url)), 'Model project not found');
       }
       if (tail === 'models' && method === 'POST') {
         const parsed = await parseLibraryRoutePayload('libraryCreateModelPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
-        return notFoundIfNull(service.createModel(projectId, parsed.value), 'Model project not found');
+        return notFoundIfNull(await service.createModel(projectId, parsed.value), 'Model project not found');
       }
     }
 
@@ -303,14 +321,14 @@ async function dispatchModelLibraryRoute({ method, url, body, runtime }) {
       if (tail === '' && method === 'PATCH') {
         const parsed = await parseLibraryRoutePayload('libraryUpdateModelPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
-        return notFoundIfNull(service.updateModel(modelId, parsed.value), 'Model not found');
+        return notFoundIfNull(await service.updateModel(modelId, parsed.value), 'Model not found');
       }
-      if (tail === '' && method === 'DELETE') return notFoundIfNull(service.deleteModel(modelId), 'Model not found');
-      if (tail === 'images' && (method === 'GET' || method === 'HEAD')) return notFoundIfNull(service.listImages(modelId), 'Model not found');
+      if (tail === '' && method === 'DELETE') return notFoundIfNull(await service.deleteModel(modelId), 'Model not found');
+      if (tail === 'images' && (method === 'GET' || method === 'HEAD')) return notFoundIfNull(await service.listImages(modelId), 'Model not found');
       if (tail === 'images' && method === 'POST') {
         const parsed = await parseLibraryRoutePayload('libraryAddModelImagePayloadSchema', body || {});
         if (!parsed.ok) return parsed;
-        return notFoundIfNull(service.addImage(modelId, parsed.value), 'Model not found');
+        return notFoundIfNull(await service.addImage(modelId, parsed.value), 'Model not found');
       }
       if (tail === 'images/upload' && method === 'POST') {
         const parsed = await parseLibraryRoutePayload('libraryAssetUploadPayloadSchema', body || {});
@@ -321,7 +339,7 @@ async function dispatchModelLibraryRoute({ method, url, body, runtime }) {
 
     const imageMatch = pathname.match(/^\/api\/model-images\/([^/]+)$/);
     if (imageMatch && method === 'DELETE') {
-      return notFoundIfNull(service.deleteImage(decodeURIComponent(imageMatch[1])), 'Model image not found');
+      return notFoundIfNull(await service.deleteImage(decodeURIComponent(imageMatch[1])), 'Model image not found');
     }
 
     const tagMatch = pathname.match(/^\/api\/libraries\/model\/tags(?:\/([^/]+))?$/);
@@ -333,7 +351,7 @@ async function dispatchModelLibraryRoute({ method, url, body, runtime }) {
     if (pathname === '/api/libraries/model/entries/bulk' && method === 'POST') {
       const parsed = await parseLibraryRoutePayload('libraryBulkEntriesPayloadSchema', body || {});
       if (!parsed.ok) return parsed;
-      return notFoundIfNull(service.bulkEntries(parsed.value), 'Model project not found');
+      return notFoundIfNull(await service.bulkEntries(parsed.value), 'Model project not found');
     }
 
     return null;
@@ -348,11 +366,11 @@ async function dispatchOutfitLibraryRoute({ method, url, body, runtime }) {
 
   try {
     if (pathname === '/api/outfit-projects') {
-      if (method === 'GET' || method === 'HEAD') return success(service.listProjects());
+      if (method === 'GET' || method === 'HEAD') return success(await service.listProjects());
       if (method === 'POST') {
         const parsed = await parseLibraryRoutePayload('libraryCreateProjectPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
-        return success(service.createProject(parsed.value));
+        return success(await service.createProject(parsed.value));
       }
     }
 
@@ -371,16 +389,16 @@ async function dispatchOutfitLibraryRoute({ method, url, body, runtime }) {
       if (tail === '' && method === 'PATCH') {
         const parsed = await parseLibraryRoutePayload('libraryUpdateProjectPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
-        return notFoundIfNull(service.updateProject(projectId, parsed.value), 'Outfit project not found');
+        return notFoundIfNull(await service.updateProject(projectId, parsed.value), 'Outfit project not found');
       }
-      if (tail === '' && method === 'DELETE') return notFoundIfNull(service.deleteProject(projectId), 'Outfit project not found');
+      if (tail === '' && method === 'DELETE') return notFoundIfNull(await service.deleteProject(projectId), 'Outfit project not found');
       if (tail === 'cover/upload' && method === 'POST') {
         const parsed = await parseLibraryRoutePayload('libraryAssetUploadPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
         return notFoundIfNull(await service.uploadProjectCover(projectId, parsed.value), 'Outfit project not found');
       }
       if (tail === 'outfits' && (method === 'GET' || method === 'HEAD')) {
-        return notFoundIfNull(service.listOutfits(projectId, searchObject(url)), 'Outfit project not found');
+        return notFoundIfNull(await service.listOutfits(projectId, searchObject(url)), 'Outfit project not found');
       }
     }
 
@@ -391,9 +409,9 @@ async function dispatchOutfitLibraryRoute({ method, url, body, runtime }) {
       if (!isImageUpload && method === 'PATCH') {
         const parsed = await parseLibraryRoutePayload('libraryUpdateOutfitPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
-        return notFoundIfNull(service.updateOutfit(outfitId, parsed.value), 'Outfit not found');
+        return notFoundIfNull(await service.updateOutfit(outfitId, parsed.value), 'Outfit not found');
       }
-      if (!isImageUpload && method === 'DELETE') return notFoundIfNull(service.deleteOutfit(outfitId), 'Outfit not found');
+      if (!isImageUpload && method === 'DELETE') return notFoundIfNull(await service.deleteOutfit(outfitId), 'Outfit not found');
       if (isImageUpload && method === 'POST') {
         const parsed = await parseLibraryRoutePayload('libraryAssetUploadPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
@@ -410,7 +428,7 @@ async function dispatchOutfitLibraryRoute({ method, url, body, runtime }) {
     if (pathname === '/api/libraries/outfit/entries/bulk' && method === 'POST') {
       const parsed = await parseLibraryRoutePayload('libraryBulkEntriesPayloadSchema', body || {});
       if (!parsed.ok) return parsed;
-      return notFoundIfNull(service.bulkEntries(parsed.value), 'Outfit project not found');
+      return notFoundIfNull(await service.bulkEntries(parsed.value), 'Outfit project not found');
     }
 
     return null;
@@ -425,11 +443,11 @@ async function dispatchActionLibraryRoute({ method, url, body, runtime }) {
 
   try {
     if (pathname === '/api/action-projects') {
-      if (method === 'GET' || method === 'HEAD') return success(service.listProjects());
+      if (method === 'GET' || method === 'HEAD') return success(await service.listProjects());
       if (method === 'POST') {
         const parsed = await parseLibraryRoutePayload('libraryCreateProjectPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
-        return success(service.createProject(parsed.value));
+        return success(await service.createProject(parsed.value));
       }
     }
 
@@ -449,16 +467,16 @@ async function dispatchActionLibraryRoute({ method, url, body, runtime }) {
       if (tail === '' && method === 'PATCH') {
         const parsed = await parseLibraryRoutePayload('libraryUpdateProjectPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
-        return notFoundIfNull(service.updateProject(projectId, parsed.value), 'Action project not found');
+        return notFoundIfNull(await service.updateProject(projectId, parsed.value), 'Action project not found');
       }
-      if (tail === '' && method === 'DELETE') return notFoundIfNull(service.deleteProject(projectId), 'Action project not found');
+      if (tail === '' && method === 'DELETE') return notFoundIfNull(await service.deleteProject(projectId), 'Action project not found');
       if (tail === 'cover/upload' && method === 'POST') {
         const parsed = await parseLibraryRoutePayload('libraryAssetUploadPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
         return notFoundIfNull(await service.uploadProjectCover(projectId, parsed.value), 'Action project not found');
       }
       if (tail === 'actions' && (method === 'GET' || method === 'HEAD')) {
-        return notFoundIfNull(service.listActions(projectId, searchObject(url)), 'Action project not found');
+        return notFoundIfNull(await service.listActions(projectId, searchObject(url)), 'Action project not found');
       }
     }
 
@@ -469,9 +487,9 @@ async function dispatchActionLibraryRoute({ method, url, body, runtime }) {
       if (!isImageUpload && method === 'PATCH') {
         const parsed = await parseLibraryRoutePayload('libraryUpdateActionPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
-        return notFoundIfNull(service.updateAction(actionId, parsed.value), 'Action not found');
+        return notFoundIfNull(await service.updateAction(actionId, parsed.value), 'Action not found');
       }
-      if (!isImageUpload && method === 'DELETE') return notFoundIfNull(service.deleteAction(actionId), 'Action not found');
+      if (!isImageUpload && method === 'DELETE') return notFoundIfNull(await service.deleteAction(actionId), 'Action not found');
       if (isImageUpload && method === 'POST') {
         const parsed = await parseLibraryRoutePayload('libraryAssetUploadPayloadSchema', body || {});
         if (!parsed.ok) return parsed;
@@ -488,7 +506,7 @@ async function dispatchActionLibraryRoute({ method, url, body, runtime }) {
     if (pathname === '/api/libraries/action/entries/bulk' && method === 'POST') {
       const parsed = await parseLibraryRoutePayload('libraryBulkEntriesPayloadSchema', body || {});
       if (!parsed.ok) return parsed;
-      return notFoundIfNull(service.bulkEntries(parsed.value), 'Action project not found');
+      return notFoundIfNull(await service.bulkEntries(parsed.value), 'Action project not found');
     }
 
     return null;
@@ -532,6 +550,7 @@ function registerLocalApiIpc({ ipcMain, configStore, app, dataRoot }) {
         return success({
           configured: true,
           dataDir: runtime.dataDir,
+          runtimeDataDir: runtime.runtimeDataDir,
           databaseDir: runtime.databaseDir,
           databasePath: runtime.databasePath,
           storageRoot: runtime.storageRoot,
@@ -603,9 +622,9 @@ function registerLocalApiIpc({ ipcMain, configStore, app, dataRoot }) {
       if (!assetId) return '';
       const { runtime } = await getLibraryRuntime({ configStore, app, dataRoot });
       if (!runtime) return '';
-      const asset = runtime.db.prepare('SELECT * FROM assets WHERE id = ?').get(assetId);
-      if (!asset?.path) return '';
-      const target = nodePath.isAbsolute(asset.path) ? asset.path : nodePath.join(runtime.storageRoot, asset.path);
+      const asset = await runtime.repository.getAsset(assetId);
+      if (!asset?.storage_key) return '';
+      const target = nodePath.isAbsolute(asset.storage_key) ? asset.storage_key : nodePath.join(runtime.storageRoot, asset.storage_key);
       if (!isInside(runtime.storageRoot, target) || !fs.existsSync(target)) return '';
       return target;
     },
@@ -621,9 +640,9 @@ function registerLocalApiIpc({ ipcMain, configStore, app, dataRoot }) {
       if (!assetId) return '';
       const { runtime } = await getLibraryRuntime({ configStore, app, dataRoot });
       if (!runtime) return '';
-      const asset = runtime.db.prepare('SELECT * FROM assets WHERE id = ?').get(assetId);
-      if (!asset?.path) return '';
-      const target = nodePath.isAbsolute(asset.path) ? asset.path : nodePath.join(runtime.storageRoot, asset.path);
+      const asset = await runtime.repository.getAsset(assetId);
+      if (!asset?.storage_key) return '';
+      const target = nodePath.isAbsolute(asset.storage_key) ? asset.storage_key : nodePath.join(runtime.storageRoot, asset.storage_key);
       if (!isInside(runtime.storageRoot, target) || !fs.existsSync(target)) return '';
       const { ensureLibraryAssetThumbnail } = await libraryAssetThumbnailModule();
       const generated = await ensureLibraryAssetThumbnail(runtime, asset, target);

@@ -1,8 +1,9 @@
-import { createReadStream, existsSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { createReadStream, createWriteStream, existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { ensureDir, safePathPart } from "./canvas-exchange-paths.mjs";
-import { DEFAULT_PROJECT_ID, DEFAULT_PROJECT_TITLE, SCHEMA_VERSION, nowIso } from "./canvas-exchange-types.mjs";
+import { DEFAULT_PROJECT_ID, DEFAULT_PROJECT_TITLE, PACKAGE_FORMAT, SCHEMA_VERSION, nowIso } from "./canvas-exchange-types.mjs";
 
 const RESERVED_FILE_NAMES = new Set(["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"]);
 
@@ -33,7 +34,42 @@ function unlinkIfExists(filePath) {
   if (filePath && existsSync(filePath)) unlinkSync(filePath);
 }
 
-export function createCanvasExchangeStore({ paths, index, packages }) {
+function receiveStreamToFile(stream, filePath, expectedSize = 0) {
+  return new Promise((resolve, reject) => {
+    ensureDir(path.dirname(filePath));
+    const output = createWriteStream(filePath);
+    const hash = createHash("sha256");
+    let bytes = 0;
+    let settled = false;
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      output.destroy();
+      unlinkIfExists(filePath);
+      reject(error);
+    };
+    stream.on("data", (chunk) => {
+      bytes += chunk.length;
+      hash.update(chunk);
+      if (expectedSize > 0 && bytes > expectedSize) fail(new Error("Canvas resource exceeds its declared size"));
+    });
+    stream.on("error", fail);
+    output.on("error", fail);
+    output.on("finish", () => {
+      if (settled) return;
+      settled = true;
+      if (expectedSize > 0 && bytes !== expectedSize) {
+        unlinkIfExists(filePath);
+        reject(new Error("Canvas resource size does not match its declaration"));
+        return;
+      }
+      resolve({ bytes, sha256: hash.digest("hex") });
+    });
+    stream.pipe(output);
+  });
+}
+
+export function createCanvasExchangeStore({ paths, index, packages, uploadSessionMaxAgeMs = 24 * 60 * 60 * 1000 }) {
   function ensureDefaultProject() {
     const projects = index.listProjects();
     const existing = projects.find((project) => project.id === DEFAULT_PROJECT_ID);
@@ -176,6 +212,133 @@ export function createCanvasExchangeStore({ paths, index, packages }) {
     return { ok: true, canvas: record, warnings: unpacked.warnings };
   }
 
+  function uploadSessionPath(canvasId) {
+    return path.join(paths.tempRoot(), `upload-${safePathPart(canvasId, "canvas")}`);
+  }
+
+  function uploadSessionFile(canvasId) {
+    return path.join(uploadSessionPath(canvasId), "session.json");
+  }
+
+  function readUploadSession(canvasId) {
+    const filePath = uploadSessionFile(canvasId);
+    if (!existsSync(filePath)) throw new Error("Canvas upload session not found");
+    return readJson(filePath);
+  }
+
+  function beginCanvasUpload({ projectId, canvas, manifest } = {}) {
+    ensureDefaultProject();
+    if (!canvas || typeof canvas !== "object") throw new Error("Canvas document is required");
+    if (!manifest || manifest.format !== PACKAGE_FORMAT) throw new Error("Invalid canvas upload manifest");
+    const targetProjectId = index.listProjects().some((project) => project.id === projectId) ? projectId : DEFAULT_PROJECT_ID;
+    const canvasId = newId("remote_canvas");
+    const sessionRoot = uploadSessionPath(canvasId);
+    ensureDir(path.join(sessionRoot, "assets"));
+    writeJson(uploadSessionFile(canvasId), {
+      canvasId,
+      projectId: targetProjectId,
+      canvas,
+      manifest: { ...manifest, assets: Array.isArray(manifest.assets) ? manifest.assets : [] },
+      createdAt: nowIso(),
+    });
+    return {
+      ok: true,
+      canvasId,
+      assetCount: Array.isArray(manifest.assets) ? manifest.assets.length : 0,
+      assetUploadUrl: `/api/canvas-exchange/canvases/${encodeURIComponent(canvasId)}/assets`,
+      completeUrl: `/api/canvas-exchange/canvases/${encodeURIComponent(canvasId)}/complete`,
+    };
+  }
+
+  async function receiveCanvasAsset(canvasId, assetId, stream, expectedContentLength = 0) {
+    const session = readUploadSession(canvasId);
+    const asset = session.manifest.assets.find((item) => String(item.id || "") === String(assetId || ""));
+    if (!asset) throw new Error("Canvas resource is not declared");
+    const extension = path.extname(String(asset.fileName || asset.packagePath || ".png")).toLowerCase() || ".png";
+    const target = path.join(uploadSessionPath(canvasId), "assets", `${asset.id}${extension}`);
+    const expectedSize = Number(asset.sizeBytes || expectedContentLength || 0);
+    const result = await receiveStreamToFile(stream, `${target}.part`, expectedSize);
+    if (asset.sha256 && String(asset.sha256).toLowerCase() !== result.sha256.toLowerCase()) {
+      unlinkIfExists(`${target}.part`);
+      throw new Error("Canvas resource checksum does not match its declaration");
+    }
+    renameSync(`${target}.part`, target);
+    return { ok: true, assetId: String(asset.id), sizeBytes: result.bytes };
+  }
+
+  function completeCanvasUpload(canvasId) {
+    const session = readUploadSession(canvasId);
+    const finalized = packages.finalizeDirectUpload({
+      canvasId,
+      canvas: session.canvas,
+      manifest: session.manifest,
+      stagingRoot: uploadSessionPath(canvasId),
+    });
+    try {
+      const timestamp = nowIso();
+      const canvas = {
+        ...finalized.canvas,
+        id: canvasId,
+        projectId: session.projectId,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      const title = String(session.manifest.canvas?.title || canvas.title || "Untitled canvas").slice(0, 80);
+      canvas.title = title;
+      const manifest = {
+        id: canvasId,
+        projectId: session.projectId,
+        title,
+        uploadedAt: timestamp,
+        updatedAt: timestamp,
+        nodeCount: Array.isArray(canvas.nodes) ? canvas.nodes.length : 0,
+        assetCount: finalized.assets.length,
+        packageBytes: finalized.assets.reduce((total, asset) => total + Number(asset.sizeBytes || 0), 0),
+        assets: finalized.assets,
+        warnings: Array.isArray(session.manifest.warnings) ? session.manifest.warnings : [],
+        schemaVersion: SCHEMA_VERSION,
+      };
+      writeJson(paths.canvasJsonPath(canvasId), canvas);
+      writeJson(paths.manifestPath(canvasId), manifest);
+      const record = index.upsertCanvas(manifest);
+      rmSync(uploadSessionPath(canvasId), { recursive: true, force: true });
+      return { ok: true, canvas: record, warnings: manifest.warnings };
+    } catch (error) {
+      try { finalized.cleanup?.(); } catch {}
+      try { unlinkIfExists(paths.canvasJsonPath(canvasId)); } catch {}
+      try { unlinkIfExists(paths.manifestPath(canvasId)); } catch {}
+      try { index.removeCanvas(canvasId); } catch {}
+      try { rmSync(uploadSessionPath(canvasId), { recursive: true, force: true }); } catch {}
+      throw error;
+    }
+  }
+
+  function cancelCanvasUpload(canvasId) {
+    rmSync(uploadSessionPath(canvasId), { recursive: true, force: true });
+    return { ok: true };
+  }
+
+  function cleanupStaleUploadSessions() {
+    const tempRoot = paths.tempRoot();
+    const cutoff = Date.now() - Math.max(0, Number(uploadSessionMaxAgeMs) || 0);
+    for (const entry of readdirSync(tempRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.startsWith("upload-")) continue;
+      const sessionRoot = path.join(tempRoot, entry.name);
+      try {
+        if (statSync(sessionRoot).mtimeMs < cutoff) rmSync(sessionRoot, { recursive: true, force: true });
+      } catch {
+        // A concurrently completed or canceled upload can disappear between the scan and stat.
+      }
+    }
+  }
+
+  function loadCanvasTransfer(canvasId) {
+    const canvas = loadCanvas(canvasId);
+    const manifest = loadManifest(canvasId);
+    if (!canvas || !manifest) throw new Error("Canvas not found");
+    return { canvas, manifest };
+  }
+
   function createPackageForCanvas(canvasId) {
     const canvas = loadCanvas(canvasId);
     const manifest = loadManifest(canvasId);
@@ -193,17 +356,23 @@ export function createCanvasExchangeStore({ paths, index, packages }) {
   }
 
   paths.ensureAll();
+  cleanupStaleUploadSessions();
   ensureDefaultProject();
 
   return {
     createPackageForCanvas,
+    beginCanvasUpload,
+    cancelCanvasUpload,
+    completeCanvasUpload,
     createProject,
     deleteCanvas,
     deleteProject,
     listCanvases,
     listProjects,
     loadCanvas,
+    loadCanvasTransfer,
     readAsset,
+    receiveCanvasAsset,
     updateCanvas,
     updateProject,
     uploadCanvasPackage,

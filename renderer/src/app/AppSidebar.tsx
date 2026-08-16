@@ -56,7 +56,6 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const { t } = useTranslation()
   const ThemeIcon = theme === "dark" ? Sun : Moon
-
   return (
     <Sidebar className="app-sidebar" collapsible="icon" mobileTitle={`${appTitle} ${t("app:mainNavigation")}`}>
       <SidebarHeader className="h-[34px] justify-center px-2 py-0">

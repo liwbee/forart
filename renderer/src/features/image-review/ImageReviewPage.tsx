@@ -83,13 +83,14 @@ function listReviewProducts(modelFolderValue: string, reviewRootPath: string, br
   return window.forartReview.products({ root: reviewRootPath, modelFolders: modelFolderValue }).then((payload) => payload.products);
 }
 
-function loadProductImages(productId: string, modelFolderValue: string, detailFolderValue: string, reviewRootPath: string, bridgeUnavailableMessage: string) {
+function loadProductImages(productId: string, modelFolderValue: string, detailFolderValue: string, reviewRootPath: string, requestPriority: number, bridgeUnavailableMessage: string) {
   if (!window.forartReview?.productImages) return Promise.reject(new Error(bridgeUnavailableMessage));
   return window.forartReview.productImages({
     root: reviewRootPath,
     productId,
     modelFolders: modelFolderValue,
     detailFolders: detailFolderValue,
+    requestPriority,
   }).then((payload) => payload.product);
 }
 
@@ -97,9 +98,15 @@ function hasSameReviewImages(current: ReviewProduct, next: ReviewProduct) {
   if (current.hasModelImages !== next.hasModelImages) return false;
   if (current.modelImages.length !== next.modelImages.length || current.detailImages.length !== next.detailImages.length) return false;
   return current.modelImages.every((image, index) => (
-    image.id === next.modelImages[index]?.id && image.reviewStatus === next.modelImages[index]?.reviewStatus
+    image.id === next.modelImages[index]?.id
+      && image.reviewStatus === next.modelImages[index]?.reviewStatus
+      && image.thumbnailUrl === next.modelImages[index]?.thumbnailUrl
+      && image.previewUrl === next.modelImages[index]?.previewUrl
   )) && current.detailImages.every((image, index) => (
-    image.id === next.detailImages[index]?.id && image.reviewStatus === next.detailImages[index]?.reviewStatus
+    image.id === next.detailImages[index]?.id
+      && image.reviewStatus === next.detailImages[index]?.reviewStatus
+      && image.thumbnailUrl === next.detailImages[index]?.thumbnailUrl
+      && image.previewUrl === next.detailImages[index]?.previewUrl
   ));
 }
 
@@ -966,6 +973,7 @@ export function ImageReviewPage() {
         scannedModelFolderValue,
         debouncedDetailFolderValue,
         selectedReviewRoot,
+        requestId,
         t("imageReview:bridgeUnavailable"),
       );
       if (requestId !== productRefreshRequestRef.current) return;

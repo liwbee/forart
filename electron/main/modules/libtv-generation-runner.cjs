@@ -1,4 +1,8 @@
 const path = require('path');
+const {
+  GENERATION_EXECUTION_TIMEOUT_MS,
+  createGenerationExecutionTimeout,
+} = require('./generation/generation-execution-timeout.cjs');
 
 function firstString(...values) {
   for (const value of values) {
@@ -167,6 +171,7 @@ function createLibtvGenerationRunner({
   resultCommitter,
   resolveWorkspaceName,
   resolveActionFissionConcurrency,
+  executionTimeoutMs = GENERATION_EXECUTION_TIMEOUT_MS,
 }) {
   if (!resultCommitter?.commit) throw new Error('Generation result committer is required.');
   const activeControllers = new Map();
@@ -570,7 +575,7 @@ function createLibtvGenerationRunner({
         }
         if (remoteNodeHasStarted(queried.payload)) {
           let recovered = queried;
-          for (let poll = 0; poll < 120 && !signal.aborted; poll += 1) {
+          while (!signal.aborted) {
             await waitFor(4000, signal);
             recovered = await queryNodeWithRetry(project.projectUuid, remoteNodeId, signal);
             if (extractImageUrl(recovered.payload, recovered.stdout)) break;
@@ -635,7 +640,8 @@ function createLibtvGenerationRunner({
     const execute = async () => {
       const queued = taskStore.getTask(task.id);
       if (!queued || queued.status === 'interrupted') return;
-      const controller = new AbortController();
+      const execution = createGenerationExecutionTimeout({ timeoutMs: executionTimeoutMs });
+      const { controller } = execution;
       activeControllers.set(task.id, controller);
       try {
         taskStore.updateTask(task.id, { status: 'preparing', message: '', messageCode: 'libtv.generationPreparing', messageParams: null });
@@ -647,16 +653,18 @@ function createLibtvGenerationRunner({
       } catch (error) {
         const current = taskStore.getTask(task.id);
         if (!current || current.status === 'interrupted') return;
-        const interrupted = controller.signal.aborted || error?.name === 'AbortError';
+        const timedOut = execution.didTimeout();
+        const interrupted = !timedOut && (controller.signal.aborted || error?.name === 'AbortError');
         const completed = taskStore.updateTask(task.id, {
           status: interrupted ? 'interrupted' : 'failed',
           message: '',
           messageCode: '',
           messageParams: null,
-          error: interrupted ? '' : error instanceof Error ? error.message : String(error),
+          error: interrupted ? '' : timedOut ? execution.errorMessage : error instanceof Error ? error.message : String(error),
         });
         writeTaskTerminal(completed, completed.status, undefined, completed.error);
       } finally {
+        execution.dispose();
         activeControllers.delete(task.id);
       }
     };
@@ -674,7 +682,11 @@ function createLibtvGenerationRunner({
     const projectUuid = firstString(task.projectUuid);
     const remoteNodeId = firstString(task.remoteNodeId);
     if (!projectUuid || !remoteNodeId) return null;
-    const controller = new AbortController();
+    const execution = createGenerationExecutionTimeout({
+      timeoutMs: executionTimeoutMs,
+      startedAt: task.remoteExecutionStartedAt,
+    });
+    const { controller } = execution;
     activeControllers.set(task.id, controller);
     void (async () => {
       try {
@@ -694,16 +706,18 @@ function createLibtvGenerationRunner({
       } catch (error) {
         const current = taskStore.getTask(task.id);
         if (!current || current.status === 'interrupted') return;
-        const interrupted = controller.signal.aborted || error?.name === 'AbortError';
+        const timedOut = execution.didTimeout();
+        const interrupted = !timedOut && (controller.signal.aborted || error?.name === 'AbortError');
         const completed = taskStore.updateTask(task.id, {
           status: interrupted ? 'interrupted' : 'failed',
           message: '',
           messageCode: '',
           messageParams: null,
-          error: interrupted ? '' : error instanceof Error ? error.message : String(error),
+          error: interrupted ? '' : timedOut ? execution.errorMessage : error instanceof Error ? error.message : String(error),
         });
         writeTaskTerminal(completed, completed.status, undefined, completed.error);
       } finally {
+        execution.dispose();
         activeControllers.delete(task.id);
       }
     })();

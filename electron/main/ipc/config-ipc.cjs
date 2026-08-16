@@ -2,7 +2,7 @@ const fs = require('fs');
 
 async function checkServerHealth(net, baseUrl) {
   try {
-    const response = await net.fetch(baseUrl.replace(/\/+$/, '') + '/api/health');
+    const response = await net.fetch(baseUrl.replace(/\/+$/, '') + '/api/health', { credentials: 'omit' });
     if (!response.ok) return { ok: false, status: response.status };
     return { ok: true, payload: await response.json() };
   } catch (error) {
@@ -89,6 +89,66 @@ function registerConfigIpc({ ipcMain, dialog, configStore, app, net }) {
     const baseUrl = String(serverUrl || '').trim();
     if (!baseUrl) return { ok: false, error: 'Server URL is required' };
     return checkServerHealth(net, baseUrl);
+  });
+
+  ipcMain.handle('server:login', async (_event, payload = {}) => {
+    const baseUrl = String(payload.serverUrl || '').trim().replace(/\/+$/, '');
+    const username = String(payload.username || '').trim();
+    const password = String(payload.password || '');
+    if (!baseUrl || !username || !password) return { ok: false, error: 'Server URL, username and password are required.' };
+    try {
+      const response = await net.fetch(`${baseUrl}/api/auth/sign-in/username`, {
+        method: 'POST',
+        credentials: 'omit',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          origin: new URL(baseUrl).origin,
+        },
+        body: JSON.stringify({ username, password, rememberMe: true }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) return { ok: false, status: response.status, error: body.message || body.detail || 'Login failed.' };
+      const token = response.headers.get('set-auth-token') || body.token || '';
+      if (!token) return { ok: false, status: 502, error: 'Login succeeded but no session token was returned.' };
+      const current = configStore.load() || {};
+      const config = configStore.save({
+        ...current,
+        mode: 'remote',
+        serverUrl: baseUrl,
+        serverAuthUsername: username,
+        serverAuthToken: token,
+      });
+      activeAppConfig = config;
+      return { ok: true, user: body.user, config };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('server:logout', async () => {
+    const current = configStore.load() || {};
+    const config = configStore.save({ ...current, serverAuthToken: '' });
+    activeAppConfig = config;
+    return { ok: true, config };
+  });
+
+  ipcMain.handle('server:session', async (_event, payload = {}) => {
+    const current = configStore.load() || {};
+    const baseUrl = String(payload.serverUrl || current.serverUrl || '').trim().replace(/\/+$/, '');
+    const token = String(payload.token || current.serverAuthToken || '').trim();
+    if (!baseUrl || !token) return { ok: false, status: 401, error: 'Not logged in.' };
+    try {
+      const response = await net.fetch(`${baseUrl}/api/me`, {
+        credentials: 'omit',
+        headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) return { ok: false, status: response.status, error: body.detail || 'Session is invalid.' };
+      return { ok: true, user: body.user, permissions: body.permissions || [] };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
   });
 
   ipcMain.handle('server:local-status', async () => {

@@ -1,10 +1,10 @@
 import { Images, PersonStanding, Users, X, type LucideIcon } from "lucide-react";
 import { Fragment, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import { AppScrollArea } from "../../components/AppScrollArea";
 import { LazyImage } from "../../components/LazyImage";
 import { NativeTabs } from "../../components/NativeTabs";
+import { RemoteDataState } from "../../components/RemoteDataState";
 import { AppSelect as Select } from "../../components/AppSelect";
 import { Button } from "../../components/ui/button";
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
@@ -73,6 +73,19 @@ export function LibraryAssetPickerContent({ onSelect }: LibraryAssetPickerConten
       return;
     }
     if (modelChoiceFor?.id === item.id) picker.setModelChoiceFor(null);
+  }
+
+  if (picker.failure) {
+    return (
+      <div className="library-asset-picker-content library-asset-picker-content--unavailable">
+        <RemoteDataState
+          failure={picker.failure}
+          scope="panel"
+          className="h-full min-h-0 border-0"
+          onRetry={picker.retry}
+        />
+      </div>
+    );
   }
 
   return (
@@ -156,12 +169,11 @@ export function LibraryAssetPickerContent({ onSelect }: LibraryAssetPickerConten
         viewportClassName="library-asset-picker__body-viewport"
         scrollBarClassName="library-asset-picker__body-scrollbar"
       >
-        {picker.errorMessage ? <ErrorCopyLine className="library-asset-picker__state library-asset-picker__state--error" text={t("infiniteCanvas:libraryRequestFailed", { message: picker.errorMessage })} /> : null}
-        {!picker.storageConfigured && !picker.storageSettingsLoading ? <div className="library-asset-picker__state">{t("outfitLibrary:storageUnavailable")}</div> : null}
-        {picker.storageConfigured && !picker.isLoading && !picker.activeProjects.length ? <div className="library-asset-picker__state">{t("common:empty.noProjects")}</div> : null}
-        {picker.isLoading ? <div className="library-asset-picker__state">{t("common:states.loading")}</div> : null}
-        {picker.storageConfigured && !picker.isLoading && picker.activeProjects.length && !picker.activeItems.length ? <div className="library-asset-picker__state">{t("infiniteCanvas:noLibraryImages")}</div> : null}
-        {!picker.isLoading && picker.activeItems.length ? (
+        {picker.projectLoadState === "storage-unavailable" ? <div className="library-asset-picker__state">{t("common:states.storageUnavailable")}</div> : null}
+        {picker.projectLoadState === "empty" ? <div className="library-asset-picker__state">{t("common:empty.noProjects")}</div> : null}
+        {picker.projectLoadState === "loading" || (picker.projectLoadState === "ready" && picker.isLoading) ? <div className="library-asset-picker__state">{t("common:states.loading")}</div> : null}
+        {picker.projectLoadState === "ready" && !picker.isLoading && !picker.activeItems.length ? <div className="library-asset-picker__state">{t("infiniteCanvas:noLibraryImages")}</div> : null}
+        {picker.projectLoadState === "ready" && !picker.isLoading && picker.activeItems.length ? (
           <div className="library-asset-picker__grid">
             {picker.activeItems.map((item) => {
               const src = item.url ? cacheBustedLibraryAssetUrl(item.thumbnailUrl || item.url, item.updatedAt || item.assetId || item.id) : "";
@@ -209,7 +221,8 @@ export function LibraryAssetPickerContent({ onSelect }: LibraryAssetPickerConten
                     </div>
                     <AppScrollArea className="library-asset-picker__choice-grid" viewportClassName="library-asset-picker__choice-grid-viewport">
                       {picker.modelChoicesQuery.isLoading ? <div className="library-asset-picker__state">{t("freeCanvasEditor:loadingImages")}</div> : null}
-                      {!picker.modelChoicesQuery.isLoading && !(picker.modelChoicesQuery.data?.images || []).length ? <div className="library-asset-picker__state">{t("freeCanvasEditor:noModelImages")}</div> : null}
+                      {picker.modelChoicesFailure ? <RemoteDataState failure={picker.modelChoicesFailure} scope="panel" onRetry={() => picker.modelChoicesQuery.refetch()} /> : null}
+                      {!picker.modelChoicesFailure && !picker.modelChoicesQuery.isLoading && !(picker.modelChoicesQuery.data?.images || []).length ? <div className="library-asset-picker__state">{t("freeCanvasEditor:noModelImages")}</div> : null}
                       {(picker.modelChoicesQuery.data?.images || []).map((image) => {
                         const choiceSrc = image.asset_url ? cacheBustedLibraryAssetUrl(image.thumbnail_url || image.asset_url, image.created_at || image.asset_id || image.id) : "";
                         return (

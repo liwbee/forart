@@ -1,5 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const {
+  GENERATION_EXECUTION_TIMEOUT_MS,
+  createGenerationExecutionTimeout,
+} = require('./generation/generation-execution-timeout.cjs');
 
 const activeControllers = new Map();
 
@@ -537,11 +541,10 @@ async function generateGeminiImage(context, provider, model, prompt, referenceIm
   return saveOutputAssets(context, normalizedResults, taskId);
 }
 
-async function pollImageTask(context, baseUrl, headers, taskId, upstreamTaskId, initialPayload, signal) {
-  let lastPayload = initialPayload;
+async function pollImageTask(context, baseUrl, headers, taskId, upstreamTaskId, signal) {
   context.generationTaskStore.updateTask(taskId, { status: 'running', message: '', messageCode: 'image.waitingForResult', messageParams: null });
   await wait(3000, signal);
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  while (true) {
     const current = context.generationTaskStore.getTask(taskId);
     if (!current || current.status === 'interrupted' || current.status === 'superseded') throw new Error('Interrupted');
     const payload = await requestFirstJson(context.net, taskUrlCandidates(baseUrl, upstreamTaskId), {
@@ -549,7 +552,6 @@ async function pollImageTask(context, baseUrl, headers, taskId, upstreamTaskId, 
       headers,
       signal,
     });
-    lastPayload = payload;
     const results = findImagesInPayload(payload);
     if (results.length) return results;
     const status = readTaskStatus(payload).toLowerCase();
@@ -559,7 +561,6 @@ async function pollImageTask(context, baseUrl, headers, taskId, upstreamTaskId, 
     }
     await wait(4000, signal);
   }
-  throw new Error(`Image generation task timed out (${summarizePayloadShape(lastPayload)}).`);
 }
 
 async function saveOutputAsset(context, result, taskId) {
@@ -692,7 +693,7 @@ async function executeImageTask(context, task, payload, signal) {
   const uploadHeaders = String(provider.apiKey || '').trim() ? { Authorization: `Bearer ${String(provider.apiKey || '').trim()}` } : {};
   if (task.upstreamTaskId && payload.recoverOnly !== false) {
     const pollBaseUrl = providerEndpointUrl(provider, 'imageGenerationEndpoint', '/v1/images/generations');
-    const polledResults = await pollImageTask(context, pollBaseUrl, headers, task.id, task.upstreamTaskId, {}, signal);
+    const polledResults = await pollImageTask(context, pollBaseUrl, headers, task.id, task.upstreamTaskId, signal);
     return saveOutputAssets(context, polledResults, task.id);
   }
   context.generationTaskStore.updateTask(task.id, {
@@ -745,7 +746,7 @@ async function executeImageTask(context, task, payload, signal) {
     if (!upstreamTaskId) throw new Error(`The image API response did not contain an image or task_id (${summarizePayloadShape(submitPayload)}).`);
     updateTaskWithRemoteAnchor(context, task.id, { upstreamTaskId, status: 'running' });
     const pollBaseUrl = providerEndpointUrl(provider, 'imageGenerationEndpoint', '/v1/images/generations');
-    const polledResults = await pollImageTask(context, pollBaseUrl, headers, task.id, upstreamTaskId, submitPayload, signal);
+    const polledResults = await pollImageTask(context, pollBaseUrl, headers, task.id, upstreamTaskId, signal);
     return saveOutputAssets(context, polledResults, task.id);
   }
 
@@ -799,11 +800,18 @@ async function executeImageTask(context, task, payload, signal) {
   const upstreamTaskId = readTaskId(submitPayload);
   if (!upstreamTaskId) throw new Error(`The image API response did not contain an image or task_id (${summarizePayloadShape(submitPayload)}).`);
   updateTaskWithRemoteAnchor(context, task.id, { upstreamTaskId, status: 'running' });
-  const polledResults = await pollImageTask(context, submitUrl, headers, task.id, upstreamTaskId, submitPayload, signal);
+  const polledResults = await pollImageTask(context, submitUrl, headers, task.id, upstreamTaskId, signal);
   return saveOutputAssets(context, polledResults, task.id);
 }
 
-function createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore, resultCommitter }) {
+function createImageGenerationRunner({
+  net,
+  assetStore,
+  canvasStore,
+  generationTaskStore,
+  resultCommitter,
+  executionTimeoutMs = GENERATION_EXECUTION_TIMEOUT_MS,
+}) {
   if (!resultCommitter?.commit) throw new Error('Generation result committer is required.');
   const context = { net, assetStore, canvasStore, generationTaskStore, resultCommitter };
 
@@ -828,7 +836,8 @@ function createImageGenerationRunner({ net, assetStore, canvasStore, generationT
       writeTaskTerminalToCanvas(context, superseded, 'interrupted');
     });
     if (activeControllers.has(task.id)) activeControllers.get(task.id)?.abort();
-    const controller = new AbortController();
+    const execution = createGenerationExecutionTimeout({ timeoutMs: executionTimeoutMs });
+    const { controller } = execution;
     activeControllers.set(task.id, controller);
     void (async () => {
       try {
@@ -844,13 +853,15 @@ function createImageGenerationRunner({ net, assetStore, canvasStore, generationT
       } catch (error) {
         const current = generationTaskStore.getTask(task.id);
         if (!current || current.status === 'interrupted' || current.status === 'superseded') return;
-        const interrupted = controller.signal.aborted || String(error?.message || error) === 'Interrupted';
+        const timedOut = execution.didTimeout();
+        const interrupted = !timedOut && (controller.signal.aborted || String(error?.message || error) === 'Interrupted');
         const completed = generationTaskStore.updateTask(task.id, {
           status: interrupted ? 'interrupted' : 'failed',
-          error: interrupted ? 'Interrupted' : error instanceof Error ? error.message : String(error),
+          error: interrupted ? 'Interrupted' : timedOut ? execution.errorMessage : error instanceof Error ? error.message : String(error),
         });
         writeTaskTerminalToCanvas(context, completed, completed.status, undefined, completed.error);
       } finally {
+        execution.dispose();
         activeControllers.delete(task.id);
       }
     })();
@@ -870,7 +881,11 @@ function createImageGenerationRunner({ net, assetStore, canvasStore, generationT
     if (!task.upstreamTaskId && !payload.provider) return task;
     if (['succeeded', 'failed', 'interrupted', 'superseded'].includes(task.status)) return task;
     if (activeControllers.has(task.id)) return task;
-    const controller = new AbortController();
+    const execution = createGenerationExecutionTimeout({
+      timeoutMs: executionTimeoutMs,
+      startedAt: task.remoteExecutionStartedAt,
+    });
+    const { controller } = execution;
     activeControllers.set(task.id, controller);
     generationTaskStore.updateTask(task.id, { status: 'running' });
     void (async () => {
@@ -887,13 +902,15 @@ function createImageGenerationRunner({ net, assetStore, canvasStore, generationT
       } catch (error) {
         const current = generationTaskStore.getTask(task.id);
         if (!current || current.status === 'interrupted' || current.status === 'superseded') return;
-        const interrupted = controller.signal.aborted || String(error?.message || error) === 'Interrupted';
+        const timedOut = execution.didTimeout();
+        const interrupted = !timedOut && (controller.signal.aborted || String(error?.message || error) === 'Interrupted');
         const completed = generationTaskStore.updateTask(task.id, {
           status: interrupted ? 'interrupted' : 'failed',
-          error: interrupted ? 'Interrupted' : error instanceof Error ? error.message : String(error),
+          error: interrupted ? 'Interrupted' : timedOut ? execution.errorMessage : error instanceof Error ? error.message : String(error),
         });
         writeTaskTerminalToCanvas(context, completed, completed.status, undefined, completed.error);
       } finally {
+        execution.dispose();
         activeControllers.delete(task.id);
       }
     })();

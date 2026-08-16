@@ -7,7 +7,7 @@ interface NativeCanvasInteractionState {
   toolbarNodeId: string | null;
   beginNodeEditing: (nodeId: string) => void;
   beginSelectionGesture: () => void;
-  endSelectionGesture: () => void;
+  endSelectionGesture: (suppressToolbarNodeIds?: ReadonlySet<string>) => void;
   endNodeEditing: (nodeId?: string) => void;
   syncSelection: (selectedNodeIds: string[]) => void;
   resetInteractions: () => void;
@@ -30,9 +30,11 @@ export const useNativeCanvasInteractionStore = create<NativeCanvasInteractionSta
     selectionGestureActive: true,
     toolbarNodeId: null,
   }),
-  endSelectionGesture: () => set((state) => ({
+  endSelectionGesture: (suppressToolbarNodeIds = new Set<string>()) => set((state) => ({
     selectionGestureActive: false,
-    toolbarNodeId: state.soleSelectedNodeId,
+    toolbarNodeId: state.soleSelectedNodeId && !suppressToolbarNodeIds.has(state.soleSelectedNodeId)
+      ? state.soleSelectedNodeId
+      : null,
   })),
   endNodeEditing: (nodeId) => set((state) => (
     nodeId && state.editingNodeId !== nodeId ? state : { editingNodeId: null }

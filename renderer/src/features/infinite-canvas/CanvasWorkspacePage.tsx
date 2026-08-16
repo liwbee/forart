@@ -9,6 +9,8 @@ import { Button } from "../../components/ui/button";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Tabs, TabsContent } from "../../components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
+import { getActiveForartConfig } from "../../data-source/runtime";
+import { invalidatePermissions, refreshPermissions, usePermission } from "../permissions";
 import { CanvasDocumentTabs } from "./CanvasDocumentTabs";
 import { CanvasTransferProgressDialog, type ActiveCanvasTransfer } from "./CanvasTransferProgressDialog";
 import { ReactFlowCanvasPage, type CanvasSaveStatus } from "./ReactFlowCanvasPage";
@@ -54,7 +56,19 @@ function readStoredTabs(): CanvasDocumentTab[] {
     const parsed = JSON.parse(window.localStorage.getItem(OPEN_TABS_KEY) || "[]");
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((item) => {
-      if (item?.readOnly) return [];
+      if (item?.readOnly) {
+        const remoteCanvasId = String(item.remoteCanvasId || "");
+        if (!remoteCanvasId) return [];
+        return [{
+          id: String(item.id || `shared:${remoteCanvasId}`),
+          title: String(item.title || "Shared canvas"),
+          updatedAt: Number(item.updatedAt || 0),
+          projectId: String(item.projectId || "") || undefined,
+          readOnly: true,
+          remoteCanvasId,
+          remoteUnavailable: Boolean(item.remoteUnavailable),
+        }];
+      }
       const record = normalizeCanvasRecord(item);
       return record ? [tabFromRecord(record)] : [];
     });
@@ -76,15 +90,39 @@ interface CanvasWorkspacePageProps {
 function rewriteRemoteAssetUrls<T>(value: T, serverUrl: string): T {
   if (Array.isArray(value)) return value.map((item) => rewriteRemoteAssetUrls(item, serverUrl)) as T;
   if (!value || typeof value !== "object") {
-    return typeof value === "string" && value.startsWith("/api/canvas-exchange/")
-      ? `${serverUrl}${value}` as T
-      : value;
+    if (typeof value !== "string" || !value.startsWith("/api/canvas-exchange/")) return value;
+    const token = getActiveForartConfig()?.serverAuthToken || "";
+    const resolved = new URL(value, serverUrl);
+    if (token && /\/assets\//.test(resolved.pathname)) resolved.searchParams.set("forart_token", token);
+    return resolved.toString() as T;
   }
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, rewriteRemoteAssetUrls(item, serverUrl)])) as T;
 }
 
+async function remoteFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  const token = getActiveForartConfig()?.serverAuthToken || "";
+  const response = await fetch(input, {
+    ...init,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init.headers || {}),
+    },
+  });
+  if (response.status === 401) invalidatePermissions();
+  if (response.status === 403) void refreshPermissions();
+  return response;
+}
+
 export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedCanvasesEnabled = false }: CanvasWorkspacePageProps) {
   const { t } = useTranslation();
+  const canViewSharedCanvases = sharedCanvasesEnabled;
+  const serverAuthToken = getActiveForartConfig()?.serverAuthToken || "";
+  const canEditSharedProjects = usePermission("shared_canvas.project_edit");
+  const canDeleteSharedProjects = usePermission("shared_canvas.project_delete");
+  const canReorderSharedProjects = usePermission("shared_canvas.project_reorder");
+  const canEditSharedCanvases = usePermission("shared_canvas.canvas_edit");
+  const canDeleteSharedCanvases = usePermission("shared_canvas.canvas_delete");
+  const canCopySharedCanvases = usePermission("shared_canvas.copy_to_local");
   const [canvases, setCanvases] = useState<CanvasRecord[]>([]);
   const [projects, setProjects] = useState<CanvasProjectRecord[]>([]);
   const [sharedCanvases, setSharedCanvases] = useState<CanvasRecord[]>([]);
@@ -122,9 +160,28 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
   const lastSaveErrorRef = useRef("");
   const initialRestoreRef = useRef(false);
 
+  const markSharedTabsUnavailable = useCallback(() => {
+    setTabs((current) => current.map((tab) => tab.readOnly ? { ...tab, remoteUnavailable: true } : tab));
+  }, []);
+
+  const markSharedTabsAvailable = useCallback(() => {
+    setTabs((current) => current.map((tab) => tab.readOnly ? { ...tab, remoteUnavailable: false } : tab));
+  }, []);
+
+  const markSharedTabUnavailable = useCallback((tabId: string) => {
+    setTabs((current) => current.map((tab) => tab.id === tabId ? { ...tab, remoteUnavailable: true } : tab));
+  }, []);
+
+  const markSharedTabAvailable = useCallback((tabId: string) => {
+    setTabs((current) => current.map((tab) => tab.id === tabId ? { ...tab, remoteUnavailable: false } : tab));
+  }, []);
+
   useEffect(() => {
-    if (!sharedCanvasesEnabled) setHomeSource("local");
-  }, [sharedCanvasesEnabled]);
+    if (!canViewSharedCanvases) {
+      setHomeSource("local");
+      markSharedTabsUnavailable();
+    }
+  }, [canViewSharedCanvases, markSharedTabsUnavailable]);
 
   useEffect(() => window.easyTool?.onCanvasTransferProgress?.((progress: CanvasTransferProgress) => {
     setActiveCanvasTransfer((current) => current?.operationId === progress.operationId
@@ -282,13 +339,21 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
       setActiveSharedProjectId("");
       return;
     }
+    if (!serverAuthToken) {
+      markSharedTabsUnavailable();
+      toast.error(t("infiniteCanvas:sharedCanvasLoginRequired"));
+      return;
+    }
     setBusy(true);
     try {
       const [canvasResponse, projectResponse] = await Promise.all([
-        fetch(`${baseUrl}/api/canvas-exchange/canvases`),
-        fetch(`${baseUrl}/api/canvas-exchange/projects`),
+        remoteFetch(`${baseUrl}/api/canvas-exchange/canvases`),
+        remoteFetch(`${baseUrl}/api/canvas-exchange/projects`),
       ]);
-      if (!canvasResponse.ok || !projectResponse.ok) throw new Error(t("infiniteCanvas:sharedCanvasLoadFailed"));
+      const failedResponse = [canvasResponse, projectResponse].find((response) => !response.ok);
+      if (failedResponse?.status === 401) throw new Error(t("infiniteCanvas:sharedCanvasLoginRequired"));
+      if (failedResponse?.status === 403) throw new Error(t("infiniteCanvas:sharedCanvasAccessDenied"));
+      if (failedResponse) throw new Error(t("infiniteCanvas:sharedCanvasConnectionFailed"));
       const canvasPayload = objectValue(await canvasResponse.json());
       const projectPayload = objectValue(await projectResponse.json());
       const nextCanvases = (Array.isArray(canvasPayload.canvases) ? canvasPayload.canvases : [])
@@ -300,30 +365,44 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
       setActiveSharedProjectId((current) => nextProjects.some((project) => project.id === current)
         ? current
         : nextProjects[0]?.id || "");
+      markSharedTabsAvailable();
       setErrorMessage("");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      markSharedTabsUnavailable();
+      toast.error(error instanceof TypeError ? t("infiniteCanvas:sharedCanvasConnectionFailed") : error instanceof Error ? error.message : t("infiniteCanvas:sharedCanvasConnectionFailed"));
     } finally {
       setBusy(false);
     }
-  }, [serverUrl, t]);
+  }, [markSharedTabsAvailable, markSharedTabsUnavailable, serverAuthToken, serverUrl, t]);
 
   useEffect(() => {
-    if (sharedCanvasesEnabled) void refreshSharedWorkspace();
-  }, [refreshSharedWorkspace, sharedCanvasesEnabled]);
+    if (canViewSharedCanvases) void refreshSharedWorkspace();
+  }, [refreshSharedWorkspace, canViewSharedCanvases]);
 
   const openSharedCanvas = useCallback(async (remoteCanvasId: string) => {
     const baseUrl = serverUrl.trim().replace(/\/+$/, "");
-    if (!baseUrl || !remoteCanvasId) return;
+    const tabId = `shared:${remoteCanvasId}`;
+    if (!remoteCanvasId) return;
+    if (!baseUrl) {
+      markSharedTabUnavailable(tabId);
+      toast.error(t("infiniteCanvas:sharedCanvasConnectionFailed"));
+      return;
+    }
+    if (!serverAuthToken) {
+      markSharedTabUnavailable(tabId);
+      toast.error(t("infiniteCanvas:sharedCanvasLoginRequired"));
+      return;
+    }
     if (!(await saveActiveCanvasNow())) return;
     setLoadingCanvas(true);
     try {
-      const response = await fetch(`${baseUrl}/api/canvas-exchange/canvases/${encodeURIComponent(remoteCanvasId)}`);
-      if (!response.ok) throw new Error(t("infiniteCanvas:canvasNotFound"));
+      const response = await remoteFetch(`${baseUrl}/api/canvas-exchange/canvases/${encodeURIComponent(remoteCanvasId)}`);
+      if (response.status === 401) throw new Error(t("infiniteCanvas:sharedCanvasLoginRequired"));
+      if (response.status === 403) throw new Error(t("infiniteCanvas:sharedCanvasAccessDenied"));
+      if (!response.ok) throw new Error(t("infiniteCanvas:sharedCanvasConnectionFailed"));
       const remote = rewriteRemoteAssetUrls(await response.json(), baseUrl);
       const loaded = normalizeCanvasDocument(remote);
       if (!loaded) throw new Error(t("infiniteCanvas:canvasNotFound"));
-      const tabId = `shared:${remoteCanvasId}`;
       const document = { ...loaded, id: tabId };
       activeCanvasIdRef.current = tabId;
       activeDocumentRef.current = document;
@@ -335,7 +414,15 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
       showHomeRef.current = false;
       setShowHome(false);
       setTabs((current) => current.some((tab) => tab.id === tabId)
-        ? current
+        ? current.map((tab) => tab.id === tabId ? {
+            ...tab,
+            title: document.title,
+            updatedAt: document.updatedAt,
+            projectId: document.projectId,
+            readOnly: true,
+            remoteCanvasId,
+            remoteUnavailable: false,
+          } : tab)
         : [...current, {
             id: tabId,
             title: document.title,
@@ -343,22 +430,28 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
             projectId: document.projectId,
             readOnly: true,
             remoteCanvasId,
+            remoteUnavailable: false,
           }]);
       setErrorMessage("");
+      markSharedTabAvailable(tabId);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      markSharedTabUnavailable(tabId);
+      toast.error(error instanceof TypeError ? t("infiniteCanvas:sharedCanvasConnectionFailed") : error instanceof Error ? error.message : t("infiniteCanvas:sharedCanvasConnectionFailed"));
     } finally {
       setLoadingCanvas(false);
     }
-  }, [adoptSavedSnapshot, saveActiveCanvasNow, serverUrl, t]);
+  }, [adoptSavedSnapshot, markSharedTabAvailable, markSharedTabUnavailable, saveActiveCanvasNow, serverAuthToken, serverUrl, t]);
 
   useEffect(() => {
     void refreshWorkspace().then(() => {
       if (initialRestoreRef.current) return;
       initialRestoreRef.current = true;
       const lastCanvasId = window.localStorage.getItem(LAST_CANVAS_ID_KEY) || "";
-      if (window.localStorage.getItem(SHOW_HOME_KEY) === "false" && lastCanvasId) {
+      if (window.localStorage.getItem(SHOW_HOME_KEY) === "false" && lastCanvasId && !lastCanvasId.startsWith("shared:")) {
         void openCanvas(lastCanvasId, true);
+      } else if (lastCanvasId.startsWith("shared:")) {
+        showHomeRef.current = true;
+        setShowHome(true);
       }
     });
   }, [openCanvas, refreshWorkspace]);
@@ -375,7 +468,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
   }, [activeCanvasId]);
 
   useEffect(() => {
-    window.localStorage.setItem(OPEN_TABS_KEY, JSON.stringify(tabs.filter((tab) => !tab.readOnly)));
+    window.localStorage.setItem(OPEN_TABS_KEY, JSON.stringify(tabs));
   }, [tabs]);
 
   useEffect(() => {
@@ -516,7 +609,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
   const createSharedProject = () => void runBusy(async () => {
     const baseUrl = serverUrl.trim().replace(/\/+$/, "");
     if (!baseUrl) return;
-    const response = await fetch(`${baseUrl}/api/canvas-exchange/projects`, {
+    const response = await remoteFetch(`${baseUrl}/api/canvas-exchange/projects`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: t("infiniteCanvas:projectBaseName") }),
@@ -546,7 +639,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
   const renameSharedCanvas = (canvasId: string, title: string) => void runBusy(async () => {
     const baseUrl = serverUrl.trim().replace(/\/+$/, "");
     if (!baseUrl) return;
-    const response = await fetch(`${baseUrl}/api/canvas-exchange/canvases/${encodeURIComponent(canvasId)}`, {
+    const response = await remoteFetch(`${baseUrl}/api/canvas-exchange/canvases/${encodeURIComponent(canvasId)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title }),
@@ -574,7 +667,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
   const renameSharedProject = (projectId: string, title: string) => void runBusy(async () => {
     const baseUrl = serverUrl.trim().replace(/\/+$/, "");
     if (!baseUrl) return;
-    const response = await fetch(`${baseUrl}/api/canvas-exchange/projects/${encodeURIComponent(projectId)}`, {
+    const response = await remoteFetch(`${baseUrl}/api/canvas-exchange/projects/${encodeURIComponent(projectId)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title }),
@@ -597,34 +690,36 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     if (!baseUrl) return;
     const tabId = `shared:${canvasId}`;
     if (tabs.some((tab) => tab.id === tabId)) await closeTab(tabId);
-    const response = await fetch(`${baseUrl}/api/canvas-exchange/canvases/${encodeURIComponent(canvasId)}`, { method: "DELETE" });
+    const response = await remoteFetch(`${baseUrl}/api/canvas-exchange/canvases/${encodeURIComponent(canvasId)}`, { method: "DELETE" });
     if (!response.ok) throw new Error(t("infiniteCanvas:sharedCanvasDeleteFailed"));
     await refreshSharedWorkspace();
   });
 
   const copySharedCanvasToLocal = (canvasId: string, projectId: string) => void runCanvasTransfer("import", async (operationId) => {
     const baseUrl = serverUrl.trim().replace(/\/+$/, "");
-    if (!baseUrl || !window.easyTool?.downloadCanvasPackageFromRemote || !window.easyTool.importCanvasPackageFromPath) return;
-    const downloaded = await window.easyTool.downloadCanvasPackageFromRemote({
-      downloadUrl: `${baseUrl}/api/canvas-exchange/canvases/${encodeURIComponent(canvasId)}/package`,
+    if (!baseUrl || !window.easyTool?.copyRemoteCanvasToLocal) return;
+    await window.easyTool.copyRemoteCanvasToLocal({
+      remoteCanvasId: canvasId,
+      transferUrl: `${baseUrl}/api/canvas-exchange/canvases/${encodeURIComponent(canvasId)}/transfer`,
+      projectId,
       operationId,
+      authToken: getActiveForartConfig()?.serverAuthToken || "",
     });
-    await window.easyTool.importCanvasPackageFromPath({ filePath: downloaded.filePath, projectId, operationId });
     await refreshWorkspace();
     toast.success(t("infiniteCanvas:canvasImported"));
   });
 
   const uploadCanvasToShared = (canvasId: string, projectId: string) => void runCanvasTransfer("upload", async (operationId) => {
     const baseUrl = serverUrl.trim().replace(/\/+$/, "");
-    if (!baseUrl || !window.easyTool?.createCanvasPackageForUpload || !window.easyTool.uploadCanvasPackageToRemote) return;
-    const created = await window.easyTool.createCanvasPackageForUpload(canvasId, operationId);
-    if (created.canceled || !created.filePath) return;
-    const uploaded = objectValue(await window.easyTool.uploadCanvasPackageToRemote({
-      filePath: created.filePath,
+    if (!baseUrl || !window.easyTool?.uploadCanvasToRemote) return;
+    const uploaded = objectValue(await window.easyTool.uploadCanvasToRemote({
+      canvasId,
+      projectId,
       uploadUrl: `${baseUrl}/api/canvas-exchange/canvases?project_id=${encodeURIComponent(projectId)}`,
       operationId,
+      authToken: getActiveForartConfig()?.serverAuthToken || "",
     }));
-    const warnings = Array.isArray(uploaded.warnings) ? uploaded.warnings : created.warnings || [];
+    const warnings = Array.isArray(uploaded.warnings) ? uploaded.warnings : [];
     await refreshSharedWorkspace();
     if (warnings.length) toast.warning(t("infiniteCanvas:sharedCanvasUploadWarnings", { count: warnings.length }));
     else toast.success(t("infiniteCanvas:sharedCanvasUploaded"));
@@ -650,7 +745,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
   const deleteSharedProject = (projectId: string) => void runBusy(async () => {
     const baseUrl = serverUrl.trim().replace(/\/+$/, "");
     if (!baseUrl) return;
-    const response = await fetch(`${baseUrl}/api/canvas-exchange/projects/${encodeURIComponent(projectId)}`, {
+    const response = await remoteFetch(`${baseUrl}/api/canvas-exchange/projects/${encodeURIComponent(projectId)}`, {
       method: "DELETE",
     });
     if (!response.ok) throw new Error(t("infiniteCanvas:sharedProjectDeleteFailed"));
@@ -721,7 +816,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
       const baseUrl = serverUrl.trim().replace(/\/+$/, "");
       if (!baseUrl) return;
       await Promise.all(nextProjects.map(async (project, index) => {
-        const response = await fetch(`${baseUrl}/api/canvas-exchange/projects/${encodeURIComponent(project.id)}`, {
+        const response = await remoteFetch(`${baseUrl}/api/canvas-exchange/projects/${encodeURIComponent(project.id)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sortOrder: index + 1 }),
@@ -762,8 +857,11 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
         menuActions={{
           localProjects: projects,
           projects,
-          sharedCanvasesEnabled,
+          sharedCanvasesEnabled: canViewSharedCanvases,
           sharedProjects,
+          canEditSharedCanvases,
+          canDeleteSharedCanvases,
+          canCopySharedCanvases,
           onCopyToLocal: (tab, projectId) => {
             if (tab.remoteCanvasId) copySharedCanvasToLocal(tab.remoteCanvasId, projectId);
           },
@@ -785,7 +883,13 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
       <TabsContent className="rf-workspace__content" value="home">
         <CanvasWorkspaceHome
           source={homeSource}
-          sharedCanvasesEnabled={sharedCanvasesEnabled}
+          sharedCanvasesEnabled={canViewSharedCanvases}
+          canEditSharedProjects={canEditSharedProjects}
+          canDeleteSharedProjects={canDeleteSharedProjects}
+          canReorderSharedProjects={canReorderSharedProjects}
+          canEditSharedCanvases={canEditSharedCanvases}
+          canDeleteSharedCanvases={canDeleteSharedCanvases}
+          canCopySharedCanvases={canCopySharedCanvases}
           canvases={homeSource === "shared" ? sharedCanvases : canvases}
           projects={homeSource === "shared" ? sharedProjects : projects}
           localProjects={projects}

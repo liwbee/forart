@@ -34,8 +34,8 @@ test('local mode keeps resource CRUD on Electron IPC and preserves schema', asyn
   const request = handlers.get('local-api:request');
   assert.equal(typeof request, 'function');
 
-  t.after(() => {
-    localApi.close();
+  t.after(async () => {
+    await localApi.close();
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
@@ -47,6 +47,7 @@ test('local mode keeps resource CRUD on Electron IPC and preserves schema', asyn
   assert.equal(runtime.ok, true);
   assert.equal(runtime.body.transport, 'ipc');
   assert.equal(path.resolve(runtime.body.dataDir), path.resolve(libraryDir));
+  assert.equal(path.resolve(runtime.body.runtimeDataDir), path.resolve(dataRoot, 'forart_data'));
 
   const databasePath = path.join(libraryDir, '.forart', 'database', 'forart-library.sqlite');
   const schemaBefore = schemaFingerprint(databasePath);

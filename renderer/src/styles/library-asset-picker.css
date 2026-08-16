@@ -21,6 +21,14 @@
   overflow: hidden;
 }
 
+.library-asset-picker-content--unavailable {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.library-asset-picker--rail .library-asset-picker-content {
+  overflow: visible;
+}
+
 .library-asset-picker__filters,
 .library-asset-picker__choices-head {
   display: flex;

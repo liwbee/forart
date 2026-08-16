@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, FolderClosed, Images, Plus, Shuffle, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { AppScrollArea } from "../../../components/AppScrollArea";
+import { RemoteDataState } from "../../../components/RemoteDataState";
 import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
 import {
@@ -17,6 +18,7 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "../../../components/
 import { Skeleton } from "../../../components/ui/skeleton";
 import { Switch } from "../../../components/ui/switch";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
+import { firstRequestFailure } from "../../../lib/requestFailure";
 import { actionLibraryKeys, listActionProjects, listActions, listActionTags } from "../../action-library/api";
 import type { ActionEntry, ActionProject } from "../../action-library/types";
 import {
@@ -107,6 +109,9 @@ export function ActionFissionRowSettingsDialog({
   );
   const includeTagSet = new Set(draftIncludeTagIds);
   const excludeTagSet = new Set(draftExcludeTagIds);
+  const projectsFailure = firstRequestFailure([projectsQuery.error]);
+  const tagsFailure = firstRequestFailure([tagsQuery.error]);
+  const actionsFailure = firstRequestFailure([actionsQuery.error]);
 
   useEffect(() => {
     if (!open || !row) return;
@@ -270,7 +275,9 @@ export function ActionFissionRowSettingsDialog({
             </header>
             <AppScrollArea className="rf-action-fission-settings-scroll">
               <div className="rf-action-fission-project-list">
-                {projects.map((project) => {
+                {projectsQuery.isLoading ? <ListSkeleton /> : null}
+                {projectsFailure ? <RemoteDataState failure={projectsFailure} scope="panel" onRetry={() => projectsQuery.refetch()} /> : null}
+                {!projectsFailure ? projects.map((project) => {
                   const selected = draftProjectId === project.id;
                   return (
                     <Button
@@ -289,8 +296,8 @@ export function ActionFissionRowSettingsDialog({
                       {selected ? <Check aria-hidden="true" /> : null}
                     </Button>
                   );
-                })}
-                {!projects.length ? (
+                }) : null}
+                {!projectsFailure && !projectsQuery.isLoading && !projects.length ? (
                   <Empty className="rf-action-fission-dialog-empty">
                     <EmptyHeader>
                       <EmptyMedia variant="icon"><FolderClosed aria-hidden="true" /></EmptyMedia>
@@ -324,7 +331,9 @@ export function ActionFissionRowSettingsDialog({
               <Badge variant="secondary">{draftTags.length}</Badge>
             </header>
             <AppScrollArea className="rf-action-fission-settings-scroll">
-              {tagsQuery.isLoading ? <ListSkeleton /> : (
+              {tagsQuery.isLoading ? <ListSkeleton /> : tagsFailure ? (
+                <RemoteDataState failure={tagsFailure} scope="panel" onRetry={() => tagsQuery.refetch()} />
+              ) : (
                 <div className="rf-action-fission-settings-list">
                   <Button
                     type="button"
@@ -390,6 +399,8 @@ export function ActionFissionRowSettingsDialog({
                 <div className="rf-action-fission-action-grid">
                   {Array.from({ length: 8 }, (_, index) => <Skeleton key={index} className="rf-action-fission-action-skeleton" />)}
                 </div>
+              ) : actionsFailure ? (
+                <RemoteDataState failure={actionsFailure} scope="panel" onRetry={() => actionsQuery.refetch()} />
               ) : (
                 <div className="rf-action-fission-action-grid">
                   <Button

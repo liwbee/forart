@@ -1,8 +1,9 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Copy, Download, Eye, FolderPlus, ImagePlus, MoreHorizontal, Tags, Trash2 } from "lucide-react";
+import { ArrowLeft, Copy, Download, Eye, FolderPlus, ImagePlus, MoreHorizontal, Pencil, Tags, Trash2 } from "lucide-react";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
+import { RemoteDataState } from "../../components/RemoteDataState";
 import { AppScrollArea } from "../../components/AppScrollArea";
 import { LazyImage } from "../../components/LazyImage";
 import { Button } from "../../components/ui/button";
@@ -21,6 +22,7 @@ import { LibraryImageDropZone } from "../resource-library/LibraryImageDropZone";
 import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
 import { VirtualLibraryCardGrid } from "../resource-library/VirtualLibraryCardGrid";
 import { createUniqueLibraryProjectName, LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
+import { getLibraryProjectLoadState } from "../library-layout/libraryProjectLoadState";
 import { getChangedProjectOrder, setOptimisticProjectOrder, type LibraryProjectsQueryData } from "../library-layout/projectReorder";
 import { LibraryTagManagerDialog } from "../library-tags/LibraryTagManagerDialog";
 import { getChangedTagOrder, setOptimisticTagOrder, type LibraryTagsQueryData } from "../library-tags/tagReorder";
@@ -48,6 +50,8 @@ import {
 import { ActionFolderImportDialog } from "./ActionFolderImportDialog";
 import { useActionLibraryStore } from "./actionLibraryStore";
 import { ActionEntry, ActionProject, ActionTag } from "./types";
+import { usePermission } from "../permissions";
+import { firstRequestFailure } from "../../lib/requestFailure";
 
 function getRequestError(errors: unknown[]) {
   const first = errors.find(Boolean);
@@ -80,6 +84,7 @@ function ActionToolbar({
   selectionMode,
   onEnterSelectionMode,
   onExitSelectionMode,
+  canManageEntries,
 }: {
   tags: ActionTag[];
   tagFilter: LibraryTagFilter;
@@ -91,6 +96,7 @@ function ActionToolbar({
   selectionMode: boolean;
   onEnterSelectionMode: () => void;
   onExitSelectionMode: () => void;
+  canManageEntries: boolean;
 }) {
   const { t } = useTranslation();
   const includeTagSet = useMemo(() => new Set(tagFilter.includeTagIds), [tagFilter.includeTagIds]);
@@ -98,7 +104,7 @@ function ActionToolbar({
   return (
     <div className="library-toolbar outfit-toolbar">
       <div className="library-tag-section">
-        <LibraryBulkManageButton disabled={false} onClick={selectionMode ? onExitSelectionMode : onEnterSelectionMode} />
+        {canManageEntries ? <LibraryBulkManageButton disabled={false} onClick={selectionMode ? onExitSelectionMode : onEnterSelectionMode} /> : null}
         <span className="library-filter-label">{t("common:labels.tags")}</span>
         <div className="library-tag-controls">
           <CollapsibleTagFilterRow expandLabel={t("common:labels.expandTags")} collapseLabel={t("common:labels.collapseTags")}>
@@ -168,6 +174,8 @@ function ActionCard({
   onImageActionStatus,
   renameError,
   onClearRenameError,
+  canEditEntries,
+  canDeleteEntries,
 }: {
   action: ActionEntry;
   tags: ActionTag[];
@@ -182,11 +190,14 @@ function ActionCard({
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
   renameError: string;
   onClearRenameError: (actionId: string) => void;
+  canEditEntries: boolean;
+  canDeleteEntries: boolean;
 }) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [promptOpen, setPromptOpen] = useState(false);
+  const [editingDetails, setEditingDetails] = useState(false);
   const [draftName, setDraftName] = useState(action.name || "");
   const [draftPrompt, setDraftPrompt] = useState(action.prompt || "");
   const nameInputRef = useRef<HTMLInputElement | null>(null);
@@ -200,21 +211,27 @@ function ActionCard({
   useEffect(() => {
     setDraftName(action.name || "");
     setDraftPrompt(action.prompt || "");
+    setEditingDetails(false);
     committedNameRef.current = action.name || "";
     committedPromptRef.current = action.prompt || "";
     onClearRenameError(action.id);
   }, [action.id, action.name, action.prompt]);
 
   useEffect(() => {
-    if (promptOpen) nameInputRef.current?.focus();
-  }, [promptOpen]);
+    if (promptOpen && editingDetails) nameInputRef.current?.focus();
+  }, [editingDetails, promptOpen]);
 
   useEffect(() => {
     if (selectionMode) {
       setPromptOpen(false);
+      setEditingDetails(false);
       setMenuOpen(false);
     }
   }, [selectionMode]);
+
+  useEffect(() => {
+    if (!canEditEntries) setEditingDetails(false);
+  }, [canEditEntries]);
 
   function handleViewImage() {
     if (!assetUrl) return;
@@ -247,6 +264,7 @@ function ActionCard({
   }
 
   function commitDetails() {
+    if (!canEditEntries) return true;
     const nextName = normalizeLibraryName(draftName);
     const nextPrompt = draftPrompt;
     const patch: Partial<Pick<ActionEntry, "name" | "prompt">> = {};
@@ -263,7 +281,10 @@ function ActionCard({
   }
 
   function closePromptEditor() {
-    if (commitDetails()) setPromptOpen(false);
+    if (!editingDetails || commitDetails()) {
+      setEditingDetails(false);
+      setPromptOpen(false);
+    }
   }
 
   return (
@@ -316,9 +337,15 @@ function ActionCard({
           ) : null}
         </div>
         <div className="action-card__face action-card__face--back" aria-hidden={!promptOpen}>
-          <Button className="action-card__back-button" type="button" variant="ghost" size="icon-sm" tabIndex={promptOpen ? 0 : -1} aria-label={t("actionLibrary:backToImage")} title={t("common:actions.back")} onClick={closePromptEditor}>
-            <ArrowLeft aria-hidden="true" />
-          </Button>
+          <div className="action-card__detail-toolbar">
+            <Button className="action-card__back-button" type="button" variant="ghost" size="icon-sm" tabIndex={promptOpen ? 0 : -1} aria-label={t("actionLibrary:backToImage")} title={t("common:actions.back")} onClick={closePromptEditor}>
+              <ArrowLeft aria-hidden="true" />
+            </Button>
+            {canEditEntries ? <Button className="action-card__edit-button" type="button" variant="ghost" size="sm" tabIndex={promptOpen ? 0 : -1} aria-pressed={editingDetails} onClick={() => setEditingDetails(true)}>
+              <Pencil aria-hidden="true" />
+              <span>{t("actionLibrary:editDetails")}</span>
+            </Button> : null}
+          </div>
           <label className="action-card__name-field">
             {renameError ? <span className="library-rename-error-popover">{renameError}</span> : null}
             <Input
@@ -329,11 +356,14 @@ function ActionCard({
               tabIndex={promptOpen ? 0 : -1}
               aria-label={t("common:labels.name")}
               placeholder={t("common:labels.name")}
+              readOnly={!editingDetails || !canEditEntries}
               onChange={(event) => {
                 onClearRenameError(action.id);
                 setDraftName(event.target.value);
               }}
-              onBlur={commitDetails}
+              onBlur={() => {
+                if (editingDetails) commitDetails();
+              }}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
@@ -354,8 +384,11 @@ function ActionCard({
               maxLength={4000}
               tabIndex={promptOpen ? 0 : -1}
               placeholder={t("actionLibrary:inputText")}
+              readOnly={!editingDetails || !canEditEntries}
               onChange={(event) => setDraftPrompt(event.target.value)}
-              onBlur={commitDetails}
+              onBlur={() => {
+                if (editingDetails) commitDetails();
+              }}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
                   event.preventDefault();
@@ -374,7 +407,7 @@ function ActionCard({
         </DropdownMenuTrigger>
         <DropdownMenuContent side="right" align="start" sideOffset={8}>
           <DropdownMenuGroup>
-            <DropdownMenuSub>
+            {canEditEntries ? <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <Tags size={16} aria-hidden="true" />
                 <span>{t("common:labels.tags")}</span>
@@ -400,7 +433,7 @@ function ActionCard({
                   <div className="px-2 py-1.5 text-sm text-muted-foreground">{t("actionLibrary:noTags")}</div>
                 )}
               </DropdownMenuSubContent>
-            </DropdownMenuSub>
+            </DropdownMenuSub> : null}
             <DropdownMenuItem disabled={!assetUrl} onSelect={handleViewImage}>
               <Eye size={16} aria-hidden="true" />
               <span>{t("common:actions.viewImage")}</span>
@@ -413,7 +446,7 @@ function ActionCard({
               <Copy size={16} aria-hidden="true" />
               <span>{t("common:actions.copyImage")}</span>
             </DropdownMenuItem>
-            <ConfirmingDropdownMenuItem
+            {canDeleteEntries ? <ConfirmingDropdownMenuItem
               disabled={isDeleting}
               onConfirm={() => onDelete(action.id)}
               confirmChildren={(
@@ -425,7 +458,7 @@ function ActionCard({
             >
               <Trash2 size={16} aria-hidden="true" />
               <span>{t("common:actions.delete")}</span>
-            </ConfirmingDropdownMenuItem>
+            </ConfirmingDropdownMenuItem> : null}
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -451,6 +484,8 @@ function ActionGrid({
   onImageActionStatus,
   renameErrors,
   onClearRenameError,
+  canEditEntries,
+  canDeleteEntries,
 }: {
   actions: ActionEntry[];
   tags: ActionTag[];
@@ -468,6 +503,8 @@ function ActionGrid({
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
   renameErrors: Record<string, string>;
   onClearRenameError: (actionId: string) => void;
+  canEditEntries: boolean;
+  canDeleteEntries: boolean;
 }) {
   const cardSize = useLibraryCardSize();
   const librarySort = useLibrarySort();
@@ -480,7 +517,7 @@ function ActionGrid({
         scrollElementRef={scrollElementRef}
         style={cardSize.gridStyle}
         itemAspectRatio={4 / 3}
-        renderLeadingItem={!selectionMode ? () => (
+        renderLeadingItem={!selectionMode && canEditEntries ? () => (
           <AddActionCard disabled={creating} busy={creating} onCreate={onCreate} onOpenBulkImport={onOpenBulkImport} />
         ) : undefined}
         renderItem={(action) => (
@@ -499,6 +536,8 @@ function ActionGrid({
             onImageActionStatus={onImageActionStatus}
             renameError={renameErrors[action.id] || ""}
             onClearRenameError={onClearRenameError}
+            canEditEntries={canEditEntries}
+            canDeleteEntries={canDeleteEntries}
           />
         )}
       />
@@ -533,6 +572,12 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const sameColorSingleFilter = useLibraryTagSettingsStore((state) => state.sameColorSingleFilter);
   const setSameColorSingleFilter = useLibraryTagSettingsStore((state) => state.setSameColorSingleFilter);
   const bulkSelection = useLibraryBulkSelection();
+  const canEditProjects = usePermission("action_library.project_edit");
+  const canDeleteProjects = usePermission("action_library.project_delete");
+  const canReorderProjects = usePermission("action_library.project_reorder");
+  const canEditEntries = usePermission("action_library.entry_edit");
+  const canDeleteEntries = usePermission("action_library.entry_delete");
+  const canManageTags = usePermission("action_library.tag_manage");
 
   const storageSettingsQuery = useQuery({
     queryKey: actionLibraryKeys.storageSettings,
@@ -912,12 +957,22 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const tags = tagsQuery.data?.tags || [];
   const tagCounts = useMemo(() => countLibraryTags(filteredActions, tags), [filteredActions, tags]);
   const activeProject = projects.find((project) => project.id === activeProjectId) || null;
-  const errorMessage = getRequestError([
+  const queryFailure = firstRequestFailure([
     storageSettingsQuery.error,
     projectsQuery.error,
     tagsQuery.error,
     actionsQuery.error,
     allActionsQuery.error,
+  ]);
+  const projectLoadState = getLibraryProjectLoadState({
+    hasFailure: Boolean(queryFailure),
+    storageConfigured,
+    storageQuery: storageSettingsQuery,
+    projectsQuery,
+    projectCount: projects.length,
+  });
+  const projectActionsAvailable = projectLoadState === "empty" || projectLoadState === "ready";
+  const mutationErrorMessage = getRequestError([
     createActionMutation.error,
     deleteActionMutation.error,
     updateActionTagsMutation.error,
@@ -931,6 +986,15 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     reorderTagsMutation.error,
     deleteTagMutation.error,
   ]);
+  const hasCachedQueryData = Boolean(projectsQuery.data)
+    && (!tagsQuery.error || Boolean(tagsQuery.data))
+    && (!actionsQuery.error || Boolean(actionsQuery.data));
+  const retryQueries = async () => {
+    const retries: Array<Promise<unknown>> = [storageSettingsQuery.refetch()];
+    if (storageConfigured) retries.push(projectsQuery.refetch());
+    if (storageConfigured && activeProjectId) retries.push(tagsQuery.refetch(), actionsQuery.refetch(), allActionsQuery.refetch());
+    await Promise.all(retries);
+  };
   const libraryBodyViewportRef = useRef<HTMLDivElement | null>(null);
 
   return (
@@ -939,6 +1003,11 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         <LibraryProjectSidebar<ActionProject>
           projects={projects}
           activeProjectId={activeProjectId}
+          canCreateProjects={canEditProjects && projectActionsAvailable}
+          canRenameProjects={canEditProjects && projectActionsAvailable}
+          canDeleteProjects={canDeleteProjects && projectActionsAvailable}
+          canReorderProjects={canReorderProjects && projectActionsAvailable}
+          showEmptyState={projectLoadState === "empty"}
           renamingProjectId={renamingProjectId}
           ariaLabel={t("actionLibrary:projectRail")}
           projectActionsLabel={(name) => t("actionLibrary:projectActions", { name })}
@@ -969,23 +1038,25 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
               onTagClear={() => setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER)}
               onUntaggedToggle={handleToggleUntaggedFilter}
               selectionMode={bulkSelection.selectionMode}
-              onEnterSelectionMode={bulkSelection.enterSelectionMode}
+              onEnterSelectionMode={(canEditEntries || canDeleteEntries) ? bulkSelection.enterSelectionMode : () => undefined}
               onExitSelectionMode={bulkSelection.exitSelectionMode}
+              canManageEntries={canEditEntries || canDeleteEntries || canManageTags}
             />
           </div>
 
           <AppScrollArea className="library-body" viewportRef={libraryBodyViewportRef}>
-            {errorMessage ? <ErrorCopyLine className="library-error" text={t("actionLibrary:requestFailed", { message: errorMessage })} /> : null}
-            {storageSettingsQuery.isLoading || projectsQuery.isLoading ? (
+            {mutationErrorMessage ? <ErrorCopyLine className="library-error" text={t("actionLibrary:requestFailed", { message: mutationErrorMessage })} /> : null}
+            {queryFailure ? <RemoteDataState failure={queryFailure} scope="page" compact={hasCachedQueryData} onRetry={retryQueries} /> : null}
+            {projectLoadState === "loading" ? (
               <Empty className="library-empty" aria-label={t("common:states.loadingProjects")}>
                 <Skeleton className="h-4 w-36" />
               </Empty>
             ) : null}
-            {!storageConfigured ? <Empty className="library-empty"><EmptyDescription>{t("actionLibrary:storageUnavailable")}</EmptyDescription></Empty> : null}
-            {storageConfigured && !projectsQuery.isLoading && !projects.length ? <Empty className="library-empty"><EmptyDescription>{t("common:empty.noProjects")}</EmptyDescription></Empty> : null}
-            {activeProject ? (
+            {projectLoadState === "storage-unavailable" ? <Empty className="library-empty"><EmptyDescription>{t("common:states.storageUnavailable")}</EmptyDescription></Empty> : null}
+            {projectLoadState === "empty" ? <Empty className="library-empty"><EmptyDescription>{t("common:empty.noProjects")}</EmptyDescription></Empty> : null}
+            {activeProject && (!queryFailure || hasCachedQueryData) ? (
               <LibraryImageDropZone
-                disabled={!storageConfigured || createActionMutation.isPending}
+                disabled={!canEditEntries || !storageConfigured || createActionMutation.isPending}
                 label={t("actionLibrary:dropToAddAction")}
                 onDropImage={(file) => createActionMutation.mutate(file)}
               >
@@ -993,7 +1064,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
                   actions={filteredActions}
                   tags={tags}
                   scrollElementRef={libraryBodyViewportRef}
-                  creating={createActionMutation.isPending}
+                  creating={!canEditEntries || createActionMutation.isPending}
                   deletingActionId={deleteActionMutation.isPending ? deleteActionMutation.variables || "" : ""}
                   selectionMode={bulkSelection.selectionMode}
                   selectedIds={bulkSelection.selectedIds}
@@ -1006,6 +1077,8 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
                   onImageActionStatus={showImageActionToast}
                   renameErrors={actionRenameErrors}
                   onClearRenameError={clearActionRenameError}
+                  canEditEntries={canEditEntries}
+                  canDeleteEntries={canDeleteEntries}
                 />
               </LibraryImageDropZone>
             ) : null}
@@ -1013,7 +1086,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         </main>
       </div>
 
-      <LibraryTagManagerDialog<ActionTag>
+      {canManageTags ? <LibraryTagManagerDialog<ActionTag>
         isOpen={tagManagerOpen}
         tags={tags}
         isCreating={createTagMutation.isPending}
@@ -1028,8 +1101,8 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         onReorderTags={handleReorderTags}
         sameColorSingleFilter={sameColorSingleFilter}
         onSameColorSingleFilterChange={setSameColorSingleFilter}
-      />
-      <ActionFolderImportDialog
+      /> : null}
+      {canEditEntries ? <ActionFolderImportDialog
         isOpen={bulkImportOpen}
         projectId={activeProjectId}
         projectName={activeProject?.name || ""}
@@ -1037,7 +1110,7 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         tags={tags}
         onClose={() => setBulkImportOpen(false)}
         onImported={refreshActionLibraryAfterBulkImport}
-      />
+      /> : null}
       <LibraryImageActionToast toast={imageActionToast} />
       {activeProject ? (
         <LibraryBulkActions
@@ -1053,6 +1126,9 @@ export function ActionLibraryPage({ searchQuery = "" }: { searchQuery?: string }
           onAddTags={(tagNames) => bulkActionEntriesMutation.mutate({ operation: "add_tags", tags: tagNames })}
           onRemoveTags={(tagNames) => bulkActionEntriesMutation.mutate({ operation: "remove_tags", tags: tagNames })}
           onDeleteSelected={() => bulkActionEntriesMutation.mutate({ operation: "delete" })}
+          canEditEntries={canEditEntries}
+          canDeleteEntries={canDeleteEntries}
+          canManageTags={canManageTags}
         />
       ) : null}
     </section>

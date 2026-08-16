@@ -119,7 +119,9 @@ export function restoreInfiniteCanvasHistorySnapshot(
       if (!current) return node;
       return {
         ...current,
+        ...node,
         position: { ...node.position },
+        data: cloneNativeCanvasNodeData(node.data),
         selected: false,
         dragging: false,
       };

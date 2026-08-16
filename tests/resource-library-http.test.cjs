@@ -63,7 +63,6 @@ async function jsonRequest(baseUrl, pathname, options = {}) {
 
 test('remote resource library keeps schema stable while Library Modules handle CRUD', async (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-library-http-'));
-  const databaseDir = path.join(tempRoot, 'database');
   const libraryDir = path.join(tempRoot, 'library');
   const port = await reservePort();
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -73,7 +72,9 @@ test('remote resource library keeps schema stable while Library Modules handle C
       ...process.env,
       HOST: '127.0.0.1',
       PORT: String(port),
-      FORART_DATABASE_DIR: databaseDir,
+      FORART_DB_DRIVER: 'sqlite',
+      FORART_AUTH_DISABLED: '1',
+      NODE_ENV: 'test',
       FORART_LIBRARY_DIR: libraryDir,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -87,7 +88,7 @@ test('remote resource library keeps schema stable while Library Modules handle C
   });
 
   await waitForOutput(child, /Forart Server API running/);
-  const databasePath = path.join(databaseDir, 'forart-library.sqlite');
+  const databasePath = path.join(libraryDir, '.forart', 'database', 'forart-library.sqlite');
   const schemaBefore = schemaFingerprint(databasePath);
 
   const project = await jsonRequest(baseUrl, '/api/outfit-projects', {

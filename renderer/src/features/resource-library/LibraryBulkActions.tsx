@@ -28,6 +28,9 @@ export function LibraryBulkActions({
   onAddTags,
   onRemoveTags,
   onDeleteSelected,
+  canEditEntries = true,
+  canDeleteEntries = true,
+  canManageTags = true,
 }: {
   selectionMode: boolean;
   selectedCount: number;
@@ -41,6 +44,9 @@ export function LibraryBulkActions({
   onAddTags: (tagNames: string[]) => void;
   onRemoveTags: (tagNames: string[]) => void;
   onDeleteSelected: () => void;
+  canEditEntries?: boolean;
+  canDeleteEntries?: boolean;
+  canManageTags?: boolean;
 }) {
   const { t } = useTranslation();
   const [tagDialogMode, setTagDialogMode] = useState<BulkTagMode | null>(null);
@@ -69,26 +75,26 @@ export function LibraryBulkActions({
             <X data-icon="inline-start" aria-hidden="true" />
             <span>{t("common:bulk.clearSelection")}</span>
           </Button>
-          <Button type="button" variant="default" disabled={isBusy || !selectedCount || !tags.length} onClick={() => setTagDialogMode("add")}>
+          {canEditEntries ? <Button type="button" variant="default" disabled={isBusy || !selectedCount || !tags.length} onClick={() => setTagDialogMode("add")}>
             <Tags data-icon="inline-start" aria-hidden="true" />
             <span>{t("common:bulk.addTags")}</span>
-          </Button>
-          <Button type="button" variant="default" disabled={isBusy || !selectedCount || !tags.length} onClick={() => setTagDialogMode("remove")}>
+          </Button> : null}
+          {canEditEntries ? <Button type="button" variant="default" disabled={isBusy || !selectedCount || !tags.length} onClick={() => setTagDialogMode("remove")}>
             <Tags data-icon="inline-start" aria-hidden="true" />
             <span>{t("common:bulk.removeTags")}</span>
-          </Button>
-          <Button type="button" variant="default" disabled={isBusy} onClick={onOpenTagManager}>
+          </Button> : null}
+          {canManageTags ? <Button type="button" variant="default" disabled={isBusy} onClick={onOpenTagManager}>
             <Settings data-icon="inline-start" aria-hidden="true" />
             <span>{t("common:labels.manageTags")}</span>
-          </Button>
-          <ConfirmingDeleteButton
+          </Button> : null}
+          {canDeleteEntries ? <ConfirmingDeleteButton
             disabled={isBusy || !selectedCount}
             icon={<Trash2 size={17} aria-hidden="true" />}
             label={t("common:bulk.deleteSelected")}
             confirmLabel={t("common:bulk.confirmDelete")}
             resetKey={`${selectionMode}-${selectedCount}`}
             onDelete={onDeleteSelected}
-          />
+          /> : null}
           <Button className="library-bulk-bar__close" type="button" variant="ghost" size="icon" disabled={isBusy} onClick={onExitSelectionMode} aria-label={t("common:actions.close")} title={t("common:actions.close")}>
             <X aria-hidden="true" />
           </Button>

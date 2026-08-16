@@ -1,5 +1,5 @@
-import { ArrowDownAZ, Clock3, Copy, Download, FileJson, Layers3, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Upload, UploadCloud } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ArrowDownAZ, Clock3, Cloud, Copy, Download, FileJson, Layers3, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Upload, UploadCloud } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SearchInput } from "../../components/SearchInput";
 import { NativeTabs } from "../../components/NativeTabs";
@@ -24,6 +24,12 @@ import type { CanvasProjectRecord, CanvasRecord } from "./canvasWorkspaceTypes";
 interface CanvasWorkspaceHomeProps {
   source: "local" | "shared";
   sharedCanvasesEnabled: boolean;
+  canEditSharedProjects: boolean;
+  canDeleteSharedProjects: boolean;
+  canReorderSharedProjects: boolean;
+  canEditSharedCanvases: boolean;
+  canDeleteSharedCanvases: boolean;
+  canCopySharedCanvases: boolean;
   canvases: CanvasRecord[];
   projects: CanvasProjectRecord[];
   localProjects: CanvasProjectRecord[];
@@ -62,6 +68,12 @@ function formatUpdatedAt(timestamp: number) {
 export function CanvasWorkspaceHome({
   source,
   sharedCanvasesEnabled,
+  canEditSharedProjects,
+  canDeleteSharedProjects,
+  canReorderSharedProjects,
+  canEditSharedCanvases,
+  canDeleteSharedCanvases,
+  canCopySharedCanvases,
   canvases,
   projects,
   localProjects,
@@ -93,6 +105,15 @@ export function CanvasWorkspaceHome({
   const [renamingProjectId, setRenamingProjectId] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
   const readOnly = source === "shared";
+  const CanvasIcon = readOnly ? Cloud : Layers3;
+  const canShowCanvasActions = !readOnly || canEditSharedCanvases || canDeleteSharedCanvases || canCopySharedCanvases;
+
+  useEffect(() => {
+    if (!readOnly || canEditSharedCanvases) return;
+    setRenamingCanvasId("");
+    setRenamingProjectId("");
+    setRenameDraft("");
+  }, [canEditSharedCanvases, readOnly]);
 
   const activeProject = projects.find((project) => project.id === activeProjectId) || projects[0] || null;
   const visibleCanvases = useMemo(() => {
@@ -123,14 +144,15 @@ export function CanvasWorkspaceHome({
         projectActionsLabel={(name) => `${t("infiniteCanvas:projectActions")}: ${name}`}
         title={t("infiniteCanvas:projectsTitle")}
         creatingProject={busy}
-        canCreateProjects={!readOnly || sharedCanvasesEnabled}
-        canManageProjects
-        canReorderProjects
+        canCreateProjects={!readOnly || canEditSharedProjects}
+        canRenameProjects={!readOnly || canEditSharedProjects}
+        canDeleteProjects={!readOnly || canDeleteSharedProjects}
+        canReorderProjects={!readOnly || canReorderSharedProjects}
         topContent={sharedCanvasesEnabled ? (
           <NativeTabs
             items={[
-              { value: "local", label: t("infiniteCanvas:localCanvases") },
-              { value: "shared", label: t("infiniteCanvas:serverCanvases") },
+              { value: "local", label: t("infiniteCanvas:localCanvases"), icon: Layers3 },
+              { value: "shared", label: t("infiniteCanvas:serverCanvases"), icon: Cloud },
             ]}
             value={source}
             onChange={onSourceChange}
@@ -197,7 +219,9 @@ export function CanvasWorkspaceHome({
           {visibleCanvases.length ? visibleCanvases.map((canvas) => (
             <Card key={canvas.id} className="rf-canvas-card">
               <CardHeader>
-                <div className="rf-canvas-card__icon"><Layers3 aria-hidden="true" /></div>
+                <div className="rf-canvas-card__icon" data-source={source}>
+                  <CanvasIcon aria-hidden="true" />
+                </div>
                 <div className="min-w-0">
                   {renamingCanvasId === canvas.id ? (
                     <Input
@@ -217,7 +241,7 @@ export function CanvasWorkspaceHome({
                   )}
                   <CardDescription>{formatUpdatedAt(canvas.updatedAt)}</CardDescription>
                 </div>
-                <CardAction>
+                {canShowCanvasActions ? <CardAction>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button type="button" variant="outline" size="icon-sm" aria-label={`${t("infiniteCanvas:canvasActions")}: ${canvas.title}`}>
@@ -226,14 +250,14 @@ export function CanvasWorkspaceHome({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuGroup>
-                        <DropdownMenuItem onSelect={() => {
+                        {(!readOnly || canEditSharedCanvases) ? <DropdownMenuItem onSelect={() => {
                           setRenameDraft(canvas.title);
                           setRenamingCanvasId(canvas.id);
                         }}>
                           <Pencil aria-hidden="true" />
                           {t("common:actions.rename")}
-                        </DropdownMenuItem>
-                        {readOnly ? <DropdownMenuSub>
+                        </DropdownMenuItem> : null}
+                        {readOnly && canCopySharedCanvases ? <DropdownMenuSub>
                           <DropdownMenuSubTrigger>
                             <Copy aria-hidden="true" />
                             {t("infiniteCanvas:copyToLocal")}
@@ -247,10 +271,10 @@ export function CanvasWorkspaceHome({
                               <DropdownMenuItem disabled>{t("common:empty.noProjects")}</DropdownMenuItem>
                             )}
                           </DropdownMenuSubContent>
-                        </DropdownMenuSub> : <DropdownMenuItem onSelect={() => onDuplicateCanvas(canvas.id)}>
+                        </DropdownMenuSub> : !readOnly ? <DropdownMenuItem onSelect={() => onDuplicateCanvas(canvas.id)}>
                           <Copy aria-hidden="true" />
                           {t("infiniteCanvas:duplicateCanvas")}
-                        </DropdownMenuItem>}
+                        </DropdownMenuItem> : null}
                         {!readOnly ? <DropdownMenuSub>
                           <DropdownMenuSubTrigger>{t("infiniteCanvas:moveTo")}</DropdownMenuSubTrigger>
                           <DropdownMenuSubContent>
@@ -261,7 +285,7 @@ export function CanvasWorkspaceHome({
                             ))}
                           </DropdownMenuSubContent>
                         </DropdownMenuSub> : null}
-                        {!readOnly && sharedCanvasesEnabled ? <DropdownMenuSub>
+                        {!readOnly && sharedCanvasesEnabled && canEditSharedCanvases ? <DropdownMenuSub>
                           <DropdownMenuSubTrigger>
                             <UploadCloud aria-hidden="true" />
                             {t("infiniteCanvas:uploadToShared")}
@@ -292,7 +316,7 @@ export function CanvasWorkspaceHome({
                             </DropdownMenuItem>
                           </DropdownMenuSubContent>
                         </DropdownMenuSub> : null}
-                        <ConfirmingDropdownMenuItem
+                        {(!readOnly || canDeleteSharedCanvases) ? <ConfirmingDropdownMenuItem
                           confirmChildren={(
                             <>
                               <Trash2 aria-hidden="true" />
@@ -303,15 +327,15 @@ export function CanvasWorkspaceHome({
                         >
                           <Trash2 aria-hidden="true" />
                           {t("common:actions.delete")}
-                        </ConfirmingDropdownMenuItem>
+                        </ConfirmingDropdownMenuItem> : null}
                       </DropdownMenuGroup>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                </CardAction>
+                </CardAction> : null}
               </CardHeader>
               <CardContent>
                 <Button className="rf-canvas-card__open" type="button" variant="ghost" onClick={() => onOpenCanvas(canvas.id)}>
-                  <Layers3 data-icon="inline-start" aria-hidden="true" />
+                  <CanvasIcon data-icon="inline-start" aria-hidden="true" />
                   <span>{canvas.nodeCount}</span>
                 </Button>
               </CardContent>
@@ -319,7 +343,7 @@ export function CanvasWorkspaceHome({
           )) : (
             <Empty className="rf-workspace-home__empty">
               <EmptyHeader>
-                <EmptyMedia variant="icon"><Layers3 aria-hidden="true" /></EmptyMedia>
+                <EmptyMedia variant="icon"><CanvasIcon aria-hidden="true" /></EmptyMedia>
                 <EmptyTitle>{t("infiniteCanvas:noCanvases")}</EmptyTitle>
                 <EmptyDescription>{activeProject?.title || t("infiniteCanvas:projectsTitle")}</EmptyDescription>
               </EmptyHeader>

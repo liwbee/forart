@@ -4,6 +4,8 @@ export interface ForartAppConfig {
   mode: ForartMode;
   localLibraryPath: string;
   serverUrl: string;
+  serverAuthUsername: string;
+  serverAuthToken: string;
   imageDownloadPath: string;
   photoshopExecutablePath: string;
   language: "zh-CN" | "en-US";
@@ -205,6 +207,9 @@ export interface ForartConfigApi {
   chooseDirectory: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
   chooseFile: (payload?: { title?: string; filterName?: string; extensions?: string[] }) => Promise<{ canceled: boolean; path: string }>;
   testServer: (serverUrl: string) => Promise<{ ok: boolean; status?: number; error?: string; payload?: unknown }>;
+  serverLogin: (payload: { serverUrl: string; username: string; password: string }) => Promise<{ ok: boolean; status?: number; error?: string; user?: { id: string; username?: string; name?: string; role?: string }; config?: ForartAppConfig }>;
+  serverSession: (payload?: { serverUrl?: string; token?: string }) => Promise<{ ok: boolean; status?: number; error?: string; user?: { id: string; username?: string; name?: string; role?: string }; permissions?: string[] }>;
+  serverLogout: () => Promise<{ ok: true; config: ForartAppConfig }>;
   localServerStatus: () => Promise<{ ok: boolean; managed?: boolean; transport?: "ipc" | "http"; localLibraryPath?: string; status?: number; error?: string; payload?: unknown }>;
   appInfo: () => Promise<ForartAppInfo>;
   checkUpdate: () => Promise<ForartUpdateCheckResult>;
@@ -300,7 +305,9 @@ export interface EasyToolApi {
   createCanvasPackageForUpload: (canvasId: string, operationId?: string) => Promise<CanvasPackageExportResult>;
   importCanvasPackageFromPath: (payload: { filePath: string; projectId?: string; operationId?: string }) => Promise<CanvasPackageImportResult>;
   uploadCanvasPackageToRemote: (payload: { filePath: string; uploadUrl: string; operationId?: string }) => Promise<unknown>;
+  uploadCanvasToRemote: (payload: { canvasId: string; projectId?: string; uploadUrl: string; operationId?: string; authToken?: string }) => Promise<unknown>;
   downloadCanvasPackageFromRemote: (payload: { downloadUrl: string; operationId?: string }) => Promise<{ ok: true; filePath: string }>;
+  copyRemoteCanvasToLocal: (payload: { transferUrl: string; remoteCanvasId: string; projectId?: string; operationId?: string; authToken?: string }) => Promise<unknown>;
   cancelCanvasTransfer: (operationId: string) => Promise<{ ok: true; canceled: boolean }>;
   onCanvasTransferProgress: (callback: (progress: CanvasTransferProgress) => void) => () => void;
   saveCanvasAsset: (payload: { dataUrl?: string; url?: string; defaultName?: string; kind?: "input" | "output"; type?: string }) => Promise<{ url: string; thumbUrl?: string; fileName: string; filePath?: string; thumbFilePath?: string }>;
@@ -412,7 +419,7 @@ export interface ImageReviewApi {
   chooseRoot: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
   restoreRoot: (payload: { root: string }) => Promise<{ ok: true; path: string } | { ok: false; path: "" }>;
   products: (payload: { root: string; modelFolders: string }) => Promise<{ products: ImageReviewProduct[] }>;
-  productImages: (payload: { root: string; productId: string; modelFolders: string; detailFolders: string }) => Promise<{ product: ImageReviewProduct }>;
+  productImages: (payload: { root: string; productId: string; modelFolders: string; detailFolders: string; requestPriority: number }) => Promise<{ product: ImageReviewProduct }>;
   setReviewStatus: (payload: {
     root: string;
     productId: string;
@@ -511,6 +518,8 @@ export const DEFAULT_APP_CONFIG: ForartAppConfig = {
   mode: "local",
   localLibraryPath: "",
   serverUrl: "",
+  serverAuthUsername: "",
+  serverAuthToken: "",
   imageDownloadPath: "",
   photoshopExecutablePath: "",
   language: "zh-CN",
@@ -523,6 +532,8 @@ export function normalizeConfig(input: Partial<ForartAppConfig>): ForartAppConfi
     mode: input.mode === "remote" ? "remote" : "local",
     localLibraryPath: String(input.localLibraryPath || "").trim(),
     serverUrl: String(input.serverUrl || "").trim().replace(/\/+$/, ""),
+    serverAuthUsername: String(input.serverAuthUsername || "").trim(),
+    serverAuthToken: String(input.serverAuthToken || "").trim(),
     imageDownloadPath: String(input.imageDownloadPath || "").trim(),
     photoshopExecutablePath: String(input.photoshopExecutablePath || "").trim(),
     language: input.language === "en-US" ? "en-US" : "zh-CN",

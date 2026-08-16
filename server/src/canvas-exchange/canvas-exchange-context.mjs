@@ -4,7 +4,7 @@ import { createCanvasExchangePackages } from "./canvas-exchange-packages.mjs";
 import { createCanvasExchangePaths } from "./canvas-exchange-paths.mjs";
 import { createCanvasExchangeStore } from "./canvas-exchange-store.mjs";
 
-export function createCanvasExchangeContext({ getStorageRoot }) {
+export function createCanvasExchangeContext({ getStorageRoot, getAuthRuntime }) {
   const paths = createCanvasExchangePaths({ getStorageRoot });
   const index = createCanvasExchangeIndex(paths);
   const packages = createCanvasExchangePackages(paths);
@@ -12,6 +12,7 @@ export function createCanvasExchangeContext({ getStorageRoot }) {
 
   return {
     getStorageRoot,
+    getAuthRuntime,
     newId: (prefix = "") => {
       const base = crypto.randomUUID().replace(/-/g, "");
       return prefix ? `${prefix}_${base}` : base;
@@ -21,4 +22,3 @@ export function createCanvasExchangeContext({ getStorageRoot }) {
     store,
   };
 }
-

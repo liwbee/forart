@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import AdmZip from "adm-zip";
@@ -171,8 +171,55 @@ export function createCanvasExchangePackages(paths) {
     return outputPath;
   }
 
+  function finalizeDirectUpload({ canvasId, canvas, manifest, stagingRoot }) {
+    const urlByAssetId = new Map();
+    const storedAssets = [];
+    const movedTargets = [];
+    const cleanup = () => {
+      for (const target of movedTargets.splice(0).reverse()) {
+        try { unlinkSync(target); } catch {}
+      }
+    };
+    try {
+      for (const asset of Array.isArray(manifest.assets) ? manifest.assets : []) {
+        const assetId = String(asset.id || "").trim();
+        const packagePath = safeRelativePath(asset.packagePath);
+        if (!/^[a-zA-Z0-9_-]+$/.test(assetId)) throw new Error("Invalid canvas resource id");
+        const source = path.join(stagingRoot, "assets", `${assetId}${extensionFromPath(asset.fileName || packagePath)}`);
+        if (!assetId || !packagePath || !existsSync(source)) throw new Error(`Canvas resource is missing: ${assetId || packagePath}`);
+        const kind = asset.kind === "output" ? "output" : "input";
+        const target = internalAssetFilePath(paths.assetRootForKind(kind), path.basename(asset.fileName || packagePath));
+        renameSync(source, target);
+        movedTargets.push(target);
+        const relativePath = paths.assetRelativePath(target);
+        const nextUrl = serverAssetUrl(canvasId, relativePath);
+        urlByAssetId.set(assetId, nextUrl);
+        storedAssets.push({
+          id: assetId,
+          kind,
+          fileName: path.basename(target),
+          relativePath,
+          originalUrl: String(asset.originalUrl || ""),
+          packagePath,
+          sizeBytes: statSync(target).size,
+        });
+      }
+      const rewrittenCanvas = walk(cloneSerializable(canvas), (value, key) => {
+        if (/path$/i.test(key) || /filePath/i.test(key) || /localPath/i.test(key)) return undefined;
+        if (typeof value !== "string") return value;
+        const packageId = packageAssetIdFromUrl(value);
+        return packageId && urlByAssetId.has(packageId) ? urlByAssetId.get(packageId) : value;
+      });
+      return { canvas: rewrittenCanvas, assets: storedAssets, cleanup };
+    } catch (error) {
+      cleanup();
+      throw error;
+    }
+  }
+
   return {
     createPackageFromServer,
+    finalizeDirectUpload,
     unpackPackageToServer,
   };
 }

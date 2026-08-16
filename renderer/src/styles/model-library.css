@@ -8,8 +8,7 @@
 }
 
 .model-add-card,
-.model-card,
-.model-inline-editor {
+.model-card {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   background: var(--surface-card);
@@ -215,16 +214,42 @@
   white-space: nowrap;
 }
 
-.model-inline-editor {
-  grid-column: 1 / -1;
+.model-editor-dialog {
+  width: min(1120px, calc(100vw - 48px));
+  max-width: none;
+  max-height: min(760px, calc(100vh - 48px));
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0;
+  overflow: hidden;
+  border-color: var(--border-subtle);
+  padding: 0;
+}
+
+.model-editor-dialog__header {
   position: relative;
-  z-index: 1;
-  overflow: visible;
+  min-height: 72px;
+  justify-content: center;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 14px 52px 14px 18px;
+  background: var(--surface-control);
+}
+
+.model-editor-dialog__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.model-editor-dialog__scroll {
+  min-height: 0;
+}
+
+.model-editor-dialog__viewport {
   padding: var(--space-5);
-  border-color: color-mix(in srgb, var(--border-strong) 50%, var(--border-subtle));
-  background: var(--surface-card);
-  box-shadow: var(--shadow-popover);
-  border-radius: var(--radius);
+}
+
+.model-editor-dialog__body {
+  min-width: 0;
 }
 
 .model-inline-editor-head {
@@ -340,13 +365,6 @@
   font-weight: var(--font-weight-semibold);
 }
 
-.model-inline-close-button {
-  position: absolute;
-  top: var(--space-2);
-  right: var(--space-3);
-  z-index: 2;
-}
-
 .model-image-grid {
   display: flex;
   flex-wrap: wrap;
@@ -384,6 +402,7 @@
   width: auto;
   height: 100%;
   display: block;
+  aspect-ratio: auto 4 / 5;
   object-fit: contain;
 }
 

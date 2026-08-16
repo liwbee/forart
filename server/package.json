@@ -1,20 +1,40 @@
 {
   "name": "forart-server",
   "private": true,
-  "version": "0.1.47",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "start": "node forart-server.mjs",
-    "dev": "node forart-server.mjs"
+    "dev": "node forart-server.mjs",
+    "migrate:legacy-postgres": "node scripts/migrate-legacy-sqlite-to-postgres.mjs",
+    "build:admin": "vite build --config admin-app/vite.config.mjs",
+    "check:admin": "tsc -p admin-app/tsconfig.json --noEmit",
+    "test": "node --test tests/library-database-smoke.mjs tests/auth-runtime-smoke.mjs tests/permission-matrix.test.mjs tests/legacy-postgres-import.test.mjs tests/library-storage-layout.test.mjs tests/admin-context.test.mjs",
+    "test:http": "node --test tests/library-http-smoke.mjs",
+    "test:local-ipc": "node --test tests/local-library-ipc-smoke.mjs"
   },
   "engines": {
     "node": ">=24"
   },
   "dependencies": {
     "adm-zip": "^0.5.18",
+    "better-auth": "^1.6.26",
     "better-sqlite3": "^12.11.1",
+    "kysely": "^0.29.5",
     "p-limit": "^7.3.0",
+    "pg": "^8.23.0",
     "sharp": "^0.35.3",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@refinedev/core": "^5.0.12",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
   }
 }

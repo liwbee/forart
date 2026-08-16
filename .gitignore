@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .forart-data/
+forart_data/
 CanvasAssests/
 data/
 config.json
@@ -38,8 +39,10 @@ server/.forart-data/
 server/data/
 server/.env
 server/.env.*
+!server/.env.example
 server/.cache/
 server/coverage/
+server/admin/assets/
 
 release/
 releases/

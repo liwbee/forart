@@ -1,6 +1,7 @@
 import type { Viewport } from "@xyflow/react";
 import {
   NATIVE_CANVAS_NODE_DEFINITIONS,
+  createNativeCanvasGroupNode,
   type NativeCanvasEdge,
   type NativeCanvasNode,
   type NativeCanvasNodeKind,
@@ -32,6 +33,7 @@ export interface CanvasDocumentTab {
   projectId?: string;
   readOnly?: boolean;
   remoteCanvasId?: string;
+  remoteUnavailable?: boolean;
 }
 
 export interface NativeCanvasSnapshot {
@@ -146,13 +148,73 @@ function normalizeNode(input: unknown): NativeCanvasNode | null {
   const value = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const data = value.data && typeof value.data === "object" ? value.data as Record<string, unknown> : {};
   const kind = data.kind;
-  if (value.type !== "canvasNode" || !value.position || !isNodeKind(kind)) return null;
-  return {
+  if ((value.type !== "canvasNode" && value.type !== "groupNode") || !value.position || !isNodeKind(kind)) return null;
+  const normalized: NativeCanvasNode = {
     ...(value as unknown as NativeCanvasNode),
-    type: "canvasNode",
+    type: value.type === "groupNode" || kind === "group" ? "groupNode" : "canvasNode",
     data: normalizeCurrentNodeData(data, kind),
     selected: false,
   };
+  if (normalized.parentId) {
+    delete normalized.extent;
+    delete normalized.expandParent;
+  }
+  return normalized;
+}
+
+function nodeDimension(node: NativeCanvasNode, dimension: "width" | "height") {
+  const styleValue = node.style && typeof node.style === "object"
+    ? Number((node.style as Record<string, unknown>)[dimension] || 0)
+    : 0;
+  return styleValue > 0 ? styleValue : NATIVE_CANVAS_NODE_DEFINITIONS[node.data.kind].size[dimension];
+}
+
+/** Convert the pre-parentId groupId representation once when a document is opened. */
+function migrateLegacyGroups(sourceNodes: NativeCanvasNode[]) {
+  const legacyMembers = new Map<string, NativeCanvasNode[]>();
+  sourceNodes.forEach((node) => {
+    const groupId = String(node.data.groupId || "");
+    if (groupId && node.data.kind !== "group") {
+      const members = legacyMembers.get(groupId) || [];
+      members.push(node);
+      legacyMembers.set(groupId, members);
+    }
+  });
+  if (!legacyMembers.size) return sourceNodes;
+
+  const groups: NativeCanvasNode[] = [];
+  const migrated = [...sourceNodes];
+  legacyMembers.forEach((members, legacyId) => {
+    if (members.length < 2 || members.some((node) => node.parentId)) return;
+    const left = Math.min(...members.map((node) => node.position.x));
+    const top = Math.min(...members.map((node) => node.position.y));
+    const right = Math.max(...members.map((node) => node.position.x + nodeDimension(node, "width")));
+    const bottom = Math.max(...members.map((node) => node.position.y + nodeDimension(node, "height")));
+    const padding = 28;
+    const groupId = `group_legacy_${legacyId}`;
+    const group = createNativeCanvasGroupNode(
+      { x: left - padding, y: top - padding },
+      { width: Math.max(260, right - left + padding * 2), height: Math.max(180, bottom - top + padding * 2) },
+      "",
+    );
+    group.id = groupId;
+    groups.push(group);
+    const memberIds = new Set(members.map((node) => node.id));
+    for (let index = 0; index < migrated.length; index += 1) {
+      const node = migrated[index];
+      if (!memberIds.has(node.id)) continue;
+      const data = { ...node.data };
+      delete data.groupId;
+      migrated[index] = {
+        ...node,
+        parentId: group.id,
+        position: { x: node.position.x - group.position.x, y: node.position.y - group.position.y },
+        data,
+        zIndex: Math.max(1, node.zIndex || 0),
+      };
+    }
+  });
+  return groups.length ? [...groups, ...migrated.filter((node) => !groups.some((group) => group.id === node.id))] : sourceNodes;
 }
 
 function normalizeEdge(input: unknown): NativeCanvasEdge | null {
@@ -195,7 +257,7 @@ export function normalizeCanvasDocument(input: unknown): NativeCanvasDocument | 
   const rawViewport = value.viewport && typeof value.viewport === "object"
     ? value.viewport as Record<string, unknown>
     : {};
-  const nodes = (Array.isArray(value.nodes) ? value.nodes : []).map(normalizeNode).filter((node): node is NativeCanvasNode => Boolean(node));
+  const nodes = migrateLegacyGroups((Array.isArray(value.nodes) ? value.nodes : []).map(normalizeNode).filter((node): node is NativeCanvasNode => Boolean(node)));
   const edges = (Array.isArray(value.edges) ? value.edges : Array.isArray(value.connections) ? value.connections : [])
     .map(normalizeEdge)
     .filter((edge): edge is NativeCanvasEdge => Boolean(edge));

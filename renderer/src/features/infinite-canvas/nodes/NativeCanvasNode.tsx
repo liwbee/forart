@@ -1,6 +1,6 @@
 import { Handle, NodeToolbar, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import ImageAiFillIcon from "@iconify-react/ri/image-ai-fill";
-import { ArrowLeft, Check, ChevronUp, CircleAlert, Copy, Crop, Download, Images, LoaderCircle, Maximize2, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronUp, CircleAlert, Copy, Crop, Download, Images, LoaderCircle, Maximize2, Play, Square, Trash2, Upload, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -103,7 +103,8 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const taskDismissed = useGenerationRuntimeStore((state) => taskId ? state.dismissedTaskIds.has(taskId) : false);
   const activeGenerationError = runtimeError
     || (!taskDismissed && activeGenerationTask?.status === "failed" ? String(activeGenerationTask.errorMessage || "") : "");
-  const isGenerating = data.kind === "imageGenerator" && (isLaunching || isGenerationTaskActive(activeGenerationTask));
+  const isImageGenerationTaskRunning = data.kind === "imageGenerator" && isGenerationTaskActive(activeGenerationTask);
+  const isGenerating = data.kind === "imageGenerator" && (isLaunching || isImageGenerationTaskRunning);
   const hasGenerationError = data.kind === "imageGenerator" && !isGenerating && Boolean(activeGenerationError);
   const generationMessage = isGenerating
     ? isLaunching
@@ -128,6 +129,10 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     : [];
   const primaryImage = nativeCanvasNodePrimaryImage(data);
   const primaryImageUrl = String(primaryImage?.localUrl || primaryImage?.url || "");
+  const showImageGeneratorEmptyIcon = data.kind === "imageGenerator"
+    && !primaryImageUrl
+    && !isGenerating
+    && !generationMessage;
   const showGeneratorDownload = data.kind === "imageGenerator" && Boolean(primaryImageUrl) && !isGenerating && !hasGenerationError;
   const isPendingDownload = showGeneratorDownload && primaryImage?.downloadState !== "downloaded";
   const canUseImageActions = isImageNode && Boolean(primaryImageUrl) && !isGenerating && !hasGenerationError;
@@ -302,7 +307,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
         />
       ) : null}
 
-      {toolbarVisible ? (
+      {toolbarVisible && !isActionFissionNode ? (
         <NodeToolbar nodeId={id} position={Position.Top} offset={toolbarOffset} className="rf-native-node-toolbar">
           {isAnnotationNode ? (
             <AnnotationNodeToolbarControls nodeId={id} style={data.annotationStyle} />
@@ -361,6 +366,25 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               </Button>
             </>
           ) : null}
+          {data.kind === "imageGenerator" && !isCropping ? (
+            <Button
+              type="button"
+              variant="default"
+              size="icon-sm"
+              disabled={isLaunching}
+              aria-label={t(isImageGenerationTaskRunning ? "infiniteCanvas:stopRun" : "infiniteCanvas:run")}
+              title={t(isImageGenerationTaskRunning ? "infiniteCanvas:stopRun" : "infiniteCanvas:run")}
+              onClick={() => void (isImageGenerationTaskRunning
+                ? actions.stopImageGeneration(id)
+                : actions.runImageGeneration(id))}
+            >
+              {isLaunching
+                ? <LoaderCircle className="animate-spin" aria-hidden="true" />
+                : isImageGenerationTaskRunning
+                  ? <Square aria-hidden="true" fill="currentColor" />
+                  : <Play aria-hidden="true" fill="currentColor" />}
+            </Button>
+          ) : null}
           {!isCropping && canUseImageActions ? (
             <Button
               type="button"
@@ -392,17 +416,19 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               <Crop aria-hidden="true" />
             </Button>
           ) : null}
-          {canUseImageActions ? (
+          {data.kind === "imageGenerator" || canUseImageActions ? (
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
-              disabled={isDownloadBusy}
+              disabled={!canUseImageActions || isDownloadBusy}
               aria-label={t("infiniteCanvas:downloadImage")}
               title={t("infiniteCanvas:downloadImage")}
               onClick={downloadImage}
             >
-              <Download aria-hidden="true" />
+              {isDownloadBusy
+                ? <LoaderCircle className="animate-spin" aria-hidden="true" />
+                : <Download aria-hidden="true" />}
             </Button>
           ) : null}
           {!isCropping ? <Button
@@ -639,7 +665,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 {t("infiniteCanvas:importFromLibrary")}
               </Button>
             </div>
-          ) : data.kind === "imageGenerator" ? (
+          ) : showImageGeneratorEmptyIcon ? (
             <ImageAiFillIcon className="rf-native-image-generator-empty-icon" aria-hidden="true" />
           ) : null}
           {imageResolution && primaryImageUrl && !isCropping && !isGenerating && !hasGenerationError && !isMultiImageExpanded ? (

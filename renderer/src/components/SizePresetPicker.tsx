@@ -156,7 +156,7 @@ export function SizePresetPicker<R extends string, A extends string>({
         </PopoverTrigger>
         <PopoverContent
           className={cn(
-            "ic-composer-size__panel scrollbar-menu grid max-h-[min(28rem,calc(100vh-4rem))] w-[min(20rem,calc(100vw-2rem))] gap-4 overflow-y-auto border-border/60 p-3 shadow-lg",
+            "ic-composer-size__panel scrollbar-menu grid max-h-[min(28rem,calc(100vh-4rem))] w-[min(20rem,calc(100vw-2rem))] gap-4 overflow-y-auto border-border p-3 shadow-lg",
             panelClassName,
           )}
           side={panelSide}

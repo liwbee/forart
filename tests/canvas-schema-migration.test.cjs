@@ -240,6 +240,32 @@ test('canvas schema v2 reads idempotently and rejects future schemas', () => {
   );
 });
 
+test('canvas schema migration preserves React Flow native parent groups', () => {
+  const result = upgradeCanvasDocument({
+    id: 'native-group-canvas',
+    nodes: [{
+      id: 'group-1',
+      type: 'groupNode',
+      position: { x: 100, y: 120 },
+      style: { width: 640, height: 420 },
+      data: { kind: 'group', label: 'Group' },
+    }, {
+      id: 'prompt-1',
+      type: 'canvasNode',
+      parentId: 'group-1',
+      extent: 'parent',
+      position: { x: 28, y: 28 },
+      data: { kind: 'prompt', label: 'Prompt', text: 'hello' },
+    }],
+    connections: [],
+  }).canvas;
+
+  assert.equal(result.nodes[0].type, 'groupNode');
+  assert.equal(result.nodes[0].data.kind, 'group');
+  assert.equal(result.nodes[1].parentId, 'group-1');
+  assert.equal('extent' in result.nodes[1], false);
+});
+
 test('canvas store startup atomically rewrites local canvases to schema v2', (t) => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-canvas-schema-'));
   t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));

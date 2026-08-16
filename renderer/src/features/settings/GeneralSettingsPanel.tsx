@@ -2,9 +2,9 @@ import { ChevronDown, FolderOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ForartAppConfig, ForartMode, normalizeConfig } from "../../app/appConfig";
-import { ErrorCopyLine } from "../../components/ErrorCopyLine";
 import { NativeTabs, type NativeTabItem } from "../../components/NativeTabs";
 import { Button } from "../../components/ui/button";
+import { openServerLoginDialog } from "../server-auth/serverLoginDialogStore";
 
 interface GeneralSettingsPanelProps {
   config: ForartAppConfig;
@@ -13,7 +13,7 @@ interface GeneralSettingsPanelProps {
 }
 
 interface StatusState {
-  tone: "idle" | "ready" | "error" | "busy";
+  tone: "ready" | "warning" | "error" | "busy";
   text: string;
 }
 
@@ -23,6 +23,8 @@ function sameAppConfig(left: ForartAppConfig, right: ForartAppConfig) {
     && left.imageDownloadPath === right.imageDownloadPath
     && left.photoshopExecutablePath === right.photoshopExecutablePath
     && left.serverUrl === right.serverUrl
+    && left.serverAuthUsername === right.serverAuthUsername
+    && left.serverAuthToken === right.serverAuthToken
     && left.language === right.language;
 }
 
@@ -35,8 +37,11 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
   const [photoshopExecutablePath, setPhotoshopExecutablePath] = useState(config.photoshopExecutablePath);
   const [defaultImageDownloadPath, setDefaultImageDownloadPath] = useState("");
   const [serverUrl, setServerUrl] = useState(config.serverUrl);
-  const [status, setStatus] = useState<StatusState>({ tone: "idle", text: t("settings:connectionChecking") });
+  const [serverAuthUsername, setServerAuthUsername] = useState(config.serverAuthUsername);
+  const [serverAuthToken, setServerAuthToken] = useState(config.serverAuthToken);
+  const [status, setStatus] = useState<StatusState>({ tone: "busy", text: t("settings:connectionChecking") });
   const didMount = useRef(false);
+  const connectionCheckIdRef = useRef(0);
   const savingConfigRef = useRef(false);
   const pendingConfigRef = useRef<ForartAppConfig | null>(null);
   const persistedConfigRef = useRef(config);
@@ -53,6 +58,8 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
     setImageDownloadPath(config.imageDownloadPath);
     setPhotoshopExecutablePath(config.photoshopExecutablePath);
     setServerUrl(config.serverUrl);
+    setServerAuthUsername(config.serverAuthUsername);
+    setServerAuthToken(config.serverAuthToken);
   }, [config]);
 
   useEffect(() => {
@@ -87,43 +94,76 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
   }
 
   const refreshConnectionStatus = useCallback(async (nextMode: ForartMode, nextServerUrl: string) => {
+    const connectionCheckId = ++connectionCheckIdRef.current;
+    const updateStatus = (nextStatus: StatusState) => {
+      if (connectionCheckId === connectionCheckIdRef.current) setStatus(nextStatus);
+    };
+
     if (nextMode === "local") {
-      setStatus({ tone: "busy", text: t("settings:localStatusBusy") });
+      updateStatus({ tone: "busy", text: t("settings:localStatusBusy") });
       const result = await window.forartConfig?.localServerStatus();
       if (result?.ok) {
-        setStatus({
-          tone: "ready",
-          text: result.transport === "ipc" ? t("settings:serverOk") : result.managed ? t("settings:localStatusManaged") : t("settings:localStatusExternal"),
-        });
+        updateStatus({ tone: "ready", text: t("settings:localServiceStarted") });
         return;
       }
-      setStatus({ tone: "error", text: result?.error || t("settings:localStatusDisconnected") });
+      updateStatus({ tone: "error", text: t("settings:connectionFailed") });
       return;
     }
 
     const trimmedServerUrl = nextServerUrl.trim();
     if (!trimmedServerUrl) {
-      setStatus({ tone: "idle", text: t("settings:serverUrlRequired") });
+      updateStatus({ tone: "error", text: t("settings:connectionFailed") });
       return;
     }
 
-    setStatus({ tone: "busy", text: t("settings:testingServer") });
+    updateStatus({ tone: "busy", text: t("settings:testingServer") });
     const result = await window.forartConfig?.testServer(trimmedServerUrl);
+    if (connectionCheckId !== connectionCheckIdRef.current) return;
     if (result?.ok) {
-      setStatus({ tone: "ready", text: t("settings:serverOk") });
+      if (!serverAuthToken) {
+        updateStatus({ tone: "warning", text: t("settings:serverNotLoggedIn") });
+        return;
+      }
+
+      const session = await window.forartConfig?.serverSession({ serverUrl: trimmedServerUrl, token: serverAuthToken });
+      if (connectionCheckId !== connectionCheckIdRef.current) return;
+      if (session?.ok) {
+        updateStatus({ tone: "ready", text: t("settings:serverOk") });
+        return;
+      }
+
+      if (session?.status === 401) {
+        const logoutResult = await window.forartConfig?.serverLogout();
+        if (connectionCheckId !== connectionCheckIdRef.current) return;
+        if (logoutResult?.config) {
+          persistedConfigRef.current = logoutResult.config;
+          onConfigChange(logoutResult.config);
+        }
+        setServerAuthToken("");
+        updateStatus({ tone: "warning", text: t("settings:serverNotLoggedIn") });
+        return;
+      }
+
+      updateStatus({ tone: "error", text: t("settings:connectionFailed") });
       return;
     }
-    setStatus({ tone: "error", text: result?.error || `${t("settings:connectionFailed")}${result?.status ? ` (${result.status})` : ""}` });
-  }, [t]);
+    updateStatus({ tone: "error", text: t("settings:connectionFailed") });
+  }, [onConfigChange, serverAuthToken, t]);
 
   const saveGeneralSettings = useCallback(async (nextConfig: ForartAppConfig) => {
+    if (!nextConfig.serverAuthToken
+      && persistedConfigRef.current.serverAuthToken
+      && nextConfig.serverUrl === persistedConfigRef.current.serverUrl
+      && nextConfig.serverAuthUsername === persistedConfigRef.current.serverAuthUsername) {
+      nextConfig = { ...nextConfig, serverAuthToken: persistedConfigRef.current.serverAuthToken };
+    }
     if (nextConfig.mode === "local" && !nextConfig.localLibraryPath) {
-      setStatus({ tone: "error", text: t("settings:localPathRequired") });
+      setStatus({ tone: "error", text: t("settings:connectionFailed") });
       return;
     }
 
     if (nextConfig.mode === "remote" && !nextConfig.serverUrl) {
-      setStatus({ tone: "error", text: t("settings:serverUrlRequired") });
+      setStatus({ tone: "error", text: t("settings:connectionFailed") });
       return;
     }
 
@@ -144,8 +184,8 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
       persistedConfigRef.current = savedConfig;
       onConfigChange(savedConfig);
       void refreshConnectionStatus(savedConfig.mode, savedConfig.serverUrl);
-    } catch (error) {
-      setStatus({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } catch {
+      setStatus({ tone: "error", text: t("settings:connectionFailed") });
     } finally {
       savingConfigRef.current = false;
       const pendingConfig = pendingConfigRef.current;
@@ -155,6 +195,20 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
       }
     }
   }, [onConfigChange, refreshConnectionStatus, t]);
+
+  async function logoutRemoteServer() {
+    const result = await window.forartConfig?.serverLogout();
+    if (result?.config) {
+      setServerAuthToken("");
+      persistedConfigRef.current = result.config;
+      onConfigChange(result.config);
+      setStatus({ tone: "warning", text: t("settings:serverNotLoggedIn") });
+    }
+  }
+
+  function openLoginDialog() {
+    openServerLoginDialog({ serverUrl, username: serverAuthUsername });
+  }
 
   useEffect(() => {
     if (!didMount.current) {
@@ -170,12 +224,14 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
         imageDownloadPath,
         photoshopExecutablePath,
         serverUrl,
+        serverAuthUsername,
+        serverAuthToken,
         language: i18n.language === "en-US" ? "en-US" : "zh-CN",
       }));
     }, 450);
 
     return () => window.clearTimeout(timeout);
-  }, [config.mode, config.serverUrl, imageDownloadPath, i18n.language, localLibraryPath, mode, photoshopExecutablePath, refreshConnectionStatus, saveGeneralSettings, serverUrl]);
+  }, [config.mode, config.serverUrl, imageDownloadPath, i18n.language, localLibraryPath, mode, photoshopExecutablePath, refreshConnectionStatus, saveGeneralSettings, serverAuthToken, serverAuthUsername, serverUrl]);
 
   return (
     <div hidden={hidden}>
@@ -185,13 +241,6 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
           <div>
             <h2>{t("settings:generalSettings")}</h2>
           </div>
-          {status.tone === "error" ? (
-            <ErrorCopyLine className="settings-status" text={status.text} />
-          ) : (
-            <div className="settings-status" data-tone={status.tone}>
-              {status.text}
-            </div>
-          )}
         </div>
 
         <div className={`settings-subsection settings-run-mode${runModeExpanded ? " settings-run-mode--expanded" : ""}`}>
@@ -202,6 +251,9 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
               </div>
             </div>
             <div className="settings-run-mode-controls">
+              <div className="settings-status" data-tone={status.tone} role="status" aria-live="polite">
+                {status.text}
+              </div>
               <NativeTabs
                 items={runModeTabs}
                 value={mode}
@@ -240,10 +292,27 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
                   </div>
                 </label>
               ) : (
-                <label className="settings-field">
-                  <span>{t("settings:serverUrl")}</span>
-                  <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://192.168.1.20:6980" />
-                </label>
+                <div className="settings-remote-config">
+                  <div className="settings-field">
+                    <label htmlFor="settings-server-url">{t("settings:serverUrl")}</label>
+                    <div className="settings-remote-server-row">
+                      <input
+                        id="settings-server-url"
+                        value={serverUrl}
+                        onChange={(event) => {
+                          setServerUrl(event.target.value);
+                          setServerAuthToken("");
+                        }}
+                        placeholder="http://192.168.1.20:6980"
+                      />
+                      {serverAuthToken ? (
+                        <Button type="button" variant="outline" onClick={() => void logoutRemoteServer()}>{t("settings:logout")}</Button>
+                      ) : (
+                        <Button type="button" variant="outline" onClick={openLoginDialog}>{t("settings:login")}</Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           ) : null}

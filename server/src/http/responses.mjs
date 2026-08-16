@@ -2,6 +2,7 @@ const CORS_HEADERS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET,HEAD,POST,PATCH,DELETE,OPTIONS",
   "access-control-allow-headers": "content-type,authorization",
+  "access-control-expose-headers": "set-auth-token",
   "access-control-max-age": "86400",
 };
 
@@ -18,4 +19,3 @@ export function sendText(res, statusCode, text, contentType = "text/plain; chars
   res.writeHead(statusCode, withCorsHeaders({ "content-type": contentType, ...headers }));
   res.end(text);
 }
-

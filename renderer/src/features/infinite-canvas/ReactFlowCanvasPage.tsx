@@ -6,12 +6,15 @@ import {
   EdgeToolbar,
   getNodesBounds,
   MiniMap,
+  NodeToolbar,
+  Position,
   ReactFlow,
   ReactFlowProvider,
   SelectionMode,
   useEdgesState,
   useNodesState,
   useReactFlow,
+  useStore,
   useViewport,
   type Connection,
   type EdgeMouseHandler,
@@ -19,7 +22,7 @@ import {
   type OnConnectEnd,
   type OnNodeDrag,
 } from "@xyflow/react";
-import { ClipboardPaste, Copy, Crosshair, Download, Eye, EyeOff, Grid3X3, Image, Images, Map as MapIcon, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ClipboardPaste, Copy, Crosshair, Download, Eye, EyeOff, Grid3X3, Group as GroupIcon, Image, Images, Map as MapIcon, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -43,6 +46,7 @@ import { applyNativeNodeDataPatch } from "./applyNativeNodeDataPatch";
 import {
   cloneNativeCanvasNodeData,
   createNativeCanvasNode,
+  createNativeCanvasGroupNode,
   getImageNodeSize,
   nativeCanvasNodePrimaryImage,
   nativeCanvasNodeTaskId,
@@ -53,6 +57,7 @@ import {
   type NativeCanvasNodeKind,
 } from "./nativeCanvas";
 import { NativeCanvasNode as NativeCanvasNodeComponent } from "./nodes/NativeCanvasNode";
+import { NativeCanvasGroupNode } from "./nodes/NativeCanvasGroupNode";
 import { ActionFissionRowSettingsDialog } from "./nodes/ActionFissionRowSettingsDialog";
 import { configureActionFissionRow, normalizeActionFissionState } from "./action-fission/actionFissionState";
 import { actionFissionRowTaskId, type ActionFissionRow } from "./action-fission/actionFissionTypes";
@@ -86,13 +91,21 @@ import {
 } from "./canvasHistoryStore";
 import { rememberedGenerationNodeData } from "./generation/generationPreferenceStore";
 import { useInfiniteCanvasSettings } from "./infiniteCanvasSettings";
+import {
+  collectNativeCanvasSubtree,
+  detachNativeCanvasChildrenOutsideParents,
+  expandNativeCanvasGroupSelection,
+  groupNativeCanvasNodes,
+  prepareNativeCanvasNodesForClipboard,
+} from "./nativeCanvasGroups";
 import { ViewportMomentumController } from "./viewportMomentum";
 import {
   projectAltDragOntoClones,
   type AltDragCloneGestureState,
 } from "./canvasAltDragClone";
 
-const NODE_TYPES: NodeTypes = { canvasNode: NativeCanvasNodeComponent };
+const NODE_TYPES: NodeTypes = { canvasNode: NativeCanvasNodeComponent, groupNode: NativeCanvasGroupNode };
+const MULTI_SELECTION_SCREEN_GAP = 24;
 
 const CONTEXT_CANVAS_NODE_GROUPS: NativeCanvasNodeKind[][] = [
   ["imageLoader", "prompt"],
@@ -148,6 +161,7 @@ interface AltDragCloneGesture extends AltDragCloneGestureState {
 
 const PASTE_POINTER_RESET_DISTANCE = 8;
 const PASTE_CASCADE_OFFSET = 24;
+const NODE_POINTER_GESTURE_THRESHOLD = 3;
 
 export type CanvasSaveStatus = "saved" | "unsaved" | "saving";
 
@@ -161,6 +175,10 @@ function isEditingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   if (target.closest("input, textarea, select")) return true;
   return Boolean(target.closest<HTMLElement>("[contenteditable]")?.isContentEditable);
+}
+
+function isNativeCanvasGroupNode(node: NativeCanvasNode) {
+  return node.type === "groupNode" || node.data.kind === "group";
 }
 
 function parseCanvasClipboard(serialized: string): CanvasClipboardPayload | null {
@@ -262,6 +280,66 @@ function NativeCanvasToolbar({
   );
 }
 
+interface NativeCanvasMultiSelectionFrameGeometry {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+function equalMultiSelectionFrameGeometry(
+  previous: NativeCanvasMultiSelectionFrameGeometry | null,
+  next: NativeCanvasMultiSelectionFrameGeometry | null,
+) {
+  return previous === next || (
+    previous !== null
+    && next !== null
+    && previous.left === next.left
+    && previous.top === next.top
+    && previous.right === next.right
+    && previous.bottom === next.bottom
+  );
+}
+
+function NativeCanvasMultiSelectionFrame({
+  nodeIds,
+  visible,
+}: {
+  nodeIds: string[];
+  visible: boolean;
+}) {
+  const geometry = useStore((state) => {
+    if (!visible || nodeIds.length === 0) return null;
+    const liveNodes = nodeIds.flatMap((nodeId) => {
+      const node = state.nodeLookup.get(nodeId);
+      return node ? [node] : [];
+    });
+    if (liveNodes.length !== nodeIds.length) return null;
+    const bounds = getNodesBounds(liveNodes, { nodeLookup: state.nodeLookup });
+    const [x, y, zoom] = state.transform;
+    return {
+      left: Math.round(x + bounds.x * zoom - MULTI_SELECTION_SCREEN_GAP),
+      top: Math.round(y + bounds.y * zoom - MULTI_SELECTION_SCREEN_GAP),
+      right: Math.round(x + (bounds.x + bounds.width) * zoom + MULTI_SELECTION_SCREEN_GAP),
+      bottom: Math.round(y + (bounds.y + bounds.height) * zoom + MULTI_SELECTION_SCREEN_GAP),
+    };
+  }, equalMultiSelectionFrameGeometry);
+
+  if (!geometry) return null;
+
+  return (
+    <div
+      className="react-flow__selection rf-native-multi-selection-frame"
+      aria-hidden="true"
+      style={{
+        width: geometry.right - geometry.left,
+        height: geometry.bottom - geometry.top,
+        transform: `translate(${geometry.left}px, ${geometry.top}px)`,
+      }}
+    />
+  );
+}
+
 function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onSnapshotChange, onSave, readOnly, saveStatus }: {
   canvasId: string;
   imageDownloadPath?: string;
@@ -306,10 +384,12 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   const edgeToolbarFrameRef = useRef<number | null>(null);
   const edgeToolbarHideTimerRef = useRef<number | null>(null);
   const pendingEdgePointerRef = useRef<{ edgeId: string; clientX: number; clientY: number } | null>(null);
-  const { deleteElements, getEdges, getIntersectingNodes, getNodes, screenToFlowPosition, setViewport } = useReactFlow<NativeCanvasNode, NativeCanvasEdge>();
+  const { deleteElements, getEdges, getIntersectingNodes, getNodes, getNodesBounds: getFlowNodesBounds, screenToFlowPosition, setViewport } = useReactFlow<NativeCanvasNode, NativeCanvasEdge>();
   const syncSelection = useNativeCanvasInteractionStore((state) => state.syncSelection);
   const beginSelectionGesture = useNativeCanvasInteractionStore((state) => state.beginSelectionGesture);
   const endSelectionGesture = useNativeCanvasInteractionStore((state) => state.endSelectionGesture);
+  const selectionGestureActive = useNativeCanvasInteractionStore((state) => state.selectionGestureActive);
+  const toolbarNodeId = useNativeCanvasInteractionStore((state) => state.toolbarNodeId);
   const resetInteractions = useNativeCanvasInteractionStore((state) => state.resetInteractions);
   const clearCanvasLaunching = useGenerationRuntimeStore((state) => state.clearCanvasLaunching);
   const actionFissionSettingsRow = useMemo<ActionFissionRow | null>(() => {
@@ -327,6 +407,18 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     if (contextNode?.data.kind !== "imageLoader" && contextNode?.data.kind !== "imageGenerator") return null;
     return nativeCanvasNodePrimaryImage(contextNode.data);
   }, [contextNode]);
+  const selectedNodes = useMemo(() => nodes.filter((node) => node.selected && !isNativeCanvasGroupNode(node)), [nodes]);
+  const selectedNodeIds = useMemo(() => selectedNodes.map((node) => node.id), [selectedNodes]);
+  const canGroupSelectedNodes = selectedNodes.length > 1;
+  const selectedGroupNodes = useMemo(() => nodes.filter((node) => node.selected && isNativeCanvasGroupNode(node)), [nodes]);
+  const multiSelectionFrameNodeIds = useMemo(() => {
+    const groupNodeIds = selectedGroupNodes
+      .filter((node) => toolbarNodeId !== node.id)
+      .map((node) => node.id);
+    const nodeIds = [...selectedNodeIds, ...groupNodeIds];
+    return nodeIds.length > 1 || groupNodeIds.length > 0 ? nodeIds : [];
+  }, [selectedGroupNodes, selectedNodeIds, toolbarNodeId]);
+  const multiSelectionDragging = selectedNodes.some((node) => node.dragging);
 
   const readOnlyRef = useRef(readOnly);
   const onSnapshotChangeRef = useRef(onSnapshotChange);
@@ -444,8 +536,11 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   }, [beginSelectionGesture, stopViewportMomentum]);
 
   const finishCanvasSelection = useCallback(() => {
-    endSelectionGesture();
-  }, [endSelectionGesture]);
+    const currentNodes = getNodes();
+    const expanded = expandNativeCanvasGroupSelection(currentNodes);
+    if (expanded.nodes !== currentNodes) setNodes(expanded.nodes);
+    endSelectionGesture(new Set(expanded.groupIds));
+  }, [endSelectionGesture, getNodes, setNodes]);
 
   const addNode = useCallback((kind: NativeCanvasNodeKind, x: number, y: number, data?: Partial<NativeCanvasNode["data"]>) => {
     const definition = NATIVE_CANVAS_NODE_DEFINITIONS[kind];
@@ -508,10 +603,17 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
 
   const copyContextNode = useCallback(async () => {
     if (!contextNode) return;
-    const serialized = JSON.stringify(createCanvasClipboardPayload([contextNode], getEdges()));
+    const allNodes = getNodes();
+    const sourceNodes = prepareNativeCanvasNodesForClipboard(
+      isNativeCanvasGroupNode(contextNode)
+        ? collectNativeCanvasSubtree(contextNode.id, allNodes)
+        : [contextNode],
+      allNodes,
+    );
+    const serialized = JSON.stringify(createCanvasClipboardPayload(sourceNodes, getEdges()));
     await navigator.clipboard.writeText(serialized);
     pasteSequenceRef.current = null;
-  }, [contextNode, getEdges]);
+  }, [contextNode, getEdges, getNodes]);
 
   const copyContextNodeImage = useCallback(async () => {
     const imageUrl = contextNodeImage?.localUrl || contextNodeImage?.url;
@@ -530,6 +632,34 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     if (!contextNode) return;
     void deleteElements({ nodes: [{ id: contextNode.id }] });
   }, [contextNode, deleteElements]);
+
+  const groupSelectedNodes = useCallback(() => {
+    if (readOnly || selectedNodeIds.length < 2) return;
+    setNodes((current) => {
+      const selected = current.filter((node) => node.selected && !isNativeCanvasGroupNode(node));
+      if (selected.length < 2) return current;
+      const bounds = getFlowNodesBounds(selected);
+      const padding = 28;
+      const group = createNativeCanvasGroupNode(
+        { x: bounds.x - padding, y: bounds.y - padding },
+        { width: Math.max(260, bounds.width + padding * 2), height: Math.max(180, bounds.height + padding * 2) },
+        t("infiniteCanvas:group"),
+      );
+      const selectedIds = new Set(selected.map((node) => node.id));
+      return groupNativeCanvasNodes(current, selectedIds, group);
+    });
+  }, [getFlowNodesBounds, readOnly, selectedNodeIds.length, setNodes, t]);
+
+  const deleteSelectedNodes = useCallback(() => {
+    if (readOnly || !selectedNodeIds.length) return;
+    const selectedIds = new Set(selectedNodeIds);
+    const current = getNodes();
+    current.filter(isNativeCanvasGroupNode).forEach((group) => {
+      const children = current.filter((node) => node.parentId === group.id);
+      if (children.length && children.every((node) => selectedIds.has(node.id))) selectedIds.add(group.id);
+    });
+    void deleteElements({ nodes: [...selectedIds].map((id) => ({ id })) });
+  }, [deleteElements, getNodes, readOnly, selectedNodeIds]);
 
   const stopDeletedNodeTasks = useCallback((deletedNodes: NativeCanvasNode[]) => {
     if (!window.forartGenerationTasks?.stop) return;
@@ -1122,9 +1252,29 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
 
     function handleCopy(event: ClipboardEvent) {
       if (readOnly || !isCanvasAvailable() || isEditingTarget(event.target)) return;
-      const selectedNodes = getNodes().filter((node) => node.selected);
+      const allNodes = getNodes();
+      const selectedNodes = allNodes.filter((node) => node.selected);
       if (!selectedNodes.length) return;
-      const payload = createCanvasClipboardPayload(selectedNodes, getEdges());
+      const selectedIds = new Set(selectedNodes.map((node) => node.id));
+      const copiedIds = new Set<string>();
+      selectedNodes.forEach((node) => {
+        if (isNativeCanvasGroupNode(node)) {
+          collectNativeCanvasSubtree(node.id, allNodes).forEach((item) => copiedIds.add(item.id));
+        } else {
+          copiedIds.add(node.id);
+        }
+      });
+      selectedNodes.forEach((node) => {
+        if (!node.parentId || copiedIds.has(node.parentId)) return;
+        const siblings = allNodes.filter((item) => item.parentId === node.parentId);
+        if (!siblings.length || !siblings.every((item) => selectedIds.has(item.id))) return;
+        collectNativeCanvasSubtree(node.parentId, allNodes).forEach((item) => copiedIds.add(item.id));
+      });
+      const copiedNodes = allNodes.filter((node) => copiedIds.has(node.id));
+      const payload = createCanvasClipboardPayload(
+        prepareNativeCanvasNodesForClipboard(copiedNodes, allNodes),
+        getEdges(),
+      );
       const serialized = JSON.stringify(payload);
       event.clipboardData?.setData(CANVAS_CLIPBOARD_MIME, serialized);
       event.clipboardData?.setData("text/plain", serialized);
@@ -1155,11 +1305,12 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
           : 0;
         pasteSequenceRef.current = { serialized, count: pasteCount, pointer: { ...pointer } };
         const cascadeOffset = pasteCount * PASTE_CASCADE_OFFSET;
+        const sourceRoots = payload.nodes.filter((node) => !node.parentId);
+        const sourceBounds = getNodesBounds(sourceRoots);
         const targetCenter = contextPastePoint || screenToFlowPosition({
           x: pointer.x + cascadeOffset,
           y: pointer.y + cascadeOffset,
         });
-        const sourceBounds = getNodesBounds(payload.nodes);
         const deltaX = targetCenter.x - (sourceBounds.x + sourceBounds.width / 2);
         const deltaY = targetCenter.y - (sourceBounds.y + sourceBounds.height / 2);
         const pasted = instantiateCanvasClipboardPayload(payload, { x: deltaX, y: deltaY }, true);
@@ -1206,16 +1357,34 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     stopViewportMomentum();
     historyGestureRef.current = beginInfiniteCanvasHistoryGesture();
     altDragCloneGestureRef.current = null;
-    const draggedIds = new Set([draggedNode.id, ...draggedNodes.map((node) => node.id)]);
-    const sourceNodes = getNodes().filter((node) => draggedIds.has(node.id));
     const historyNodeById = new Map(
       (historyGestureRef.current?.nodes || []).map((node) => [node.id, node]),
     );
+    const reactFlowDraggedIds = new Set([draggedNode.id, ...draggedNodes.map((node) => node.id)]);
+    const currentNodes = getNodes();
+    const draggedIds = new Set(reactFlowDraggedIds);
+    const isAltDrag = "altKey" in event && event.altKey;
+    if (isAltDrag) {
+      // Copy an entire native parent subtree when Alt-drag starts on a child.
+      [...reactFlowDraggedIds].forEach((nodeId) => {
+        const node = currentNodes.find((item) => item.id === nodeId);
+        const parentId = node?.parentId;
+        if (parentId) {
+          draggedIds.add(parentId);
+          currentNodes.forEach((item) => { if (item.parentId === parentId) draggedIds.add(item.id); });
+        }
+        if (node && isNativeCanvasGroupNode(node)) {
+          currentNodes.forEach((item) => { if (item.parentId === nodeId) draggedIds.add(item.id); });
+        }
+      });
+    }
+    const sourceNodes = currentNodes
+      .filter((node) => draggedIds.has(node.id))
+      .sort((left, right) => Number(Boolean(left.parentId)) - Number(Boolean(right.parentId)));
     const sourceNodesAtDragStart = sourceNodes.map((node) => {
       const historyNode = historyNodeById.get(node.id);
       return historyNode ? { ...node, position: { ...historyNode.position } } : node;
     });
-    const isAltDrag = "altKey" in event && event.altKey;
     const cloned = isAltDrag && sourceNodesAtDragStart.length
       ? instantiateCanvasClipboardPayload(
           createCanvasClipboardPayload(sourceNodesAtDragStart, getEdges()),
@@ -1246,7 +1415,9 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     setNodes((current) => {
       const nextZIndex = Math.max(0, ...current.map((node) => node.zIndex || 0)) + 1;
       if (!cloned || !altDragCloneGestureRef.current) {
-        return current.map((node) => draggedIds.has(node.id) ? { ...node, zIndex: nextZIndex } : node);
+        return current.map((node) => draggedIds.has(node.id)
+          ? { ...node, zIndex: nextZIndex, selected: node.selected }
+          : node);
       }
       const prepared = [
         ...current.map((node) => node.selected && !draggedIds.has(node.id) ? { ...node, selected: false } : node),
@@ -1265,12 +1436,9 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   const handleNodeDrag = useCallback<OnNodeDrag<NativeCanvasNode>>((_event, draggedNode, draggedNodes) => {
     const cloneGesture = altDragCloneGestureRef.current;
     if (readOnly || !cloneGesture) return;
-    setNodes((current) => projectAltDragOntoClones(
-      current,
-      cloneGesture,
-      [draggedNode, ...draggedNodes],
-      true,
-    ));
+    setNodes((current) => {
+      return projectAltDragOntoClones(current, cloneGesture, [draggedNode, ...draggedNodes], true);
+    });
   }, [readOnly, setNodes]);
 
   const handleNodeDragStop = useCallback<OnNodeDrag<NativeCanvasNode>>((_event, draggedNode, draggedNodes) => {
@@ -1305,7 +1473,11 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       return;
     }
 
-    recordInfiniteCanvasHistory(getNodes(), getEdges());
+    const currentNodes = getNodes();
+    const draggedIds = new Set([draggedNode.id, ...draggedNodes.map((node) => node.id)]);
+    const finalNodes = detachNativeCanvasChildrenOutsideParents(currentNodes, draggedIds);
+    if (finalNodes !== currentNodes) setNodes(finalNodes);
+    recordInfiniteCanvasHistory(finalNodes, getEdges());
     commitInfiniteCanvasHistoryGesture(historyGestureRef.current);
     historyGestureRef.current = null;
   }, [getEdges, getNodes, readOnly, setEdges, setNodes, syncSelection]);
@@ -1356,9 +1528,6 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
               onNodesDelete={readOnly ? undefined : stopDeletedNodeTasks}
               onEdgesChange={onEdgesChange}
               onSelectionChange={({ nodes: selectedNodes, edges: selectedEdges }) => {
-                if (wrapperRef.current) {
-                  wrapperRef.current.dataset.selectionCount = String(selectedNodes.length);
-                }
                 syncSelection(selectedNodes.map((node) => node.id));
                 setEdgeToolbarPoint((current) => current && selectedEdges.some((edge) => edge.id === current.edgeId) ? current : null);
               }}
@@ -1368,9 +1537,6 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
               onConnectEnd={readOnly ? undefined : connectToNodeBody}
               onSelectionStart={beginCanvasSelection}
               onSelectionEnd={finishCanvasSelection}
-              onViewportChange={({ zoom }) => {
-                wrapperRef.current?.style.setProperty("--rf-selection-inverse-zoom", String(1 / zoom));
-              }}
               onMoveStart={(event, viewport) => {
                 if (!event && viewportMomentum.isInternalViewport(viewport)) return;
                 viewportRef.current = viewport;
@@ -1410,6 +1576,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
               }}
               minZoom={0.1}
               maxZoom={6}
+              nodeClickDistance={NODE_POINTER_GESTURE_THRESHOLD}
+              nodeDragThreshold={NODE_POINTER_GESTURE_THRESHOLD}
               selectionOnDrag={!readOnly}
               selectionMode={SelectionMode.Partial}
               elevateNodesOnSelect={false}
@@ -1428,6 +1596,27 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
               defaultViewport={initialSnapshot.viewport}
             >
               <Background variant={BackgroundVariant.Dots} gap={28} size={1.4} />
+              {!readOnly && selectedNodeIds.length > 1 && !selectedGroupNodes.length ? (
+                <NodeToolbar
+                  nodeId={selectedNodeIds}
+                  isVisible={!multiSelectionDragging && !selectionGestureActive}
+                  position={Position.Top}
+                  offset={18}
+                  className="rf-native-multi-selection-toolbar nodrag nopan nowheel"
+                >
+                  <span className="rf-native-multi-selection-count">
+                    {t("infiniteCanvas:selectedNodeCount", { count: selectedNodeIds.length })}
+                  </span>
+                  <Button type="button" variant="ghost" size="sm" disabled={!canGroupSelectedNodes} onClick={groupSelectedNodes}>
+                    <GroupIcon aria-hidden="true" />
+                    <span>{t("infiniteCanvas:groupSelectedNodes")}</span>
+                  </Button>
+                  <Button type="button" variant="destructive" size="sm" onClick={deleteSelectedNodes}>
+                    <Trash2 aria-hidden="true" />
+                    <span>{t("infiniteCanvas:deleteSelectedNodes")}</span>
+                  </Button>
+                </NodeToolbar>
+              ) : null}
               {minimapOpen ? <MiniMap className="rf-native-minimap" position="bottom-left" pannable zoomable ariaLabel={t("infiniteCanvas:minimap")} /> : null}
               {edgeToolbarPoint ? (
                 <EdgeToolbar
@@ -1460,6 +1649,10 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
                 </EdgeToolbar>
               ) : null}
             </ReactFlow>
+            <NativeCanvasMultiSelectionFrame
+              nodeIds={multiSelectionFrameNodeIds}
+              visible={!selectionGestureActive}
+            />
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
@@ -1654,14 +1847,24 @@ function instantiateCanvasClipboardPayload(
   const idMap = new Map(payload.nodes.map((node) => [node.id, `${node.data.kind}_${crypto.randomUUID()}`]));
   return {
     idMap,
-    nodes: payload.nodes.map((node) => ({
-      ...node,
-      id: idMap.get(node.id)!,
-      data: cloneNativeCanvasNodeData(node.data),
-      position: { x: node.position.x + delta.x, y: node.position.y + delta.y },
-      selected,
-      dragging: false,
-    })),
+    nodes: payload.nodes.map((node) => {
+      const clonedParentId = node.parentId ? idMap.get(node.parentId) : undefined;
+      const data = cloneNativeCanvasNodeData(node.data);
+      delete data.groupId;
+      return {
+        ...node,
+        id: idMap.get(node.id)!,
+        parentId: clonedParentId,
+        extent: undefined,
+        expandParent: undefined,
+        data,
+        position: clonedParentId
+          ? { ...node.position }
+          : { x: node.position.x + delta.x, y: node.position.y + delta.y },
+        selected,
+        dragging: false,
+      };
+    }),
     edges: payload.edges.map((edge) => ({
       ...edge,
       id: `edge_${crypto.randomUUID()}`,

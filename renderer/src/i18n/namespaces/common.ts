@@ -46,6 +46,7 @@ export const zhCN = {
     creating: "创建中...",
     loading: "加载中...",
     loadingProjects: "正在加载项目...",
+    storageUnavailable: "资源库存储目录暂不可用，请检查服务器数据目录配置。",
     saving: "保存中...",
     uploading: "上传中...",
     copyingImage: "正在复制图片...",
@@ -67,6 +68,39 @@ export const zhCN = {
     noImage: "暂无图片",
     noProjects: "还没有项目。",
     noTagsYet: "还没有标签。"
+  },
+  remoteData: {
+    title: {
+      unauthenticated: "尚未登录服务器",
+      forbidden: "当前账号没有访问权限",
+      timeout: "服务器响应超时",
+      unavailable: "无法连接服务器",
+      server: "服务器暂时异常",
+      request: "请求未能完成",
+      unknown: "加载数据时发生错误"
+    },
+    description: {
+      unauthenticated: "登录服务器后即可继续加载这些内容。",
+      forbidden: "请切换到有权限的账号，或联系管理员调整权限。",
+      timeout: "网络较慢或服务器正忙，请稍后重试。",
+      unavailable: "请检查服务器是否已启动、地址是否正确以及当前网络连接。",
+      server: "服务器已收到请求但未能正常处理，请稍后重试。",
+      request: "请检查当前操作或服务器配置后再试。",
+      unknown: "数据没有被清空，你可以重试或检查服务器设置。"
+    },
+    actions: {
+      login: "登录服务器",
+      switchAccount: "切换账号",
+      retry: "重试",
+      retrying: "正在重试",
+      settings: "检查设置"
+    }
+  },
+  workspaceError: {
+    title: "页面暂时无法显示",
+    description: "当前页面发生了意外错误。其他页面和设置仍可继续使用，你可以重试或检查配置。",
+    retry: "重新打开页面",
+    settings: "打开设置"
   },
   labels: {
     tagColor: "标签颜色",
@@ -148,6 +182,7 @@ export const enUS = {
     creating: "Creating...",
     loading: "Loading...",
     loadingProjects: "Loading projects...",
+    storageUnavailable: "Asset library storage is unavailable. Check the server data directory configuration.",
     saving: "Saving...",
     uploading: "Uploading...",
     copyingImage: "Copying image...",
@@ -169,6 +204,39 @@ export const enUS = {
     noImage: "No image",
     noProjects: "No projects yet.",
     noTagsYet: "No tags yet."
+  },
+  remoteData: {
+    title: {
+      unauthenticated: "Not logged in to the server",
+      forbidden: "This account does not have access",
+      timeout: "The server timed out",
+      unavailable: "Unable to reach the server",
+      server: "The server is temporarily unavailable",
+      request: "The request could not be completed",
+      unknown: "Something went wrong while loading data"
+    },
+    description: {
+      unauthenticated: "Log in to the server to continue loading this content.",
+      forbidden: "Switch to an account with access or ask an administrator to update your permissions.",
+      timeout: "The network may be slow or the server may be busy. Try again in a moment.",
+      unavailable: "Check that the server is running, the address is correct, and the network is connected.",
+      server: "The server received the request but could not process it. Try again shortly.",
+      request: "Check the current action or server configuration and try again.",
+      unknown: "Your existing data is preserved. Retry or check the server settings."
+    },
+    actions: {
+      login: "Log in",
+      switchAccount: "Switch account",
+      retry: "Retry",
+      retrying: "Retrying",
+      settings: "Check settings"
+    }
+  },
+  workspaceError: {
+    title: "This page could not be displayed",
+    description: "An unexpected error occurred on this page. Other pages and settings remain available; retry or check the configuration.",
+    retry: "Reopen page",
+    settings: "Open settings"
   },
   labels: {
     collapseTags: "Collapse tags",

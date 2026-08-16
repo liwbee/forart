@@ -17,6 +17,8 @@ test("paginates and virtualizes tasks without loading original images for previe
   await expect(page.locator(".generation-task-center__pagination span")).toContainText(/1\s*\/\s*3/);
   expect(await page.locator(".generation-task-center__virtual-item").count()).toBeLessThan(30);
   expect(originalRequests).toBe(0);
+  const taskViewportPaddingRight = await page.locator(".generation-task-center__viewport").evaluate((element) => parseFloat(getComputedStyle(element).paddingRight));
+  expect(taskViewportPaddingRight).toBeGreaterThanOrEqual(16);
 
   await page.locator(".generation-task-center__preview--image").first().click();
   await expect.poll(() => originalRequests).toBeGreaterThan(0);

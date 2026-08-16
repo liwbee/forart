@@ -9,18 +9,14 @@ import { getStorageSettings, listOutfitProjects, listOutfits, listOutfitTags, ou
 import { useOutfitLibraryStore } from "../outfit-library/outfitLibraryStore";
 import { applySameColorSingleIncludeFilter, cleanLibraryTagFilter, countLibraryTags, hasLibraryTagFilter, useLibraryTagSettingsStore, type LibraryTagFilter } from "../library-tags";
 import { cacheBustedLibraryImageUrl } from "../../lib/libraryImageActions";
+import { firstRequestFailure } from "../../lib/requestFailure";
 import type { LibraryAssetItem, LibraryAssetTab } from "./types";
+import { getLibraryProjectLoadState } from "../library-layout/libraryProjectLoadState";
 
 const LIBRARY_ASSET_TABS: LibraryAssetTab[] = ["models", "outfits", "actions"];
 
 export function cacheBustedLibraryAssetUrl(url: string, stamp?: string) {
   return cacheBustedLibraryImageUrl(url, stamp);
-}
-
-function getRequestError(errors: unknown[]) {
-  const first = errors.find(Boolean);
-  if (!first) return "";
-  return first instanceof Error ? first.message : String(first);
 }
 
 export function useLibraryAssetPickerData() {
@@ -226,19 +222,34 @@ export function useLibraryAssetPickerData() {
     || (activeTab === "models" ? modelProjectsQuery.isLoading || modelTagsQuery.isLoading || modelsQuery.isLoading
       : activeTab === "actions" ? actionProjectsQuery.isLoading || actionTagsQuery.isLoading || actionsQuery.isLoading
         : outfitProjectsQuery.isLoading || outfitTagsQuery.isLoading || outfitsQuery.isLoading);
-  const errorMessage = getRequestError([
+  const activeQueries = activeTab === "models"
+    ? [modelProjectsQuery, modelTagsQuery, modelsQuery]
+    : activeTab === "actions"
+      ? [actionProjectsQuery, actionTagsQuery, actionsQuery]
+      : [outfitProjectsQuery, outfitTagsQuery, outfitsQuery];
+  const failure = firstRequestFailure([
     storageSettingsQuery.error,
-    outfitProjectsQuery.error,
-    modelProjectsQuery.error,
-    actionProjectsQuery.error,
-    outfitTagsQuery.error,
-    modelTagsQuery.error,
-    actionTagsQuery.error,
-    outfitsQuery.error,
-    modelsQuery.error,
-    actionsQuery.error,
-    modelChoicesQuery.error,
+    ...activeQueries.map((query) => query.error),
   ]);
+  const modelChoicesFailure = firstRequestFailure([modelChoicesQuery.error]);
+  const activeProjectsQuery = activeTab === "models"
+    ? modelProjectsQuery
+    : activeTab === "actions"
+      ? actionProjectsQuery
+      : outfitProjectsQuery;
+  const projectLoadState = getLibraryProjectLoadState({
+    hasFailure: Boolean(failure),
+    storageConfigured,
+    storageQuery: storageSettingsQuery,
+    projectsQuery: activeProjectsQuery,
+    projectCount: activeProjects.length,
+  });
+
+  async function retry() {
+    const retries: Array<Promise<unknown>> = [storageSettingsQuery.refetch()];
+    if (canQuery) retries.push(...activeQueries.map((query) => query.refetch()));
+    await Promise.all(retries);
+  }
 
   useEffect(() => {
     setModelChoiceFor(null);
@@ -267,8 +278,6 @@ export function useLibraryAssetPickerData() {
     modelChoiceFor,
     setModelChoiceFor,
     modelChoicesQuery,
-    storageConfigured,
-    storageSettingsLoading: storageSettingsQuery.isLoading,
     activeProjects,
     activeProjectId,
     activeModelGender,
@@ -278,7 +287,10 @@ export function useLibraryAssetPickerData() {
     hasActiveTagFilter: hasLibraryTagFilter(activeTagFilter),
     activeItems,
     isLoading,
-    errorMessage,
+    projectLoadState,
+    failure,
+    modelChoicesFailure,
+    retry,
     changeProject,
     changeTag,
     toggleModelGender,

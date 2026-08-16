@@ -92,3 +92,38 @@ test('alt drag finalization leaves the clone selected without a dragging state',
     { id: 'clone', position: { x: 40, y: 50 }, selected: true, dragging: false },
   ]);
 });
+
+test('alt drag finalization clears dragging on clone descendants not returned by React Flow', () => {
+  const { projectAltDragOntoClones } = loadAltDragCloneModule();
+  const gesture = {
+    cloneIdBySourceId: new Map([
+      ['source-group', 'clone-group'],
+      ['source-child', 'clone-child'],
+    ]),
+    cloneZIndex: 7,
+    sourceNodes: [
+      { id: 'source-group', position: { x: 0, y: 0 }, zIndex: 1 },
+      { id: 'source-child', position: { x: 28, y: 28 }, zIndex: 2 },
+    ],
+  };
+
+  const projected = projectAltDragOntoClones(
+    [
+      { id: 'source-group', position: { x: 40, y: 50 }, selected: false, dragging: false },
+      { id: 'source-child', position: { x: 28, y: 28 }, selected: false, dragging: false },
+      { id: 'clone-group', position: { x: 40, y: 50 }, selected: true, dragging: true },
+      { id: 'clone-child', position: { x: 28, y: 28 }, selected: true, dragging: true },
+    ],
+    gesture,
+    [{ id: 'source-group', position: { x: 40, y: 50 } }],
+    false,
+  );
+
+  assert.deepEqual(projected.find((node) => node.id === 'clone-child'), {
+    id: 'clone-child',
+    position: { x: 28, y: 28 },
+    zIndex: 7,
+    selected: true,
+    dragging: false,
+  });
+});

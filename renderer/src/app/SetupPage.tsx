@@ -15,13 +15,15 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
   const [mode, setMode] = useState<ForartMode>(initialConfig?.mode || "local");
   const [localLibraryPath, setLocalLibraryPath] = useState(initialConfig?.localLibraryPath || "");
   const [serverUrl, setServerUrl] = useState(initialConfig?.serverUrl || "");
+  const [serverUsername, setServerUsername] = useState(initialConfig?.serverAuthUsername || "");
+  const [serverPassword, setServerPassword] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   const canSubmit = useMemo(() => {
     if (mode === "local") return localLibraryPath.trim().length > 0;
-    return serverUrl.trim().length > 0;
-  }, [localLibraryPath, mode, serverUrl]);
+    return serverUrl.trim().length > 0 && serverUsername.trim().length > 0 && serverPassword.length > 0;
+  }, [localLibraryPath, mode, serverPassword, serverUrl, serverUsername]);
 
   async function chooseDirectory() {
     setError("");
@@ -38,8 +40,8 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
       return;
     }
 
-    if (mode === "remote" && !serverUrl.trim()) {
-      setError(t("setup:saveServerUrlRequired"));
+    if (mode === "remote" && (!serverUrl.trim() || !serverUsername.trim() || !serverPassword)) {
+      setError(t("settings:remoteLoginRequired"));
       return;
     }
 
@@ -47,11 +49,18 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
       mode,
       localLibraryPath,
       serverUrl,
+      serverAuthUsername: serverUsername,
       language: i18n.language === "en-US" ? "en-US" : "zh-CN",
     });
 
     setSaving(true);
     try {
+      if (mode === "remote") {
+        const loginResult = await window.forartConfig?.serverLogin({ serverUrl, username: serverUsername, password: serverPassword });
+        if (!loginResult?.ok || !loginResult.config) throw new Error(loginResult?.error || t("settings:remoteLoginFailed"));
+        onConfigured(loginResult.config);
+        return;
+      }
       const result = await window.forartConfig?.save(nextConfig);
       onConfigured(result?.config || nextConfig);
     } catch (saveError) {
@@ -116,10 +125,20 @@ export function SetupPage({ initialConfig, onConfigured }: SetupPageProps) {
               </div>
             </label>
           ) : (
-            <label className="setup-field">
-              <span>{t("setup:serverUrl")}</span>
-              <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://192.168.1.20:6980" />
-            </label>
+            <div className="setup-remote-fields">
+              <label className="setup-field">
+                <span>{t("setup:serverUrl")}</span>
+                <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://192.168.1.20:6980" />
+              </label>
+              <label className="setup-field">
+                <span>{t("settings:serverUsername")}</span>
+                <input value={serverUsername} onChange={(event) => setServerUsername(event.target.value)} autoComplete="username" />
+              </label>
+              <label className="setup-field">
+                <span>{t("settings:serverPassword")}</span>
+                <input value={serverPassword} onChange={(event) => setServerPassword(event.target.value)} type="password" autoComplete="current-password" />
+              </label>
+            </div>
           )}
 
           <div className="settings-section__head">

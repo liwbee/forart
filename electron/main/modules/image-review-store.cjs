@@ -126,7 +126,7 @@ async function productHasModelImages(productDir, modelFolders) {
   return false;
 }
 
-async function collectReviewImages(dir, rootPath, productDir, reviewRecords) {
+async function collectReviewImages(dir, rootPath, productDir, reviewRecords, requestPriority) {
   try {
     const entries = (await fsp.readdir(dir, { withFileTypes: true }))
       .filter((entry) => entry.isFile() && isReviewImageFile(path.join(dir, entry.name)));
@@ -138,7 +138,7 @@ async function collectReviewImages(dir, rootPath, productDir, reviewRecords) {
         const reviewRecord = reviewRecords[productRelativePath];
         const encodedRoot = encodeURIComponent(path.resolve(rootPath));
         const encodedPath = encodeURIComponent(relativePath);
-        const versionQuery = `mtime=${Math.round(stats.mtimeMs)}&bytes=${stats.size}`;
+        const versionQuery = `mtime=${Math.round(stats.mtimeMs)}&bytes=${stats.size}&priority=${requestPriority}`;
         const originalUrl = `forart-review://image?root=${encodedRoot}&path=${encodedPath}&${versionQuery}`;
         const thumbnailUrl = `forart-review-thumb://image?root=${encodedRoot}&path=${encodedPath}&size=132&${versionQuery}`;
         const previewUrl = `forart-review-preview://image?root=${encodedRoot}&path=${encodedPath}&size=700&${versionQuery}`;
@@ -175,7 +175,7 @@ async function loadProducts({ root, modelFolders }) {
   }));
 }
 
-async function loadProductImages({ root, productId, modelFolders, detailFolders }) {
+async function loadProductImages({ root, productId, modelFolders, detailFolders, requestPriority = 0 }) {
   const productDir = reviewAbsolutePath(root, productId);
   const productStats = await fsp.stat(productDir).catch(() => null);
   if (!productStats?.isDirectory()) throw new Error('Product not found');
@@ -192,7 +192,13 @@ async function loadProductImages({ root, productId, modelFolders, detailFolders 
   for (const folderName of await listReviewDirectories(productDir)) {
     const normalized = normalizeReviewFolderName(folderName);
     if (!modelFolderSet.has(normalized) && !detailFolderSet.has(normalized)) continue;
-    const images = await collectReviewImages(path.join(productDir, folderName), root, productDir, reviewStatusDocument.images);
+    const images = await collectReviewImages(
+      path.join(productDir, folderName),
+      root,
+      productDir,
+      reviewStatusDocument.images,
+      Math.max(0, Number(requestPriority) || 0),
+    );
     if (modelFolderSet.has(normalized)) product.modelImages.push(...images);
     else product.detailImages.push(...images);
   }
@@ -250,6 +256,7 @@ function resolveScaledImageUrl(urlText, authorizeRoot) {
   return {
     filePath,
     size: Number.isFinite(requestedSize) ? Math.max(48, Math.min(2048, Math.round(requestedSize))) : 132,
+    priority: Math.max(0, Number(url.searchParams.get('priority')) || 0),
   };
 }
 

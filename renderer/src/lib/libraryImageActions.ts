@@ -1,4 +1,4 @@
-import { getApiBaseUrl } from "../data-source/runtime";
+import { getActiveForartConfig, getApiBaseUrl } from "../data-source/runtime";
 import { i18n } from "../i18n";
 
 export function resolveLibraryImageUrl(url: string) {
@@ -6,10 +6,28 @@ export function resolveLibraryImageUrl(url: string) {
   if (!source) return "";
   if (/^data:/i.test(source)) return source;
   if (/^forart-asset:/i.test(source)) return source;
-  if (/^https?:\/\//i.test(source)) return source;
   const apiBaseUrl = getApiBaseUrl();
   const baseUrl = apiBaseUrl || (typeof window !== "undefined" ? window.location.origin : "");
-  return baseUrl ? new URL(source, baseUrl).toString() : source;
+  let resolved = source;
+  if (!/^https?:\/\//i.test(source) && baseUrl) {
+    try {
+      resolved = new URL(source, baseUrl).toString();
+    } catch {
+      // A user-entered server address must never make stored relative assets crash rendering.
+      resolved = source;
+    }
+  }
+  const config = getActiveForartConfig();
+  if (!config?.serverAuthToken || config.mode !== "remote") return resolved;
+  try {
+    const parsed = new URL(resolved);
+    const server = new URL(config.serverUrl);
+    if (parsed.origin === server.origin && (/^\/api\/assets\//.test(parsed.pathname) || /^\/api\/canvas-exchange\/canvases\/[^/]+\/assets\//.test(parsed.pathname))) {
+      parsed.searchParams.set("forart_token", config.serverAuthToken);
+      return parsed.toString();
+    }
+  } catch { /* keep the original relative URL */ }
+  return resolved;
 }
 
 export function cacheBustedLibraryImageUrl(url: string, stamp?: string) {

@@ -12,6 +12,7 @@ const {
   pollRecoveredImageResult,
 } = require('../electron/main/modules/libtv-generation-runner.cjs');
 const { createMemoryGenerationTaskStore } = require('./fixtures/generation-task-memory.cjs');
+const { GENERATION_EXECUTION_TIMEOUT_MS } = require('../electron/main/modules/generation/generation-execution-timeout.cjs');
 
 const createGenerationTaskStore = () => createMemoryGenerationTaskStore('api');
 const createLibtvGenerationTaskStore = () => createMemoryGenerationTaskStore('libtv');
@@ -88,6 +89,10 @@ function createCanvasRecorder() {
   };
 }
 
+test('generation execution timeout defaults to 30 minutes', () => {
+  assert.equal(GENERATION_EXECUTION_TIMEOUT_MS, 30 * 60 * 1000);
+});
+
 test('LibTV output parsing never treats an input reference as a generated result', () => {
   const pendingNode = {
     data: {
@@ -160,6 +165,65 @@ test('LibTV recovery keeps polling beyond the former fixed attempt limit', async
 
   assert.equal(queryCount, 121);
   assert.equal(resultUrl, 'https://example.test/recovered.png');
+});
+
+test('API execution timeout fails a stalled Gemini request instead of marking it interrupted', async () => {
+  const canvasStore = createCanvasRecorder();
+  const generationTaskStore = createGenerationTaskStore();
+  const runner = createImageGenerationRunner({
+    net: {
+      fetch(_url, init = {}) {
+        return new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        });
+      },
+    },
+    assetStore: { async saveAsset() { throw new Error('unexpected save'); } },
+    canvasStore,
+    generationTaskStore,
+    executionTimeoutMs: 20,
+  });
+  const task = await runner.startTask({
+    canvasId: 'canvas-timeout-api',
+    target: { type: 'imageGenerator', nodeId: 'node-timeout-api' },
+    providerId: 'provider',
+    provider: { id: 'provider', baseUrl: 'https://example.test', apiKey: 'test', protocol: 'gemini' },
+    model: 'gemini-3-pro-image',
+    prompt: 'test timeout',
+  });
+
+  await waitFor(() => generationTaskStore.getTask(task.id)?.status === 'failed');
+  const failed = generationTaskStore.getTask(task.id);
+  assert.match(failed.error, /timed out after 20 ms/i);
+  assert.equal(canvasStore.terminals.at(-1)?.status, 'failed');
+});
+
+test('LibTV recovered execution stops polling and fails at the execution timeout', async () => {
+  const canvasStore = createCanvasRecorder();
+  const taskStore = createLibtvGenerationTaskStore();
+  taskStore.createTask({
+    id: 'libtv_timeout_recovery',
+    canvasId: 'canvas-timeout-libtv',
+    target: { type: 'actionFissionRow', nodeId: 'node-timeout-libtv', rowId: 'row-timeout-libtv' },
+    status: 'running',
+    projectUuid: 'project-timeout',
+    remoteNodeId: 'remote-timeout',
+  });
+  const runner = createLibtvGenerationRunner({
+    libtv: {
+      async queryNode() { return { payload: { data: { url: [] } }, stdout: '' }; },
+    },
+    assetStore: { async saveAsset() { throw new Error('unexpected save'); } },
+    canvasStore,
+    taskStore,
+    executionTimeoutMs: 20,
+  });
+
+  runner.recoverPersistedTasks();
+  await waitFor(() => taskStore.getTask('libtv_timeout_recovery')?.status === 'failed');
+  const failed = taskStore.getTask('libtv_timeout_recovery');
+  assert.match(failed.error, /timed out after 20 ms/i);
+  assert.equal(canvasStore.terminals.at(-1)?.status, 'failed');
 });
 
 test('API image nodes keep a local task anchor while preparation is still running', async () => {

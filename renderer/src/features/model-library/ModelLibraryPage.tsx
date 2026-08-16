@@ -4,9 +4,11 @@ import { useTranslation } from "react-i18next";
 import { Copy, Download, Eye, MoreHorizontal, Star, Trash2, Upload, X } from "lucide-react";
 import { ConfirmingDeleteButton } from "../../components/ConfirmingDeleteButton";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
+import { RemoteDataState } from "../../components/RemoteDataState";
 import { AppScrollArea } from "../../components/AppScrollArea";
 import { LazyImage } from "../../components/LazyImage";
 import { Button } from "../../components/ui/button";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { Empty, EmptyDescription } from "../../components/ui/empty";
 import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
@@ -19,6 +21,7 @@ import { cacheBustedLibraryImageUrl, copyLibraryImage, downloadLibraryOriginalIm
 import { LibraryCardToolbar, sortLibraryItems, useLibraryCardSize, useLibrarySort } from "../resource-library/LibraryCardSizeControl";
 import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
 import { createUniqueLibraryProjectName, LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
+import { getLibraryProjectLoadState } from "../library-layout/libraryProjectLoadState";
 import { getChangedProjectOrder, setOptimisticProjectOrder, type LibraryProjectsQueryData } from "../library-layout/projectReorder";
 import { LibraryTagManagerDialog } from "../library-tags/LibraryTagManagerDialog";
 import { getChangedTagOrder, setOptimisticTagOrder, type LibraryTagsQueryData } from "../library-tags/tagReorder";
@@ -48,6 +51,8 @@ import {
 import { useModelLibraryStore } from "./modelLibraryStore";
 import { normalizeTags, toggleTag } from "../library-tags/tagUtils";
 import { ModelEntry, ModelImage, ModelProject, ModelTag } from "./types";
+import { usePermission } from "../permissions";
+import { firstRequestFailure } from "../../lib/requestFailure";
 
 function getRequestError(errors: unknown[]) {
   const first = errors.find(Boolean);
@@ -82,6 +87,7 @@ function ModelToolbar({
   selectionMode,
   onEnterSelectionMode,
   onExitSelectionMode,
+  canManageEntries,
 }: {
   tags: ModelTag[];
   tagFilter: LibraryTagFilter;
@@ -95,6 +101,7 @@ function ModelToolbar({
   selectionMode: boolean;
   onEnterSelectionMode: () => void;
   onExitSelectionMode: () => void;
+  canManageEntries: boolean;
 }) {
   const { t } = useTranslation();
   const includeTagSet = useMemo(() => new Set(tagFilter.includeTagIds), [tagFilter.includeTagIds]);
@@ -129,7 +136,7 @@ function ModelToolbar({
       <div className="library-filter-divider" aria-hidden="true" />
 
       <div className="library-tag-section">
-        <LibraryBulkManageButton disabled={false} onClick={selectionMode ? onExitSelectionMode : onEnterSelectionMode} />
+        {canManageEntries ? <LibraryBulkManageButton disabled={false} onClick={selectionMode ? onExitSelectionMode : onEnterSelectionMode} /> : null}
         <span className="library-filter-label">{t("common:labels.tags")}</span>
         <div className="library-tag-controls">
           <CollapsibleTagFilterRow expandLabel={t("common:labels.expandTags")} collapseLabel={t("common:labels.collapseTags")}>
@@ -255,48 +262,7 @@ function ModelCard({
   );
 }
 
-function scrollEditorIntoView(editor: HTMLElement) {
-  const scrollParents: HTMLElement[] = [];
-  let parent = editor.parentElement;
-  while (parent && parent !== document.body) {
-    const style = window.getComputedStyle(parent);
-    const canScrollY = /(auto|scroll|overlay)/.test(style.overflowY);
-    if (canScrollY && parent.scrollHeight > parent.clientHeight) {
-      scrollParents.push(parent);
-    }
-    parent = parent.parentElement;
-  }
-
-  const scrollParent = scrollParents[0];
-  if (!scrollParent) {
-    editor.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    return;
-  }
-
-  const margin = 16;
-  const editorRect = editor.getBoundingClientRect();
-  const parentRect = scrollParent.getBoundingClientRect();
-  const editorTopInScroller = editorRect.top - parentRect.top + scrollParent.scrollTop;
-  const editorHeight = editorRect.height;
-  const visibleHeight = scrollParent.clientHeight - margin * 2;
-  const currentTop = scrollParent.scrollTop;
-  const visibleTop = currentTop + margin;
-  const visibleBottom = currentTop + scrollParent.clientHeight - margin;
-  const editorBottomInScroller = editorTopInScroller + editorHeight;
-  let targetTop = currentTop;
-
-  if (editorHeight > visibleHeight || editorTopInScroller < visibleTop) {
-    targetTop = editorTopInScroller - margin;
-  } else if (editorBottomInScroller > visibleBottom) {
-    targetTop = editorBottomInScroller - scrollParent.clientHeight + margin;
-  }
-
-  if (Math.abs(targetTop - currentTop) > 1) {
-    scrollParent.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
-  }
-}
-
-function ModelInlineEditor({
+function ModelEditorDialog({
   model,
   tags,
   images,
@@ -312,6 +278,8 @@ function ModelInlineEditor({
   onImageActionStatus,
   renameError,
   onClearRenameError,
+  canEditEntries,
+  canDeleteEntries,
 }: {
   model: ModelEntry;
   tags: ModelTag[];
@@ -328,6 +296,8 @@ function ModelInlineEditor({
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
   renameError: string;
   onClearRenameError: (modelId: string) => void;
+  canEditEntries: boolean;
+  canDeleteEntries: boolean;
 }) {
   const { t } = useTranslation();
   const [draftName, setDraftName] = useState(model.name || "");
@@ -339,7 +309,6 @@ function ModelInlineEditor({
   const [isImageDropActive, setIsImageDropActive] = useState(false);
   const imageDropDepthRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const editorRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     setDraftName(model.name || "");
@@ -353,20 +322,8 @@ function ModelInlineEditor({
     imageDropDepthRef.current = 0;
   }, [model.id]);
 
-  useEffect(() => {
-    let nextFrame = 0;
-    const frame = window.requestAnimationFrame(() => {
-      nextFrame = window.requestAnimationFrame(() => {
-        if (editorRef.current) scrollEditorIntoView(editorRef.current);
-      });
-    });
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.cancelAnimationFrame(nextFrame);
-    };
-  }, [model.id, images.length]);
-
   function submitName() {
+    if (!canEditEntries) return;
     const nextName = normalizeLibraryName(draftName);
     if (!nextName || nextName === model.name) {
       setDraftName(model.name || "");
@@ -404,12 +361,20 @@ function ModelInlineEditor({
 
   function handleImageDragEnter(event: React.DragEvent<HTMLDivElement>) {
     event.preventDefault();
+    if (!canEditEntries) {
+      event.dataTransfer.dropEffect = "none";
+      return;
+    }
     imageDropDepthRef.current += 1;
     setIsImageDropActive(true);
   }
 
   function handleImageDragOver(event: React.DragEvent<HTMLDivElement>) {
     event.preventDefault();
+    if (!canEditEntries) {
+      event.dataTransfer.dropEffect = "none";
+      return;
+    }
     event.dataTransfer.dropEffect = "copy";
   }
 
@@ -423,6 +388,7 @@ function ModelInlineEditor({
 
   function handleImageDrop(event: React.DragEvent<HTMLDivElement>) {
     event.preventDefault();
+    if (!canEditEntries) return;
     const files = Array.from(event.dataTransfer.files || []);
     resetImageDropState();
     files.forEach((file) => {
@@ -463,93 +429,103 @@ function ModelInlineEditor({
   }
 
   return (
-    <section ref={editorRef} className="model-inline-editor" aria-label={t("modelLibrary:inlineEditor", { name: model.name })}>
-      <Button className="model-inline-close-button" variant="ghost" size="icon-sm" type="button" onClick={onClose} aria-label={t("modelLibrary:closeEditor")}>
-        <X aria-hidden="true" />
-      </Button>
-      <div className="model-inline-editor-head">
-        <div className="model-inline-title-area">
-          <label className="model-inline-name-field">
-            <span>{t("modelLibrary:modelName")}</span>
-            {renameError ? <span className="library-rename-error-popover">{renameError}</span> : null}
-            <Input
-              className={`library-entry-title-input${renameError ? " library-rename-input--error" : ""}`}
-              type="text"
-              value={draftName}
-              onChange={(event) => {
-                onClearRenameError(model.id);
-                setDraftName(event.target.value);
-              }}
-              onBlur={submitName}
-              onKeyDown={handleNameKeyDown}
-              disabled={isSaving || isDeleting}
-              maxLength={120}
-            />
-          </label>
-          <div className="model-inline-summary" aria-label={t("modelLibrary:assetOverview")}>
-            <ConfirmingDeleteButton
-              className="model-delete-confirm-button"
-              disabled={isDeleting}
-              isBusy={isDeleting}
-              label={t("common:actions.delete")}
-              confirmLabel={t("modelLibrary:finalConfirmDelete")}
-              busyLabel={t("modelLibrary:deleting")}
-              resetKey={model.id}
-              aria-label={t("modelLibrary:deleteModel")}
-              onDelete={() => onDelete(model.id)}
-            />
-            <span>{t("modelLibrary:tagCount", { count: model.tags.length || 0 })}</span>
-            <span>{t("modelLibrary:imageCount", { count: images.length || 0 })}</span>
-          </div>
-        </div>
-      </div>
-      <div className="model-inline-editor-placeholder">
-        <div className="model-inline-tags-block">
-          <div className="model-inline-section-head">
-            <div>
-              <span className="model-inline-section-label">{t("common:labels.tags")}</span>
-              <p>{model.tags.length ? t("modelLibrary:selectedTagCount", { count: model.tags.length }) : t("common:labels.notSelected")}</p>
-            </div>
-          </div>
-          <div className="library-modal-tags">
-            {tags.length ? (
-              tags.map((tag) => {
-                const selected = model.tags.includes(tag.name);
-                return (
-                  <LibraryTagChoiceButton
-                    key={tag.id}
-                    mode="select"
-                    name={tag.name}
-                    color={tag.color}
-                    selected={selected}
-                    onToggleSelect={() => onToggleTag(model.id, tag.name)}
-                  />
-                );
-              })
-            ) : (
-              <div className="library-modal-tags empty">{t("modelLibrary:noAvailableTags")}</div>
-            )}
-          </div>
-        </div>
-        <div
-          className={`model-inline-images-block${isImageDropActive ? " drag-active" : ""}`}
-          onDragEnter={handleImageDragEnter}
-          onDragOver={handleImageDragOver}
-          onDragLeave={handleImageDragLeave}
-          onDrop={handleImageDrop}
-        >
-          <div className="model-inline-section-head">
-            <div>
-              <span className="model-inline-section-label">{t("modelLibrary:images")}</span>
-              <p>{images.length ? t("modelLibrary:assetCount", { count: images.length }) : t("modelLibrary:noAssets")}</p>
-            </div>
-            <Button type="button" onClick={() => fileInputRef.current?.click()}>
-              <Upload data-icon="inline-start" aria-hidden="true" />
-              <span>{t("common:actions.uploadImage")}</span>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="model-editor-dialog">
+        <DialogHeader className="model-editor-dialog__header">
+          <DialogTitle>{t("modelLibrary:inlineEditor", { name: model.name })}</DialogTitle>
+          <DialogDescription>{t("modelLibrary:editorDescription")}</DialogDescription>
+          <DialogClose asChild>
+            <Button className="model-editor-dialog__close" variant="ghost" size="icon-sm" type="button" aria-label={t("modelLibrary:closeEditor")}>
+              <X aria-hidden="true" />
             </Button>
-            <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={handleFilesSelected} />
-          </div>
-          <div className="model-image-grid">
+          </DialogClose>
+        </DialogHeader>
+        <AppScrollArea className="model-editor-dialog__scroll" viewportClassName="model-editor-dialog__viewport">
+          <div className="model-editor-dialog__body">
+            <div className="model-inline-editor-head">
+              <div className="model-inline-title-area">
+                <label className="model-inline-name-field">
+                  <span>{t("modelLibrary:modelName")}</span>
+                  {renameError ? <span className="library-rename-error-popover">{renameError}</span> : null}
+                  <Input
+                    className={`library-entry-title-input${renameError ? " library-rename-input--error" : ""}`}
+                    type="text"
+                    value={draftName}
+                    onChange={(event) => {
+                      onClearRenameError(model.id);
+                      setDraftName(event.target.value);
+                    }}
+                    onBlur={submitName}
+                    onKeyDown={handleNameKeyDown}
+                    disabled={!canEditEntries || isSaving || isDeleting}
+                    maxLength={120}
+                  />
+                </label>
+                <div className="model-inline-summary" aria-label={t("modelLibrary:assetOverview")}>
+                  {canDeleteEntries ? <ConfirmingDeleteButton
+                    className="model-delete-confirm-button"
+                    disabled={isDeleting}
+                    isBusy={isDeleting}
+                    label={t("common:actions.delete")}
+                    confirmLabel={t("modelLibrary:finalConfirmDelete")}
+                    busyLabel={t("modelLibrary:deleting")}
+                    resetKey={model.id}
+                    aria-label={t("modelLibrary:deleteModel")}
+                    onDelete={() => onDelete(model.id)}
+                  /> : null}
+                  <span>{t("modelLibrary:tagCount", { count: model.tags.length || 0 })}</span>
+                  <span>{t("modelLibrary:imageCount", { count: images.length || 0 })}</span>
+                </div>
+              </div>
+            </div>
+            <div className="model-inline-editor-placeholder">
+              <div className="model-inline-tags-block">
+                <div className="model-inline-section-head">
+                  <div>
+                    <span className="model-inline-section-label">{t("common:labels.tags")}</span>
+                    <p>{model.tags.length ? t("modelLibrary:selectedTagCount", { count: model.tags.length }) : t("common:labels.notSelected")}</p>
+                  </div>
+                </div>
+                <div className="library-modal-tags">
+                  {tags.length ? (
+                    tags.map((tag) => {
+                      const selected = model.tags.includes(tag.name);
+                      return (
+                        <LibraryTagChoiceButton
+                          key={tag.id}
+                          mode="select"
+                          name={tag.name}
+                          color={tag.color}
+                          selected={selected}
+                          disabled={!canEditEntries}
+                          onToggleSelect={() => onToggleTag(model.id, tag.name)}
+                        />
+                      );
+                    })
+                  ) : (
+                    <div className="library-modal-tags empty">{t("modelLibrary:noAvailableTags")}</div>
+                  )}
+                </div>
+              </div>
+              <div
+                className={`model-inline-images-block${isImageDropActive ? " drag-active" : ""}`}
+                onDragEnter={handleImageDragEnter}
+                onDragOver={handleImageDragOver}
+                onDragLeave={handleImageDragLeave}
+                onDrop={handleImageDrop}
+              >
+                <div className="model-inline-section-head">
+                  <div>
+                    <span className="model-inline-section-label">{t("modelLibrary:images")}</span>
+                    <p>{images.length ? t("modelLibrary:assetCount", { count: images.length }) : t("modelLibrary:noAssets")}</p>
+                  </div>
+                  {canEditEntries ? <Button type="button" onClick={() => fileInputRef.current?.click()}>
+                    <Upload data-icon="inline-start" aria-hidden="true" />
+                    <span>{t("common:actions.uploadImage")}</span>
+                  </Button> : null}
+                  <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={handleFilesSelected} />
+                </div>
+                <div className="model-image-grid">
             {images.length ? (
               images.map((image) => {
                 const isCover = model.cover_image_id === image.id;
@@ -609,7 +585,7 @@ function ModelInlineEditor({
                     </figure>
                     <DropdownMenuContent side="right" align="start" sideOffset={8}>
                       <DropdownMenuGroup>
-                        <DropdownMenuItem
+                        {canEditEntries ? <DropdownMenuItem
                           disabled={isCover}
                           onSelect={() => {
                             setOpenImageMenuId("");
@@ -618,7 +594,7 @@ function ModelInlineEditor({
                         >
                           <Star size={15} aria-hidden="true" />
                           <span>{t("modelLibrary:setAsCover")}</span>
-                        </DropdownMenuItem>
+                        </DropdownMenuItem> : null}
                         <DropdownMenuItem disabled={!originalSrc} onSelect={() => openImageViewer(originalSrc, altText)}>
                           <Eye size={15} aria-hidden="true" />
                           <span>{t("common:actions.viewImage")}</span>
@@ -634,7 +610,7 @@ function ModelInlineEditor({
                           <Copy size={15} aria-hidden="true" />
                           <span>{t("common:actions.copyImage")}</span>
                         </DropdownMenuItem>
-                        <ConfirmingDropdownMenuItem
+                        {canDeleteEntries ? <ConfirmingDropdownMenuItem
                           onConfirm={() => {
                             setOpenImageMenuId("");
                             onDeleteImage(image.id);
@@ -648,7 +624,7 @@ function ModelInlineEditor({
                         >
                           <Trash2 size={15} aria-hidden="true" />
                           <span>{t("common:actions.delete")}</span>
-                        </ConfirmingDropdownMenuItem>
+                        </ConfirmingDropdownMenuItem> : null}
                       </DropdownMenuGroup>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -657,17 +633,20 @@ function ModelInlineEditor({
             ) : (
               <div className="model-inline-helper">{t("modelLibrary:emptyImagesHint")}</div>
             )}
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-      {openImageViewerState ? (
-        <ImageViewer
-          src={openImageViewerState.src}
-          alt={openImageViewerState.alt}
-          onClose={() => setOpenImageViewerState(null)}
-        />
-      ) : null}
-    </section>
+        </AppScrollArea>
+        {openImageViewerState ? (
+          <ImageViewer
+            src={openImageViewerState.src}
+            alt={openImageViewerState.alt}
+            onClose={() => setOpenImageViewerState(null)}
+          />
+        ) : null}
+      </DialogContent>
+    </Dialog>
   );
 }
 function ModelGrid({
@@ -693,6 +672,8 @@ function ModelGrid({
   selectionMode,
   selectedIds,
   onToggleSelected,
+  canEditEntries,
+  canDeleteEntries,
 }: {
   models: ModelEntry[];
   openModelId: string;
@@ -716,153 +697,33 @@ function ModelGrid({
   selectionMode: boolean;
   selectedIds: Set<string>;
   onToggleSelected: (modelId: string) => void;
+  canEditEntries: boolean;
+  canDeleteEntries: boolean;
 }) {
-  const gridRef = useRef<HTMLDivElement | null>(null);
   const cardSize = useLibraryCardSize();
   const librarySort = useLibrarySort();
   const tagsByName = useMemo(() => createLibraryTagsByName(tags), [tags]);
-  const [columnCount, setColumnCount] = useState(1);
   const openModel = models.find((model) => model.id === openModelId) || null;
-  const openIndex = models.findIndex((model) => model.id === openModelId);
-  const insertAfterIndex = useMemo(() => {
-    if (!openModel || openIndex < 0) return -1;
-    const fullGridIndex = openIndex + 1;
-    const rowEndGridIndex = Math.floor(fullGridIndex / columnCount) * columnCount + columnCount - 1;
-    return Math.min(models.length - 1, rowEndGridIndex - 1);
-  }, [columnCount, models.length, openIndex, openModel]);
-
-  useEffect(() => {
-    function updateColumnCount() {
-      const grid = gridRef.current;
-      if (!grid) return;
-      const styles = window.getComputedStyle(grid);
-      const nextColumns = styles.gridTemplateColumns
-        .split(" ")
-        .filter((column) => column && column !== "none").length;
-      setColumnCount(Math.max(1, nextColumns));
-    }
-
-    updateColumnCount();
-    const grid = gridRef.current;
-    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateColumnCount) : null;
-    if (grid) resizeObserver?.observe(grid);
-    window.addEventListener("resize", updateColumnCount);
-    return () => {
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateColumnCount);
-    };
-  }, []);
 
   return (
     <div className="library-card-size-scope">
-      <div ref={gridRef} className="model-grid" style={cardSize.gridStyle}>
-        {!selectionMode ? <AddModelCard disabled={creating} busy={creating} onCreate={onCreate} /> : null}
-        {models.map((model, index) => (
-          <FragmentWithEditor
+      <div className="model-grid" style={cardSize.gridStyle}>
+        {!selectionMode && canEditEntries ? <AddModelCard disabled={creating} busy={creating} onCreate={onCreate} /> : null}
+        {models.map((model) => (
+          <ModelCard
             key={model.id}
             model={model}
             tagsByName={tagsByName}
             isOpen={model.id === openModelId}
-            shouldRenderEditor={Boolean(openModel && index === insertAfterIndex)}
-            openModel={openModel}
-            tags={tags}
-            images={images}
-            savingModelId={savingModelId}
-            deletingModelId={deletingModelId}
-            onOpenModel={onOpenModel}
-            onSaveModelName={onSaveModelName}
-            onCloseEditor={onCloseEditor}
-            onDeleteModel={onDeleteModel}
-            onToggleTag={onToggleTag}
-            onUploadImage={onUploadImage}
-            onDeleteImage={onDeleteImage}
-            onSetCover={onSetCover}
-            onImageActionStatus={onImageActionStatus}
-            renameErrors={renameErrors}
-            onClearRenameError={onClearRenameError}
             selectionMode={selectionMode}
-            selectedIds={selectedIds}
-            onToggleSelected={onToggleSelected}
+            selected={selectedIds.has(model.id)}
+            onToggleSelected={() => onToggleSelected(model.id)}
+            onOpen={() => onOpenModel(model.id)}
           />
         ))}
       </div>
-      <LibraryCardToolbar
-        activePresetId={cardSize.activePresetId}
-        activePresetIndex={cardSize.activePresetIndex}
-        activePresetLabel={cardSize.activePresetLabel}
-        presets={cardSize.presets}
-        sortField={librarySort.sortField}
-        sortDirection={librarySort.sortDirection}
-        onSelectPreset={cardSize.setPresetId}
-        onSelectSortField={librarySort.setSortField}
-        onSelectSortDirection={librarySort.setSortDirection}
-      />
-    </div>
-  );
-}
-
-function FragmentWithEditor({
-  model,
-  tagsByName,
-  isOpen,
-  shouldRenderEditor,
-  openModel,
-  tags,
-  images,
-  savingModelId,
-  deletingModelId,
-  onOpenModel,
-  onSaveModelName,
-  onCloseEditor,
-  onDeleteModel,
-  onToggleTag,
-  onUploadImage,
-  onDeleteImage,
-  onSetCover,
-  onImageActionStatus,
-  renameErrors,
-  onClearRenameError,
-  selectionMode,
-  selectedIds,
-  onToggleSelected,
-}: {
-  model: ModelEntry;
-  tagsByName: Map<string, LibraryTagNameColorLike>;
-  isOpen: boolean;
-  shouldRenderEditor: boolean;
-  openModel: ModelEntry | null;
-  tags: ModelTag[];
-  images: ModelImage[];
-  savingModelId: string;
-  deletingModelId: string;
-  onOpenModel: (modelId: string) => void;
-  onSaveModelName: (modelId: string, name: string) => void;
-  onCloseEditor: () => void;
-  onDeleteModel: (modelId: string) => void;
-  onToggleTag: (modelId: string, tagName: string) => void;
-  onUploadImage: (modelId: string, file: File) => void;
-  onDeleteImage: (imageId: string) => void;
-  onSetCover: (modelId: string, imageId: string) => void;
-  onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
-  renameErrors: Record<string, string>;
-  onClearRenameError: (modelId: string) => void;
-  selectionMode: boolean;
-  selectedIds: Set<string>;
-  onToggleSelected: (modelId: string) => void;
-}) {
-  return (
-    <>
-      <ModelCard
-        model={model}
-        tagsByName={tagsByName}
-        isOpen={isOpen}
-        selectionMode={selectionMode}
-        selected={selectedIds.has(model.id)}
-        onToggleSelected={() => onToggleSelected(model.id)}
-        onOpen={() => onOpenModel(model.id)}
-      />
-      {shouldRenderEditor && openModel ? (
-        <ModelInlineEditor
+      {openModel ? (
+        <ModelEditorDialog
           model={openModel}
           tags={tags}
           images={images}
@@ -878,9 +739,22 @@ function FragmentWithEditor({
           onImageActionStatus={onImageActionStatus}
           renameError={renameErrors[openModel.id] || ""}
           onClearRenameError={onClearRenameError}
+          canEditEntries={canEditEntries}
+          canDeleteEntries={canDeleteEntries}
         />
       ) : null}
-    </>
+      <LibraryCardToolbar
+        activePresetId={cardSize.activePresetId}
+        activePresetIndex={cardSize.activePresetIndex}
+        activePresetLabel={cardSize.activePresetLabel}
+        presets={cardSize.presets}
+        sortField={librarySort.sortField}
+        sortDirection={librarySort.sortDirection}
+        onSelectPreset={cardSize.setPresetId}
+        onSelectSortField={librarySort.setSortField}
+        onSelectSortDirection={librarySort.setSortDirection}
+      />
+    </div>
   );
 }
 
@@ -904,6 +778,12 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
   const sameColorSingleFilter = useLibraryTagSettingsStore((state) => state.sameColorSingleFilter);
   const setSameColorSingleFilter = useLibraryTagSettingsStore((state) => state.setSameColorSingleFilter);
   const bulkSelection = useLibraryBulkSelection();
+  const canEditProjects = usePermission("model_library.project_edit");
+  const canDeleteProjects = usePermission("model_library.project_delete");
+  const canReorderProjects = usePermission("model_library.project_reorder");
+  const canEditEntries = usePermission("model_library.entry_edit");
+  const canDeleteEntries = usePermission("model_library.entry_delete");
+  const canManageTags = usePermission("model_library.tag_manage");
 
   const storageSettingsQuery = useQuery({
     queryKey: modelLibraryKeys.storageSettings,
@@ -1307,11 +1187,22 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     enabled: Boolean(openModelId),
   });
   const images = imagesQuery.data?.images || [];
-  const errorMessage = getRequestError([
+  const queryFailure = firstRequestFailure([
+    storageSettingsQuery.error,
     projectsQuery.error,
     tagsQuery.error,
     modelsQuery.error,
     imagesQuery.error,
+  ]);
+  const projectLoadState = getLibraryProjectLoadState({
+    hasFailure: Boolean(queryFailure),
+    storageConfigured,
+    storageQuery: storageSettingsQuery,
+    projectsQuery,
+    projectCount: projects.length,
+  });
+  const projectActionsAvailable = projectLoadState === "empty" || projectLoadState === "ready";
+  const mutationErrorMessage = getRequestError([
     createModelMutation.error,
     createProjectMutation.error,
     renameProjectMutation.error,
@@ -1328,6 +1219,16 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
     reorderTagsMutation.error,
     deleteTagMutation.error,
   ]);
+  const hasCachedQueryData = Boolean(projectsQuery.data)
+    && (!tagsQuery.error || Boolean(tagsQuery.data))
+    && (!modelsQuery.error || Boolean(modelsQuery.data));
+  const retryQueries = async () => {
+    const retries: Array<Promise<unknown>> = [storageSettingsQuery.refetch()];
+    if (storageConfigured) retries.push(projectsQuery.refetch());
+    if (storageConfigured && activeProjectId) retries.push(tagsQuery.refetch(), modelsQuery.refetch());
+    if (openModelId) retries.push(imagesQuery.refetch());
+    await Promise.all(retries);
+  };
 
   return (
     <section className="library-page" aria-label={t("modelLibrary:title")}>
@@ -1335,6 +1236,11 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
         <LibraryProjectSidebar<ModelProject>
           projects={projects}
           activeProjectId={activeProjectId}
+          canCreateProjects={canEditProjects && projectActionsAvailable}
+          canRenameProjects={canEditProjects && projectActionsAvailable}
+          canDeleteProjects={canDeleteProjects && projectActionsAvailable}
+          canReorderProjects={canReorderProjects && projectActionsAvailable}
+          showEmptyState={projectLoadState === "empty"}
           renamingProjectId={renamingProjectId}
           ariaLabel={t("modelLibrary:projectRail")}
           projectActionsLabel={(name) => t("modelLibrary:projectActions", { name })}
@@ -1367,25 +1273,28 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
               onUntaggedToggle={handleToggleUntaggedFilter}
               onGenderToggle={toggleGender}
               selectionMode={bulkSelection.selectionMode}
-              onEnterSelectionMode={bulkSelection.enterSelectionMode}
+              onEnterSelectionMode={(canEditEntries || canDeleteEntries) ? bulkSelection.enterSelectionMode : () => undefined}
               onExitSelectionMode={bulkSelection.exitSelectionMode}
+              canManageEntries={canEditEntries || canDeleteEntries || canManageTags}
             />
           </div>
 
           <AppScrollArea className="library-body">
-            {errorMessage ? <ErrorCopyLine className="library-error" text={t("modelLibrary:requestFailed", { message: errorMessage })} /> : null}
-            {projectsQuery.isLoading ? (
+            {mutationErrorMessage ? <ErrorCopyLine className="library-error" text={t("modelLibrary:requestFailed", { message: mutationErrorMessage })} /> : null}
+            {queryFailure ? <RemoteDataState failure={queryFailure} scope="page" compact={hasCachedQueryData} onRetry={retryQueries} /> : null}
+            {projectLoadState === "loading" ? (
               <Empty className="library-empty" aria-label={t("common:states.loadingProjects")}>
                 <Skeleton className="h-4 w-36" />
               </Empty>
             ) : null}
-            {!projectsQuery.isLoading && !projects.length ? <Empty className="library-empty"><EmptyDescription>{t("common:empty.noProjects")}</EmptyDescription></Empty> : null}
-            {activeProject ? (
+            {projectLoadState === "storage-unavailable" ? <Empty className="library-empty"><EmptyDescription>{t("common:states.storageUnavailable")}</EmptyDescription></Empty> : null}
+            {projectLoadState === "empty" ? <Empty className="library-empty"><EmptyDescription>{t("common:empty.noProjects")}</EmptyDescription></Empty> : null}
+            {activeProject && (!queryFailure || hasCachedQueryData) ? (
               <>
                 <ModelGrid
                   models={filteredModels}
                   openModelId={openModelId}
-                  creating={createModelMutation.isPending}
+                  creating={!canEditEntries || createModelMutation.isPending}
                   savingModelId={updateModelNameMutation.isPending ? updateModelNameMutation.variables?.modelId || "" : ""}
                   deletingModelId={deleteModelMutation.isPending ? deleteModelMutation.variables || "" : ""}
                   tags={tags}
@@ -1407,6 +1316,8 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
                   selectionMode={bulkSelection.selectionMode}
                   selectedIds={bulkSelection.selectedIds}
                   onToggleSelected={bulkSelection.toggleSelected}
+                  canEditEntries={canEditEntries}
+                  canDeleteEntries={canDeleteEntries}
                 />
               </>
             ) : null}
@@ -1414,7 +1325,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
         </main>
       </div>
 
-      <LibraryTagManagerDialog<ModelTag>
+      {canManageTags ? <LibraryTagManagerDialog<ModelTag>
         isOpen={tagManagerOpen}
         tags={tags}
         isCreating={createTagMutation.isPending}
@@ -1429,7 +1340,7 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
         onReorderTags={handleReorderTags}
         sameColorSingleFilter={sameColorSingleFilter}
         onSameColorSingleFilterChange={setSameColorSingleFilter}
-      />
+      /> : null}
       <LibraryImageActionToast toast={imageActionToast} />
       {activeProject ? (
         <LibraryBulkActions
@@ -1445,6 +1356,9 @@ export function ModelLibraryPage({ searchQuery = "" }: { searchQuery?: string })
           onAddTags={(tagNames) => bulkModelEntriesMutation.mutate({ operation: "add_tags", tags: tagNames })}
           onRemoveTags={(tagNames) => bulkModelEntriesMutation.mutate({ operation: "remove_tags", tags: tagNames })}
           onDeleteSelected={() => bulkModelEntriesMutation.mutate({ operation: "delete" })}
+          canEditEntries={canEditEntries}
+          canDeleteEntries={canDeleteEntries}
+          canManageTags={canManageTags}
         />
       ) : null}
     </section>

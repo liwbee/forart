@@ -18,6 +18,20 @@
 @import "./infinite-canvas.css";
 @import "./responsive.css";
 
+/* Keep every shared overlay aligned with the action-category dialog border. */
+[data-slot="dialog-content"],
+[data-slot="alert-dialog-content"],
+[data-slot="sheet-content"],
+[data-slot="popover-content"],
+[data-slot="hover-card-content"],
+[data-slot="select-content"],
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"],
+[data-slot="context-menu-content"],
+[data-slot="context-menu-sub-content"] {
+  border-color: var(--border-subtle);
+}
+
 :root {
   color-scheme: light;
   font-family: "Noto Sans SC", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -600,6 +614,13 @@ body {
   background: var(--danger-soft);
 }
 
+.settings-status[data-tone="warning"],
+.settings-inline-status[data-tone="warning"] {
+  color: var(--status-warning-text);
+  border-color: var(--status-warning-border);
+  background: var(--status-warning-bg);
+}
+
 .settings-status[data-tone="busy"],
 .settings-inline-status[data-tone="busy"] {
   color: var(--text-primary);
@@ -753,6 +774,12 @@ body {
   gap: var(--space-2);
 }
 
+.settings-run-mode-controls .settings-status {
+  flex: 0 0 auto;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .settings-run-mode-panel {
   display: grid;
   gap: var(--space-3);
@@ -830,7 +857,8 @@ body {
   gap: var(--space-2);
 }
 
-.settings-field span {
+.settings-field span,
+.settings-field > label {
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: var(--font-weight-medium);
@@ -1240,6 +1268,39 @@ body {
   color: currentColor;
   opacity: 0.65;
   cursor: grab;
+}
+
+.setup-remote-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.setup-remote-fields .setup-field:first-child {
+  grid-column: 1 / -1;
+}
+
+.settings-remote-config {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.settings-remote-server-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.settings-remote-server-row [data-slot="button"] {
+  min-width: 88px;
+  min-height: 46px;
+}
+
+@media (max-width: 720px) {
+  .settings-remote-server-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .settings-api-model-toolbar {

@@ -59,14 +59,13 @@ CanvasAssests/output/thumb/<basename>.webp
 保持当前路径：
 
 ```text
-<databaseDir>/thumb/library-assets/<asset_id>.webp
+<forart_data>/thumb/library-assets/<asset_id>.webp
 ```
 
 示例：
 
 ```text
-<library>/.forart/database/thumb/library-assets/asset_xxxxx.webp
-/database/thumb/library-assets/asset_xxxxx.webp
+<forart_data>/thumb/library-assets/asset_xxxxx.webp
 ```
 
 说明：

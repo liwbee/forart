@@ -43,7 +43,11 @@ function createImageReviewScaledImageStore({
 
   function runNext() {
     while (active < maxConcurrent && queue.length) {
-      const next = queue.shift();
+      let nextIndex = 0;
+      for (let index = 1; index < queue.length; index += 1) {
+        if (queue[index].priority > queue[nextIndex].priority) nextIndex = index;
+      }
+      const [next] = queue.splice(nextIndex, 1);
       if (next.generation !== cacheGeneration) {
         next.reject(createCacheClearedError());
         continue;
@@ -59,14 +63,14 @@ function createImageReviewScaledImageStore({
     }
   }
 
-  function enqueue(task, generation) {
+  function enqueue(task, generation, priority, cacheKey) {
     return new Promise((resolve, reject) => {
-      queue.push({ task, resolve, reject, generation });
+      queue.push({ task, resolve, reject, generation, priority, cacheKey });
       runNext();
     });
   }
 
-  async function generate(filePath, size) {
+  async function generate(filePath, size, priority = 0) {
     const stats = await fsp.stat(filePath);
     const cacheKey = `${filePath}|${stats.size}|${stats.mtimeMs}|${size}`;
     const cached = cache.get(cacheKey);
@@ -76,7 +80,11 @@ function createImageReviewScaledImageStore({
     }
 
     const existing = inFlight.get(cacheKey);
-    if (existing?.generation === cacheGeneration) return existing.promise;
+    if (existing?.generation === cacheGeneration) {
+      const pending = queue.find((item) => item.cacheKey === cacheKey);
+      if (pending) pending.priority = Math.max(pending.priority, priority);
+      return existing.promise;
+    }
 
     const generationAtRequest = cacheGeneration;
     const task = enqueue(async () => {
@@ -104,7 +112,7 @@ function createImageReviewScaledImageStore({
         evict();
       }
       return entry;
-    }, generationAtRequest).finally(() => {
+    }, generationAtRequest, priority, cacheKey).finally(() => {
       if (inFlight.get(cacheKey)?.promise === task) inFlight.delete(cacheKey);
     });
 

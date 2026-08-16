@@ -168,3 +168,48 @@ test('local status checks that the configured IPC library path is accessible', a
   assert.equal(available.ok, true);
   assert.equal(available.transport, 'ipc');
 });
+
+test('remote authentication uses bearer tokens without Electron cookies', async () => {
+  const handlers = new Map();
+  const requests = [];
+  let savedConfig = { mode: 'local' };
+  registerConfigIpc({
+    ipcMain: { handle(channel, handler) { handlers.set(channel, handler); } },
+    dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
+    configStore: {
+      load: () => savedConfig,
+      loadApiSettings: () => ({}),
+      loadImageReviewSettings: () => ({}),
+      loadInfiniteCanvasSettings: () => ({}),
+      save: (value) => { savedConfig = value; return value; },
+      saveApiSettings: (value) => value,
+      saveImageReviewSettings: (value) => value,
+      saveInfiniteCanvasSettings: (value) => value,
+    },
+    app: { getPath: () => '' },
+    net: {
+      fetch: async (url, options) => {
+        requests.push({ url, options });
+        return {
+          ok: true,
+          headers: new Headers({ 'set-auth-token': 'token-1' }),
+          json: async () => ({ user: { id: 'admin-1' } }),
+        };
+      },
+    },
+  });
+
+  await handlers.get('server:login')({}, {
+    serverUrl: 'https://forart.example.com/', username: 'admin', password: 'password123',
+  });
+  await handlers.get('server:login')({}, {
+    serverUrl: 'https://forart.example.com/', username: 'admin', password: 'password123',
+  });
+
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    assert.equal(request.options.credentials, 'omit');
+    assert.equal(request.options.headers.origin, 'https://forart.example.com');
+    assert.equal(request.options.headers.cookie, undefined);
+  }
+});

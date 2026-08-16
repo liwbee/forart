@@ -1,4 +1,4 @@
-const { app, ipcMain, dialog, protocol, net, shell, clipboard } = require('electron');
+const { app, ipcMain, dialog, protocol, net, shell, clipboard, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -58,7 +58,7 @@ const canvasStore = createCanvasStore({ rootDir: portableRootDir });
 const generationTaskRepository = createGenerationTaskRepository({ rootDir: portableRootDir });
 const canvasCacheStore = createCanvasCacheStore({ assetStore, canvasStore, generationTaskRepository, shell });
 const canvasPackageStore = createCanvasPackageStore({ rootDir: appRootDir, dialog, canvasStore, assetStore, net });
-const configStore = createConfigStore({ app, rootDir: portableRootDir });
+const configStore = createConfigStore({ app, rootDir: portableRootDir, safeStorage });
 const generationResultCommitter = createGenerationResultCommitter({ repository: generationTaskRepository, canvasStore });
 const generationTaskService = createGenerationTaskService({ repository: generationTaskRepository });
 const generationTaskStore = generationTaskService.createStoreAdapter('api');
@@ -100,6 +100,8 @@ let mainWindow = null;
 let appTray = null;
 let disposeCloseToTray = null;
 let isQuitting = false;
+let localApiClosed = false;
+let localApiClosePromise = null;
 const disposeGenerationTaskIpc = registerGenerationTaskIpc({
   ipcMain,
   generationTaskService,
@@ -131,7 +133,7 @@ function registerImageReviewProtocol() {
     try {
       const target = imageReviewStore.resolveScaledImageUrl(request.url);
       if (!target) return new Response('Image not found', { status: 404 });
-      const result = await imageReviewScaledImageStore.generate(target.filePath, target.size);
+      const result = await imageReviewScaledImageStore.generate(target.filePath, target.size, target.priority);
       return new Response(result.buffer, {
         headers: {
           'Content-Type': result.contentType,
@@ -221,9 +223,18 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   isQuitting = true;
-  localApi?.close?.();
+  if (localApiClosed) return;
+  event.preventDefault();
+  if (!localApiClosePromise) {
+    localApiClosePromise = Promise.resolve(localApi?.close?.())
+      .catch((error) => console.error('Local library database shutdown failed:', error))
+      .finally(() => {
+        localApiClosed = true;
+        app.quit();
+      });
+  }
 });
 app.on('will-quit', () => {
   disposeCloseToTray?.();

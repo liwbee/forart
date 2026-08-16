@@ -1,4 +1,4 @@
-import { Download, Shuffle } from "lucide-react";
+import { Download, LoaderCircle, Shuffle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { ButtonGroup } from "../../../components/ui/button-group";
@@ -20,6 +20,56 @@ interface ActionFissionParamPanelProps {
   onStop: () => void | Promise<void>;
 }
 
+interface ActionFissionBatchActionsProps {
+  grouped?: boolean;
+  canRandomize: boolean;
+  onRandomize: () => void;
+  canDownload: boolean;
+  isDownloading: boolean;
+  onDownload: () => void | Promise<void>;
+}
+
+export function ActionFissionBatchActions({
+  grouped = true,
+  canRandomize,
+  onRandomize,
+  canDownload,
+  isDownloading,
+  onDownload,
+}: ActionFissionBatchActionsProps) {
+  const { t } = useTranslation();
+  const buttons = (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        disabled={!canDownload || isDownloading}
+        aria-label={t("infiniteCanvas:actionFissionDownloadAll")}
+        title={t("infiniteCanvas:actionFissionDownloadAll")}
+        onClick={() => void onDownload()}
+      >
+        {isDownloading
+          ? <LoaderCircle className="animate-spin" aria-hidden="true" />
+          : <Download aria-hidden="true" />}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        disabled={!canRandomize}
+        aria-label={t("infiniteCanvas:actionFissionSwitchAllActions")}
+        title={t("infiniteCanvas:actionFissionSwitchAllActions")}
+        onClick={onRandomize}
+      >
+        <Shuffle aria-hidden="true" />
+      </Button>
+    </>
+  );
+
+  return grouped ? <ButtonGroup>{buttons}</ButtonGroup> : buttons;
+}
+
 export function ActionFissionParamPanel({
   nodeId,
   data,
@@ -34,8 +84,6 @@ export function ActionFissionParamPanel({
   onRun,
   onStop,
 }: ActionFissionParamPanelProps) {
-  const { t } = useTranslation();
-
   return (
     <ImageGeneratorParamPanel
       nodeId={nodeId}
@@ -48,30 +96,13 @@ export function ActionFissionParamPanel({
       onRun={onRun}
       onStop={onStop}
       beforeRunControl={(
-        <ButtonGroup>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            disabled={!canDownload || isDownloading}
-            aria-label={t("infiniteCanvas:actionFissionDownloadAll")}
-            title={t("infiniteCanvas:actionFissionDownloadAll")}
-            onClick={onDownload}
-          >
-            <Download aria-hidden="true" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            disabled={!canRandomize}
-            aria-label={t("infiniteCanvas:actionFissionSwitchAllActions")}
-            title={t("infiniteCanvas:actionFissionSwitchAllActions")}
-            onClick={onRandomize}
-          >
-            <Shuffle aria-hidden="true" />
-          </Button>
-        </ButtonGroup>
+        <ActionFissionBatchActions
+          canRandomize={canRandomize}
+          onRandomize={onRandomize}
+          canDownload={canDownload}
+          isDownloading={isDownloading}
+          onDownload={onDownload}
+        />
       )}
     />
   );

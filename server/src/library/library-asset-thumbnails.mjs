@@ -2,7 +2,6 @@ import { existsSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { generateSharpImageThumbnail } from "../shared/image-thumbnail-sharp.mjs";
 
-const THUMB_DIR = path.join("thumb", "library-assets");
 const THUMB_EXT = ".webp";
 
 function logThumbnailError(message, error) {
@@ -16,27 +15,28 @@ function safeAssetId(assetId) {
   return value;
 }
 
-function databaseDir(runtime) {
-  return runtime?.databaseDir || path.dirname(runtime?.databasePath || "");
-}
-
 export function libraryAssetThumbnailRoot(runtime) {
-  const root = databaseDir(runtime);
-  if (!root) throw new Error("Library database directory is not configured");
-  return path.join(root, THUMB_DIR);
+  const root = String(runtime?.thumbnailRoot || "").trim();
+  if (!root) throw new Error("Forart data directory is not configured");
+  return path.resolve(root);
 }
 
-export function libraryAssetThumbnailPath(runtime, assetId) {
-  return path.join(libraryAssetThumbnailRoot(runtime), `${safeAssetId(assetId)}${THUMB_EXT}`);
+export function libraryAssetThumbnailPath(runtime, asset) {
+  return path.join(libraryAssetThumbnailRoot(runtime, asset), `${safeAssetId(asset?.id)}${THUMB_EXT}`);
 }
 
-export function deleteLibraryAssetThumbnail(runtime, assetId) {
-  if (!assetId) return;
+export function libraryAssetThumbnailStorageKey(runtime, asset) {
+  const target = libraryAssetThumbnailPath(runtime, asset);
+  return path.relative(runtime.runtimeDataDir, target);
+}
+
+export function deleteLibraryAssetThumbnail(runtime, asset) {
+  if (!asset?.id) return;
   try {
-    const target = libraryAssetThumbnailPath(runtime, assetId);
+    const target = libraryAssetThumbnailPath(runtime, asset);
     if (existsSync(target)) unlinkSync(target);
   } catch (error) {
-    logThumbnailError(`Failed to delete thumbnail for ${assetId}`, error);
+    logThumbnailError(`Failed to delete thumbnail for ${asset.id}`, error);
   }
 }
 
@@ -44,13 +44,13 @@ export function ensureLibraryAssetThumbnail(runtime, asset, sourcePath) {
   if (!asset?.id) return Promise.resolve(null);
   let targetPath = "";
   try {
-    targetPath = libraryAssetThumbnailPath(runtime, asset.id);
+    targetPath = libraryAssetThumbnailPath(runtime, asset);
   } catch (error) {
     logThumbnailError(`Failed to resolve thumbnail path for ${asset.id}`, error);
     return Promise.resolve(null);
   }
   return generateSharpImageThumbnail({
-    key: `library:${databaseDir(runtime)}:${asset.id}`,
+    key: `library:${targetPath}:${asset.id}`,
     sourcePath,
     targetPath,
     mimeType: asset.mime_type || "",

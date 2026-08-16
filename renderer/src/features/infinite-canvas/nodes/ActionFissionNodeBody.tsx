@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useEdges, useNodes } from "@xyflow/react";
+import { NodeToolbar, Position, useEdges, useNodes, useReactFlow, useStore } from "@xyflow/react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import type { GenerationTaskDto } from "../../../app/appConfig";
@@ -17,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { AppScrollArea } from "../../../components/AppScrollArea";
+import { RemoteDataState } from "../../../components/RemoteDataState";
 import { Button } from "../../../components/ui/button";
 import { ButtonGroup } from "../../../components/ui/button-group";
 import { Switch } from "../../../components/ui/switch";
@@ -52,7 +53,7 @@ import {
   collectActionFissionAdditionalReferences,
   collectImageGeneratorReferences,
 } from "../generation/imageGenerationInputs";
-import { ActionFissionParamPanel } from "./ActionFissionParamPanel";
+import { ActionFissionBatchActions, ActionFissionParamPanel } from "./ActionFissionParamPanel";
 import { actionFissionLaunchingRowIds, useGenerationRuntimeStore } from "../generation/generationRuntimeStore";
 import { ReferenceComparisonImageViewer } from "./ReferenceComparisonImageViewer";
 import { useInfiniteCanvasSettings } from "../infiniteCanvasSettings";
@@ -283,6 +284,8 @@ function ResultPreview({
   const isPendingDownload = canDownload && row.resultDownloadState !== "downloaded";
   const tone = toneForRow(row, task, launching, runtimeError);
   const isActive = tone === "queued" || tone === "running";
+  const hasGenerationMessage = showStatusOverlay
+    && (tone === "queued" || tone === "running" || tone === "error");
   return (
     <div className={cn(
       "rf-action-fission-result-preview nodrag nopan",
@@ -304,7 +307,7 @@ function ResultPreview({
         >
           <img src={resolvedPreviewUrl} alt={alt} draggable={false} />
         </div>
-      ) : <Images aria-hidden="true" />}
+      ) : !hasGenerationMessage ? <Images aria-hidden="true" /> : null}
       {canDownload ? (
         <Button
           className={cn("rf-action-fission-download", isPendingDownload && "is-pending")}
@@ -350,6 +353,73 @@ function hasCategoryCandidates(groups: readonly { group: ActionFissionCategoryGr
   return groups.some(({ actions }) => actions.length > 0);
 }
 
+function ActionFissionNodeToolbar({
+  nodeId,
+  visible,
+  canRandomize,
+  onRandomize,
+  canDownload,
+  isDownloading,
+  onDownload,
+  canRun,
+  isGenerationActive,
+  onRun,
+  onStop,
+}: {
+  nodeId: string;
+  visible: boolean;
+  canRandomize: boolean;
+  onRandomize: () => void;
+  canDownload: boolean;
+  isDownloading: boolean;
+  onDownload: () => void | Promise<void>;
+  canRun: boolean;
+  isGenerationActive: boolean;
+  onRun: () => void | Promise<void>;
+  onStop: () => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const toolbarOffset = useStore((canvas) => canvas.transform[2]) * 36;
+  const { deleteElements } = useReactFlow<NativeCanvasNode, NativeCanvasEdge>();
+  const runLabel = t(isGenerationActive ? "infiniteCanvas:stopRun" : "infiniteCanvas:run");
+
+  return (
+    <NodeToolbar nodeId={nodeId} isVisible={visible} position={Position.Top} offset={toolbarOffset} className="rf-native-node-toolbar">
+      <Button
+        type="button"
+        variant="default"
+        size="icon-sm"
+        disabled={!isGenerationActive && !canRun}
+        aria-label={runLabel}
+        title={runLabel}
+        onClick={() => void (isGenerationActive ? onStop() : onRun())}
+      >
+        {isGenerationActive
+          ? <Square aria-hidden="true" fill="currentColor" />
+          : <Play aria-hidden="true" fill="currentColor" />}
+      </Button>
+      <ActionFissionBatchActions
+        grouped={false}
+        canRandomize={canRandomize}
+        onRandomize={onRandomize}
+        canDownload={canDownload}
+        isDownloading={isDownloading}
+        onDownload={onDownload}
+      />
+      <Button
+        type="button"
+        variant="destructive"
+        size="icon-sm"
+        aria-label={t("common:actions.delete")}
+        title={t("common:actions.delete")}
+        onClick={() => void deleteElements({ nodes: [{ id: nodeId }] })}
+      >
+        <Trash2 aria-hidden="true" />
+      </Button>
+    </NodeToolbar>
+  );
+}
+
 export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: ActionFissionNodeBodyProps) {
   const { t } = useTranslation();
   const actions = useNativeCanvasActions();
@@ -374,7 +444,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   const launchingKeys = useGenerationRuntimeStore((runtime) => runtime.launchingKeys);
   const launchingRowIds = useMemo(() => actionFissionLaunchingRowIds(launchingKeys, nodeId), [launchingKeys, nodeId]);
   const isLaunching = launchingRowIds.size > 0;
-  const { projects, rowData, isLoading } = useActionFissionLibraryData(state);
+  const { projects, rowData, isLoading, failure: libraryFailure, retry: retryLibrary } = useActionFissionLibraryData(state);
   const viewerImages = useMemo(() => ({
     result: state.rows.flatMap((row) => {
       const url = row.resultUrl || tasksByRowId[row.id]?.result?.images[0]?.assetUrl || "";
@@ -442,6 +512,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   const hasQueuedRows = state.rows.some((row) => isRowQueued(tasksByRowId[row.id]));
   const isRunning = state.rows.some((row) => isRowRunning(tasksByRowId[row.id]));
   const isGenerationActive = isLaunching || hasQueuedRows || hasRunningRows;
+  const canRandomize = !libraryFailure && canSwitchAnyRow && !isGenerationActive;
   const completedRowCount = state.rows.filter((row) => {
     const task = tasksByRowId[row.id];
     if (launchingRowIds.has(row.id) || isRowQueued(task) || isRowGenerating(task)) return false;
@@ -500,13 +571,13 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
     const pendingRows = rowData.filter(({ row, categoryGroups }) => (
       !row.selectedActionId && hasCategoryCandidates(categoryGroups)
     ));
-    if (!pendingRows.length) return;
+    if (libraryFailure || !pendingRows.length) return;
     const pendingRowIds = new Set(pendingRows.map(({ row }) => row.id));
     setState({
       ...state,
       rows: randomizeActionFissionRows(state.rows, candidatesByRowId, { rowIds: pendingRowIds }),
     });
-  }, [candidatesByRowId, rowData, setState, state]);
+  }, [candidatesByRowId, libraryFailure, rowData, setState, state]);
 
   const refreshRow = (rowId: string) => {
     const nextState = {
@@ -558,7 +629,8 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           icon: "shuffle" as const,
           disabled: (() => {
             const row = state.rows.find((item) => item.id === viewerImage.id);
-            return !row
+            return Boolean(libraryFailure)
+              || !row
               || !hasCategoryCandidates(candidatesByRowId.get(row.id) || [])
               || launchingRowIds.has(row.id)
               || isRowRunning(tasksByRowId[row.id]);
@@ -627,13 +699,27 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   };
 
   return (
-    <section
-      className="rf-action-fission"
+    <>
+      <ActionFissionNodeToolbar
+        nodeId={nodeId}
+        visible={paramPanelVisible}
+        canRandomize={canRandomize}
+        onRandomize={selectActions}
+        canDownload={downloadableRows.length > 0}
+        isDownloading={Boolean(downloadBusyRowId)}
+        onDownload={downloadAllRows}
+        canRun={!libraryFailure && runReadiness.canRun}
+        isGenerationActive={isGenerationActive}
+        onRun={() => actions.runActionFission(nodeId)}
+        onStop={() => actions.stopActionFission(nodeId)}
+      />
+      <section
+      className={cn("rf-action-fission", libraryFailure && "rf-action-fission--unavailable")}
       data-layout={state.layout}
       data-generating={isGenerationActive}
       data-has-additional-references={hasAdditionalReferences || undefined}
     >
-      <header className="rf-action-fission-header">
+      {!libraryFailure ? <header className="rf-action-fission-header">
         <span className="rf-action-fission-status rf-action-fission-group-status rf-action-fission-header-status" data-tone={groupTone}>
           {groupStatus}
         </span>
@@ -659,10 +745,17 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
             <Grid2X2 aria-hidden="true" />
           </ToggleGroupItem>
         </ToggleGroup>
-      </header>
+      </header> : null}
 
       <AppScrollArea className="rf-action-fission-scroll nowheel" viewportClassName="rf-action-fission-scroll-viewport" scrollBarClassName="nodrag">
-        {isLoading ? (
+        {libraryFailure ? (
+          <RemoteDataState
+            failure={libraryFailure}
+            scope="node"
+            className="h-full min-h-0 border-0"
+            onRetry={retryLibrary}
+          />
+        ) : isLoading ? (
           <div className="rf-action-fission-empty">{t("common:states.loading")}</div>
         ) : state.layout === "grid" ? (
           <div className="rf-action-fission-grid">
@@ -682,8 +775,8 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
                 </div>
                 <ActionRowSummary row={row} projects={projects} tags={tags} />
                 <ButtonGroup className="rf-action-fission-row-actions nodrag">
-                  <Button type="button" variant="ghost" size="icon-xs" aria-label={t("infiniteCanvas:actionFissionRowSettings")} title={t("infiniteCanvas:actionFissionRowSettings")} onClick={() => actions.openActionFissionRowSettings(nodeId, row.id)}><Settings2 aria-hidden="true" /></Button>
-                  <Button type="button" variant="ghost" size="icon-xs" disabled={!hasCategoryCandidates(categoryGroups)} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>
+                  <Button type="button" variant="ghost" size="icon-xs" disabled={Boolean(libraryFailure)} aria-label={t("infiniteCanvas:actionFissionRowSettings")} title={t("infiniteCanvas:actionFissionRowSettings")} onClick={() => actions.openActionFissionRowSettings(nodeId, row.id)}><Settings2 aria-hidden="true" /></Button>
+                  <Button type="button" variant="ghost" size="icon-xs" disabled={Boolean(libraryFailure) || !hasCategoryCandidates(categoryGroups)} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>
                   <Button type="button" variant="ghost" size="icon-xs" disabled={launchingRowIds.has(row.id) || (!isRowRunning(tasksByRowId[row.id]) && (!row.selectedActionId || referenceCount < 1))} aria-label={t(isRowRunning(tasksByRowId[row.id]) ? "infiniteCanvas:stopRun" : "infiniteCanvas:actionFissionRerunImage")} onClick={() => void (isRowRunning(tasksByRowId[row.id]) ? actions.stopActionFission(nodeId, row.id) : actions.runActionFission(nodeId, row.id))}>{isRowRunning(tasksByRowId[row.id]) ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" />}</Button>
                   <Button type="button" variant="ghost" size="icon-xs" disabled={state.rows.length <= 1} aria-label={t("infiniteCanvas:actionFissionDeleteRow")} onClick={() => deleteRow(row.id)}><Trash2 aria-hidden="true" /></Button>
                 </ButtonGroup>
@@ -706,8 +799,8 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
                 ) : null}
                 <ActionPreview row={row} onOpen={setViewerImage} />
                 <ButtonGroup className="rf-action-fission-row-actions nodrag">
-                  <Button type="button" variant="ghost" size="icon-sm" aria-label={t("infiniteCanvas:actionFissionRowSettings")} title={t("infiniteCanvas:actionFissionRowSettings")} onClick={() => actions.openActionFissionRowSettings(nodeId, row.id)}><Settings2 aria-hidden="true" /></Button>
-                  <Button type="button" variant="ghost" size="icon-sm" disabled={!hasCategoryCandidates(categoryGroups)} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>
+                  <Button type="button" variant="ghost" size="icon-sm" disabled={Boolean(libraryFailure)} aria-label={t("infiniteCanvas:actionFissionRowSettings")} title={t("infiniteCanvas:actionFissionRowSettings")} onClick={() => actions.openActionFissionRowSettings(nodeId, row.id)}><Settings2 aria-hidden="true" /></Button>
+                  <Button type="button" variant="ghost" size="icon-sm" disabled={Boolean(libraryFailure) || !hasCategoryCandidates(categoryGroups)} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>
                   <Button type="button" variant="ghost" size="icon-sm" disabled={launchingRowIds.has(row.id) || (!isRowRunning(tasksByRowId[row.id]) && (!row.selectedActionId || referenceCount < 1))} aria-label={t(isRowRunning(tasksByRowId[row.id]) ? "infiniteCanvas:stopRun" : "infiniteCanvas:actionFissionRerunImage")} onClick={() => void (isRowRunning(tasksByRowId[row.id]) ? actions.stopActionFission(nodeId, row.id) : actions.runActionFission(nodeId, row.id))}>{isRowRunning(tasksByRowId[row.id]) ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" />}</Button>
                   <Button type="button" variant="ghost" size="icon-sm" disabled={state.rows.length <= 1} aria-label={t("infiniteCanvas:actionFissionDeleteRow")} onClick={() => deleteRow(row.id)}><Trash2 aria-hidden="true" /></Button>
                 </ButtonGroup>
@@ -717,11 +810,11 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
         )}
       </AppScrollArea>
 
-      <ActionFissionParamPanel
+      {!libraryFailure ? <ActionFissionParamPanel
         nodeId={nodeId}
         data={data}
         visible={paramPanelVisible}
-        canRandomize={canSwitchAnyRow && !isLaunching}
+        canRandomize={canRandomize}
         onRandomize={selectActions}
         canDownload={downloadableRows.length > 0 && !isLaunching}
         isDownloading={Boolean(downloadBusyRowId)}
@@ -730,8 +823,8 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
         isRunning={isRunning}
         onRun={() => actions.runActionFission(nodeId)}
         onStop={() => actions.stopActionFission(nodeId)}
-      />
-      {viewerImage?.kind === "action" ? (
+      /> : null}
+      {!libraryFailure && viewerImage?.kind === "action" ? (
         <ImageViewer
           src={resolvedViewerImage?.src ?? viewerImage.src}
           alt={resolvedViewerImage?.alt ?? viewerImage.alt}
@@ -740,7 +833,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           actions={viewerActions}
           navigation={viewerNavigation}
         />
-      ) : viewerImage ? (
+      ) : !libraryFailure && viewerImage ? (
         <ReferenceComparisonImageViewer
           src={resolvedViewerImage?.src ?? viewerImage.src}
           alt={resolvedViewerImage?.alt ?? viewerImage.alt}
@@ -778,6 +871,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           navigation={viewerNavigation}
         />
       ) : null}
-    </section>
+      </section>
+    </>
   );
 }

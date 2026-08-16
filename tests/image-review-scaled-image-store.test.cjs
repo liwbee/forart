@@ -17,7 +17,7 @@ test('image review returns separate original and scaled image URLs', async (t) =
 
   const store = createImageReviewStore();
   store.authorizeRoot(root);
-  const productImages = await store.loadProductImages({ root, productId: 'SKU-001', modelFolders: 'model', detailFolders: '' });
+  const productImages = await store.loadProductImages({ root, productId: 'SKU-001', modelFolders: 'model', detailFolders: '', requestPriority: 7 });
   const image = productImages.modelImages[0];
   assert.equal(Object.hasOwn(image, 'url'), false);
   assert.match(image.originalUrl, /^forart-review:\/\//);
@@ -25,7 +25,9 @@ test('image review returns separate original and scaled image URLs', async (t) =
   assert.match(image.originalUrl, /[?&]bytes=\d+/);
   assert.match(image.thumbnailUrl, /^forart-review-thumb:\/\//);
   assert.match(image.previewUrl, /^forart-review-preview:\/\//);
+  assert.match(image.thumbnailUrl, /[?&]priority=7(?:&|$)/);
   assert.equal(store.resolveScaledImageUrl(image.thumbnailUrl).size, 132);
+  assert.equal(store.resolveScaledImageUrl(image.thumbnailUrl).priority, 7);
   assert.equal(store.resolveScaledImageUrl(image.previewUrl).size, 700);
 
   fs.writeFileSync(imagePath, Buffer.from('updated-image'));
@@ -130,6 +132,46 @@ test('image review scaled image store limits concurrency and reuses memory entri
 
   store.clear();
   assert.equal(store.stats().entries, 0);
+});
+
+test('image review scaled image store runs the current product before older queued products', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-review-priority-'));
+  const activePath = path.join(root, 'active.png');
+  const olderPath = path.join(root, 'older.png');
+  const currentPath = path.join(root, 'current.png');
+  [activePath, olderPath, currentPath].forEach((filePath) => fs.writeFileSync(filePath, Buffer.from(filePath)));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  let releaseActive;
+  const activeGate = new Promise((resolve) => { releaseActive = resolve; });
+  const started = [];
+  const sharpFactory = (filePath) => ({
+    rotate() { return this; },
+    resize() { return this; },
+    webp() { return this; },
+    async metadata() { return { hasAlpha: false }; },
+    async toBuffer() {
+      started.push(path.basename(filePath));
+      if (filePath === activePath) await activeGate;
+      return Buffer.from(filePath);
+    },
+  });
+  const store = createImageReviewScaledImageStore({ maxConcurrent: 1, sharpFactory });
+
+  const active = store.generate(activePath, 132, 1);
+  for (let attempt = 0; attempt < 20 && store.stats().active < 1; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  const older = store.generate(olderPath, 132, 1);
+  const current = store.generate(currentPath, 132, 2);
+  for (let attempt = 0; attempt < 20 && store.stats().queued < 2; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  assert.equal(store.stats().queued, 2);
+  releaseActive();
+
+  await Promise.all([active, older, current]);
+  assert.deepEqual(started, ['active.png', 'current.png', 'older.png']);
 });
 
 test('image review scaled image store does not run queued work after clear', async (t) => {

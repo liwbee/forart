@@ -14,6 +14,9 @@ import { Separator } from "../components/ui/separator";
 import { SidebarInset, SidebarProvider } from "../components/ui/sidebar";
 import { AppSidebar, AppSidebarTrigger } from "./AppSidebar";
 import { useDesktopUpdater, type DesktopUpdateStatus } from "./update/DesktopUpdater";
+import { syncPermissions } from "../features/permissions";
+import { ServerLoginDialog } from "../features/server-auth/ServerLoginDialog";
+import { WorkspaceErrorBoundary } from "../components/WorkspaceErrorBoundary";
 
 const LIBRARY_QUERY_ROOTS = new Set([
   "storageSettings",
@@ -193,6 +196,7 @@ export function App() {
         if (config) {
           if (i18n.language !== config.language) void i18n.changeLanguage(config.language);
           setActiveForartConfig(config);
+          void syncPermissions(config);
         }
         setAppConfig(config || null);
         setConfigLoaded(true);
@@ -219,13 +223,13 @@ export function App() {
     return (
       appConfig.mode !== nextConfig.mode ||
       appConfig.localLibraryPath !== nextConfig.localLibraryPath ||
-      appConfig.serverUrl !== nextConfig.serverUrl
+      appConfig.serverUrl !== nextConfig.serverUrl ||
+      appConfig.serverAuthToken !== nextConfig.serverAuthToken
     );
   }
 
-  function refreshLibraryQueries() {
-    void queryClient.invalidateQueries({
-      refetchType: "active",
+  function resetLibraryQueries() {
+    void queryClient.resetQueries({
       predicate: (query) => {
         const root = query.queryKey[0];
         return typeof root === "string" && LIBRARY_QUERY_ROOTS.has(root);
@@ -234,10 +238,11 @@ export function App() {
   }
 
   function updateConfig(config: ForartAppConfig) {
-    const refreshLibraryCache = shouldRefreshLibraryQueries(config);
+    const resetLibraryCache = shouldRefreshLibraryQueries(config);
     setActiveForartConfig(config);
+    void syncPermissions(config);
     setAppConfig(config);
-    if (refreshLibraryCache) refreshLibraryQueries();
+    if (resetLibraryCache) resetLibraryQueries();
   }
 
   function toggleLanguage() {
@@ -297,6 +302,14 @@ export function App() {
   const keepAliveViewsToRender = isKeepAliveView(activeView)
     ? new Set([...mountedKeepAliveViews, activeView])
     : mountedKeepAliveViews;
+
+  const workspaceErrorBoundaryProps = {
+    title: t("common:workspaceError.title"),
+    description: t("common:workspaceError.description"),
+    retryLabel: t("common:workspaceError.retry"),
+    settingsLabel: t("common:workspaceError.settings"),
+    onOpenSettings: () => setActiveView("settings" as const),
+  };
 
   if (!isElectron && !browserDiagnosticRuntime) {
     return (
@@ -363,12 +376,16 @@ export function App() {
             <div className="workspace" id="main-workspace">
               {[...keepAliveViewsToRender].map((view) => (
                 <KeepAliveWorkspaceView key={view} active={activeView === view} view={view}>
-                  {renderView(view, appConfig, updateConfig)}
+                  <WorkspaceErrorBoundary {...workspaceErrorBoundaryProps}>
+                    {renderView(view, appConfig, updateConfig)}
+                  </WorkspaceErrorBoundary>
                 </KeepAliveWorkspaceView>
               ))}
               {!isKeepAliveView(activeView) ? (
                 <div key={`active-${activeView}`} className="workspace-view workspace-view--active" data-view={activeView}>
-                  {renderView(activeView, appConfig, updateConfig)}
+                  <WorkspaceErrorBoundary {...workspaceErrorBoundaryProps}>
+                    {renderView(activeView, appConfig, updateConfig)}
+                  </WorkspaceErrorBoundary>
                 </div>
               ) : null}
             </div>
@@ -376,6 +393,7 @@ export function App() {
           </SidebarInset>
         </SidebarProvider>
       </AppFrame>
+      <ServerLoginDialog config={appConfig} onConfigChange={updateConfig} />
       <Toaster
         theme={theme}
         position="top-right"

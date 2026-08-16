@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { actionLibraryKeys, listActionProjects, listActions, listActionTags } from "../../action-library/api";
 import type { LibraryTagFilter } from "../../library-tags";
+import { firstRequestFailure } from "../../../lib/requestFailure";
 import type { ActionFissionCategoryGroup, ActionFissionState } from "./actionFissionTypes";
 
 interface GroupQuerySpec {
@@ -65,6 +66,19 @@ export function useActionFissionLibraryData(state: ActionFissionState) {
   const tagsByProject = new Map(projectIds.map((projectId, index) => [projectId, tagsQueries[index]?.data?.tags || []]));
   const actionsByKey = new Map(querySpecs.map((spec, index) => [spec.key, actionsQueries[index]?.data?.actions || []]));
   const loadingByKey = new Map(querySpecs.map((spec, index) => [spec.key, Boolean(actionsQueries[index]?.isLoading)]));
+  const failure = firstRequestFailure([
+    projectsQuery.error,
+    ...tagsQueries.map((query) => query.error),
+    ...actionsQueries.map((query) => query.error),
+  ]);
+
+  async function retry() {
+    await Promise.all([
+      projectsQuery.refetch(),
+      ...tagsQueries.map((query) => query.refetch()),
+      ...actionsQueries.map((query) => query.refetch()),
+    ]);
+  }
 
   return {
     projects: projectsQuery.data?.projects || [],
@@ -89,6 +103,10 @@ export function useActionFissionLibraryData(state: ActionFissionState) {
         isLoading: categoryGroups.some((group) => group.isLoading),
       };
     }),
-    isLoading: projectsQuery.isLoading,
+    isLoading: projectsQuery.isLoading
+      || tagsQueries.some((query) => query.isLoading)
+      || actionsQueries.some((query) => query.isLoading),
+    failure,
+    retry,
   };
 }

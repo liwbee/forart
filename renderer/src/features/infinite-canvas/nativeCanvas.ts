@@ -1,5 +1,5 @@
 import type { Edge, Node, XYPosition } from "@xyflow/react";
-import { Bot, ImageIcon, ImagePlus, Split, TextCursorInput, Type, type LucideIcon } from "lucide-react";
+import { Bot, FolderKanban, ImageIcon, ImagePlus, Split, TextCursorInput, Type, type LucideIcon } from "lucide-react";
 import type { ActionFissionState } from "./action-fission/actionFissionTypes";
 import {
   getImageGeneratorNodeSize,
@@ -10,7 +10,7 @@ import {
 
 export { getImageGeneratorNodeSize, getImageNodeSize } from "./imageNodeSizing";
 
-export type NativeCanvasNodeKind = "imageGenerator" | "imageLoader" | "prompt" | "annotation" | "llm" | "actionFission";
+export type NativeCanvasNodeKind = "imageGenerator" | "imageLoader" | "prompt" | "annotation" | "llm" | "actionFission" | "group";
 
 export interface NativeGenerationResult {
   url?: string;
@@ -51,6 +51,9 @@ export interface ImageGenerationRunOptions {
 export interface NativeCanvasNodeData extends Record<string, unknown> {
   kind: NativeCanvasNodeKind;
   label: string;
+  /** Legacy grouping marker. New documents use React Flow parentId/groupNode instead. */
+  groupId?: string;
+  groupColor?: string;
   imageUrl?: string;
   thumbUrl?: string;
   text?: string;
@@ -84,7 +87,7 @@ export interface NativeCanvasNodeData extends Record<string, unknown> {
   actionFission?: ActionFissionState;
 }
 
-export type NativeCanvasNode = Node<NativeCanvasNodeData, "canvasNode">;
+export type NativeCanvasNode = Node<NativeCanvasNodeData, "canvasNode" | "groupNode">;
 export type NativeCanvasInputKind =
   | "prompt"
   | "referenceImage"
@@ -125,7 +128,7 @@ export interface NativeCanvasNodeResizeConfig {
 
 interface NativeCanvasNodeDefinition {
   icon: LucideIcon;
-  labelKey: "imageGenerator" | "imageNode" | "prompt" | "annotation" | "llm" | "actionFission";
+  labelKey: "imageGenerator" | "imageNode" | "prompt" | "annotation" | "llm" | "actionFission" | "group";
   size: { width: number; height: number };
   acceptsInput: boolean;
   providesOutput: boolean;
@@ -187,6 +190,13 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
       maxHeight: 1078,
     },
   },
+  group: {
+    icon: FolderKanban,
+    labelKey: "group",
+    size: { width: 640, height: 420 },
+    acceptsInput: false,
+    providesOutput: false,
+  },
 };
 
 export const NATIVE_CANVAS_NODE_KINDS = Object.keys(NATIVE_CANVAS_NODE_DEFINITIONS) as NativeCanvasNodeKind[];
@@ -210,6 +220,25 @@ export function createNativeCanvasNode(
     style: kind === "imageGenerator" && !nodeData.imageUrl
       ? getImageGeneratorNodeSize(nodeData.imageAspectRatio)
       : definition.size,
+  };
+}
+
+export function createNativeCanvasGroupNode(
+  position: XYPosition,
+  size: { width: number; height: number },
+  label = "",
+): NativeCanvasNode {
+  return {
+    id: `group_${crypto.randomUUID()}`,
+    type: "groupNode",
+    position,
+    data: { kind: "group", label },
+    style: size,
+    zIndex: 0,
+    draggable: true,
+    selectable: true,
+    connectable: false,
+    deletable: true,
   };
 }
 

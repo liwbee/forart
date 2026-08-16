@@ -1,14 +1,20 @@
 import { getActiveForartConfig, getApiBaseUrl } from "../data-source/runtime";
+import { invalidatePermissions, refreshPermissions } from "../features/permissions";
+import { requestFailureKindFromStatus, type RequestFailureKind } from "./requestFailure";
+
+const QUERY_TIMEOUT_MS = 15_000;
 
 export class ApiError extends Error {
   status: number;
   detail: unknown;
+  kind: RequestFailureKind;
 
-  constructor(message: string, status: number, detail: unknown) {
+  constructor(message: string, status: number, detail: unknown, kind = requestFailureKindFromStatus(status)) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
+    this.kind = kind;
   }
 }
 
@@ -54,17 +60,52 @@ function throwApiErrorFromBody(status: number, body: unknown): never {
   throw new ApiError(message, status, body);
 }
 
+function networkError(error: unknown, timedOut: boolean) {
+  if (timedOut) return new ApiError("Request timed out.", 0, error, "timeout");
+  const message = error instanceof Error && error.message ? error.message : "Network request failed.";
+  return new ApiError(message, 0, error, "unavailable");
+}
+
 async function httpRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(resolveApiUrl(path), {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
+  const authToken = getActiveForartConfig()?.serverAuthToken || "";
+  const requestController = new AbortController();
+  const sourceSignal = options.signal;
+  const forwardAbort = () => requestController.abort(sourceSignal?.reason);
+  let timedOut = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  if (sourceSignal?.aborted) forwardAbort();
+  else sourceSignal?.addEventListener("abort", forwardAbort, { once: true });
+  if (requestMethod(options) === "GET") {
+    timeout = setTimeout(() => {
+      timedOut = true;
+      requestController.abort();
+    }, QUERY_TIMEOUT_MS);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(resolveApiUrl(path), {
+      ...options,
+      signal: requestController.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        ...(options.headers || {}),
+      },
+    });
+  } catch (error) {
+    if (sourceSignal?.aborted && !timedOut) throw error;
+    throw networkError(error, timedOut);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    sourceSignal?.removeEventListener("abort", forwardAbort);
+  }
+
   const body = await parseResponse(response);
 
   if (!response.ok) {
+    if (response.status === 401) invalidatePermissions();
+    if (response.status === 403) void refreshPermissions();
     throwApiErrorFromBody(response.status, body);
   }
 

@@ -663,7 +663,8 @@
 
 .library-card-toolbar {
   position: fixed;
-  right: 24px;
+  /* Keep the fixed control clear of the library's 10px scrollbar gutter. */
+  right: 34px;
   bottom: 24px;
   z-index: 40;
   min-height: 46px;

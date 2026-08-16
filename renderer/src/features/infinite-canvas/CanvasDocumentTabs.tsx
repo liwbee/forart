@@ -15,7 +15,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Copy, Download, FileJson, FolderInput, Home, Layers3, Pencil, Plus, Trash2, UploadCloud, X } from "lucide-react";
+import { Cloud, CloudOff, Copy, Download, FileJson, FolderInput, Home, Layers3, Pencil, Plus, Trash2, UploadCloud, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../components/ui/button";
@@ -47,6 +47,9 @@ interface CanvasDocumentTabMenuActions {
   projects: CanvasProjectRecord[];
   sharedCanvasesEnabled: boolean;
   sharedProjects: CanvasProjectRecord[];
+  canEditSharedCanvases: boolean;
+  canDeleteSharedCanvases: boolean;
+  canCopySharedCanvases: boolean;
   onCopyToLocal: (tab: CanvasDocumentTab, projectId: string) => void;
   onDelete: (tab: CanvasDocumentTab) => void;
   onDuplicate: (tab: CanvasDocumentTab) => void;
@@ -85,6 +88,9 @@ function SortableCanvasTab({ tab, active, menuActions, onClose, onRename }: {
     transform: CSS.Transform.toString(transform ? { ...transform, y: 0 } : null),
     transition,
   };
+  const canRename = !tab.readOnly || menuActions.canEditSharedCanvases;
+  const canDelete = !tab.readOnly || menuActions.canDeleteSharedCanvases;
+  const CanvasIcon = tab.remoteUnavailable ? CloudOff : tab.readOnly ? Cloud : Layers3;
 
   const stopClosePointer = (event: PointerEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -95,6 +101,10 @@ function SortableCanvasTab({ tab, active, menuActions, onClose, onRename }: {
     renameInputRef.current?.focus();
     renameInputRef.current?.select();
   }, [renaming]);
+
+  useEffect(() => {
+    if (!canRename) setRenaming(false);
+  }, [canRename]);
 
   const commitRename = () => {
     if (cancelRenameRef.current) {
@@ -110,6 +120,7 @@ function SortableCanvasTab({ tab, active, menuActions, onClose, onRename }: {
   };
 
   const startRename = () => {
+    if (!canRename) return;
     cancelRenameRef.current = false;
     setRenameDraft(tab.title);
     setRenaming(true);
@@ -123,12 +134,13 @@ function SortableCanvasTab({ tab, active, menuActions, onClose, onRename }: {
           className="rf-workspace-tab"
           data-active={active || undefined}
           data-dragging={isDragging || undefined}
+          data-remote-unavailable={tab.remoteUnavailable || undefined}
           style={style}
           {...listeners}
         >
           {renaming ? (
             <div className="rf-workspace-tab__trigger rf-workspace-tab__editor">
-              <Layers3 aria-hidden="true" />
+              <CanvasIcon aria-hidden="true" />
               <Input
                 ref={renameInputRef}
                 className="rf-workspace-tab__rename-input"
@@ -151,12 +163,12 @@ function SortableCanvasTab({ tab, active, menuActions, onClose, onRename }: {
             </div>
           ) : (
             <TabsTrigger className="rf-workspace-tab__trigger" value={tab.id} title={tab.title}>
-              <Layers3 aria-hidden="true" />
+              <CanvasIcon aria-hidden="true" />
               <span
                 onDoubleClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  startRename();
+                  if (canRename) startRename();
                 }}
               >
                 {tab.title}
@@ -182,11 +194,11 @@ function SortableCanvasTab({ tab, active, menuActions, onClose, onRename }: {
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuGroup>
-          <ContextMenuItem onSelect={startRename}>
+          {canRename ? <ContextMenuItem onSelect={startRename}>
             <Pencil aria-hidden="true" />
             {t("common:actions.rename")}
-          </ContextMenuItem>
-          {tab.readOnly ? (
+          </ContextMenuItem> : null}
+          {tab.readOnly && menuActions.canCopySharedCanvases ? (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
                 <Copy aria-hidden="true" />
@@ -200,12 +212,12 @@ function SortableCanvasTab({ tab, active, menuActions, onClose, onRename }: {
                 )) : <ContextMenuItem disabled>{t("common:empty.noProjects")}</ContextMenuItem>}
               </ContextMenuSubContent>
             </ContextMenuSub>
-          ) : (
+          ) : !tab.readOnly ? (
             <ContextMenuItem onSelect={() => menuActions.onDuplicate(tab)}>
               <Copy aria-hidden="true" />
               {t("infiniteCanvas:duplicateCanvas")}
             </ContextMenuItem>
-          )}
+          ) : null}
           {!tab.readOnly ? (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
@@ -225,7 +237,7 @@ function SortableCanvasTab({ tab, active, menuActions, onClose, onRename }: {
               </ContextMenuSubContent>
             </ContextMenuSub>
           ) : null}
-          {!tab.readOnly && menuActions.sharedCanvasesEnabled ? (
+          {!tab.readOnly && menuActions.sharedCanvasesEnabled && menuActions.canEditSharedCanvases ? (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
                 <UploadCloud aria-hidden="true" />
@@ -258,7 +270,7 @@ function SortableCanvasTab({ tab, active, menuActions, onClose, onRename }: {
               </ContextMenuSubContent>
             </ContextMenuSub>
           ) : null}
-          <ConfirmingContextMenuItem
+          {canDelete ? <ConfirmingContextMenuItem
             confirmChildren={(
               <>
                 <Trash2 aria-hidden="true" />
@@ -269,7 +281,7 @@ function SortableCanvasTab({ tab, active, menuActions, onClose, onRename }: {
           >
             <Trash2 aria-hidden="true" />
             {t("common:actions.delete")}
-          </ConfirmingContextMenuItem>
+          </ConfirmingContextMenuItem> : null}
         </ContextMenuGroup>
       </ContextMenuContent>
     </ContextMenu>
@@ -277,10 +289,11 @@ function SortableCanvasTab({ tab, active, menuActions, onClose, onRename }: {
 }
 
 function CanvasTabOverlay({ tab }: { tab: CanvasDocumentTab }) {
+  const CanvasIcon = tab.remoteUnavailable ? CloudOff : tab.readOnly ? Cloud : Layers3;
   return (
-    <div className="rf-workspace-tab rf-workspace-tab--overlay" aria-hidden="true">
+    <div className="rf-workspace-tab rf-workspace-tab--overlay" data-remote-unavailable={tab.remoteUnavailable || undefined} aria-hidden="true">
       <span className="rf-workspace-tab__trigger">
-        <Layers3 aria-hidden="true" />
+        <CanvasIcon aria-hidden="true" />
         <span>{tab.title}</span>
       </span>
       <span className="rf-workspace-tab__close"><X aria-hidden="true" /></span>

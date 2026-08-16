@@ -44,8 +44,14 @@ function durableNode(value: object) {
   delete node.width;
   delete node.height;
   delete node.resizing;
+  if (node.parentId) {
+    delete node.extent;
+    delete node.expandParent;
+  }
 
-  node.data = { ...recordOf(node.data) };
+  const nodeData = { ...recordOf(node.data) };
+  delete nodeData.groupId;
+  node.data = nodeData;
   return node;
 }
 

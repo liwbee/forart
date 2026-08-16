@@ -1,6 +1,6 @@
 /* Opt-in shared popover and menu surfaces. Layout stays in feature styles. */
 .popover-surface {
-  border: 1px solid var(--popover-border, var(--canvas-node-border, var(--border-subtle)));
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   background: var(--popover-bg, var(--canvas-control-bg, var(--surface-card)));
   box-shadow: var(--shadow-popover);
@@ -37,7 +37,7 @@
 [data-slot="dropdown-menu-sub-content"],
 [data-slot="context-menu-content"],
 [data-slot="context-menu-sub-content"] {
-  border: 1px solid var(--popover-border, var(--canvas-node-border, var(--border-subtle)));
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   padding: var(--popover-menu-padding, 5px);
   background: var(--popover-bg, var(--canvas-control-bg, var(--surface-card)));

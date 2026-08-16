@@ -19,6 +19,8 @@ interface LibraryProjectSidebarProps<TProject extends LibraryProjectSidebarProje
   activeProjectId: string;
   canCreateProjects?: boolean;
   canManageProjects?: boolean;
+  canRenameProjects?: boolean;
+  canDeleteProjects?: boolean;
   canReorderProjects?: boolean;
   renamingProjectId: string;
   ariaLabel: string;
@@ -34,6 +36,7 @@ interface LibraryProjectSidebarProps<TProject extends LibraryProjectSidebarProje
   title?: string;
   creatingProject?: boolean;
   topContent?: ReactNode;
+  showEmptyState?: boolean;
 }
 
 export function createUniqueLibraryProjectName(projects: Array<{ name: string }>, baseName: string) {
@@ -49,6 +52,8 @@ export function LibraryProjectSidebar<TProject extends LibraryProjectSidebarProj
   activeProjectId,
   canManageProjects = true,
   canCreateProjects = canManageProjects,
+  canRenameProjects = canManageProjects,
+  canDeleteProjects = canManageProjects,
   canReorderProjects = canManageProjects,
   renamingProjectId,
   ariaLabel,
@@ -64,6 +69,7 @@ export function LibraryProjectSidebar<TProject extends LibraryProjectSidebarProj
   title,
   creatingProject = false,
   topContent,
+  showEmptyState = true,
 }: LibraryProjectSidebarProps<TProject>) {
   const { t } = useTranslation();
   const [openMenuProjectId, setOpenMenuProjectId] = useState("");
@@ -79,6 +85,10 @@ export function LibraryProjectSidebar<TProject extends LibraryProjectSidebarProj
     if (renamingProjectId) setRenameDraft(renamingProjectName);
   }, [renamingProjectId, renamingProjectName]);
 
+  useEffect(() => {
+    if (renamingProjectId && !canRenameProjects) onRenameCancel();
+  }, [canRenameProjects, onRenameCancel, renamingProjectId]);
+
   function startRename(project: TProject) {
     setRenameDraft(project.name);
     setOpenMenuProjectId("");
@@ -86,6 +96,10 @@ export function LibraryProjectSidebar<TProject extends LibraryProjectSidebarProj
   }
 
   async function commitRename(project: TProject) {
+    if (!canRenameProjects) {
+      cancelRename();
+      return;
+    }
     const nextName = renameDraft.trim();
     if (!nextName || nextName === project.name) {
       cancelRename();
@@ -135,7 +149,7 @@ export function LibraryProjectSidebar<TProject extends LibraryProjectSidebarProj
             <span title={project.name}>{project.name}</span>
           </Button>
         )}
-        {canManageProjects && !isRenaming ? (
+        {(canRenameProjects || canDeleteProjects) && !isRenaming ? (
           <DropdownMenu
             open={isMenuOpen}
             onOpenChange={(open) => {
@@ -156,11 +170,11 @@ export function LibraryProjectSidebar<TProject extends LibraryProjectSidebarProj
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" sideOffset={4}>
               <DropdownMenuGroup>
-                <DropdownMenuItem onSelect={() => startRename(project)}>
+                {canRenameProjects ? <DropdownMenuItem onSelect={() => startRename(project)}>
                   <Pencil size={14} aria-hidden="true" />
                   <span>{t("common:actions.rename")}</span>
-                </DropdownMenuItem>
-                <ConfirmingDropdownMenuItem
+                </DropdownMenuItem> : null}
+                {canDeleteProjects ? <ConfirmingDropdownMenuItem
                   onConfirm={() => onDeleteProject(project.id)}
                   confirmChildren={(
                     <>
@@ -171,7 +185,7 @@ export function LibraryProjectSidebar<TProject extends LibraryProjectSidebarProj
                 >
                   <Trash2 size={14} aria-hidden="true" />
                   <span>{t("common:actions.delete")}</span>
-                </ConfirmingDropdownMenuItem>
+                </ConfirmingDropdownMenuItem> : null}
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -199,11 +213,11 @@ export function LibraryProjectSidebar<TProject extends LibraryProjectSidebarProj
           }}
           className="library-project-list"
           renderItem={(project, { isDragging, dragHandleProps }) => renderProjectRow(project, isDragging, dragHandleProps)}
-          empty={(
+          empty={showEmptyState ? (
             <Empty className="library-project-list-empty">
               <EmptyDescription>{t("common:empty.noProjects")}</EmptyDescription>
             </Empty>
-          )}
+          ) : null}
         />
       </AppScrollArea>
     </aside>

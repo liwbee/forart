@@ -1,4 +1,5 @@
 export const zhCN = {
+  editDetails: "编辑详情",
   projectRail: "动作项目栏",
   projectActions: "{{name}} 操作",
   addAction: "添加动作",
@@ -62,6 +63,7 @@ export const zhCN = {
 } as const;
 
 export const enUS = {
+  editDetails: "Edit details",
   projectRail: "Action project rail",
   projectActions: "{{name}} actions",
   addAction: "Add action",

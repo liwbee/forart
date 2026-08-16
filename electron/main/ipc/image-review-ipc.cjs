@@ -97,6 +97,7 @@ function registerImageReviewIpc({
       productId: String(payload.productId || ''),
       modelFolders: payload.modelFolders,
       detailFolders: payload.detailFolders,
+      requestPriority: payload.requestPriority,
     }),
   }));
 

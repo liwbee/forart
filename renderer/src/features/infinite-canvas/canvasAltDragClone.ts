@@ -42,11 +42,10 @@ export function projectAltDragOntoClones<NodeType extends AltDragCanvasNode>(
     const sourceId = sourceIdByCloneId.get(node.id);
     if (!sourceId) return node;
     const draggedSource = draggedSourceById.get(sourceId);
-    if (!draggedSource) return node;
 
     return {
       ...node,
-      position: { ...draggedSource.position },
+      ...(draggedSource ? { position: { ...draggedSource.position } } : {}),
       zIndex: gesture.cloneZIndex,
       selected: true,
       dragging,

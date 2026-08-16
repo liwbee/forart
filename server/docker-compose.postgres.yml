@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: forart
+      POSTGRES_USER: forart
+      POSTGRES_PASSWORD: ${FORART_DB_PASSWORD:?Set FORART_DB_PASSWORD in .env}
+    volumes:
+      - forart-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forart -d forart"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  forart-server:
+    build: .
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGPASSWORD: ${FORART_DB_PASSWORD}
+      FORART_ADMIN_USERNAME: ${FORART_ADMIN_USERNAME:-admin}
+      FORART_ADMIN_PASSWORD: ${FORART_ADMIN_PASSWORD:?Set FORART_ADMIN_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "6980:6980"
+    volumes:
+      - forart-library:/library
+      - forart-data:/forart_data
+
+volumes:
+  forart-postgres-data:
+  forart-library:
+  forart-data:

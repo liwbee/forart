@@ -73,6 +73,33 @@ test('canvas snapshot semantics persist explicit React Flow resize dimensions in
   assert.notEqual(canvasSnapshotSignatures(resized).content, canvasSnapshotSignatures(base).content);
 });
 
+test('canvas snapshot semantics persist native parent groups and discard legacy group ids', () => {
+  const { canvasSnapshotForStorage } = loadSnapshotSemantics();
+  const grouped = snapshot({
+    nodes: [{
+      id: 'group-1',
+      type: 'groupNode',
+      position: { x: 40, y: 60 },
+      data: { kind: 'group', label: 'Group' },
+      width: 640,
+      height: 420,
+    }, {
+      ...snapshot().nodes[0],
+      parentId: 'group-1',
+      extent: 'parent',
+      position: { x: 28, y: 28 },
+      data: { ...snapshot().nodes[0].data, groupId: 'legacy-group' },
+    }],
+  });
+
+  const stored = canvasSnapshotForStorage(grouped);
+  assert.equal(stored.nodes[0].type, 'groupNode');
+  assert.deepEqual(stored.nodes[0].style, { width: 640, height: 420 });
+  assert.equal(stored.nodes[1].parentId, 'group-1');
+  assert.equal('extent' in stored.nodes[1], false);
+  assert.equal('groupId' in stored.nodes[1].data, false);
+});
+
 test('canvas snapshot semantics persist unified task pointers silently', () => {
   const { canvasSnapshotSignatures } = loadSnapshotSemantics();
   const plain = snapshot();

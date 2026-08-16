@@ -1,6 +1,6 @@
 const CURRENT_CANVAS_SCHEMA_VERSION = 2;
 
-const NODE_KINDS = new Set(['imageGenerator', 'imageLoader', 'prompt', 'annotation', 'llm', 'actionFission']);
+const NODE_KINDS = new Set(['imageGenerator', 'imageLoader', 'prompt', 'annotation', 'llm', 'actionFission', 'group']);
 const NODE_DEFAULT_SIZES = Object.freeze({
   imageGenerator: { width: 280, height: 280 },
   imageLoader: { width: 240, height: 320 },
@@ -8,6 +8,7 @@ const NODE_DEFAULT_SIZES = Object.freeze({
   annotation: { width: 64, height: 40 },
   llm: { width: 280, height: 190 },
   actionFission: { width: 820, height: 620 },
+  group: { width: 640, height: 420 },
 });
 
 function isRecord(value) {
@@ -215,7 +216,7 @@ function normalizeNode(value, index) {
   const sourceData = isRecord(value.data) ? value.data : {};
   const kind = currentNodeKind(value, sourceData);
   if (!kind) return null;
-  const current = value.type === 'canvasNode' && isRecord(value.position) && safeString(sourceData.kind);
+  const current = (value.type === 'canvasNode' || value.type === 'groupNode') && isRecord(value.position) && safeString(sourceData.kind);
   const position = isRecord(value.position) ? value.position : {};
   const node = current ? { ...value } : {
     id: safeString(value.id) || `${kind}_migrated_${index + 1}`,
@@ -243,12 +244,13 @@ function normalizeNode(value, index) {
     };
   }
   node.id = safeString(node.id) || `${kind}_migrated_${index + 1}`;
-  node.type = 'canvasNode';
+  node.type = kind === 'group' ? 'groupNode' : 'canvasNode';
   node.position = {
     x: Number(node.position?.x || 0),
     y: Number(node.position?.y || 0),
   };
   node.data = normalizeNodeData(value, kind);
+  if (node.parentId) removeKeys(node, ['extent', 'expandParent']);
   removeKeys(node, ['selected', 'dragging', 'measured', 'width', 'height', 'resizing', 'running']);
   return node;
 }

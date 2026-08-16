@@ -28,11 +28,16 @@ export function createAdminContext({
   startedAt,
   databaseFilename,
   getDataDir,
+  getRuntimeDataDir,
   getDatabaseDir,
   getDatabasePath,
   getStorageRoot,
   getCanvasStorageRoot,
-  getDb,
+  getRepository,
+  getDatabaseDriver,
+  checkDatabase,
+  getAuthRuntime,
+  getCanvasSummary,
 }) {
   function serverPayload() {
     const local = `http://127.0.0.1:${serverPort}`;
@@ -53,13 +58,24 @@ export function createAdminContext({
     };
   }
 
-  function storagePayload() {
+  async function storagePayload() {
     const databasePath = getDatabasePath();
     const file = fileStatPayload(databasePath);
+    const databaseDriver = getDatabaseDriver?.() || "";
+    let databaseReady = false;
+    if (checkDatabase) {
+      try {
+        await checkDatabase();
+        databaseReady = true;
+      } catch {}
+    } else if (databaseDriver === "sqlite") {
+      databaseReady = file.exists;
+    }
     return {
       ok: true,
       storage: {
         dataDir: getDataDir(),
+        runtimeDataDir: getRuntimeDataDir?.() || "",
         storageRoot: getStorageRoot(),
         canvasStorageRoot: getCanvasStorageRoot?.() || getStorageRoot(),
         databaseDir: getDatabaseDir(),
@@ -68,28 +84,29 @@ export function createAdminContext({
         databaseExists: file.exists,
         databaseSizeBytes: file.sizeBytes,
         databaseModifiedAt: file.modifiedAt,
+        databaseDriver,
+        databaseReady,
       },
     };
   }
 
-  function countTable(tableName) {
-    const database = getDb();
-    if (!database) return 0;
-    return database.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`).get()?.count || 0;
-  }
-
-  function librarySummaryPayload() {
+  async function librarySummaryPayload() {
+    const repository = getRepository?.();
+    if (!repository) return { ok: true, summary: {} };
     return {
       ok: true,
-      summary: {
-        modelProjects: countTable("model_projects"),
-        models: countTable("model_entries"),
-        outfitProjects: countTable("outfit_projects"),
-        outfits: countTable("outfit_entries"),
-        actionProjects: countTable("action_projects"),
-        actions: countTable("action_entries"),
-        assets: countTable("assets"),
-      },
+      summary: await Promise.all([
+        repository.countKind("library_projects", "model"),
+        repository.countKind("library_entries", "model"),
+        repository.countKind("library_projects", "outfit"),
+        repository.countKind("library_entries", "outfit"),
+        repository.countKind("library_projects", "action"),
+        repository.countKind("library_entries", "action"),
+        repository.countTable("assets"),
+      ]).then(([modelProjects, models, outfitProjects, outfits, actionProjects, actions, assets]) => ({
+        modelProjects, models, outfitProjects, outfits, actionProjects, actions, assets,
+        ...(getCanvasSummary?.() || { canvasProjects: 0, canvases: 0 }),
+      })),
     };
   }
 
@@ -113,5 +130,6 @@ export function createAdminContext({
     storagePayload,
     librarySummaryPayload,
     environmentPayload,
+    authRuntime: () => getAuthRuntime?.(),
   };
 }

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Copy, Download, Eye, ImagePlus, MoreHorizontal, Tags, Trash2 } from "lucide-react";
 import { ErrorCopyLine } from "../../components/ErrorCopyLine";
+import { RemoteDataState } from "../../components/RemoteDataState";
 import { AppScrollArea } from "../../components/AppScrollArea";
 import { LazyImage } from "../../components/LazyImage";
 import { Button } from "../../components/ui/button";
@@ -19,6 +20,7 @@ import { LibraryImageDropZone } from "../resource-library/LibraryImageDropZone";
 import { LibraryBulkActions, LibraryBulkManageButton } from "../resource-library/LibraryBulkActions";
 import { VirtualLibraryCardGrid } from "../resource-library/VirtualLibraryCardGrid";
 import { createUniqueLibraryProjectName, LibraryProjectSidebar } from "../library-layout/LibraryProjectSidebar";
+import { getLibraryProjectLoadState } from "../library-layout/libraryProjectLoadState";
 import { getChangedProjectOrder, setOptimisticProjectOrder, type LibraryProjectsQueryData } from "../library-layout/projectReorder";
 import { LibraryTagManagerDialog } from "../library-tags/LibraryTagManagerDialog";
 import { getChangedTagOrder, setOptimisticTagOrder, type LibraryTagsQueryData } from "../library-tags/tagReorder";
@@ -45,6 +47,8 @@ import { useOutfitLibraryStore } from "./outfitLibraryStore";
 import { OutfitEntry, OutfitProject, OutfitTag } from "./types";
 import { normalizeTags, toggleTag } from "../library-tags/tagUtils";
 import { EMPTY_LIBRARY_TAG_FILTER, applySameColorSingleIncludeFilter, cleanLibraryTagFilter, countLibraryTags, createLibraryTagFilter, createLibraryTagsByName, hasLibraryTagFilter, normalizeLibraryTagColor, toggleLibraryTagFilterInclude, useLibraryTagSettingsStore, type LibraryTagColor, type LibraryTagFilter, type LibraryTagNameColorLike } from "../library-tags";
+import { usePermission } from "../permissions";
+import { firstRequestFailure } from "../../lib/requestFailure";
 
 function getRequestError(errors: unknown[]) {
   const first = errors.find(Boolean);
@@ -63,6 +67,7 @@ function OutfitToolbar({
   selectionMode,
   onEnterSelectionMode,
   onExitSelectionMode,
+  canManageEntries,
 }: {
   tags: OutfitTag[];
   tagFilter: LibraryTagFilter;
@@ -74,6 +79,7 @@ function OutfitToolbar({
   selectionMode: boolean;
   onEnterSelectionMode: () => void;
   onExitSelectionMode: () => void;
+  canManageEntries: boolean;
 }) {
   const { t } = useTranslation();
   const includeTagSet = useMemo(() => new Set(tagFilter.includeTagIds), [tagFilter.includeTagIds]);
@@ -81,7 +87,7 @@ function OutfitToolbar({
   return (
     <div className="library-toolbar outfit-toolbar">
       <div className="library-tag-section">
-        <LibraryBulkManageButton disabled={false} onClick={selectionMode ? onExitSelectionMode : onEnterSelectionMode} />
+        {canManageEntries ? <LibraryBulkManageButton disabled={false} onClick={selectionMode ? onExitSelectionMode : onEnterSelectionMode} /> : null}
         <span className="library-filter-label">{t("common:labels.tags")}</span>
         <div className="library-tag-controls">
           <CollapsibleTagFilterRow expandLabel={t("common:labels.expandTags")} collapseLabel={t("common:labels.collapseTags")}>
@@ -144,6 +150,8 @@ function OutfitCard({
   onToggleSelected,
   onDelete,
   onImageActionStatus,
+  canEditEntries,
+  canDeleteEntries,
 }: {
   outfit: OutfitEntry;
   tags: OutfitTag[];
@@ -155,6 +163,8 @@ function OutfitCard({
   onToggleSelected: (outfitId: string) => void;
   onDelete: (outfitId: string) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
+  canEditEntries: boolean;
+  canDeleteEntries: boolean;
 }) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -251,7 +261,7 @@ function OutfitCard({
         </DropdownMenuTrigger>
         <DropdownMenuContent side="right" align="start" sideOffset={8}>
           <DropdownMenuGroup>
-            <DropdownMenuSub>
+            {canEditEntries ? <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <Tags size={16} aria-hidden="true" />
                 <span>{t("common:labels.tags")}</span>
@@ -275,7 +285,7 @@ function OutfitCard({
                   <div className="px-2 py-1.5 text-sm text-muted-foreground">{t("outfitLibrary:noTags")}</div>
                 )}
               </DropdownMenuSubContent>
-            </DropdownMenuSub>
+            </DropdownMenuSub> : null}
             <DropdownMenuItem disabled={!assetUrl} onSelect={handleViewImage}>
               <Eye size={16} aria-hidden="true" />
               <span>{t("common:actions.viewImage")}</span>
@@ -288,7 +298,7 @@ function OutfitCard({
               <Copy size={16} aria-hidden="true" />
               <span>{t("common:actions.copyImage")}</span>
             </DropdownMenuItem>
-            <ConfirmingDropdownMenuItem
+            {canDeleteEntries ? <ConfirmingDropdownMenuItem
               disabled={isDeleting}
               onConfirm={() => onDelete(outfit.id)}
               confirmChildren={(
@@ -300,7 +310,7 @@ function OutfitCard({
             >
               <Trash2 size={16} aria-hidden="true" />
               <span>{t("common:actions.delete")}</span>
-            </ConfirmingDropdownMenuItem>
+            </ConfirmingDropdownMenuItem> : null}
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -322,6 +332,8 @@ function OutfitGrid({
   onToggleSelected,
   onDelete,
   onImageActionStatus,
+  canEditEntries,
+  canDeleteEntries,
 }: {
   outfits: OutfitEntry[];
   tags: OutfitTag[];
@@ -335,6 +347,8 @@ function OutfitGrid({
   onToggleSelected: (outfitId: string) => void;
   onDelete: (outfitId: string) => void;
   onImageActionStatus: (tone: LibraryImageActionToastTone, text: string) => void;
+  canEditEntries: boolean;
+  canDeleteEntries: boolean;
 }) {
   const cardSize = useLibraryCardSize();
   const librarySort = useLibrarySort();
@@ -346,7 +360,7 @@ function OutfitGrid({
         getItemKey={(outfit) => outfit.id}
         scrollElementRef={scrollElementRef}
         style={cardSize.gridStyle}
-        renderLeadingItem={!selectionMode ? () => (
+        renderLeadingItem={!selectionMode && canEditEntries ? () => (
           <AddOutfitCard disabled={creating} busy={creating} onCreate={onCreate} />
         ) : undefined}
         renderItem={(outfit) => (
@@ -362,6 +376,8 @@ function OutfitGrid({
             onToggleSelected={onToggleSelected}
             onDelete={onDelete}
             onImageActionStatus={onImageActionStatus}
+            canEditEntries={canEditEntries}
+            canDeleteEntries={canDeleteEntries}
           />
         )}
       />
@@ -394,6 +410,12 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const sameColorSingleFilter = useLibraryTagSettingsStore((state) => state.sameColorSingleFilter);
   const setSameColorSingleFilter = useLibraryTagSettingsStore((state) => state.setSameColorSingleFilter);
   const bulkSelection = useLibraryBulkSelection();
+  const canEditProjects = usePermission("outfit_library.project_edit");
+  const canDeleteProjects = usePermission("outfit_library.project_delete");
+  const canReorderProjects = usePermission("outfit_library.project_reorder");
+  const canEditEntries = usePermission("outfit_library.entry_edit");
+  const canDeleteEntries = usePermission("outfit_library.entry_delete");
+  const canManageTags = usePermission("outfit_library.tag_manage");
 
   const storageSettingsQuery = useQuery({
     queryKey: outfitLibraryKeys.storageSettings,
@@ -712,11 +734,21 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
   const tags = tagsQuery.data?.tags || [];
   const tagCounts = useMemo(() => countLibraryTags(filteredOutfits, tags), [filteredOutfits, tags]);
   const activeProject = projects.find((project) => project.id === activeProjectId) || null;
-  const errorMessage = getRequestError([
+  const queryFailure = firstRequestFailure([
     storageSettingsQuery.error,
     projectsQuery.error,
     tagsQuery.error,
     outfitsQuery.error,
+  ]);
+  const projectLoadState = getLibraryProjectLoadState({
+    hasFailure: Boolean(queryFailure),
+    storageConfigured,
+    storageQuery: storageSettingsQuery,
+    projectsQuery,
+    projectCount: projects.length,
+  });
+  const projectActionsAvailable = projectLoadState === "empty" || projectLoadState === "ready";
+  const mutationErrorMessage = getRequestError([
     createOutfitMutation.error,
     deleteOutfitMutation.error,
     updateOutfitTagsMutation.error,
@@ -730,6 +762,15 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
     reorderTagsMutation.error,
     deleteTagMutation.error,
   ]);
+  const hasCachedQueryData = Boolean(projectsQuery.data)
+    && (!tagsQuery.error || Boolean(tagsQuery.data))
+    && (!outfitsQuery.error || Boolean(outfitsQuery.data));
+  const retryQueries = async () => {
+    const retries: Array<Promise<unknown>> = [storageSettingsQuery.refetch()];
+    if (storageConfigured) retries.push(projectsQuery.refetch());
+    if (storageConfigured && activeProjectId) retries.push(tagsQuery.refetch(), outfitsQuery.refetch());
+    await Promise.all(retries);
+  };
   const libraryBodyViewportRef = useRef<HTMLDivElement | null>(null);
 
   return (
@@ -738,7 +779,11 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         <LibraryProjectSidebar<OutfitProject>
           projects={projects}
           activeProjectId={activeProjectId}
-          canManageProjects={true}
+          canCreateProjects={canEditProjects && projectActionsAvailable}
+          canRenameProjects={canEditProjects && projectActionsAvailable}
+          canDeleteProjects={canDeleteProjects && projectActionsAvailable}
+          canReorderProjects={canReorderProjects && projectActionsAvailable}
+          showEmptyState={projectLoadState === "empty"}
           renamingProjectId={renamingProjectId}
           ariaLabel={t("outfitLibrary:projectRail")}
           projectActionsLabel={(name) => t("outfitLibrary:projectActions", { name })}
@@ -769,23 +814,25 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
               onTagClear={() => setActiveTagFilter(EMPTY_LIBRARY_TAG_FILTER)}
               onUntaggedToggle={handleToggleUntaggedFilter}
               selectionMode={bulkSelection.selectionMode}
-              onEnterSelectionMode={bulkSelection.enterSelectionMode}
+              onEnterSelectionMode={(canEditEntries || canDeleteEntries) ? bulkSelection.enterSelectionMode : () => undefined}
               onExitSelectionMode={bulkSelection.exitSelectionMode}
+              canManageEntries={canEditEntries || canDeleteEntries || canManageTags}
             />
           </div>
 
           <AppScrollArea className="library-body" viewportRef={libraryBodyViewportRef}>
-            {errorMessage ? <ErrorCopyLine className="library-error" text={t("outfitLibrary:requestFailed", { message: errorMessage })} /> : null}
-            {storageSettingsQuery.isLoading || projectsQuery.isLoading ? (
+            {mutationErrorMessage ? <ErrorCopyLine className="library-error" text={t("outfitLibrary:requestFailed", { message: mutationErrorMessage })} /> : null}
+            {queryFailure ? <RemoteDataState failure={queryFailure} scope="page" compact={hasCachedQueryData} onRetry={retryQueries} /> : null}
+            {projectLoadState === "loading" ? (
               <Empty className="library-empty" aria-label={t("common:states.loadingProjects")}>
                 <Skeleton className="h-4 w-36" />
               </Empty>
             ) : null}
-            {!storageConfigured ? <Empty className="library-empty"><EmptyDescription>{t("outfitLibrary:storageUnavailable")}</EmptyDescription></Empty> : null}
-            {storageConfigured && !projectsQuery.isLoading && !projects.length ? <Empty className="library-empty"><EmptyDescription>{t("common:empty.noProjects")}</EmptyDescription></Empty> : null}
-            {activeProject ? (
+            {projectLoadState === "storage-unavailable" ? <Empty className="library-empty"><EmptyDescription>{t("common:states.storageUnavailable")}</EmptyDescription></Empty> : null}
+            {projectLoadState === "empty" ? <Empty className="library-empty"><EmptyDescription>{t("common:empty.noProjects")}</EmptyDescription></Empty> : null}
+            {activeProject && (!queryFailure || hasCachedQueryData) ? (
               <LibraryImageDropZone
-                disabled={!storageConfigured || createOutfitMutation.isPending}
+                disabled={!canEditEntries || !storageConfigured || createOutfitMutation.isPending}
                 label={t("outfitLibrary:dropToAddOutfit")}
                 onDropImage={(file) => createOutfitMutation.mutate(file)}
               >
@@ -793,7 +840,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
                   outfits={filteredOutfits}
                   tags={tags}
                   scrollElementRef={libraryBodyViewportRef}
-                  creating={createOutfitMutation.isPending}
+                  creating={!canEditEntries || createOutfitMutation.isPending}
                   deletingOutfitId={deleteOutfitMutation.isPending ? deleteOutfitMutation.variables || "" : ""}
                   selectionMode={bulkSelection.selectionMode}
                   selectedIds={bulkSelection.selectedIds}
@@ -802,6 +849,8 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
                   onToggleSelected={bulkSelection.toggleSelected}
                   onDelete={handleOutfitDelete}
                   onImageActionStatus={showImageActionToast}
+                  canEditEntries={canEditEntries}
+                  canDeleteEntries={canDeleteEntries}
                 />
               </LibraryImageDropZone>
             ) : null}
@@ -809,7 +858,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         </main>
       </div>
 
-      <LibraryTagManagerDialog<OutfitTag>
+      {canManageTags ? <LibraryTagManagerDialog<OutfitTag>
         isOpen={tagManagerOpen}
         tags={tags}
         isCreating={createTagMutation.isPending}
@@ -824,7 +873,7 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
         onReorderTags={handleReorderTags}
         sameColorSingleFilter={sameColorSingleFilter}
         onSameColorSingleFilterChange={setSameColorSingleFilter}
-      />
+      /> : null}
       <LibraryImageActionToast toast={imageActionToast} />
       {activeProject ? (
         <LibraryBulkActions
@@ -840,6 +889,9 @@ export function OutfitLibraryPage({ searchQuery = "" }: { searchQuery?: string }
           onAddTags={(tagNames) => bulkOutfitEntriesMutation.mutate({ operation: "add_tags", tags: tagNames })}
           onRemoveTags={(tagNames) => bulkOutfitEntriesMutation.mutate({ operation: "remove_tags", tags: tagNames })}
           onDeleteSelected={() => bulkOutfitEntriesMutation.mutate({ operation: "delete" })}
+          canEditEntries={canEditEntries}
+          canDeleteEntries={canDeleteEntries}
+          canManageTags={canManageTags}
         />
       ) : null}
     </section>

@@ -512,6 +512,252 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, ne
     return writeCanvasPackageToPath(canvasId, targetPath, options);
   }
 
+  function requestRemoteJson({ url, method = 'GET', body, signal, authToken = '' }) {
+    if (!/^https?:\/\//i.test(String(url || ''))) return Promise.reject(new Error('Remote canvas URL is invalid.'));
+    if (!net?.request) return Promise.reject(new Error('Electron network service is unavailable.'));
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) return reject(abortError());
+      const request = net.request({ method, url });
+      const onAbort = () => {
+        request.abort();
+        reject(abortError());
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      request.setHeader('Accept', 'application/json');
+      if (authToken) request.setHeader('Authorization', `Bearer ${authToken}`);
+      if (body !== undefined) request.setHeader('Content-Type', 'application/json');
+      request.on('response', (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        response.on('end', () => {
+          signal?.removeEventListener('abort', onAbort);
+          const text = Buffer.concat(chunks).toString('utf8');
+          let payload = text;
+          try { payload = text ? JSON.parse(text) : {}; } catch {}
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            const message = payload && typeof payload === 'object' && 'detail' in payload
+              ? String(payload.detail)
+              : String(payload || `Remote request failed with ${response.statusCode}`);
+            reject(new Error(message));
+            return;
+          }
+          resolve(payload);
+        });
+      });
+      request.on('error', (error) => {
+        signal?.removeEventListener('abort', onAbort);
+        reject(error);
+      });
+      if (body !== undefined) request.write(JSON.stringify(body));
+      request.end();
+    });
+  }
+
+  function uploadCanvasAssetToRemote(filePath, url, options = {}) {
+    if (!fs.existsSync(filePath)) return Promise.reject(new Error('Canvas resource file not found.'));
+    if (!net?.request) return Promise.reject(new Error('Electron network service is unavailable.'));
+    return new Promise((resolve, reject) => {
+      if (options.signal?.aborted) return reject(abortError());
+      const request = net.request({ method: 'PUT', url });
+      const stream = fs.createReadStream(filePath);
+      const totalBytes = fs.statSync(filePath).size;
+      let loadedBytes = 0;
+      let settled = false;
+      const finish = (callback) => {
+        if (settled) return;
+        settled = true;
+        options.signal?.removeEventListener('abort', onAbort);
+        callback();
+      };
+      const onAbort = () => {
+        stream.destroy(abortError());
+        request.abort();
+        finish(() => reject(abortError()));
+      };
+      options.signal?.addEventListener('abort', onAbort, { once: true });
+      request.setHeader('Content-Type', 'application/octet-stream');
+      if (options.authToken) request.setHeader('Authorization', `Bearer ${options.authToken}`);
+      request.on('response', (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        response.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          let payload = text;
+          try { payload = text ? JSON.parse(text) : {}; } catch {}
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            const message = payload && typeof payload === 'object' && 'detail' in payload ? String(payload.detail) : String(payload || 'Canvas resource upload failed.');
+            finish(() => reject(new Error(message)));
+            return;
+          }
+          finish(() => resolve(payload));
+        });
+      });
+      request.on('error', (error) => finish(() => reject(error)));
+      stream.on('data', (chunk) => {
+        loadedBytes += chunk.length;
+        options.onProgress?.(loadedBytes, totalBytes);
+      });
+      stream.on('error', (error) => finish(() => reject(error)));
+      stream.pipe(request);
+    });
+  }
+
+  async function uploadCanvasToRemote(payload = {}, options = {}) {
+    const canvasId = String(payload.canvasId || '').trim();
+    const uploadUrl = String(payload.uploadUrl || '').trim();
+    const canvas = canvasStore.readCanvas(canvasId);
+    if (!canvas) throw new Error('Canvas not found.');
+    const packagePayloadValue = packagePayload(canvas);
+    const manifest = JSON.parse(packagePayloadValue.manifestJson);
+    const document = JSON.parse(packagePayloadValue.canvasJson);
+    reportProgress(options.onProgress, 'preparing', 2);
+    let session = null;
+    try {
+      session = await requestRemoteJson({
+        url: uploadUrl,
+        method: 'POST',
+        body: { projectId: payload.projectId, canvas: document, manifest },
+        signal: options.signal,
+        authToken: payload.authToken,
+      });
+      const assets = packagePayloadValue.assets || [];
+      for (const [index, asset] of assets.entries()) {
+        if (options.signal?.aborted) throw abortError();
+        const assetId = manifest.assets[index]?.id;
+        const assetUrl = new URL(`${session.assetUploadUrl}/${encodeURIComponent(assetId)}`, uploadUrl).toString();
+        const start = assets.length ? 5 + (90 * index) / assets.length : 95;
+        const end = assets.length ? 5 + (90 * (index + 1)) / assets.length : 95;
+        await uploadCanvasAssetToRemote(asset.sourceFilePath, assetUrl, {
+          signal: options.signal,
+          authToken: payload.authToken,
+          onProgress: (loaded, total) => reportProgress(options.onProgress, 'uploading', start + ((end - start) * (total > 0 ? loaded / total : 1)), loaded, total),
+        });
+      }
+      reportProgress(options.onProgress, 'finalizing', 96);
+      const completed = await requestRemoteJson({
+        url: new URL(session.completeUrl, uploadUrl).toString(),
+        method: 'POST',
+        signal: options.signal,
+        authToken: payload.authToken,
+      });
+      reportProgress(options.onProgress, 'finalizing', 100);
+      session = null;
+      return completed;
+    } finally {
+      if (session?.canvasId) {
+        await requestRemoteJson({
+          url: new URL(`/api/canvas-exchange/canvases/${encodeURIComponent(session.canvasId)}/upload`, uploadUrl).toString(),
+          method: 'DELETE',
+          authToken: payload.authToken,
+        }).catch(() => undefined);
+      }
+    }
+  }
+
+  function downloadRemoteFile(url, targetPath, options = {}) {
+    if (!net?.request) return Promise.reject(new Error('Electron network service is unavailable.'));
+    return new Promise((resolve, reject) => {
+      if (options.signal?.aborted) return reject(abortError());
+      const partPath = `${targetPath}.part`;
+      const request = net.request({ method: 'GET', url });
+      if (options.authToken) request.setHeader('Authorization', `Bearer ${options.authToken}`);
+      let output = null;
+      let settled = false;
+      const finish = (callback) => {
+        if (settled) return;
+        settled = true;
+        options.signal?.removeEventListener('abort', onAbort);
+        callback();
+      };
+      const onAbort = () => {
+        output?.destroy(abortError());
+        request.abort();
+        void fs.promises.rm(partPath, { force: true });
+        finish(() => reject(abortError()));
+      };
+      options.signal?.addEventListener('abort', onAbort, { once: true });
+      request.on('response', (response) => {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          const chunks = [];
+          response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+          response.on('end', () => finish(() => reject(new Error(Buffer.concat(chunks).toString('utf8') || `Canvas resource download failed with ${response.statusCode}`))));
+          return;
+        }
+        const totalBytes = Number(response.headers['content-length'] || 0);
+        let loadedBytes = 0;
+        output = fs.createWriteStream(partPath);
+        response.on('data', (chunk) => {
+          loadedBytes += chunk.length;
+          options.onProgress?.(loadedBytes, totalBytes);
+        });
+        response.pipe(output);
+        output.on('finish', async () => {
+          try {
+            await fs.promises.rename(partPath, targetPath);
+            finish(() => resolve({ filePath: targetPath, loadedBytes, totalBytes }));
+          } catch (error) {
+            finish(() => reject(error));
+          }
+        });
+        output.on('error', (error) => finish(() => reject(error)));
+      });
+      request.on('error', (error) => finish(() => reject(error)));
+      request.end();
+    });
+  }
+
+  async function copyRemoteCanvasToLocal(payload = {}, options = {}) {
+    const transferUrl = String(payload.transferUrl || '').trim();
+    const remoteCanvasId = String(payload.remoteCanvasId || '').trim();
+    const transfer = await requestRemoteJson({ url: transferUrl, signal: options.signal, authToken: payload.authToken });
+    const canvas = upgradeCanvasDocument(transfer.canvas).canvas;
+    const manifest = transfer.manifest || {};
+    const urlByOriginalUrl = new Map();
+    const stagingRoot = path.join(canvasAssetsRoot(), 'tmp', `remote-copy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+    const importedFilePaths = [];
+    let committed = false;
+    await fs.promises.mkdir(stagingRoot, { recursive: true });
+    try {
+      const assets = Array.isArray(manifest.assets) ? manifest.assets : [];
+      for (const [index, asset] of assets.entries()) {
+        if (options.signal?.aborted) throw abortError();
+        const relativePathParts = String(asset.relativePath || '').replace(/\\/g, '/').split('/');
+        if (!relativePathParts.length || relativePathParts.some((part) => !part || part === '.' || part === '..')) {
+          throw new Error('Remote canvas resource path is invalid.');
+        }
+        const relativePath = relativePathParts.map(encodeURIComponent).join('/');
+        const assetBaseUrl = transferUrl.replace(/\/transfer$/, '/');
+        const assetUrl = new URL(`assets/${relativePath}`, assetBaseUrl).toString();
+        const remoteAssetPath = `/api/canvas-exchange/canvases/${encodeURIComponent(remoteCanvasId)}/assets/${relativePath}`;
+        const targetPath = path.join(stagingRoot, `asset-${index + 1}${extensionFromPath(asset.fileName || asset.relativePath)}`);
+        const start = assets.length ? (90 * index) / assets.length : 0;
+        const end = assets.length ? (90 * (index + 1)) / assets.length : 90;
+        await downloadRemoteFile(assetUrl, targetPath, {
+          signal: options.signal,
+          onProgress: (loaded, total) => reportProgress(options.onProgress, 'downloading', start + ((end - start) * (total > 0 ? loaded / total : 1)), loaded, total),
+          authToken: payload.authToken,
+        });
+        const imported = await assetStore.importAssetFile({ filePath: targetPath, fileName: asset.fileName, kind: asset.kind });
+        if (imported.filePath) importedFilePaths.push(imported.filePath);
+        urlByOriginalUrl.set(assetUrl, imported.url);
+        urlByOriginalUrl.set(remoteAssetPath, imported.url);
+        urlByOriginalUrl.set(new URL(remoteAssetPath, transferUrl).toString(), imported.url);
+        if (asset.originalUrl) urlByOriginalUrl.set(String(asset.originalUrl), imported.url);
+      }
+      const rewritten = rewriteImportedPackageUrls(canvas, new Map(), urlByOriginalUrl);
+      reportProgress(options.onProgress, 'saving', 95);
+      const created = createImportedCanvas(sanitizeCanvasForPackage(rewritten, { preserveLocalAssetUrls: true, preservePackageUrls: false }), payload.projectId);
+      reportProgress(options.onProgress, 'saving', 100);
+      committed = true;
+      return created;
+    } finally {
+      await fs.promises.rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
+      if (!committed) {
+        await Promise.all(importedFilePaths.map((filePath) => fs.promises.rm(filePath, { force: true }).catch(() => undefined)));
+      }
+    }
+  }
+
   async function uploadPackageToRemote(payload = {}, options = {}) {
     const filePath = String(payload.filePath || '');
     const uploadUrl = String(payload.uploadUrl || '');
@@ -739,8 +985,9 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, ne
       const target = path.join(directory, entry.name);
       const removablePart = entry.isFile() && entry.name.endsWith('.part');
       const removableImportDirectory = entry.isDirectory() && entry.name.startsWith('import-');
+      const removableRemoteCopyDirectory = entry.isDirectory() && entry.name.startsWith('remote-copy-');
       const removablePackage = entry.isFile() && entry.name.endsWith('.forartcanvas');
-      if (!removablePart && !removableImportDirectory && !removablePackage) return;
+      if (!removablePart && !removableImportDirectory && !removableRemoteCopyDirectory && !removablePackage) return;
       const stat = await fs.promises.stat(target).catch(() => null);
       if (!stat || stat.mtimeMs > cutoff) return;
       await fs.promises.rm(target, { recursive: entry.isDirectory(), force: true }).catch(() => undefined);
@@ -750,6 +997,8 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, ne
   return {
     cleanupTemporaryFiles,
     createPackageForUpload,
+    uploadCanvasToRemote,
+    copyRemoteCanvasToLocal,
     downloadPackageFromRemote,
     exportJson,
     exportPackage,

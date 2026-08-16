@@ -136,12 +136,18 @@ function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackag
       rangeEnd: 100,
     }))
   ));
+  ipcMain.handle('canvas:upload-to-remote', async (event, payload = {}) => (
+    runCanvasTransfer(event, payload.operationId, 'upload', (options) => canvasPackageStore.uploadCanvasToRemote(payload, options))
+  ));
   ipcMain.handle('canvas:download-package-from-remote', async (event, payload = {}) => (
     runCanvasTransfer(event, payload.operationId, 'import', (options) => canvasPackageStore.downloadPackageFromRemote(payload, {
       ...options,
       rangeStart: 0,
       rangeEnd: 50,
     }))
+  ));
+  ipcMain.handle('canvas:copy-remote-to-local', async (event, payload = {}) => (
+    runCanvasTransfer(event, payload.operationId, 'import', (options) => canvasPackageStore.copyRemoteCanvasToLocal(payload, options))
   ));
   ipcMain.handle('canvas:cancel-transfer', async (_event, operationId) => {
     const controller = canvasTransferJobs.get(String(operationId || '').trim());

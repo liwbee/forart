@@ -7,19 +7,9 @@ function rowIdFor(kind, value) {
   return crypto.createHash("sha1").update(`${kind}:${value}`).digest("hex").slice(0, 24);
 }
 
-function actionNameExists(db, projectId, name) {
-  return Boolean(db.prepare("SELECT id FROM action_entries WHERE project_id = ? AND name = ?").get(projectId, name));
-}
-
-function projectExists(db, projectId) {
-  return Boolean(db.prepare("SELECT id FROM action_projects WHERE id = ?").get(projectId));
-}
-
 export function createActionFolderImportService(runtime, actionService) {
-  const db = runtime.db;
-
   async function importActionEntries(projectId, payload = {}) {
-    if (!projectExists(db, projectId)) return null;
+    if (!await actionService.projectExists(projectId)) return null;
     const entries = Array.isArray(payload.entries) ? payload.entries : [];
     if (!entries.length) throw new Error("No rows selected for import");
 
@@ -46,10 +36,7 @@ export function createActionFolderImportService(runtime, actionService) {
 
       try {
         const name = entry.name ? validateFileNamePart(entry.name, "action name") : "";
-        if (name && actionNameExists(db, projectId, name)) throw new Error("Action name must be unique");
-        const tagNames = Array.isArray(entry.tags) && entry.tags.length
-          ? actionService.existingProjectTagNames(projectId, entry.tags)
-          : [];
+        const tagNames = entry.tags?.length ? await actionService.existingProjectTagNames(projectId, entry.tags) : [];
         const imageData = String(entry.data || "");
         if (!imageData) throw new Error("Invalid image data");
         const action = await actionService.createActionFromFile(projectId, {
@@ -58,10 +45,9 @@ export function createActionFolderImportService(runtime, actionService) {
           filename: entry.filename || "image",
           mime_type: entry.mime_type || "image/png",
           buffer: Buffer.from(imageData, "base64"),
+          tags: tagNames,
         });
-        if (tagNames.length) actionService.updateAction(action.id, { tags: tagNames });
-        const importedAction = tagNames.length ? actionService.loadActionEntry(action.id) || action : action;
-        imported.push(importedAction);
+        imported.push(action);
         rows.push({ ...rowBase, action_id: action.id, final_status: rowBase.warnings.length ? "warning" : "imported" });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -71,14 +57,7 @@ export function createActionFolderImportService(runtime, actionService) {
       }
     }
 
-    return {
-      imported_count: imported.length,
-      failed_count: failed.length,
-      imported,
-      not_selected: [],
-      failed,
-      rows,
-    };
+    return { imported_count: imported.length, failed_count: failed.length, imported, not_selected: [], failed, rows };
   }
 
   return { importActionEntries };

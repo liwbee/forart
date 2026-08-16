@@ -7,6 +7,7 @@ interface LibraryTagChoiceButtonBaseProps {
   color?: LibraryTagColor | string | null;
   count?: number;
   role?: string;
+  disabled?: boolean;
 }
 
 type LibraryTagChoiceButtonProps = LibraryTagChoiceButtonBaseProps & (
@@ -30,7 +31,7 @@ export function LibraryTagChoiceButton(props: LibraryTagChoiceButtonProps) {
   const included = selectMode ? props.selected : props.included;
   const excluded = selectMode ? false : props.excluded;
   const selected = included || excluded;
-  const disabled = count !== undefined && count <= 0 && !selected;
+  const disabled = Boolean(props.disabled) || (count !== undefined && count <= 0 && !selected);
   const togglePrimary = selectMode ? props.onToggleSelect : props.onToggleInclude;
 
   return (

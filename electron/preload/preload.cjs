@@ -31,7 +31,9 @@ contextBridge.exposeInMainWorld('easyTool', {
   createCanvasPackageForUpload: (canvasId, operationId) => ipcRenderer.invoke('canvas:create-package-for-upload', canvasId, operationId),
   importCanvasPackageFromPath: (payload) => ipcRenderer.invoke('canvas:import-package-from-path', payload),
   uploadCanvasPackageToRemote: (payload) => ipcRenderer.invoke('canvas:upload-package-to-remote', payload),
+  uploadCanvasToRemote: (payload) => ipcRenderer.invoke('canvas:upload-to-remote', payload),
   downloadCanvasPackageFromRemote: (payload) => ipcRenderer.invoke('canvas:download-package-from-remote', payload),
+  copyRemoteCanvasToLocal: (payload) => ipcRenderer.invoke('canvas:copy-remote-to-local', payload),
   cancelCanvasTransfer: (operationId) => ipcRenderer.invoke('canvas:cancel-transfer', operationId),
   onCanvasTransferProgress: (callback) => {
     const listener = (_event, progress) => callback(progress);
@@ -81,6 +83,9 @@ contextBridge.exposeInMainWorld('forartConfig', {
   chooseDirectory: (payload) => ipcRenderer.invoke('dialog:choose-directory', payload),
   chooseFile: (payload) => ipcRenderer.invoke('dialog:choose-file', payload),
   testServer: (serverUrl) => ipcRenderer.invoke('server:test-remote', serverUrl),
+  serverLogin: (payload) => ipcRenderer.invoke('server:login', payload),
+  serverSession: (payload) => ipcRenderer.invoke('server:session', payload),
+  serverLogout: () => ipcRenderer.invoke('server:logout'),
   localServerStatus: () => ipcRenderer.invoke('server:local-status'),
   appInfo: () => ipcRenderer.invoke('app:info'),
   checkUpdate: () => ipcRenderer.invoke('app:check-update'),

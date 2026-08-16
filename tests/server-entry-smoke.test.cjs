@@ -46,8 +46,8 @@ function waitForOutput(child, pattern, timeoutMs = 10000) {
 
 test('real server entry uses isolated storage and preserves the expected schema', async (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-server-smoke-'));
-  const databaseDir = path.join(tempRoot, 'database');
   const libraryDir = path.join(tempRoot, 'library');
+  const runtimeDataDir = path.join(tempRoot, 'forart_data');
   const canvasDir = path.join(tempRoot, 'canvas');
   const port = await reservePort();
   const child = spawn(process.execPath, ['server/forart-server.mjs'], {
@@ -56,8 +56,11 @@ test('real server entry uses isolated storage and preserves the expected schema'
       ...process.env,
       HOST: '127.0.0.1',
       PORT: String(port),
-      FORART_DATABASE_DIR: databaseDir,
+      FORART_DB_DRIVER: 'sqlite',
+      FORART_AUTH_DISABLED: '1',
+      NODE_ENV: 'test',
       FORART_LIBRARY_DIR: libraryDir,
+      FORART_DATA_DIR: runtimeDataDir,
       FORART_CANVAS_STORAGE_ROOT: canvasDir,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -73,26 +76,47 @@ test('real server entry uses isolated storage and preserves the expected schema'
   await waitForOutput(child, /Forart Server API running/);
   const health = await fetch(`http://127.0.0.1:${port}/api/health`);
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { ok: true });
+  assert.deepEqual(await health.json(), { ok: true, database: 'ready' });
 
   const admin = await fetch(`http://127.0.0.1:${port}/api/admin/status`);
   assert.equal(admin.status, 200);
   assert.equal((await admin.json()).ok, true);
 
-  const databasePath = path.join(databaseDir, 'forart-library.sqlite');
+  const adminPage = await fetch(`http://127.0.0.1:${port}/`);
+  assert.equal(adminPage.status, 200);
+  const adminHtml = await adminPage.text();
+  const adminEntry = adminHtml.match(/src="(\/_admin\/assets\/[^"]+\.js)"/i)?.[1];
+  assert.ok(adminEntry, "compiled admin entry should be present");
+  const adminAsset = await fetch(`http://127.0.0.1:${port}${adminEntry}`);
+  assert.equal(adminAsset.status, 200);
+  assert.match(adminAsset.headers.get("content-type") || "", /javascript/);
+
+  const databasePath = path.join(libraryDir, '.forart', 'database', 'forart-library.sqlite');
   const db = new Database(databasePath, { readonly: true });
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((row) => row.name);
   db.close();
-  assert.deepEqual(tables, [
-    'action_entries',
-    'action_projects',
+  const requiredTables = [
+    'account',
+    'action_profiles',
+    'asset_cleanup_jobs',
     'assets',
+    'kysely_migration',
+    'kysely_migration_lock',
+    'library_entries',
+    'library_entry_assets',
     'library_entry_tags',
+    'library_projects',
     'library_tags',
-    'model_entries',
-    'model_images',
-    'model_projects',
-    'outfit_entries',
-    'outfit_projects',
-  ]);
+    'model_profiles',
+    'organization',
+    'organizationRole',
+    'member',
+    'session',
+    'user',
+    'verification',
+  ];
+  for (const table of requiredTables) assert.ok(tables.includes(table), `expected current schema table ${table}`);
+  assert.equal(tables.includes('user_permission_grants'), false, 'legacy permission grant table must not be recreated');
+  assert.equal(fs.existsSync(path.join(runtimeDataDir, '.forart-auth-secret')), true);
+  assert.equal(fs.existsSync(path.join(libraryDir, '.forart-auth-secret')), false);
 });

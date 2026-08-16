@@ -19,6 +19,8 @@ function normalizeConfig(payload = {}) {
     mode,
     localLibraryPath: String(payload.localLibraryPath || '').trim(),
     serverUrl: String(payload.serverUrl || '').trim().replace(/\/+$/, ''),
+    serverAuthUsername: String(payload.serverAuthUsername || '').trim(),
+    serverAuthToken: String(payload.serverAuthToken || '').trim(),
     imageDownloadPath: String(payload.imageDownloadPath || '').trim(),
     photoshopExecutablePath: String(payload.photoshopExecutablePath || '').trim(),
     language: payload.language === 'en-US' ? 'en-US' : 'zh-CN',
@@ -282,7 +284,7 @@ function createTudouProvider(input = {}) {
   };
 }
 
-function createConfigStore({ app, rootDir }) {
+function createConfigStore({ app, rootDir, safeStorage }) {
   function portableRoot() {
     return app.isPackaged ? path.dirname(app.getPath('exe')) : rootDir;
   }
@@ -315,9 +317,34 @@ function createConfigStore({ app, rootDir }) {
     }
   }
 
+  function readServerAuthToken(raw) {
+    const encrypted = String(raw?.serverAuthTokenEncrypted || '').trim();
+    if (encrypted && safeStorage?.isEncryptionAvailable?.()) {
+      try {
+        return safeStorage.decryptString(Buffer.from(encrypted, 'base64'));
+      } catch {}
+    }
+    return String(raw?.serverAuthToken || '').trim();
+  }
+
+  function persistedConfig(raw, config) {
+    const next = { ...raw, ...config };
+    delete next.serverAuthToken;
+    delete next.serverAuthTokenEncrypted;
+    if (config.serverAuthToken) {
+      if (safeStorage?.isEncryptionAvailable?.()) {
+        next.serverAuthTokenEncrypted = safeStorage.encryptString(config.serverAuthToken).toString('base64');
+      } else {
+        next.serverAuthToken = config.serverAuthToken;
+      }
+    }
+    return next;
+  }
+
   function load() {
     if (!fs.existsSync(configPath())) return null;
-    const config = normalizeConfig(readRaw());
+    const raw = readRaw();
+    const config = normalizeConfig({ ...raw, serverAuthToken: readServerAuthToken(raw) });
     if (config.mode === 'local' && !config.localLibraryPath) return null;
     if (config.mode === 'remote' && !config.serverUrl) return null;
     return config;
@@ -325,7 +352,7 @@ function createConfigStore({ app, rootDir }) {
 
   function save(payload) {
     const config = normalizeConfig(payload);
-    writeRaw({ ...readRaw(), ...config });
+    writeRaw(persistedConfig(readRaw(), config));
     return config;
   }
 
