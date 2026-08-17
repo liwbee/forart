@@ -22,8 +22,6 @@ export interface CanvasSnapshotSignatures {
   persistence: string;
 }
 
-export type CanvasSnapshotSaveStatus = "saved" | "unsaved" | "saving";
-
 function recordOf(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
@@ -115,27 +113,20 @@ export function storedCanvasSnapshotSignatures(stored: StoredCanvasSnapshot): Ca
       connections: stored.connections,
       groups: stored.groups,
     }),
-    persistence: JSON.stringify(stored),
+    persistence: JSON.stringify({
+      nodes: stored.nodes,
+      connections: stored.connections,
+      groups: stored.groups,
+    }),
   };
 }
 
 export function canvasSnapshotSaveState(
   current: CanvasSnapshotSignatures,
   saved: CanvasSnapshotSignatures,
-  activeSave?: { signatures: CanvasSnapshotSignatures; reportsStatus: boolean } | null,
 ) {
-  const persistenceBaseline = activeSave?.signatures.persistence ?? saved.persistence;
-  const contentBaseline = activeSave?.reportsStatus
-    ? activeSave.signatures.content
-    : saved.content;
-  const contentDirty = current.content !== contentBaseline;
   return {
-    contentDirty,
-    persistenceDirty: current.persistence !== persistenceBaseline,
-    status: (contentDirty
-      ? "unsaved"
-      : activeSave?.reportsStatus
-        ? "saving"
-        : "saved") as CanvasSnapshotSaveStatus,
+    contentDirty: current.content !== saved.content,
+    persistenceDirty: current.persistence !== saved.persistence,
   };
 }

@@ -119,6 +119,7 @@ test("does not autosave while dragging and saves once after the interaction sett
   await expect.poll(() => page.evaluate(() => (
     window as typeof window & { __canvasSaves: unknown[] }
   ).__canvasSaves.length)).toBe(0);
+  await expect(page.locator(".rf-canvas-save-status")).toContainText("Unsaved");
 
   await page.mouse.up();
   await page.waitForTimeout(250);
@@ -128,4 +129,42 @@ test("does not autosave while dragging and saves once after the interaction sett
   await expect.poll(() => page.evaluate(() => (
     window as typeof window & { __canvasSaves: unknown[] }
   ).__canvasSaves.length), { timeout: 1_500 }).toBe(1);
+  await expect(page.locator(".rf-canvas-save-status")).toContainText("Saved");
+});
+
+test("stores viewport locally without saving the full canvas", async ({ page }) => {
+  await page.waitForTimeout(2_200);
+  await page.evaluate(() => {
+    (window as typeof window & { __canvasSaves: unknown[] }).__canvasSaves.length = 0;
+  });
+
+  const pane = page.locator(".react-flow__pane");
+  const box = await pane.boundingBox();
+  expect(box).not.toBeNull();
+  const start = { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down({ button: "middle" });
+  await page.mouse.move(start.x + 140, start.y + 80, { steps: 6 });
+  await page.mouse.up({ button: "middle" });
+
+  await page.waitForTimeout(1_200);
+  expect(await page.evaluate(() => (
+    window as typeof window & { __canvasSaves: unknown[] }
+  ).__canvasSaves.length)).toBe(0);
+  const storedViewport = await page.evaluate(() => {
+    const stored = JSON.parse(window.localStorage.getItem("forart_infinite_canvas_viewports_v1") || "{}");
+    return stored["canvas-1"];
+  });
+  expect(storedViewport).toMatchObject({ zoom: 1 });
+  expect(Math.abs(Number(storedViewport.x)) + Math.abs(Number(storedViewport.y))).toBeGreaterThan(0);
+
+  const positionBeforeReload = await page.locator('.react-flow__node[data-id="node-a"]').boundingBox();
+  await page.reload();
+  await page.getByRole("button", { name: "Infinite Canvas" }).click();
+  await expect(page.locator('.react-flow__node[data-id="node-a"]')).toBeVisible();
+  const positionAfterReload = await page.locator('.react-flow__node[data-id="node-a"]').boundingBox();
+  expect(positionBeforeReload).not.toBeNull();
+  expect(positionAfterReload).not.toBeNull();
+  expect(Math.abs(positionAfterReload!.x - positionBeforeReload!.x)).toBeLessThan(1);
+  expect(Math.abs(positionAfterReload!.y - positionBeforeReload!.y)).toBeLessThan(1);
 });

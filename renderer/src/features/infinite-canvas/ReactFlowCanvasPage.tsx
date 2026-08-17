@@ -23,7 +23,7 @@ import {
   type OnNodeDrag,
 } from "@xyflow/react";
 import { ClipboardPaste, Copy, Crosshair, Download, Eye, EyeOff, Grid3X3, Group as GroupIcon, Image, Images, Map as MapIcon, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../../components/ui/alert-dialog";
@@ -42,6 +42,7 @@ import {
 } from "./canvasActions";
 import { useNativeCanvasInteractionStore } from "./canvasInteractionStore";
 import { CanvasFloatingPanel } from "./components/CanvasFloatingPanel";
+import { CanvasSaveStatusIndicator } from "./components/CanvasSaveStatusIndicator";
 import { applyNativeNodeDataPatch } from "./applyNativeNodeDataPatch";
 import { applyCanvasNodeThumbnail, collectMissingCanvasThumbnailTargets } from "./canvasThumbnails";
 import {
@@ -162,14 +163,6 @@ interface AltDragCloneGesture extends AltDragCloneGestureState {
 const PASTE_POINTER_RESET_DISTANCE = 8;
 const PASTE_CASCADE_OFFSET = 24;
 const NODE_POINTER_GESTURE_THRESHOLD = 3;
-
-export type CanvasSaveStatus = "saved" | "unsaved" | "saving";
-
-const SAVE_STATUS_LABEL_KEYS: Record<CanvasSaveStatus, string> = {
-  saved: "infiniteCanvas:saveStatusSaved",
-  unsaved: "infiniteCanvas:saveStatusUnsaved",
-  saving: "infiniteCanvas:saveStatusSaving",
-};
 
 function isEditingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
@@ -340,15 +333,15 @@ function NativeCanvasMultiSelectionFrame({
   );
 }
 
-function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onInteractionChange, onSnapshotChange, onSave, readOnly, saveStatus }: {
+function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onInteractionChange, onSnapshotChange, onViewportChange, onSave, readOnly }: {
   canvasId: string;
   imageDownloadPath?: string;
   initialSnapshot: NativeCanvasSnapshot;
   onInteractionChange?: (active: boolean) => void;
   onSnapshotChange?: (snapshot: NativeCanvasSnapshot) => void;
+  onViewportChange?: (viewport: NativeCanvasSnapshot["viewport"]) => void;
   onSave?: () => void | Promise<void>;
   readOnly: boolean;
-  saveStatus: CanvasSaveStatus;
 }) {
   const { t } = useTranslation();
   const { settings, updateSettings } = useInfiniteCanvasSettings();
@@ -1577,7 +1570,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
               onMoveEnd={(_event, viewport) => {
                 viewportRef.current = viewport;
                 setCanvasInteraction("viewport", false);
-                if (!readOnly) onSnapshotChange?.({ nodes: nodesRef.current, edges: edgesRef.current, viewport });
+                onViewportChange?.(viewport);
               }}
               onNodeDragStart={handleNodeDragStart}
               onNodeDrag={handleNodeDrag}
@@ -1779,20 +1772,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
           </AlertDialogContent>
         </AlertDialog>
 
-        <Button
-          type="button"
-          variant="ghost"
-          className={`rf-canvas-save-status rf-canvas-save-status--${saveStatus}`}
-          disabled={!onSave || saveStatus === "saving"}
-          aria-label={t("infiniteCanvas:saveCanvas")}
-          aria-live="polite"
-          aria-atomic="true"
-          title={t("infiniteCanvas:saveCanvas")}
-          onClick={() => void onSave?.()}
-        >
-          <span className="rf-canvas-save-status__dot" aria-hidden="true" />
-          <span>{t(SAVE_STATUS_LABEL_KEYS[saveStatus])}</span>
-        </Button>
+        <CanvasSaveStatusIndicator canvasId={canvasId} onSave={onSave} />
 
         <NativeCanvasToolbar
         readOnly={readOnly}
@@ -1827,9 +1807,9 @@ interface ReactFlowCanvasPageProps {
   initialSnapshot?: NativeCanvasSnapshot;
   onInteractionChange?: (active: boolean) => void;
   onSnapshotChange?: (snapshot: NativeCanvasSnapshot) => void;
+  onViewportChange?: (viewport: NativeCanvasSnapshot["viewport"]) => void;
   onSave?: () => void | Promise<void>;
   readOnly?: boolean;
-  saveStatus: CanvasSaveStatus;
 }
 
 function createCanvasClipboardPayload(
@@ -1890,15 +1870,15 @@ function instantiateCanvasClipboardPayload(
   };
 }
 
-export function ReactFlowCanvasPage({ canvasId, imageDownloadPath, initialSnapshot = emptyCanvasSnapshot(), onInteractionChange, onSnapshotChange, onSave, readOnly = false, saveStatus }: ReactFlowCanvasPageProps) {
+export const ReactFlowCanvasPage = memo(function ReactFlowCanvasPage({ canvasId, imageDownloadPath, initialSnapshot = emptyCanvasSnapshot(), onInteractionChange, onSnapshotChange, onViewportChange, onSave, readOnly = false }: ReactFlowCanvasPageProps) {
   const { t } = useTranslation();
   return (
     <section className="infinite-canvas-page" aria-label={t("infiniteCanvas:title")}>
       <ReactFlowProvider>
-        <NativeCanvasSurface canvasId={canvasId} imageDownloadPath={imageDownloadPath} initialSnapshot={initialSnapshot} onInteractionChange={onInteractionChange} onSnapshotChange={onSnapshotChange} onSave={onSave} readOnly={readOnly} saveStatus={saveStatus} />
+        <NativeCanvasSurface canvasId={canvasId} imageDownloadPath={imageDownloadPath} initialSnapshot={initialSnapshot} onInteractionChange={onInteractionChange} onSnapshotChange={onSnapshotChange} onViewportChange={onViewportChange} onSave={onSave} readOnly={readOnly} />
       </ReactFlowProvider>
     </section>
   );
-}
+});
 
 export default ReactFlowCanvasPage;

@@ -128,13 +128,13 @@ test('canvas snapshot semantics persist unified task pointers silently', () => {
   assert.notEqual(canvasSnapshotSignatures(anchored).persistence, canvasSnapshotSignatures(base).persistence);
 });
 
-test('viewport changes require silent persistence without changing the content signature', () => {
+test('viewport changes stay outside canvas dirty signatures', () => {
   const { canvasSnapshotSignatures } = loadSnapshotSemantics();
   const base = canvasSnapshotSignatures(snapshot());
   const moved = canvasSnapshotSignatures(snapshot({ viewport: { x: 20, y: -10, zoom: 1.25 } }));
 
   assert.equal(moved.content, base.content);
-  assert.notEqual(moved.persistence, base.persistence);
+  assert.equal(moved.persistence, base.persistence);
 });
 
 test('download markers persist silently without making canvas content dirty', () => {
@@ -191,7 +191,7 @@ test('durable canvas content changes alter both signatures', () => {
   assert.notEqual(canvasSnapshotSignatures(changed).persistence, canvasSnapshotSignatures(base).persistence);
 });
 
-test('save state keeps viewport persistence silent and detects edits during an active save', () => {
+test('save state ignores viewport changes and detects durable edits', () => {
   const { canvasSnapshotSaveState, canvasSnapshotSignatures } = loadSnapshotSemantics();
   const saved = canvasSnapshotSignatures(snapshot());
   const viewportOnly = canvasSnapshotSignatures(snapshot({ viewport: { x: 30, y: 40, zoom: 0.8 } }));
@@ -204,25 +204,10 @@ test('save state keeps viewport persistence silent and detects edits during an a
 
   assert.deepEqual(canvasSnapshotSaveState(viewportOnly, saved), {
     contentDirty: false,
-    persistenceDirty: true,
-    status: 'saved',
-  });
-  assert.deepEqual(canvasSnapshotSaveState(saved, saved, { signatures: saved, reportsStatus: true }), {
-    contentDirty: false,
     persistenceDirty: false,
-    status: 'saving',
   });
-  assert.deepEqual(canvasSnapshotSaveState(edited, saved, { signatures: saved, reportsStatus: true }), {
+  assert.deepEqual(canvasSnapshotSaveState(edited, saved), {
     contentDirty: true,
     persistenceDirty: true,
-    status: 'unsaved',
-  });
-  assert.deepEqual(canvasSnapshotSaveState(viewportOnly, saved, {
-    signatures: viewportOnly,
-    reportsStatus: false,
-  }), {
-    contentDirty: false,
-    persistenceDirty: false,
-    status: 'saved',
   });
 });

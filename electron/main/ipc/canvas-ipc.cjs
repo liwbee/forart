@@ -86,7 +86,10 @@ function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackag
         sequence: saveSequence,
       });
     }
-    return result;
+    return {
+      ok: result?.ok !== false,
+      ...(result?.record ? { record: result.record } : {}),
+    };
   });
   ipcMain.handle('canvas:update-meta', async (_event, canvasId, patch) => canvasStore.updateCanvasMeta(canvasId, patch));
   ipcMain.handle('canvas:update-project', async (_event, projectId, patch) => canvasStore.updateProject(projectId, patch));

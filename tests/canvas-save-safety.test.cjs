@@ -25,7 +25,10 @@ test('canvas saves use revisions and reject an unexpected empty overwrite', () =
   assert.throws(() => store.saveCanvas(canvas.id, { nodes: [], connections: [] }), /empty canvas snapshot/i);
   assert.equal(store.readCanvas(canvas.id).nodes.length, 1);
 
-  const cleared = store.saveCanvas(canvas.id, { nodes: [], connections: [], allowEmpty: true }).canvas;
+  const saveResult = store.saveCanvas(canvas.id, { nodes: [], connections: [], allowEmpty: true });
+  const cleared = store.readCanvas(canvas.id);
+  assert.equal(Object.hasOwn(saveResult, 'canvas'), false);
+  assert.equal(saveResult.record.id, canvas.id);
   assert.equal(cleared.nodes.length, 0);
   assert.equal(cleared.revision, 2);
 }));
@@ -120,7 +123,12 @@ test('main-process saves do not consult in-memory task runners', async () => {
     canvasStore: {
       saveCanvas(canvasId, payload) {
         saves.push({ canvasId, payload });
-        return { ok: true };
+        return {
+          ok: true,
+          canvas: { id: canvasId, nodes: payload.nodes },
+          record: { id: canvasId, nodeCount: payload.nodes.length },
+          filePath: 'canvas.json',
+        };
       },
     },
     assetStore: {},
@@ -129,7 +137,7 @@ test('main-process saves do not consult in-memory task runners', async () => {
     imageGenerationRunner: runner,
   });
   const save = handlers.get('canvas:save');
-  await save(null, 'canvas-1', {
+  const saved = await save(null, 'canvas-1', {
     saveSessionId: 'session',
     saveSessionStartedAt: 100,
     saveSequence: 2,
@@ -141,6 +149,9 @@ test('main-process saves do not consult in-memory task runners', async () => {
   assert.equal(saves[0].payload.nodes[0].id, 'new');
   assert.equal(saves[0].payload.nodes[0].data.generatedImages[0].downloadState, 'downloaded');
   assert.equal(reconciliations, 0);
+  assert.deepEqual(saved, { ok: true, record: { id: 'canvas-1', nodeCount: 1 } });
+  assert.equal(Object.hasOwn(saved, 'canvas'), false);
+  assert.equal(Object.hasOwn(saved, 'filePath'), false);
   assert.equal(stale.stale, true);
 });
 

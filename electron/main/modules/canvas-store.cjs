@@ -393,7 +393,7 @@ function createCanvasStore({ rootDir }) {
       updatedAt: nowMs(),
       revision: existing.revision + 1,
     });
-    return { ok: true, canvas: result.canvas, record: canvasRecord(result.canvas), filePath: result.filePath };
+    return { ok: true, record: canvasRecord(result.canvas), filePath: result.filePath };
   }
 
   function updateCanvasNode(canvasId, nodeId, updater) {

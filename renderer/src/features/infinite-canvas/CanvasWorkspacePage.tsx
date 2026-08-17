@@ -13,10 +13,12 @@ import { getActiveForartConfig } from "../../data-source/runtime";
 import { invalidatePermissions, refreshPermissions, usePermission } from "../permissions";
 import { CanvasDocumentTabs } from "./CanvasDocumentTabs";
 import { createCanvasAutosaveScheduler, type CanvasAutosaveScheduler } from "./canvasAutosaveScheduler";
+import { setCanvasSaveStatus } from "./canvasSaveStatusStore";
 import { CanvasTransferProgressDialog, type ActiveCanvasTransfer } from "./CanvasTransferProgressDialog";
-import { ReactFlowCanvasPage, type CanvasSaveStatus } from "./ReactFlowCanvasPage";
+import { ReactFlowCanvasPage } from "./ReactFlowCanvasPage";
 import { CanvasWorkspaceHome } from "./CanvasWorkspaceHome";
 import { CanvasFloatingPanel } from "./components/CanvasFloatingPanel";
+import { readCanvasViewport, writeCanvasViewport } from "./canvasViewportStorage";
 import {
   canvasSnapshotSaveState,
   canvasSnapshotSignatures,
@@ -137,7 +139,6 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
   const [busy, setBusy] = useState(false);
   const [loadingCanvas, setLoadingCanvas] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [saveStatus, setSaveStatus] = useState<CanvasSaveStatus>("saved");
   const [taskCenterOpen, setTaskCenterOpen] = useState(false);
   const [activeCanvasTransfer, setActiveCanvasTransfer] = useState<ActiveCanvasTransfer | null>(null);
   const activeTaskCount = useGenerationTaskCache((state) => Object.values(state.tasksById).filter(isGenerationTaskActive).length);
@@ -197,7 +198,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     snapshotVersionRef.current += 1;
     lastSavedSignaturesRef.current = canvasSnapshotSignatures(snapshot);
     autosaveSchedulerRef.current?.reset();
-    setSaveStatus("saved");
+    setCanvasSaveStatus(activeCanvasIdRef.current, "saved");
   }, []);
 
   const refreshWorkspace = useCallback(async () => {
@@ -229,12 +230,12 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     const signatures = storedCanvasSnapshotSignatures(storedSnapshot);
     const pendingState = canvasSnapshotSaveState(signatures, lastSavedSignaturesRef.current);
     if (!pendingState.persistenceDirty) {
-      if (snapshotVersionRef.current === capturedVersion) setSaveStatus("saved");
+      if (snapshotVersionRef.current === capturedVersion) setCanvasSaveStatus(canvasId, "saved");
       return true;
     }
     const allowEmpty = allowEmptySaveRef.current && storedSnapshot.nodes.length === 0;
     const saveSequence = ++saveSequenceRef.current;
-    if (pendingState.contentDirty) setSaveStatus("saving");
+    if (pendingState.contentDirty) setCanvasSaveStatus(canvasId, "saving");
     try {
       const result = await window.easyTool.saveCanvas(canvasId, {
         title: document.title,
@@ -254,10 +255,10 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
         lastSaveErrorRef.current = "";
         setErrorMessage((current) => current === resolvedError ? "" : current);
       }
-      setSaveStatus(snapshotVersionRef.current === capturedVersion ? "saved" : "unsaved");
+      setCanvasSaveStatus(canvasId, snapshotVersionRef.current === capturedVersion ? "saved" : "unsaved");
       return true;
     } catch (error) {
-      setSaveStatus("unsaved");
+      setCanvasSaveStatus(canvasId, "unsaved");
       const message = error instanceof Error ? error.message : String(error);
       lastSaveErrorRef.current = message;
       setErrorMessage(message);
@@ -284,18 +285,19 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     try {
       const loaded = normalizeCanvasDocument(await window.easyTool.loadCanvas(canvasId));
       if (!loaded) throw new Error(t("infiniteCanvas:canvasNotFound"));
-      activeCanvasIdRef.current = loaded.id;
+      const document = { ...loaded, viewport: readCanvasViewport(loaded.id, loaded.viewport) };
+      activeCanvasIdRef.current = document.id;
       activeReadOnlyRef.current = false;
-      activeDocumentRef.current = loaded;
-      adoptSavedSnapshot({ nodes: loaded.nodes, edges: loaded.edges, viewport: loaded.viewport });
+      activeDocumentRef.current = document;
+      adoptSavedSnapshot({ nodes: document.nodes, edges: document.edges, viewport: document.viewport });
       allowEmptySaveRef.current = false;
-      setActiveCanvasId(loaded.id);
-      setActiveDocument(loaded);
+      setActiveCanvasId(document.id);
+      setActiveDocument(document);
       showHomeRef.current = false;
       setShowHome(false);
-      setTabs((current) => current.some((tab) => tab.id === loaded.id)
-        ? current.map((tab) => tab.id === loaded.id ? tabFromRecord(loaded) : tab)
-        : [...current, tabFromRecord(loaded)]);
+      setTabs((current) => current.some((tab) => tab.id === document.id)
+        ? current.map((tab) => tab.id === document.id ? tabFromRecord(document) : tab)
+        : [...current, tabFromRecord(document)]);
       setErrorMessage("");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -378,7 +380,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
       const remote = rewriteRemoteAssetUrls(await response.json(), baseUrl);
       const loaded = normalizeCanvasDocument(remote);
       if (!loaded) throw new Error(t("infiniteCanvas:canvasNotFound"));
-      const document = { ...loaded, id: tabId };
+      const document = { ...loaded, id: tabId, viewport: readCanvasViewport(tabId, loaded.viewport) };
       activeCanvasIdRef.current = tabId;
       activeDocumentRef.current = document;
       activeReadOnlyRef.current = true;
@@ -474,18 +476,22 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     const previousSnapshot = snapshotRef.current;
     const previousNodeCount = previousSnapshot.nodes.length;
     const unchanged = snapshot.nodes === previousSnapshot.nodes
-      && snapshot.edges === previousSnapshot.edges
-      && snapshot.viewport.x === previousSnapshot.viewport.x
-      && snapshot.viewport.y === previousSnapshot.viewport.y
-      && snapshot.viewport.zoom === previousSnapshot.viewport.zoom;
+      && snapshot.edges === previousSnapshot.edges;
     snapshotRef.current = snapshot;
     if (unchanged) return;
     snapshotVersionRef.current += 1;
     if (!activeCanvasIdRef.current) return;
     if (previousNodeCount > 0 && snapshot.nodes.length === 0) allowEmptySaveRef.current = true;
     else if (snapshot.nodes.length > 0) allowEmptySaveRef.current = false;
-    setSaveStatus("unsaved");
+    setCanvasSaveStatus(activeCanvasIdRef.current, "unsaved");
     autosaveSchedulerRef.current?.markDirty();
+  }, []);
+
+  const handleViewportChange = useCallback((viewport: NativeCanvasSnapshot["viewport"]) => {
+    const canvasId = activeCanvasIdRef.current;
+    if (!canvasId) return;
+    snapshotRef.current = { ...snapshotRef.current, viewport };
+    writeCanvasViewport(canvasId, viewport);
   }, []);
 
   const handleCanvasInteractionChange = useCallback((active: boolean) => {
@@ -913,9 +919,9 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
               initialSnapshot={activeDocument}
               onInteractionChange={handleCanvasInteractionChange}
               onSnapshotChange={handleSnapshotChange}
+              onViewportChange={handleViewportChange}
               onSave={tab.readOnly ? undefined : saveActiveCanvasManually}
               readOnly={Boolean(tab.readOnly)}
-              saveStatus={saveStatus}
             />
           ) : null}
         </TabsContent>
