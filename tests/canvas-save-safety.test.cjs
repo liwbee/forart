@@ -100,6 +100,8 @@ test('successful saves leave no temporary canvas or index files behind', () => w
 
   assert.equal(fs.existsSync(`${store.canvasPath(canvas.id)}.tmp`), false);
   assert.equal(fs.existsSync(path.join(rootDir, 'CanvasAssests', 'canvas-index.json.tmp')), false);
+  const serialized = fs.readFileSync(store.canvasPath(canvas.id), 'utf8');
+  assert.equal(serialized, JSON.stringify(JSON.parse(serialized)));
 }));
 
 test('main-process saves do not consult in-memory task runners', async () => {

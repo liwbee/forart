@@ -340,10 +340,11 @@ function NativeCanvasMultiSelectionFrame({
   );
 }
 
-function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onSnapshotChange, onSave, readOnly, saveStatus }: {
+function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onInteractionChange, onSnapshotChange, onSave, readOnly, saveStatus }: {
   canvasId: string;
   imageDownloadPath?: string;
   initialSnapshot: NativeCanvasSnapshot;
+  onInteractionChange?: (active: boolean) => void;
   onSnapshotChange?: (snapshot: NativeCanvasSnapshot) => void;
   onSave?: () => void | Promise<void>;
   readOnly: boolean;
@@ -389,6 +390,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   const pendingContextPastePointRef = useRef<{ x: number; y: number } | null>(null);
   const altDragCloneGestureRef = useRef<AltDragCloneGesture | null>(null);
   const historyGestureRef = useRef<NativeCanvasHistorySnapshot | null>(null);
+  const activeCanvasInteractionsRef = useRef(new Set<string>());
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
   const edgeToolbarFrameRef = useRef<number | null>(null);
   const edgeToolbarHideTimerRef = useRef<number | null>(null);
@@ -429,8 +431,18 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   }, [selectedGroupNodes, selectedNodeIds, toolbarNodeId]);
   const multiSelectionDragging = selectedNodes.some((node) => node.dragging);
 
+  const setCanvasInteraction = useCallback((kind: string, active: boolean) => {
+    const interactions = activeCanvasInteractionsRef.current;
+    const wasActive = interactions.size > 0;
+    if (active) interactions.add(kind);
+    else interactions.delete(kind);
+    const isActive = interactions.size > 0;
+    if (wasActive !== isActive) onInteractionChange?.(isActive);
+  }, [onInteractionChange]);
+
   useEffect(() => resetInteractions, [resetInteractions]);
   useEffect(() => () => clearCanvasLaunching(canvasId), [canvasId, clearCanvasLaunching]);
+  useEffect(() => () => onInteractionChange?.(false), [onInteractionChange]);
 
   const clearEdgeToolbarHide = useCallback(() => {
     if (edgeToolbarHideTimerRef.current === null) return;
@@ -515,15 +527,17 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   }, [readOnly, redoHistory, undoHistory]);
 
   const beginCanvasSelection = useCallback(() => {
+    setCanvasInteraction("selection", true);
     beginSelectionGesture();
-  }, [beginSelectionGesture]);
+  }, [beginSelectionGesture, setCanvasInteraction]);
 
   const finishCanvasSelection = useCallback(() => {
     const currentNodes = getNodes();
     const expanded = expandNativeCanvasGroupSelection(currentNodes);
     if (expanded.nodes !== currentNodes) setNodes(expanded.nodes);
     endSelectionGesture(new Set(expanded.groupIds));
-  }, [endSelectionGesture, getNodes, setNodes]);
+    setCanvasInteraction("selection", false);
+  }, [endSelectionGesture, getNodes, setCanvasInteraction, setNodes]);
 
   const addNode = useCallback((kind: NativeCanvasNodeKind, x: number, y: number, data?: Partial<NativeCanvasNode["data"]>) => {
     const definition = NATIVE_CANVAS_NODE_DEFINITIONS[kind];
@@ -1370,6 +1384,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
 
   const handleNodeDragStart = useCallback<OnNodeDrag<NativeCanvasNode>>((event, draggedNode, draggedNodes) => {
     if (readOnly) return;
+    setCanvasInteraction("node-drag", true);
     historyGestureRef.current = beginInfiniteCanvasHistoryGesture();
     altDragCloneGestureRef.current = null;
     const historyNodeById = new Map(
@@ -1446,7 +1461,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       );
     });
     if (cloned) syncSelection([...cloned.idMap.values()]);
-  }, [getEdges, getNodes, readOnly, setNodes, syncSelection]);
+  }, [getEdges, getNodes, readOnly, setCanvasInteraction, setNodes, syncSelection]);
 
   const handleNodeDrag = useCallback<OnNodeDrag<NativeCanvasNode>>((_event, draggedNode, draggedNodes) => {
     const cloneGesture = altDragCloneGestureRef.current;
@@ -1458,6 +1473,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
 
   const handleNodeDragStop = useCallback<OnNodeDrag<NativeCanvasNode>>((_event, draggedNode, draggedNodes) => {
     if (readOnly) return;
+    setCanvasInteraction("node-drag", false);
     const cloneGesture = altDragCloneGestureRef.current;
     altDragCloneGestureRef.current = null;
 
@@ -1495,7 +1511,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     recordInfiniteCanvasHistory(finalNodes, getEdges());
     commitInfiniteCanvasHistoryGesture(historyGestureRef.current);
     historyGestureRef.current = null;
-  }, [getEdges, getNodes, readOnly, setEdges, setNodes, syncSelection]);
+  }, [getEdges, getNodes, readOnly, setCanvasInteraction, setEdges, setNodes, syncSelection]);
 
   return (
     <div ref={wrapperRef} className={`rf-native-canvas${readOnly ? " rf-native-canvas--readonly" : ""}`}>
@@ -1552,6 +1568,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
               onSelectionStart={beginCanvasSelection}
               onSelectionEnd={finishCanvasSelection}
               onMoveStart={(_event, viewport) => {
+                setCanvasInteraction("viewport", true);
                 viewportRef.current = viewport;
               }}
               onMove={(_event, viewport) => {
@@ -1559,6 +1576,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
               }}
               onMoveEnd={(_event, viewport) => {
                 viewportRef.current = viewport;
+                setCanvasInteraction("viewport", false);
                 if (!readOnly) onSnapshotChange?.({ nodes: nodesRef.current, edges: edgesRef.current, viewport });
               }}
               onNodeDragStart={handleNodeDragStart}
@@ -1807,6 +1825,7 @@ interface ReactFlowCanvasPageProps {
   canvasId: string;
   imageDownloadPath?: string;
   initialSnapshot?: NativeCanvasSnapshot;
+  onInteractionChange?: (active: boolean) => void;
   onSnapshotChange?: (snapshot: NativeCanvasSnapshot) => void;
   onSave?: () => void | Promise<void>;
   readOnly?: boolean;
@@ -1871,12 +1890,12 @@ function instantiateCanvasClipboardPayload(
   };
 }
 
-export function ReactFlowCanvasPage({ canvasId, imageDownloadPath, initialSnapshot = emptyCanvasSnapshot(), onSnapshotChange, onSave, readOnly = false, saveStatus }: ReactFlowCanvasPageProps) {
+export function ReactFlowCanvasPage({ canvasId, imageDownloadPath, initialSnapshot = emptyCanvasSnapshot(), onInteractionChange, onSnapshotChange, onSave, readOnly = false, saveStatus }: ReactFlowCanvasPageProps) {
   const { t } = useTranslation();
   return (
     <section className="infinite-canvas-page" aria-label={t("infiniteCanvas:title")}>
       <ReactFlowProvider>
-        <NativeCanvasSurface canvasId={canvasId} imageDownloadPath={imageDownloadPath} initialSnapshot={initialSnapshot} onSnapshotChange={onSnapshotChange} onSave={onSave} readOnly={readOnly} saveStatus={saveStatus} />
+        <NativeCanvasSurface canvasId={canvasId} imageDownloadPath={imageDownloadPath} initialSnapshot={initialSnapshot} onInteractionChange={onInteractionChange} onSnapshotChange={onSnapshotChange} onSave={onSave} readOnly={readOnly} saveStatus={saveStatus} />
       </ReactFlowProvider>
     </section>
   );

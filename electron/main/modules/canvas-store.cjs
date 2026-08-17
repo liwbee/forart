@@ -49,8 +49,7 @@ function readJsonFile(filePath) {
 }
 
 function atomicWriteJson(filePath, payload) {
-  const serialized = `${JSON.stringify(payload, null, 2)}\n`;
-  JSON.parse(serialized);
+  const serialized = JSON.stringify(payload);
   const temporaryPath = `${filePath}.tmp`;
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const descriptor = fs.openSync(temporaryPath, 'w');
