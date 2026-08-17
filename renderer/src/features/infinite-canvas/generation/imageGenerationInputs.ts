@@ -91,7 +91,9 @@ function collectReferenceInputs(
         order: Math.max(1, Number(edge.data?.referenceOrder || 1)),
         title: String(source.data.label || fallbackTitle),
         imageUrl: resolveLibraryImageUrl(imageUrl),
-        previewUrl: resolveLibraryImageUrl(String(primaryImage?.thumbUrl || imageUrl)),
+        previewUrl: primaryImage?.thumbUrl
+          ? resolveLibraryImageUrl(String(primaryImage.thumbUrl))
+          : "",
       }];
     })
     .sort((left, right) => left.order - right.order || left.edgeId.localeCompare(right.edgeId));

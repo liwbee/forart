@@ -802,6 +802,16 @@
   cursor: zoom-in;
 }
 
+.rf-native-generated-tile > svg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  color: var(--text-muted);
+  transform: translate(-50%, -50%);
+}
+
 .rf-native-generated-tile-actions {
   position: absolute;
   top: 7px;
@@ -2331,6 +2341,20 @@
   max-height: 120px;
 }
 
+.rf-native-image-placeholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  background: var(--surface-card-muted);
+}
+
+.rf-native-image-placeholder > svg {
+  width: 24px;
+  height: 24px;
+}
+
 .rf-native-canvas .rf-image-generator-prompt {
   width: 100%;
   height: 100%;
@@ -2827,6 +2851,27 @@
   stroke-width: 2;
   stroke-linecap: round;
   transition: stroke 120ms ease, stroke-width 120ms ease;
+}
+
+.rf-reference-item > svg,
+.rf-reference-preview > svg {
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
+}
+
+.rf-reference-item > svg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.rf-reference-preview:has(> svg) {
+  min-width: 56px;
+  min-height: 56px;
+  display: grid;
+  place-items: center;
 }
 
 .rf-native-canvas .react-flow__edge.selectable:not(.selected):hover .react-flow__edge-path {

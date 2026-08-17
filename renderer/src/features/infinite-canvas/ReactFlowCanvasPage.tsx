@@ -43,6 +43,7 @@ import {
 import { useNativeCanvasInteractionStore } from "./canvasInteractionStore";
 import { CanvasFloatingPanel } from "./components/CanvasFloatingPanel";
 import { applyNativeNodeDataPatch } from "./applyNativeNodeDataPatch";
+import { applyCanvasNodeThumbnail, collectMissingCanvasThumbnailTargets } from "./canvasThumbnails";
 import {
   cloneNativeCanvasNodeData,
   createNativeCanvasNode,
@@ -98,7 +99,6 @@ import {
   groupNativeCanvasNodes,
   prepareNativeCanvasNodesForClipboard,
 } from "./nativeCanvasGroups";
-import { ViewportMomentumController } from "./viewportMomentum";
 import {
   projectAltDragOntoClones,
   type AltDragCloneGestureState,
@@ -357,8 +357,17 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   const [edges, setEdges, onEdgesChange] = useEdgesState<NativeCanvasEdge>(initialSnapshot.edges);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
+  const imageThumbnailAttemptsRef = useRef(new Set<string>());
+  const imageThumbnailMountedRef = useRef(true);
   nodesRef.current = nodes;
   edgesRef.current = edges;
+
+  useEffect(() => {
+    imageThumbnailMountedRef.current = true;
+    return () => {
+      imageThumbnailMountedRef.current = false;
+    };
+  }, []);
   const flowEdges = useMemo(
     () => edges.map((edge) => edge.hidden === !connectionsVisible
       ? edge
@@ -384,7 +393,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   const edgeToolbarFrameRef = useRef<number | null>(null);
   const edgeToolbarHideTimerRef = useRef<number | null>(null);
   const pendingEdgePointerRef = useRef<{ edgeId: string; clientX: number; clientY: number } | null>(null);
-  const { deleteElements, getEdges, getIntersectingNodes, getNodes, getNodesBounds: getFlowNodesBounds, screenToFlowPosition, setViewport } = useReactFlow<NativeCanvasNode, NativeCanvasEdge>();
+  const { deleteElements, getEdges, getIntersectingNodes, getNodes, getNodesBounds: getFlowNodesBounds, screenToFlowPosition } = useReactFlow<NativeCanvasNode, NativeCanvasEdge>();
   const syncSelection = useNativeCanvasInteractionStore((state) => state.syncSelection);
   const beginSelectionGesture = useNativeCanvasInteractionStore((state) => state.beginSelectionGesture);
   const endSelectionGesture = useNativeCanvasInteractionStore((state) => state.endSelectionGesture);
@@ -419,31 +428,6 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
     return nodeIds.length > 1 || groupNodeIds.length > 0 ? nodeIds : [];
   }, [selectedGroupNodes, selectedNodeIds, toolbarNodeId]);
   const multiSelectionDragging = selectedNodes.some((node) => node.dragging);
-
-  const readOnlyRef = useRef(readOnly);
-  const onSnapshotChangeRef = useRef(onSnapshotChange);
-  readOnlyRef.current = readOnly;
-  onSnapshotChangeRef.current = onSnapshotChange;
-  const viewportMomentumRef = useRef<ViewportMomentumController | null>(null);
-  if (!viewportMomentumRef.current) {
-    viewportMomentumRef.current = new ViewportMomentumController({
-      initialViewport: initialSnapshot.viewport,
-      applyViewport: (viewport) => {
-        viewportRef.current = viewport;
-        void setViewport(viewport, { duration: 0 });
-      },
-      settleViewport: (viewport) => {
-        viewportRef.current = viewport;
-        if (!readOnlyRef.current) {
-          onSnapshotChangeRef.current?.({ nodes: nodesRef.current, edges: edgesRef.current, viewport });
-        }
-      },
-    });
-  }
-  const viewportMomentum = viewportMomentumRef.current;
-  const stopViewportMomentum = useCallback(() => viewportMomentum.stop(), [viewportMomentum]);
-
-  useEffect(() => () => viewportMomentum.dispose(), [viewportMomentum]);
 
   useEffect(() => resetInteractions, [resetInteractions]);
   useEffect(() => () => clearCanvasLaunching(canvasId), [canvasId, clearCanvasLaunching]);
@@ -531,9 +515,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
   }, [readOnly, redoHistory, undoHistory]);
 
   const beginCanvasSelection = useCallback(() => {
-    stopViewportMomentum();
     beginSelectionGesture();
-  }, [beginSelectionGesture, stopViewportMomentum]);
+  }, [beginSelectionGesture]);
 
   const finishCanvasSelection = useCallback(() => {
     const currentNodes = getNodes();
@@ -786,6 +769,39 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       ? applyNativeNodeDataPatch(node, patch)
       : node));
   }, [setNodes]);
+
+  const patchImageNodeThumbnail = useCallback((nodeId: string, sourceUrl: string, thumbUrl: string) => {
+    setNodes((current) => applyCanvasNodeThumbnail(current, nodeId, sourceUrl, thumbUrl));
+  }, [setNodes]);
+
+  useEffect(() => {
+    const ensureThumbnail = window.easyTool?.ensureCanvasAssetThumbnail;
+    if (!ensureThumbnail) return;
+    const pending = collectMissingCanvasThumbnailTargets(nodes).filter((item) => {
+      const key = `${item.nodeId}:${item.sourceUrl}`;
+      if (imageThumbnailAttemptsRef.current.has(key)) return false;
+      imageThumbnailAttemptsRef.current.add(key);
+      return true;
+    });
+    if (!pending.length) return;
+
+    let nextIndex = 0;
+    const worker = async () => {
+      while (imageThumbnailMountedRef.current) {
+        const item = pending[nextIndex++];
+        if (!item) return;
+        try {
+          const thumbnail = await ensureThumbnail({ url: item.sourceUrl });
+          if (imageThumbnailMountedRef.current && thumbnail.thumbUrl) {
+            patchImageNodeThumbnail(item.nodeId, item.sourceUrl, thumbnail.thumbUrl);
+          }
+        } catch {
+          // Keep the placeholder when an asset cannot be resolved or thumb generation fails.
+        }
+      }
+    };
+    void Promise.all([worker(), worker()]);
+  }, [nodes, patchImageNodeThumbnail]);
 
   const patchActionFissionRow = useCallback((nodeId: string, rowId: string, patch: Partial<ActionFissionRow>) => {
     setNodes((current) => current.map((node) => {
@@ -1354,7 +1370,6 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
 
   const handleNodeDragStart = useCallback<OnNodeDrag<NativeCanvasNode>>((event, draggedNode, draggedNodes) => {
     if (readOnly) return;
-    stopViewportMomentum();
     historyGestureRef.current = beginInfiniteCanvasHistoryGesture();
     altDragCloneGestureRef.current = null;
     const historyNodeById = new Map(
@@ -1431,7 +1446,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
       );
     });
     if (cloned) syncSelection([...cloned.idMap.values()]);
-  }, [getEdges, getNodes, readOnly, setNodes, stopViewportMomentum, syncSelection]);
+  }, [getEdges, getNodes, readOnly, setNodes, syncSelection]);
 
   const handleNodeDrag = useCallback<OnNodeDrag<NativeCanvasNode>>((_event, draggedNode, draggedNodes) => {
     const cloneGesture = altDragCloneGestureRef.current;
@@ -1491,7 +1506,6 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
         <ContextMenuTrigger asChild disabled={readOnly}>
           <div
             className="rf-native-flow-surface"
-            onPointerDown={stopViewportMomentum}
             onPointerMove={(event) => {
               lastPointerRef.current = { x: event.clientX, y: event.clientY };
             }}
@@ -1537,34 +1551,15 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onS
               onConnectEnd={readOnly ? undefined : connectToNodeBody}
               onSelectionStart={beginCanvasSelection}
               onSelectionEnd={finishCanvasSelection}
-              onMoveStart={(event, viewport) => {
-                if (!event && viewportMomentum.isInternalViewport(viewport)) return;
+              onMoveStart={(_event, viewport) => {
                 viewportRef.current = viewport;
-                if (!event) {
-                  viewportMomentum.stop();
-                  viewportMomentum.syncViewport(viewport);
-                  return;
-                }
-                viewportMomentum.beginUserMove(viewport);
               }}
-              onMove={(event, viewport) => {
-                if (!event && viewportMomentum.isInternalViewport(viewport)) return;
+              onMove={(_event, viewport) => {
                 viewportRef.current = viewport;
-                if (!event) {
-                  viewportMomentum.syncViewport(viewport);
-                  return;
-                }
-                viewportMomentum.updateUserMove(viewport);
               }}
-              onMoveEnd={(event, viewport) => {
-                if (!event && viewportMomentum.isInternalViewport(viewport)) return;
+              onMoveEnd={(_event, viewport) => {
                 viewportRef.current = viewport;
-                if (!event) {
-                  viewportMomentum.syncViewport(viewport);
-                  if (!readOnly) onSnapshotChange?.({ nodes: nodesRef.current, edges: edgesRef.current, viewport });
-                  return;
-                }
-                viewportMomentum.endUserMove(viewport);
+                if (!readOnly) onSnapshotChange?.({ nodes: nodesRef.current, edges: edgesRef.current, viewport });
               }}
               onNodeDragStart={handleNodeDragStart}
               onNodeDrag={handleNodeDrag}

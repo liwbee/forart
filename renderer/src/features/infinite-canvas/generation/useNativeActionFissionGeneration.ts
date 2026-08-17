@@ -62,24 +62,61 @@ export function useNativeActionFissionGeneration({
   const activeNodeRunsRef = useRef(new Set<string>());
   const thumbnailAttemptsRef = useRef(new Set<string>());
   const handledTerminalVersionsRef = useRef(new Map<string, number>());
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+
+  useEffect(() => activateGenerationHook(mountedRef, () => {
+    taskControllersRef.current.forEach((controller) => controller.abort());
+    taskControllersRef.current.clear();
+    nodeQueueControllersRef.current.clear();
+    activeNodeRunsRef.current.clear();
+  }), []);
 
   useEffect(() => {
     if (!window.easyTool?.ensureCanvasAssetThumbnail) return;
-    nodes.forEach((node) => {
-      if (node.data.kind !== "actionFission") return;
-      node.data.actionFission?.rows.forEach((row) => {
-        const resultUrl = row.resultUrl || "";
-        if (!resultUrl) return;
-        const attemptKey = `${node.id}:${row.id}:${resultUrl}`;
-        if (thumbnailAttemptsRef.current.has(attemptKey)) return;
-        thumbnailAttemptsRef.current.add(attemptKey);
-        void window.easyTool!.ensureCanvasAssetThumbnail({ url: resultUrl })
-          .then((thumbnail) => {
-            if (thumbnail.thumbUrl) patchRow(node.id, row.id, { resultThumbUrl: thumbnail.thumbUrl });
-          })
-          .catch(() => undefined);
+    const pending = nodes.flatMap((node) => {
+      if (node.data.kind !== "actionFission") return [];
+      return (node.data.actionFission?.rows || []).flatMap((row) => {
+        const candidates = [
+          { field: "resultThumbUrl" as const, sourceUrl: row.resultUrl || "", thumbUrl: row.resultThumbUrl || "" },
+          { field: "selectedActionThumbUrl" as const, sourceUrl: row.selectedActionAssetUrl || "", thumbUrl: row.selectedActionThumbUrl || "" },
+        ];
+        return candidates.flatMap((candidate) => {
+          if (!candidate.sourceUrl || candidate.thumbUrl) return [];
+          const attemptKey = `${node.id}:${row.id}:${candidate.field}:${candidate.sourceUrl}`;
+          if (thumbnailAttemptsRef.current.has(attemptKey)) return [];
+          thumbnailAttemptsRef.current.add(attemptKey);
+          return [{ nodeId: node.id, rowId: row.id, ...candidate }];
+        });
       });
     });
+    if (!pending.length) return;
+
+    let nextIndex = 0;
+    const worker = async () => {
+      while (mountedRef.current) {
+        const item = pending[nextIndex++];
+        if (!item) return;
+        try {
+          const thumbnail = await window.easyTool!.ensureCanvasAssetThumbnail({ url: item.sourceUrl });
+          if (mountedRef.current && thumbnail.thumbUrl) {
+            const currentRow = nodesRef.current
+              .find((node) => node.id === item.nodeId && node.data.kind === "actionFission")
+              ?.data.actionFission?.rows.find((row) => row.id === item.rowId);
+            const currentSourceUrl = item.field === "resultThumbUrl"
+              ? currentRow?.resultUrl
+              : currentRow?.selectedActionAssetUrl;
+            if (currentSourceUrl !== item.sourceUrl) continue;
+            patchRow(item.nodeId, item.rowId, item.field === "resultThumbUrl"
+              ? { resultThumbUrl: thumbnail.thumbUrl }
+              : { selectedActionThumbUrl: thumbnail.thumbUrl });
+          }
+        } catch {
+          // Keep the placeholder when an asset cannot be resolved or thumb generation fails.
+        }
+      }
+    };
+    void Promise.all([worker(), worker()]);
   }, [nodes, patchRow]);
 
   const watchRowTask = useCallback(async (taskId: string, nodeId: string, rowId: string) => {
@@ -359,13 +396,6 @@ export function useNativeActionFissionGeneration({
       clearGenerationRuntimeError(actionFissionLaunchKey(canvasId, nodeId, row.id));
     }));
   }, [canvasId, nodes]);
-
-  useEffect(() => activateGenerationHook(mountedRef, () => {
-    taskControllersRef.current.forEach((controller) => controller.abort());
-    taskControllersRef.current.clear();
-    nodeQueueControllersRef.current.clear();
-    activeNodeRunsRef.current.clear();
-  }), []);
 
   return { runActionFission, stopActionFission };
 }

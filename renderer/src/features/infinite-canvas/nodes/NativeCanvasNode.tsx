@@ -142,7 +142,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     ? { "--rf-annotation-outline-width": `${(1 / Math.max(zoom, 0.01)).toFixed(2)}px` } as CSSProperties
     : undefined;
   const resolvedImageUrl = primaryImageUrl ? resolveLibraryImageUrl(primaryImageUrl) : "";
-  const resolvedPreviewUrl = primaryImage?.thumbUrl ? resolveLibraryImageUrl(primaryImage.thumbUrl) : resolvedImageUrl;
+  const resolvedPreviewUrl = primaryImage?.thumbUrl ? resolveLibraryImageUrl(primaryImage.thumbUrl) : "";
   const hasMultipleGeneratedImages = generatedImages.length > 1;
   const isMultiImageExpanded = hasMultipleGeneratedImages
     && Boolean(data.multiImageExpanded)
@@ -535,11 +535,13 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               ) : null}
             </>
           ) : primaryImageUrl ? (
-            data.kind === "imageLoader" && isCropping ? (
+            data.kind === "imageLoader" && isCropping && resolvedPreviewUrl ? (
               <ImageNodeCropEditor
-                src={resolvedImageUrl}
+                src={resolvedPreviewUrl}
                 alt={displayLabel}
                 aspect={cropAspect}
+                sourceWidth={data.imageNaturalWidth}
+                sourceHeight={data.imageNaturalHeight}
                 onSelectionChange={setCropSelection}
               />
             ) : isMultiImageExpanded ? (
@@ -550,7 +552,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 }}
               >
                 {generatedImages.map((result, index) => {
-                  const previewUrl = resolveLibraryImageUrl(String(result.thumbUrl || result.localUrl || result.url || ""));
+                  const previewUrl = result.thumbUrl ? resolveLibraryImageUrl(String(result.thumbUrl)) : "";
                   const isPending = result.downloadState !== "downloaded";
                   return (
                     <div
@@ -565,7 +567,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                         setViewerOpen(true);
                       }}
                     >
-                      <img src={previewUrl} alt={displayLabel} draggable={false} />
+                      {previewUrl ? <img src={previewUrl} alt={displayLabel} loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
                       <div className="rf-native-generated-tile-actions nodrag nopan nowheel">
                         <Button
                           type="button"
@@ -602,11 +604,13 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                   );
                 })}
               </div>
-            ) : hasMultipleGeneratedImages ? (
+            ) : resolvedPreviewUrl ? hasMultipleGeneratedImages ? (
               <>
                 <img
                   src={resolvedPreviewUrl}
                   alt={displayLabel}
+                  loading="lazy"
+                  decoding="async"
                   draggable={false}
                   onDoubleClick={(event) => {
                     event.preventDefault();
@@ -635,6 +639,8 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               <img
                 src={resolvedPreviewUrl}
                 alt={displayLabel}
+                loading="lazy"
+                decoding="async"
                 draggable={false}
                 onDoubleClick={(event) => {
                   event.preventDefault();
@@ -653,6 +659,10 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                   });
                 }}
               />
+            ) : (
+              <div className="rf-native-image-placeholder" aria-label={t("infiniteCanvas:imagePreviewUnavailable")}>
+                <Images aria-hidden="true" />
+              </div>
             )
           ) : data.kind === "imageLoader" ? (
             <div className="rf-native-image-empty">

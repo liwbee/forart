@@ -231,10 +231,10 @@ function ActionPreview({
   const originalUrl = row.selectedActionAssetUrl ? resolveLibraryImageUrl(row.selectedActionAssetUrl) : "";
   const previewUrl = row.selectedActionThumbUrl
     ? resolveLibraryImageUrl(row.selectedActionThumbUrl)
-    : originalUrl;
+    : "";
   const alt = t("infiniteCanvas:actionFissionActionPreview");
   return (
-    <div className={cn("rf-action-fission-action-preview nodrag nopan", previewUrl && "is-viewable")}>
+    <div className={cn("rf-action-fission-action-preview nodrag nopan", originalUrl && "is-viewable")}>
       <div
         className="rf-action-fission-action-preview__trigger"
         role={originalUrl ? "button" : undefined}
@@ -246,7 +246,7 @@ function ActionPreview({
           onOpen({ id: row.id, kind: "action", src: originalUrl, alt });
         } : undefined}
       >
-        {previewUrl ? <img src={previewUrl} alt={alt} draggable={false} /> : <Images aria-hidden="true" />}
+        {previewUrl ? <img src={previewUrl} alt={alt} loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
       </div>
     </div>
   );
@@ -276,7 +276,7 @@ function ResultPreview({
   const { t } = useTranslation();
   const taskImage = task?.result?.images[0];
   const originalUrl = row.resultUrl || taskImage?.assetUrl || "";
-  const previewUrl = row.resultThumbUrl || taskImage?.thumbUrl || originalUrl;
+  const previewUrl = row.resultThumbUrl || taskImage?.thumbUrl || "";
   const resolvedOriginalUrl = originalUrl ? resolveLibraryImageUrl(originalUrl) : "";
   const resolvedPreviewUrl = previewUrl ? resolveLibraryImageUrl(previewUrl) : "";
   const alt = t("infiniteCanvas:actionFissionResultPreview");
@@ -305,7 +305,9 @@ function ResultPreview({
             onOpen({ id: row.id, kind: "result", src: resolvedOriginalUrl, alt });
           }}
         >
-          <img src={resolvedPreviewUrl} alt={alt} draggable={false} />
+          {resolvedPreviewUrl
+            ? <img src={resolvedPreviewUrl} alt={alt} loading="lazy" decoding="async" draggable={false} />
+            : !hasGenerationMessage ? <Images aria-hidden="true" /> : null}
         </div>
       ) : !hasGenerationMessage ? <Images aria-hidden="true" /> : null}
       {canDownload ? (

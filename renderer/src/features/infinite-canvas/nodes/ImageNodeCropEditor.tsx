@@ -10,6 +10,8 @@ interface ImageNodeCropEditorProps {
   src: string;
   alt: string;
   aspect: ImageCropAspect;
+  sourceWidth?: number;
+  sourceHeight?: number;
   onSelectionChange: (selection: CanvasImageCropRect | null) => void;
 }
 
@@ -42,7 +44,14 @@ function naturalCrop(crop: PercentCrop, naturalWidth: number, naturalHeight: num
   return { x, y, width, height };
 }
 
-export function ImageNodeCropEditor({ src, alt, aspect, onSelectionChange }: ImageNodeCropEditorProps) {
+export function ImageNodeCropEditor({
+  src,
+  alt,
+  aspect,
+  sourceWidth,
+  sourceHeight,
+  onSelectionChange,
+}: ImageNodeCropEditorProps) {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const [crop, setCrop] = useState<PercentCrop>();
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
@@ -84,7 +93,10 @@ export function ImageNodeCropEditor({ src, alt, aspect, onSelectionChange }: Ima
           draggable={false}
           onLoad={(event) => {
             const image = event.currentTarget;
-            const nextSize = { width: image.naturalWidth, height: image.naturalHeight };
+            const nextSize = {
+              width: Number(sourceWidth) > 0 ? Number(sourceWidth) : image.naturalWidth,
+              height: Number(sourceHeight) > 0 ? Number(sourceHeight) : image.naturalHeight,
+            };
             setImageSize(nextSize);
             updateCrop(centeredCrop(nextSize.width, nextSize.height, aspect), nextSize.width, nextSize.height);
           }}

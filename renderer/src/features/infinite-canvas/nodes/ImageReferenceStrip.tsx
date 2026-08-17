@@ -18,7 +18,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { TextCursorInput, X } from "lucide-react";
+import { Images, TextCursorInput, X } from "lucide-react";
 import { useCallback, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode, type WheelEvent } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -85,10 +85,14 @@ function SortableReferenceItem({ item, index, invalid, onRemove, onView }: Refer
     >
       <HoverCard openDelay={350} closeDelay={80}>
         <HoverCardTrigger asChild>
-          <img src={item.previewUrl} alt={item.title} draggable={false} />
+          {item.previewUrl ? (
+            <img src={item.previewUrl} alt={item.title} loading="lazy" decoding="async" draggable={false} />
+          ) : <Images aria-hidden="true" />}
         </HoverCardTrigger>
         <HoverCardContent className="rf-reference-preview" side="top" sideOffset={8}>
-          <img src={item.imageUrl} alt={item.title} draggable={false} />
+          {item.previewUrl ? (
+            <img src={item.previewUrl} alt={item.title} loading="lazy" decoding="async" draggable={false} />
+          ) : <Images aria-hidden="true" />}
         </HoverCardContent>
       </HoverCard>
       <span className="rf-reference-item__order">{index + 1}</span>
@@ -146,7 +150,7 @@ function PromptReferenceItem({
 function ReferenceOverlay({ item }: { item: ImageGeneratorReferenceInput }) {
   return (
     <div className="rf-reference-item rf-reference-item--overlay" aria-hidden="true">
-      <img src={item.previewUrl} alt="" draggable={false} />
+      {item.previewUrl ? <img src={item.previewUrl} alt="" loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
     </div>
   );
 }

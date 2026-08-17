@@ -420,7 +420,7 @@ export function ActionFissionRowSettingsDialog({
                   </Button>
                   {draftActions.map((action) => {
                     const selected = draftActionId === action.id;
-                    const previewUrl = action.thumbnail_url || action.asset_url || "";
+                    const previewUrl = action.thumbnail_url || "";
                     return (
                       <Button
                         key={action.id}
@@ -436,7 +436,7 @@ export function ActionFissionRowSettingsDialog({
                       >
                         <span className="rf-action-fission-action-choice-image">
                           {previewUrl
-                            ? <img src={resolveLibraryImageUrl(previewUrl)} alt={action.name} draggable={false} />
+                            ? <img src={resolveLibraryImageUrl(previewUrl)} alt={action.name} loading="lazy" decoding="async" draggable={false} />
                             : <Images aria-hidden="true" />}
                         </span>
                         <span className="rf-action-fission-action-choice-label" title={action.name}>{action.name}</span>

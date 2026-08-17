@@ -101,6 +101,8 @@ function ImageReferenceToken({ edgeId }: { edgeId: string }) {
           className="rf-image-prompt-reference-thumbnail"
           src={reference.previewUrl}
           alt=""
+          loading="lazy"
+          decoding="async"
           draggable={false}
         />
       ) : null}
@@ -112,7 +114,7 @@ function ImageReferenceToken({ edgeId }: { edgeId: string }) {
     <Tooltip delayDuration={250}>
       <TooltipTrigger asChild>{token}</TooltipTrigger>
       <TooltipContent className="rf-image-prompt-reference-preview" side="top" sideOffset={6}>
-        <img src={reference.previewUrl} alt="" draggable={false} />
+        <img src={reference.previewUrl} alt="" loading="lazy" decoding="async" draggable={false} />
       </TooltipContent>
     </Tooltip>
   );
@@ -283,7 +285,7 @@ function MentionPickerPlugin({ references }: { references: ImageGeneratorReferen
               onMouseEnter={() => setActiveIndex(index)}
               onClick={() => chooseReference(index)}
             >
-              <img className="size-8 shrink-0 rounded-sm object-cover" src={reference.previewUrl} alt="" draggable={false} />
+              <img className="size-8 shrink-0 rounded-sm object-cover" src={reference.previewUrl} alt="" loading="lazy" decoding="async" draggable={false} />
               <span className="min-w-0 flex-1 truncate text-left">{context?.referenceLabel(references.indexOf(reference))}</span>
             </Button>
           ))}
