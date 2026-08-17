@@ -194,19 +194,27 @@ export function handleCanvasExchangeApi(req, res, url, context) {
   const canvasAssetMatch = pathname.match(/^\/api\/canvas-exchange\/canvases\/([^/]+)\/assets\/(.+)$/);
   if (canvasAssetMatch && (method === "GET" || method === "HEAD")) {
     const relativePath = decodeURIComponent(canvasAssetMatch[2] || "");
-    const asset = store.readAsset(relativePath);
-    if (!asset) {
-      sendText(res, 404, "Asset not found");
-      return true;
-    }
-    const stat = statSync(asset.filePath);
-    res.writeHead(200, withCorsHeaders({
-      "content-type": contentTypeFor(asset.filePath),
-      "content-length": String(stat.size),
-      "cache-control": "public, max-age=300",
-    }));
-    if (method === "HEAD") res.end();
-    else asset.stream.pipe(res);
+    const assetPromise = url.searchParams.get("thumbnail") === "1"
+      ? store.readAssetThumbnail(relativePath)
+      : Promise.resolve(store.readAsset(relativePath));
+    assetPromise.then((asset) => {
+      if (!asset) {
+        sendText(res, 404, "Asset not found");
+        return;
+      }
+      const stat = statSync(asset.filePath);
+      res.writeHead(200, withCorsHeaders({
+        "content-type": contentTypeFor(asset.filePath),
+        "content-length": String(stat.size),
+        "cache-control": "public, max-age=300",
+      }));
+      if (method === "HEAD") {
+        asset.stream.destroy();
+        res.end();
+      } else {
+        asset.stream.pipe(res);
+      }
+    }).catch((error) => sendError(res, error));
     return true;
   }
 
@@ -214,7 +222,7 @@ export function handleCanvasExchangeApi(req, res, url, context) {
   if (canvasMatch) {
     const canvasId = decodeURIComponent(canvasMatch[1]);
     if (method === "GET") {
-      const canvas = store.loadCanvas(canvasId);
+      const canvas = store.loadCanvasForDisplay(canvasId);
       if (!canvas) sendJson(res, 404, { detail: "Canvas not found" });
       else sendJson(res, 200, canvas);
       return true;

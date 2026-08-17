@@ -100,6 +100,7 @@ import {
   groupNativeCanvasNodes,
   prepareNativeCanvasNodesForClipboard,
 } from "./nativeCanvasGroups";
+import { ViewportMomentumController } from "./viewportMomentum";
 import {
   projectAltDragOntoClones,
   type AltDragCloneGestureState,
@@ -369,6 +370,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     [connectionsVisible, edges],
   );
   const viewportRef = useRef(initialSnapshot.viewport);
+  const onViewportChangeRef = useRef(onViewportChange);
+  onViewportChangeRef.current = onViewportChange;
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [libraryTargetNodeId, setLibraryTargetNodeId] = useState<string | null>(null);
   const [libraryReferenceTargetNodeId, setLibraryReferenceTargetNodeId] = useState<string | null>(null);
@@ -388,7 +391,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
   const edgeToolbarFrameRef = useRef<number | null>(null);
   const edgeToolbarHideTimerRef = useRef<number | null>(null);
   const pendingEdgePointerRef = useRef<{ edgeId: string; clientX: number; clientY: number } | null>(null);
-  const { deleteElements, getEdges, getIntersectingNodes, getNodes, getNodesBounds: getFlowNodesBounds, screenToFlowPosition } = useReactFlow<NativeCanvasNode, NativeCanvasEdge>();
+  const { deleteElements, getEdges, getIntersectingNodes, getNodes, getNodesBounds: getFlowNodesBounds, screenToFlowPosition, setViewport } = useReactFlow<NativeCanvasNode, NativeCanvasEdge>();
   const syncSelection = useNativeCanvasInteractionStore((state) => state.syncSelection);
   const beginSelectionGesture = useNativeCanvasInteractionStore((state) => state.beginSelectionGesture);
   const endSelectionGesture = useNativeCanvasInteractionStore((state) => state.endSelectionGesture);
@@ -432,6 +435,30 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     const isActive = interactions.size > 0;
     if (wasActive !== isActive) onInteractionChange?.(isActive);
   }, [onInteractionChange]);
+
+  const setCanvasInteractionRef = useRef(setCanvasInteraction);
+  setCanvasInteractionRef.current = setCanvasInteraction;
+  const viewportMomentumRef = useRef<ViewportMomentumController | null>(null);
+  if (!viewportMomentumRef.current) {
+    viewportMomentumRef.current = new ViewportMomentumController({
+      initialViewport: initialSnapshot.viewport,
+      applyViewport: (viewport) => {
+        viewportRef.current = viewport;
+        void setViewport(viewport, { duration: 0 });
+      },
+      settleViewport: (viewport) => {
+        viewportRef.current = viewport;
+        onViewportChangeRef.current?.(viewport);
+        if (viewportMomentumRef.current?.getState() === "idle") {
+          setCanvasInteractionRef.current("viewport", false);
+        }
+      },
+    });
+  }
+  const viewportMomentum = viewportMomentumRef.current;
+  const stopViewportMomentum = useCallback(() => viewportMomentum.stop(), [viewportMomentum]);
+
+  useEffect(() => () => viewportMomentum.dispose(), [viewportMomentum]);
 
   useEffect(() => resetInteractions, [resetInteractions]);
   useEffect(() => () => clearCanvasLaunching(canvasId), [canvasId, clearCanvasLaunching]);
@@ -520,9 +547,10 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
   }, [readOnly, redoHistory, undoHistory]);
 
   const beginCanvasSelection = useCallback(() => {
+    stopViewportMomentum();
     setCanvasInteraction("selection", true);
     beginSelectionGesture();
-  }, [beginSelectionGesture, setCanvasInteraction]);
+  }, [beginSelectionGesture, setCanvasInteraction, stopViewportMomentum]);
 
   const finishCanvasSelection = useCallback(() => {
     const currentNodes = getNodes();
@@ -1377,6 +1405,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
 
   const handleNodeDragStart = useCallback<OnNodeDrag<NativeCanvasNode>>((event, draggedNode, draggedNodes) => {
     if (readOnly) return;
+    stopViewportMomentum();
     setCanvasInteraction("node-drag", true);
     historyGestureRef.current = beginInfiniteCanvasHistoryGesture();
     altDragCloneGestureRef.current = null;
@@ -1454,7 +1483,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       );
     });
     if (cloned) syncSelection([...cloned.idMap.values()]);
-  }, [getEdges, getNodes, readOnly, setCanvasInteraction, setNodes, syncSelection]);
+  }, [getEdges, getNodes, readOnly, setCanvasInteraction, setNodes, stopViewportMomentum, syncSelection]);
 
   const handleNodeDrag = useCallback<OnNodeDrag<NativeCanvasNode>>((_event, draggedNode, draggedNodes) => {
     const cloneGesture = altDragCloneGestureRef.current;
@@ -1515,6 +1544,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
         <ContextMenuTrigger asChild disabled={readOnly}>
           <div
             className="rf-native-flow-surface"
+            onPointerDown={stopViewportMomentum}
             onPointerMove={(event) => {
               lastPointerRef.current = { x: event.clientX, y: event.clientY };
             }}
@@ -1560,17 +1590,40 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
               onConnectEnd={readOnly ? undefined : connectToNodeBody}
               onSelectionStart={beginCanvasSelection}
               onSelectionEnd={finishCanvasSelection}
-              onMoveStart={(_event, viewport) => {
+              onMoveStart={(event, viewport) => {
+                if (!event && viewportMomentum.isInternalViewport(viewport)) return;
+                viewportRef.current = viewport;
+                if (!event) {
+                  viewportMomentum.stop();
+                  viewportMomentum.syncViewport(viewport);
+                  setCanvasInteraction("viewport", true);
+                  return;
+                }
+                viewportMomentum.beginUserMove(viewport);
                 setCanvasInteraction("viewport", true);
-                viewportRef.current = viewport;
               }}
-              onMove={(_event, viewport) => {
+              onMove={(event, viewport) => {
+                if (!event && viewportMomentum.isInternalViewport(viewport)) return;
                 viewportRef.current = viewport;
+                if (!event) {
+                  viewportMomentum.syncViewport(viewport);
+                  return;
+                }
+                viewportMomentum.updateUserMove(viewport);
               }}
-              onMoveEnd={(_event, viewport) => {
+              onMoveEnd={(event, viewport) => {
+                if (!event && viewportMomentum.isInternalViewport(viewport)) return;
                 viewportRef.current = viewport;
-                setCanvasInteraction("viewport", false);
-                onViewportChange?.(viewport);
+                if (!event) {
+                  viewportMomentum.syncViewport(viewport);
+                  setCanvasInteraction("viewport", false);
+                  onViewportChangeRef.current?.(viewport);
+                  return;
+                }
+                viewportMomentum.endUserMove(viewport);
+                if (viewportMomentum.getState() !== "sliding") {
+                  setCanvasInteraction("viewport", false);
+                }
               }}
               onNodeDragStart={handleNodeDragStart}
               onNodeDrag={handleNodeDrag}

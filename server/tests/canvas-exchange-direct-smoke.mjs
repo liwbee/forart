@@ -1,11 +1,36 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync } from "node:fs";
+import { once } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Readable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 import test from "node:test";
+import sharp from "sharp";
+import { handleCanvasExchangeApi } from "../src/canvas-exchange/canvas-exchange-api.mjs";
 import { createCanvasExchangeContext } from "../src/canvas-exchange/canvas-exchange-context.mjs";
 import { PACKAGE_FORMAT } from "../src/canvas-exchange/canvas-exchange-types.mjs";
+
+async function requestCanvasExchange(context, pathname) {
+  const chunks = [];
+  let statusCode = 0;
+  let headers = {};
+  const response = new Writable({
+    write(chunk, _encoding, callback) {
+      chunks.push(Buffer.from(chunk));
+      callback();
+    },
+  });
+  response.writeHead = (status, nextHeaders = {}) => {
+    statusCode = status;
+    headers = Object.fromEntries(Object.entries(nextHeaders).map(([key, value]) => [key.toLowerCase(), String(value)]));
+    return response;
+  };
+  const finished = once(response, "finish");
+  const url = new URL(pathname, "http://127.0.0.1");
+  assert.equal(handleCanvasExchangeApi({ method: "GET", headers: {} }, response, url, context), true);
+  await finished;
+  return { statusCode, headers, body: Buffer.concat(chunks) };
+}
 
 test("direct canvas exchange uploads resources without a package archive", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "forart-direct-canvas-exchange-"));
@@ -43,6 +68,84 @@ test("direct canvas exchange uploads resources without a package archive", async
     assert.equal(transfer.manifest.assets.length, 1);
     const storedPath = context.paths.assetAbsolutePath(transfer.manifest.assets[0].relativePath);
     assert.deepEqual(readFileSync(storedPath), bytes);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("shared canvas responses expose server-generated cached thumbnails", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "forart-shared-canvas-thumbnail-"));
+  try {
+    const context = createCanvasExchangeContext({ getStorageRoot: () => root });
+    const imageBytes = await sharp({
+      create: { width: 1200, height: 800, channels: 4, background: { r: 30, g: 90, b: 150, alpha: 1 } },
+    }).png().toBuffer();
+    const sourceUrl = "forart-package://asset/asset_001";
+    const started = context.store.beginCanvasUpload({
+      canvas: {
+        id: "local_canvas",
+        title: "Thumbnail canvas",
+        canvasSchemaVersion: 2,
+        nodes: [
+          { id: "loader", data: { kind: "imageLoader", imageUrl: sourceUrl } },
+          { id: "generator", data: { kind: "imageGenerator", generatedImages: [{ localUrl: sourceUrl }] } },
+          {
+            id: "fission",
+            data: {
+              kind: "actionFission",
+              actionFission: { rows: [{ id: "row", resultUrl: sourceUrl, selectedActionAssetUrl: sourceUrl }] },
+            },
+          },
+        ],
+        connections: [],
+        groups: [],
+        viewport: { x: 0, y: 0, scale: 1 },
+      },
+      manifest: {
+        format: PACKAGE_FORMAT,
+        version: 1,
+        canvas: { title: "Thumbnail canvas", nodeCount: 3 },
+        assets: [{
+          id: "asset_001",
+          kind: "input",
+          packagePath: "assets/input/image_001.png",
+          fileName: "image_001.png",
+          sizeBytes: imageBytes.length,
+        }],
+        warnings: [],
+      },
+    });
+    await context.store.receiveCanvasAsset(started.canvasId, "asset_001", Readable.from(imageBytes), imageBytes.length);
+    context.store.completeCanvasUpload(started.canvasId);
+
+    const rawCanvas = context.store.loadCanvasTransfer(started.canvasId).canvas;
+    assert.equal("thumbUrl" in rawCanvas.nodes[0].data, false);
+
+    const canvasResponse = await requestCanvasExchange(context, `/api/canvas-exchange/canvases/${started.canvasId}`);
+    assert.equal(canvasResponse.statusCode, 200);
+    const displayedCanvas = JSON.parse(canvasResponse.body.toString("utf8"));
+    const thumbnailUrl = displayedCanvas.nodes[0].data.thumbUrl;
+    assert.match(thumbnailUrl, new RegExp(`/api/canvas-exchange/canvases/${started.canvasId}/assets/.+\\?thumbnail=1$`));
+    assert.equal(displayedCanvas.nodes[1].data.generatedImages[0].thumbUrl, thumbnailUrl);
+    assert.equal(displayedCanvas.nodes[2].data.actionFission.rows[0].resultThumbUrl, thumbnailUrl);
+    assert.equal(displayedCanvas.nodes[2].data.actionFission.rows[0].selectedActionThumbUrl, thumbnailUrl);
+
+    const thumbnailResponse = await requestCanvasExchange(context, thumbnailUrl);
+    assert.equal(thumbnailResponse.statusCode, 200);
+    assert.equal(thumbnailResponse.headers["content-type"], "image/webp");
+    const metadata = await sharp(thumbnailResponse.body).metadata();
+    assert.equal(metadata.format, "webp");
+    assert.deepEqual({ width: metadata.width, height: metadata.height }, { width: 600, height: 400 });
+
+    const relativePath = context.store.loadCanvasTransfer(started.canvasId).manifest.assets[0].relativePath;
+    const thumbnailPath = context.paths.assetThumbnailPath(relativePath);
+    assert.equal(existsSync(thumbnailPath), true);
+    const cachedMtime = statSync(thumbnailPath).mtimeMs;
+    const cachedResponse = await requestCanvasExchange(context, thumbnailUrl);
+    assert.equal(cachedResponse.headers["content-type"], "image/webp");
+    assert.equal(statSync(thumbnailPath).mtimeMs, cachedMtime);
+    context.store.deleteCanvas(started.canvasId);
+    assert.equal(existsSync(thumbnailPath), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

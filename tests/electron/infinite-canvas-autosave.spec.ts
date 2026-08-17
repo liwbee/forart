@@ -129,6 +129,15 @@ test("does not autosave while dragging and saves once after the interaction sett
   await expect.poll(() => page.evaluate(() => (
     window as typeof window & { __canvasSaves: unknown[] }
   ).__canvasSaves.length), { timeout: 1_500 }).toBe(1);
+  const savePayload = await page.evaluate(() => (
+    window as typeof window & { __canvasSaves: Array<Record<string, unknown>> }
+  ).__canvasSaves[0]);
+  expect(typeof savePayload.jsonText).toBe("string");
+  expect(savePayload).not.toHaveProperty("nodes");
+  expect(JSON.parse(String(savePayload.jsonText))).toMatchObject({
+    canvasSchemaVersion: 2,
+    id: "canvas-1",
+  });
   await expect(page.locator(".rf-canvas-save-status")).toContainText("Saved");
 });
 
@@ -144,8 +153,17 @@ test("stores viewport locally without saving the full canvas", async ({ page }) 
   const start = { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
   await page.mouse.move(start.x, start.y);
   await page.mouse.down({ button: "middle" });
-  await page.mouse.move(start.x + 140, start.y + 80, { steps: 6 });
+  for (let step = 1; step <= 4; step += 1) {
+    await page.mouse.move(start.x + step * 70, start.y + step * 20);
+    await page.waitForTimeout(16);
+  }
+  const nodeAtRelease = await page.locator('.react-flow__node[data-id="node-a"]').boundingBox();
+  expect(nodeAtRelease).not.toBeNull();
   await page.mouse.up({ button: "middle" });
+
+  await expect.poll(async () => (
+    await page.locator('.react-flow__node[data-id="node-a"]').boundingBox()
+  )?.x || 0).toBeGreaterThan(nodeAtRelease!.x + 2);
 
   await page.waitForTimeout(1_200);
   expect(await page.evaluate(() => (
@@ -167,4 +185,22 @@ test("stores viewport locally without saving the full canvas", async ({ page }) 
   expect(positionAfterReload).not.toBeNull();
   expect(Math.abs(positionAfterReload!.x - positionBeforeReload!.x)).toBeLessThan(1);
   expect(Math.abs(positionAfterReload!.y - positionBeforeReload!.y)).toBeLessThan(1);
+
+  const reloadedNode = page.locator('.react-flow__node[data-id="node-a"]');
+  const reloadedBox = await reloadedNode.boundingBox();
+  expect(reloadedBox).not.toBeNull();
+  await page.mouse.move(reloadedBox!.x + 30, reloadedBox!.y + 70);
+  await page.mouse.down();
+  await page.mouse.move(reloadedBox!.x + 70, reloadedBox!.y + 90, { steps: 3 });
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __canvasSaves: unknown[] }
+  ).__canvasSaves.length), { timeout: 1_500 }).toBe(1);
+  const persistedViewport = await page.evaluate(() => {
+    const payload = (window as typeof window & {
+      __canvasSaves: Array<{ jsonText: string }>;
+    }).__canvasSaves[0];
+    return JSON.parse(payload.jsonText).viewport;
+  });
+  expect(persistedViewport).toEqual({ x: 0, y: 0, scale: 1 });
 });

@@ -266,7 +266,7 @@ test('canvas schema migration preserves React Flow native parent groups', () => 
   assert.equal('extent' in result.nodes[1], false);
 });
 
-test('canvas store startup atomically rewrites local canvases to schema v2', (t) => {
+test('canvas load atomically rewrites legacy local canvases to schema v2', (t) => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-canvas-schema-'));
   t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
   const directory = path.join(rootDir, 'CanvasAssests', 'json');
@@ -275,12 +275,13 @@ test('canvas store startup atomically rewrites local canvases to schema v2', (t)
   fs.writeFileSync(filePath, `${JSON.stringify(github0134Canvas(), null, 2)}\n`, 'utf8');
 
   const store = createCanvasStore({ rootDir });
+  assert.equal(JSON.parse(fs.readFileSync(filePath, 'utf8')).canvasSchemaVersion, undefined);
+  const loaded = store.readCanvas('canvas-release-0134');
   const stored = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   assert.equal(stored.canvasSchemaVersion, CURRENT_CANVAS_SCHEMA_VERSION);
   assert.equal(stored.revision, 7);
   assert.equal(stored.nodes[1].data.actionFission.rows[0].categoryGroups.length, 1);
-  assert.equal(store.readCanvas('canvas-release-0134').canvasSchemaVersion, CURRENT_CANVAS_SCHEMA_VERSION);
-  assert.equal(store.migrateStoredCanvasDocuments(), 0);
+  assert.equal(loaded.canvasSchemaVersion, CURRENT_CANVAS_SCHEMA_VERSION);
 
   const created = store.createCanvas({ title: 'New canvas' }).canvas;
   assert.equal(created.canvasSchemaVersion, CURRENT_CANVAS_SCHEMA_VERSION);

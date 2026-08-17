@@ -17,10 +17,19 @@ export interface StoredCanvasSnapshot {
   viewport: { x: number; y: number; scale: number };
 }
 
-export interface CanvasSnapshotSignatures {
-  content: string;
-  persistence: string;
+export interface CanvasDocumentSerializationMetadata {
+  id: string;
+  title: string;
+  icon?: string;
+  projectId: string;
+  color?: string;
+  pinned?: boolean;
+  createdAt: number;
+  viewport: CanvasViewportLike;
 }
+
+export const CANVAS_SAVE_UPDATED_AT_PLACEHOLDER = "__FORART_SAVE_UPDATED_AT__";
+export const CANVAS_SAVE_REVISION_PLACEHOLDER = "__FORART_SAVE_REVISION__";
 
 function recordOf(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
@@ -101,32 +110,42 @@ export function canvasSnapshotForStorage(snapshot: CanvasSnapshotLike): StoredCa
   };
 }
 
-export function canvasSnapshotSignatures(snapshot: CanvasSnapshotLike): CanvasSnapshotSignatures {
-  const stored = canvasSnapshotForStorage(snapshot);
-  return storedCanvasSnapshotSignatures(stored);
+export function storedCanvasContentSignature(stored: StoredCanvasSnapshot) {
+  return JSON.stringify({
+    nodes: stored.nodes.map(contentNode),
+    connections: stored.connections,
+    groups: stored.groups,
+  });
 }
 
-export function storedCanvasSnapshotSignatures(stored: StoredCanvasSnapshot): CanvasSnapshotSignatures {
-  return {
-    content: JSON.stringify({
-      nodes: stored.nodes.map(contentNode),
-      connections: stored.connections,
-      groups: stored.groups,
-    }),
-    persistence: JSON.stringify({
-      nodes: stored.nodes,
-      connections: stored.connections,
-      groups: stored.groups,
-    }),
-  };
-}
-
-export function canvasSnapshotSaveState(
-  current: CanvasSnapshotSignatures,
-  saved: CanvasSnapshotSignatures,
+/**
+ * Build the final schema-v2 file in the renderer so Electron IPC transfers one
+ * string instead of cloning the complete React Flow object graph. The main
+ * process replaces the two metadata placeholders immediately before writing.
+ */
+export function serializeCanvasDocument(
+  document: CanvasDocumentSerializationMetadata,
+  stored: StoredCanvasSnapshot,
 ) {
-  return {
-    contentDirty: current.content !== saved.content,
-    persistenceDirty: current.persistence !== saved.persistence,
-  };
+  return JSON.stringify({
+    canvasSchemaVersion: 2,
+    id: document.id,
+    title: document.title,
+    icon: document.icon || "layers",
+    canvasType: "forart",
+    projectId: document.projectId,
+    color: document.color || "",
+    pinned: Boolean(document.pinned),
+    createdAt: document.createdAt,
+    updatedAt: CANVAS_SAVE_UPDATED_AT_PLACEHOLDER,
+    revision: CANVAS_SAVE_REVISION_PLACEHOLDER,
+    nodes: stored.nodes,
+    connections: stored.connections,
+    groups: stored.groups,
+    viewport: {
+      x: document.viewport.x,
+      y: document.viewport.y,
+      scale: document.viewport.zoom,
+    },
+  });
 }

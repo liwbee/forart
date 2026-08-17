@@ -64,6 +64,12 @@ export function createCanvasExchangePaths({ getStorageRoot }) {
     return dir;
   }
 
+  function thumbnailRoot() {
+    const dir = path.join(canvasAssetsRoot(), "thumb");
+    ensureDir(dir);
+    return dir;
+  }
+
   function projectsRoot() {
     const dir = path.join(canvasAssetsRoot(), "projects");
     ensureDir(dir);
@@ -109,12 +115,21 @@ export function createCanvasExchangePaths({ getStorageRoot }) {
     return path.relative(canvasAssetsRoot(), filePath).replace(/\\/g, "/");
   }
 
+  function assetThumbnailPath(relativePath) {
+    const safe = safeRelativePath(relativePath);
+    if (!safe || safe === "thumb" || safe.startsWith("thumb/")) return "";
+    const parsed = path.parse(safe);
+    const target = path.resolve(thumbnailRoot(), parsed.dir, `${parsed.name}.webp`);
+    return isInsideOrEqual(thumbnailRoot(), target) ? target : "";
+  }
+
   function ensureAll() {
     [
       canvasAssetsRoot(),
       jsonRoot(),
       inputRoot(),
       outputRoot(),
+      thumbnailRoot(),
       projectsRoot(),
       manifestsRoot(),
       tempRoot(),
@@ -127,6 +142,7 @@ export function createCanvasExchangePaths({ getStorageRoot }) {
     assetAbsolutePath,
     assetRelativePath,
     assetRootForKind,
+    assetThumbnailPath,
     canvasAssetsRoot,
     canvasJsonPath,
     ensureAll,
@@ -139,6 +155,6 @@ export function createCanvasExchangePaths({ getStorageRoot }) {
     projectPath,
     projectsRoot,
     tempRoot,
+    thumbnailRoot,
   };
 }
-

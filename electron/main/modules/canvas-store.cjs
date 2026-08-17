@@ -48,6 +48,33 @@ function readJsonFile(filePath) {
   }
 }
 
+const RETRYABLE_RENAME_ERRORS = new Set(['EACCES', 'EBUSY', 'EPERM']);
+const renameWaitBuffer = new Int32Array(new SharedArrayBuffer(4));
+
+function renameWithRetrySync(sourcePath, targetPath) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      fs.renameSync(sourcePath, targetPath);
+      return;
+    } catch (error) {
+      if (!RETRYABLE_RENAME_ERRORS.has(error?.code) || attempt >= 5) throw error;
+      Atomics.wait(renameWaitBuffer, 0, 0, 10 * (2 ** attempt));
+    }
+  }
+}
+
+async function renameWithRetry(sourcePath, targetPath) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fs.promises.rename(sourcePath, targetPath);
+      return;
+    } catch (error) {
+      if (!RETRYABLE_RENAME_ERRORS.has(error?.code) || attempt >= 5) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10 * (2 ** attempt)));
+    }
+  }
+}
+
 function atomicWriteJson(filePath, payload) {
   const serialized = JSON.stringify(payload);
   const temporaryPath = `${filePath}.tmp`;
@@ -59,7 +86,19 @@ function atomicWriteJson(filePath, payload) {
   } finally {
     fs.closeSync(descriptor);
   }
-  fs.renameSync(temporaryPath, filePath);
+  renameWithRetrySync(temporaryPath, filePath);
+}
+
+async function atomicWriteText(filePath, text, temporaryPath = `${filePath}.tmp`) {
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+  const descriptor = await fs.promises.open(temporaryPath, 'w');
+  try {
+    await descriptor.writeFile(text, 'utf8');
+    await descriptor.sync();
+  } finally {
+    await descriptor.close();
+  }
+  await renameWithRetry(temporaryPath, filePath);
 }
 
 function readAtomicJson(filePath, revisionOf) {
@@ -73,7 +112,7 @@ function readAtomicJson(filePath, revisionOf) {
   const primaryRevision = primary ? Number(revisionOf(primary) || 0) : -1;
   const temporaryRevision = Number(revisionOf(temporary) || 0);
   if (!primary || temporaryRevision > primaryRevision) {
-    fs.renameSync(temporaryPath, filePath);
+    renameWithRetrySync(temporaryPath, filePath);
     return temporary;
   }
   fs.unlinkSync(temporaryPath);
@@ -202,6 +241,15 @@ function normalizeCanvasDocument(input, fallback = {}) {
 }
 
 function createCanvasStore({ rootDir }) {
+  let cachedIndexPayload = null;
+  let pendingIndexWrite = null;
+  let activeIndexWrite = null;
+  let indexMutationVersion = 0;
+  let persistedIndexVersion = 0;
+  let indexVerified = false;
+  const activeCanvasTextSaves = new Set();
+  const deferredCanvasMutations = new Map();
+
   function storageRoot() {
     const root = path.join(rootDir, 'CanvasAssests');
     fs.mkdirSync(root, { recursive: true });
@@ -236,45 +284,105 @@ function createCanvasStore({ rootDir }) {
     return canvas;
   }
 
-  function migrateStoredCanvasDocuments() {
-    let migrated = 0;
-    for (const canvasId of canvasIdsFromDisk()) {
-      const filePath = canvasPath(canvasId);
-      const payload = readAtomicJson(filePath, (value) => value?.revision);
-      if (!payload || Number(payload.canvasSchemaVersion || 1) === CURRENT_CANVAS_SCHEMA_VERSION) continue;
-      const canvas = normalizeCanvasDocument(payload, { id: canvasId });
-      atomicWriteJson(filePath, canvas);
-      migrated += 1;
-    }
-    return migrated;
-  }
-
-  function readIndexPayload() {
+  function loadIndexPayload() {
     const filePath = indexPath();
+    for (const fileName of fs.readdirSync(storageRoot())) {
+      if (fileName.startsWith('canvas-index.json.async-') && fileName.endsWith('.tmp')) {
+        fs.rmSync(path.join(storageRoot(), fileName), { force: true });
+      }
+    }
     if (!fs.existsSync(filePath) && !fs.existsSync(`${filePath}.tmp`)) {
-      return { canvases: [], projects: ensureDefaultProject([]), revision: 0, valid: true };
+      return { canvases: [], projects: ensureDefaultProject([]), revision: 0 };
     }
     const payload = readAtomicJson(filePath, (value) => value?.revision || value?.updatedAt);
-    if (payload?.version !== 3) return { canvases: [], projects: [], revision: 0, valid: false };
+    if (payload?.version !== 3) return { canvases: [], projects: [], revision: 0 };
     const canvases = Array.isArray(payload?.canvases) ? payload.canvases : [];
     const projects = ensureDefaultProject(Array.isArray(payload?.projects) ? payload.projects : []);
     return {
       canvases: canvases.map((record) => normalizeCanvasRecord(record)).filter((record) => record.id),
       projects,
       revision: Math.max(0, Number(payload.revision || 0)),
-      valid: true,
     };
   }
 
-  function writeIndexPayload(inputPayload) {
-    const nextPayload = {
+  function readIndexPayload() {
+    if (!cachedIndexPayload) cachedIndexPayload = loadIndexPayload();
+    return cachedIndexPayload;
+  }
+
+  function nextIndexPayload(inputPayload) {
+    return {
       version: 3,
       revision: Math.max(0, Number(inputPayload.revision || 0)) + 1,
       updatedAt: nowMs(),
       canvases: sortCanvasRecords([...(inputPayload.canvases || [])]),
       projects: sortProjectRecords(ensureDefaultProject(inputPayload.projects || [])),
     };
+  }
+
+  function setIndexPayload(inputPayload) {
+    cachedIndexPayload = nextIndexPayload(inputPayload);
+    indexMutationVersion += 1;
+    return cachedIndexPayload;
+  }
+
+  function writeIndexPayload(inputPayload) {
+    if (pendingIndexWrite) {
+      clearTimeout(pendingIndexWrite);
+      pendingIndexWrite = null;
+    }
+    const nextPayload = setIndexPayload(inputPayload);
+    if (activeIndexWrite) {
+      scheduleIndexWrite();
+      return nextPayload;
+    }
     atomicWriteJson(indexPath(), nextPayload);
+    persistedIndexVersion = indexMutationVersion;
+    return nextPayload;
+  }
+
+  function writeIndexPayloadLater(inputPayload) {
+    const nextPayload = setIndexPayload(inputPayload);
+    scheduleIndexWrite();
+    return nextPayload;
+  }
+
+  function startIndexWrite() {
+    if (activeIndexWrite) return activeIndexWrite;
+    const version = indexMutationVersion;
+    const text = JSON.stringify(cachedIndexPayload);
+    const temporaryPath = `${indexPath()}.async-${version}.tmp`;
+    let succeeded = false;
+    const operation = atomicWriteText(indexPath(), text, temporaryPath)
+      .then(() => {
+        succeeded = true;
+        persistedIndexVersion = version;
+      })
+      .finally(() => {
+        if (activeIndexWrite === operation) activeIndexWrite = null;
+        if (succeeded && persistedIndexVersion < indexMutationVersion) scheduleIndexWrite();
+      });
+    activeIndexWrite = operation;
+    return operation;
+  }
+
+  function scheduleIndexWrite() {
+    if (pendingIndexWrite) clearTimeout(pendingIndexWrite);
+    pendingIndexWrite = setTimeout(() => {
+      pendingIndexWrite = null;
+      void startIndexWrite().catch((error) => console.error('Canvas index persistence failed:', error));
+    }, 100);
+    pendingIndexWrite.unref?.();
+  }
+
+  async function flushPendingIndexWrite() {
+    if (pendingIndexWrite) {
+      clearTimeout(pendingIndexWrite);
+      pendingIndexWrite = null;
+    }
+    while (persistedIndexVersion < indexMutationVersion) {
+      await (activeIndexWrite || startIndexWrite());
+    }
   }
 
   function canvasIdsFromDisk() {
@@ -307,13 +415,22 @@ function createCanvasStore({ rootDir }) {
     return sortCanvasRecords(canvases);
   }
 
-  function updateIndexCanvas(record) {
-    const payload = readIndexPayload();
+  function upsertIndexCanvas(payload, record) {
     const nextRecord = normalizeCanvasRecord(record);
-    const next = payload.canvases.some((item) => item.id === nextRecord.id)
+    const canvases = payload.canvases.some((item) => item.id === nextRecord.id)
       ? payload.canvases.map((item) => (item.id === nextRecord.id ? nextRecord : item))
       : [nextRecord, ...payload.canvases];
-    writeIndexPayload({ ...payload, canvases: next });
+    return { ...payload, canvases };
+  }
+
+  function updateIndexCanvas(record, deferred = false) {
+    const payload = readIndexPayload();
+    const nextPayload = upsertIndexCanvas(payload, record);
+    if (!deferred) {
+      writeIndexPayload(nextPayload);
+      return;
+    }
+    writeIndexPayloadLater(nextPayload);
   }
 
   function removeIndexCanvas(canvasId) {
@@ -327,7 +444,7 @@ function createCanvasStore({ rootDir }) {
     const next = payload.projects.some((item) => item.id === nextProject.id)
       ? payload.projects.map((item) => (item.id === nextProject.id ? nextProject : item))
       : [nextProject, ...payload.projects];
-    writeIndexPayload({ ...payload, projects: next });
+    writeIndexPayloadLater({ ...payload, projects: next });
     return nextProject;
   }
 
@@ -340,11 +457,16 @@ function createCanvasStore({ rootDir }) {
   }
 
   function listCanvases() {
-    const canvasIds = canvasIdsFromDisk();
-    const indexedPayload = readIndexPayload();
-    if (!indexedPayload.valid) {
-      return rebuildIndex();
+    if (!indexVerified) {
+      const rebuilt = rebuildIndex();
+      indexVerified = true;
+      return rebuilt;
     }
+    const canvasIds = canvasIdsFromDisk();
+    for (const canvasId of canvasIds) {
+      if (fs.existsSync(`${canvasPath(canvasId)}.tmp`)) readCanvas(canvasId);
+    }
+    const indexedPayload = readIndexPayload();
     if (indexMatchesDisk(indexedPayload, canvasIds)) return sortCanvasRecords(indexedPayload.canvases);
     return rebuildIndex();
   }
@@ -374,29 +496,83 @@ function createCanvasStore({ rootDir }) {
     return { ok: true, canvas: result.canvas, record: canvasRecord(result.canvas), filePath: result.filePath };
   }
 
-  function saveCanvas(canvasId, payload = {}) {
-    const existing = readCanvas(canvasId);
-    if (!existing) throw new Error('Canvas not found.');
-    const nextNodes = Array.isArray(payload?.nodes) ? payload.nodes : existing.nodes;
-    if (existing.nodes.length > 0 && nextNodes.length === 0 && payload?.allowEmpty !== true) {
+  function replaceSavePlaceholder(jsonText, key, placeholder, value) {
+    const needle = `"${key}":"${placeholder}"`;
+    const first = jsonText.indexOf(needle);
+    if (first < 0 || jsonText.indexOf(needle, first + needle.length) >= 0) {
+      throw new Error(`Canvas save payload has an invalid ${key} placeholder.`);
+    }
+    return `${jsonText.slice(0, first)}"${key}":${value}${jsonText.slice(first + needle.length)}`;
+  }
+
+  async function saveCanvasText(canvasId, payload = {}) {
+    const safeId = sanitizeCanvasId(canvasId);
+    const jsonText = typeof payload.jsonText === 'string' ? payload.jsonText : '';
+    const nodeCount = Number(payload.nodeCount);
+    if (!safeId || !jsonText) throw new Error('Canvas save payload is incomplete.');
+    if (!Number.isInteger(nodeCount) || nodeCount < 0) throw new Error('Canvas save payload has an invalid node count.');
+    if (!jsonText.includes('"canvasSchemaVersion":2') || !jsonText.includes(`"id":"${safeId}"`)) {
+      throw new Error('Canvas save payload does not match the target canvas.');
+    }
+
+    let indexPayload = readIndexPayload();
+    let existing = indexPayload.canvases.find((record) => record.id === safeId);
+    if (!existing) {
+      const existingCanvas = readCanvas(safeId);
+      if (!existingCanvas) throw new Error('Canvas not found.');
+      existing = canvasRecord(existingCanvas);
+      indexPayload = { ...indexPayload, canvases: [existing, ...indexPayload.canvases] };
+      cachedIndexPayload = indexPayload;
+    }
+    if (existing.nodeCount > 0 && nodeCount === 0 && payload.allowEmpty !== true) {
       throw new Error('Refusing to replace a non-empty canvas with an unexpected empty canvas snapshot.');
     }
-    const result = writeCanvas({
+
+    const updatedAt = nowMs();
+    const revision = existing.revision + 1;
+    let finalText = replaceSavePlaceholder(jsonText, 'updatedAt', '__FORART_SAVE_UPDATED_AT__', updatedAt);
+    finalText = replaceSavePlaceholder(finalText, 'revision', '__FORART_SAVE_REVISION__', revision);
+    const filePath = canvasPath(safeId);
+    activeCanvasTextSaves.add(safeId);
+    let saved = false;
+    try {
+      await atomicWriteText(filePath, finalText);
+      saved = true;
+    } finally {
+      activeCanvasTextSaves.delete(safeId);
+      if (!saved) deferredCanvasMutations.delete(safeId);
+    }
+
+    let record = normalizeCanvasRecord({
       ...existing,
-      ...(payload || {}),
-      id: existing.id,
-      createdAt: existing.createdAt,
-      title: String(payload?.title || existing.title || 'Untitled canvas').slice(0, 80),
-      icon: String(payload?.icon || existing.icon || 'layers').slice(0, 32),
-      canvasType: 'forart',
-      projectId: payload?.projectId !== undefined ? normalizeProjectId(payload.projectId) : existing.projectId,
-      updatedAt: nowMs(),
-      revision: existing.revision + 1,
+      title: payload.title !== undefined ? payload.title : existing.title,
+      icon: payload.icon !== undefined ? payload.icon : existing.icon,
+      projectId: payload.projectId !== undefined ? payload.projectId : existing.projectId,
+      color: payload.color !== undefined ? payload.color : existing.color,
+      pinned: payload.pinned !== undefined ? payload.pinned : existing.pinned,
+      updatedAt,
+      revision,
+      nodeCount,
     });
-    return { ok: true, record: canvasRecord(result.canvas), filePath: result.filePath };
+    updateIndexCanvas(record, true);
+    const deferred = deferredCanvasMutations.get(safeId) || [];
+    deferredCanvasMutations.delete(safeId);
+    if (saved) {
+      deferred.forEach((replay) => {
+        const result = replay();
+        if (result?.record) record = result.record;
+      });
+    }
+    return { ok: true, record, filePath };
   }
 
   function updateCanvasNode(canvasId, nodeId, updater) {
+    const safeId = sanitizeCanvasId(canvasId);
+    if (activeCanvasTextSaves.has(safeId)) {
+      const deferred = deferredCanvasMutations.get(safeId) || [];
+      deferred.push(() => updateCanvasNode(safeId, nodeId, updater));
+      deferredCanvasMutations.set(safeId, deferred);
+    }
     const existing = readCanvas(canvasId);
     if (!existing) return { ok: false, reason: 'canvas_not_found' };
     let matched = false;
@@ -548,6 +724,12 @@ function createCanvasStore({ rootDir }) {
   }
 
   function updateCanvasMeta(canvasId, patch = {}) {
+    const safeId = sanitizeCanvasId(canvasId);
+    if (activeCanvasTextSaves.has(safeId)) {
+      const deferred = deferredCanvasMutations.get(safeId) || [];
+      deferred.push(() => updateCanvasMeta(safeId, patch));
+      deferredCanvasMutations.set(safeId, deferred);
+    }
     const existing = readCanvas(canvasId);
     if (!existing) throw new Error('Canvas not found.');
     const result = writeCanvas({
@@ -563,7 +745,7 @@ function createCanvasStore({ rootDir }) {
     return { ok: true, canvas: result.canvas, record: canvasRecord(result.canvas), filePath: result.filePath };
   }
 
-  function createProject(payload = {}) {
+  async function createProject(payload = {}) {
     const timestamp = nowMs();
     const sortOrder = Number.isFinite(Number(payload?.sortOrder))
       ? Number(payload.sortOrder)
@@ -577,10 +759,11 @@ function createCanvasStore({ rootDir }) {
       updatedAt: timestamp,
     });
     const saved = updateIndexProject(project);
+    await flushPendingIndexWrite();
     return { ok: true, project: saved };
   }
 
-  function updateProject(projectId, patch = {}) {
+  async function updateProject(projectId, patch = {}) {
     const safeId = normalizeProjectId(projectId);
     const payload = readIndexPayload();
     const existing = payload.projects.find((project) => project.id === safeId);
@@ -593,11 +776,12 @@ function createCanvasStore({ rootDir }) {
       updatedAt: nowMs(),
     });
     const nextProjects = payload.projects.map((item) => (item.id === safeId ? project : item));
-    writeIndexPayload({ ...payload, projects: nextProjects });
+    writeIndexPayloadLater({ ...payload, projects: nextProjects });
+    await flushPendingIndexWrite();
     return { ok: true, project };
   }
 
-  function deleteProject(projectId) {
+  async function deleteProject(projectId) {
     const safeId = normalizeProjectId(projectId);
     const payload = readIndexPayload();
     if (payload.projects.length <= 1) {
@@ -610,7 +794,8 @@ function createCanvasStore({ rootDir }) {
     }
     const nextCanvases = payload.canvases.filter((record) => record.projectId !== safeId);
     const nextProjects = ensureDefaultProject(payload.projects.filter((project) => project.id !== safeId));
-    writeIndexPayload({ ...payload, canvases: nextCanvases, projects: nextProjects });
+    writeIndexPayloadLater({ ...payload, canvases: nextCanvases, projects: nextProjects });
+    await flushPendingIndexWrite();
     return { ok: true, deletedCanvasIds };
   }
 
@@ -626,8 +811,6 @@ function createCanvasStore({ rootDir }) {
     return { ok: true, filePath };
   }
 
-  migrateStoredCanvasDocuments();
-
   return {
     canvasPath,
     createCanvas,
@@ -637,17 +820,16 @@ function createCanvasStore({ rootDir }) {
     findMissingGenerationTargets,
     listCanvases,
     listProjects,
-    migrateStoredCanvasDocuments,
+    flushPendingIndexWrite,
     moveCanvasToProject,
     readCanvas,
-    saveCanvas,
+    saveCanvasText,
     setGenerationTaskAnchor,
     setActionFissionRowTaskAnchor,
     completeActionFissionRow,
     completeGenerationNode,
     updateCanvasMeta,
     updateProject,
-    writeCanvas,
   };
 }
 

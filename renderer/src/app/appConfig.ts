@@ -284,6 +284,20 @@ export interface CanvasTransferProgress {
   totalBytes: number;
 }
 
+export interface CanvasSaveRequest {
+  title: string;
+  icon: string;
+  projectId: string;
+  color: string;
+  pinned: boolean;
+  jsonText: string;
+  nodeCount: number;
+  allowEmpty: boolean;
+  saveSequence: number;
+  saveSessionId: string;
+  saveSessionStartedAt: number;
+}
+
 export interface EasyToolApi {
   saveResult: (payload: { dataUrl?: string; url?: string; defaultName?: string; directory?: string }) => Promise<{ canceled: boolean; filePath?: string }>;
   listCanvases: () => Promise<{
@@ -293,7 +307,7 @@ export interface EasyToolApi {
   createCanvas: (payload: { title?: string; icon?: string; canvasType?: string; source?: string; projectId?: string; nodes?: unknown[]; connections?: unknown[]; groups?: unknown[]; viewport?: unknown }) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
   createCanvasProject: (payload: { title?: string; color?: string; sortOrder?: number }) => Promise<{ ok: true; project: unknown }>;
   loadCanvas: (canvasId: string) => Promise<unknown | null>;
-  saveCanvas: (canvasId: string, payload: unknown) => Promise<{ ok: boolean; record?: unknown; skipped?: boolean; stale?: boolean }>;
+  saveCanvas: (canvasId: string, payload: CanvasSaveRequest) => Promise<{ ok: boolean; record?: unknown; skipped?: boolean; stale?: boolean }>;
   updateCanvasMeta: (canvasId: string, patch: { title?: string; icon?: string; projectId?: string; color?: string; pinned?: boolean }) => Promise<{ ok: true; canvas: unknown; record: unknown; filePath?: string }>;
   updateCanvasProject: (projectId: string, patch: { title?: string; color?: string; sortOrder?: number }) => Promise<{ ok: true; project: unknown }>;
   deleteCanvas: (canvasId: string) => Promise<{ ok: true; filePath?: string }>;

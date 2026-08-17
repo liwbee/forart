@@ -20,10 +20,9 @@ import { CanvasWorkspaceHome } from "./CanvasWorkspaceHome";
 import { CanvasFloatingPanel } from "./components/CanvasFloatingPanel";
 import { readCanvasViewport, writeCanvasViewport } from "./canvasViewportStorage";
 import {
-  canvasSnapshotSaveState,
-  canvasSnapshotSignatures,
-  storedCanvasSnapshotSignatures,
-  type CanvasSnapshotSignatures,
+  canvasSnapshotForStorage,
+  serializeCanvasDocument,
+  storedCanvasContentSignature,
 } from "./canvasSnapshotSemantics";
 import {
   connectGenerationTaskEvents,
@@ -38,7 +37,6 @@ import {
   normalizeCanvasDocument,
   normalizeCanvasProject,
   normalizeCanvasRecord,
-  snapshotForStorage,
   tabFromRecord,
   type CanvasDocumentTab,
   type CanvasProjectRecord,
@@ -51,7 +49,11 @@ const OPEN_TABS_KEY = "forart_infinite_canvas_open_tabs";
 const LAST_CANVAS_ID_KEY = "forart_infinite_canvas_last_canvas_id";
 const SHOW_HOME_KEY = "forart_infinite_canvas_show_home";
 const LAST_PROJECT_ID_KEY = "forart_infinite_canvas_last_project_id";
-const EMPTY_SNAPSHOT_SIGNATURES = canvasSnapshotSignatures(emptyCanvasSnapshot());
+
+interface SavedCanvasPersistenceState {
+  content: string;
+  document: string;
+}
 
 function readStoredTabs(): CanvasDocumentTab[] {
   try {
@@ -147,8 +149,9 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
   const activeReadOnlyRef = useRef(false);
   const showHomeRef = useRef(showHome);
   const snapshotRef = useRef<NativeCanvasSnapshot>(emptyCanvasSnapshot());
+  const persistedViewportRef = useRef<NativeCanvasSnapshot["viewport"]>({ x: 0, y: 0, zoom: 1 });
   const snapshotVersionRef = useRef(0);
-  const lastSavedSignaturesRef = useRef<CanvasSnapshotSignatures>(EMPTY_SNAPSHOT_SIGNATURES);
+  const lastSavedPersistenceRef = useRef<SavedCanvasPersistenceState | null>(null);
   const autosaveSchedulerRef = useRef<CanvasAutosaveScheduler | null>(null);
   const allowEmptySaveRef = useRef(false);
   const saveSequenceRef = useRef(0);
@@ -193,10 +196,18 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     setTabs((current) => current.map((tab) => tab.id === record.id ? tabFromRecord(record) : tab));
   }, []);
 
-  const adoptSavedSnapshot = useCallback((snapshot: NativeCanvasSnapshot) => {
+  const adoptSavedSnapshot = useCallback((snapshot: NativeCanvasSnapshot, document?: NativeCanvasDocument) => {
     snapshotRef.current = snapshot;
     snapshotVersionRef.current += 1;
-    lastSavedSignaturesRef.current = canvasSnapshotSignatures(snapshot);
+    if (document) {
+      const stored = canvasSnapshotForStorage(snapshot);
+      lastSavedPersistenceRef.current = {
+        content: storedCanvasContentSignature(stored),
+        document: serializeCanvasDocument({ ...document, viewport: persistedViewportRef.current }, stored),
+      };
+    } else {
+      lastSavedPersistenceRef.current = null;
+    }
     autosaveSchedulerRef.current?.reset();
     setCanvasSaveStatus(activeCanvasIdRef.current, "saved");
   }, []);
@@ -226,29 +237,42 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     const document = activeDocumentRef.current;
     if (!canvasId || !document || activeReadOnlyRef.current || !window.easyTool?.saveCanvas) return true;
     const capturedVersion = snapshotVersionRef.current;
-    const storedSnapshot = snapshotForStorage(snapshotRef.current);
-    const signatures = storedCanvasSnapshotSignatures(storedSnapshot);
-    const pendingState = canvasSnapshotSaveState(signatures, lastSavedSignaturesRef.current);
-    if (!pendingState.persistenceDirty) {
+    const storedSnapshot = canvasSnapshotForStorage(snapshotRef.current);
+    const jsonText = serializeCanvasDocument({ ...document, viewport: persistedViewportRef.current }, storedSnapshot);
+    const persistenceState = {
+      content: storedCanvasContentSignature(storedSnapshot),
+      document: jsonText,
+    };
+    const savedPersistence = lastSavedPersistenceRef.current;
+    if (savedPersistence?.document === persistenceState.document) {
       if (snapshotVersionRef.current === capturedVersion) setCanvasSaveStatus(canvasId, "saved");
       return true;
     }
     const allowEmpty = allowEmptySaveRef.current && storedSnapshot.nodes.length === 0;
     const saveSequence = ++saveSequenceRef.current;
-    if (pendingState.contentDirty) setCanvasSaveStatus(canvasId, "saving");
+    if (savedPersistence?.content !== persistenceState.content) setCanvasSaveStatus(canvasId, "saving");
     try {
       const result = await window.easyTool.saveCanvas(canvasId, {
         title: document.title,
+        icon: document.icon,
         projectId: document.projectId,
-        ...storedSnapshot,
+        color: document.color,
+        pinned: document.pinned,
+        jsonText,
+        nodeCount: storedSnapshot.nodes.length,
         allowEmpty,
         saveSequence,
         saveSessionId: saveSessionIdRef.current,
         saveSessionStartedAt: saveSessionStartedAtRef.current,
       });
       const record = normalizeCanvasRecord(objectValue(result).record);
-      if (record) upsertCanvas(record);
-      lastSavedSignaturesRef.current = signatures;
+      if (record) {
+        upsertCanvas(record);
+        if (activeDocumentRef.current?.id === record.id) {
+          activeDocumentRef.current = { ...activeDocumentRef.current, ...record };
+        }
+      }
+      lastSavedPersistenceRef.current = persistenceState;
       if (allowEmpty && snapshotRef.current.nodes.length === 0) allowEmptySaveRef.current = false;
       if (lastSaveErrorRef.current) {
         const resolvedError = lastSaveErrorRef.current;
@@ -285,11 +309,12 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     try {
       const loaded = normalizeCanvasDocument(await window.easyTool.loadCanvas(canvasId));
       if (!loaded) throw new Error(t("infiniteCanvas:canvasNotFound"));
+      persistedViewportRef.current = loaded.viewport;
       const document = { ...loaded, viewport: readCanvasViewport(loaded.id, loaded.viewport) };
       activeCanvasIdRef.current = document.id;
       activeReadOnlyRef.current = false;
       activeDocumentRef.current = document;
-      adoptSavedSnapshot({ nodes: document.nodes, edges: document.edges, viewport: document.viewport });
+      adoptSavedSnapshot({ nodes: document.nodes, edges: document.edges, viewport: document.viewport }, document);
       allowEmptySaveRef.current = false;
       setActiveCanvasId(document.id);
       setActiveDocument(document);
@@ -380,11 +405,12 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
       const remote = rewriteRemoteAssetUrls(await response.json(), baseUrl);
       const loaded = normalizeCanvasDocument(remote);
       if (!loaded) throw new Error(t("infiniteCanvas:canvasNotFound"));
+      persistedViewportRef.current = loaded.viewport;
       const document = { ...loaded, id: tabId, viewport: readCanvasViewport(tabId, loaded.viewport) };
       activeCanvasIdRef.current = tabId;
       activeDocumentRef.current = document;
       activeReadOnlyRef.current = true;
-      adoptSavedSnapshot({ nodes: document.nodes, edges: document.edges, viewport: document.viewport });
+      adoptSavedSnapshot({ nodes: document.nodes, edges: document.edges, viewport: document.viewport }, document);
       allowEmptySaveRef.current = false;
       setActiveCanvasId(tabId);
       setActiveDocument(document);
@@ -521,6 +547,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     }
     activeCanvasIdRef.current = "";
     activeDocumentRef.current = null;
+    persistedViewportRef.current = { x: 0, y: 0, zoom: 1 };
     activeReadOnlyRef.current = false;
     adoptSavedSnapshot(emptyCanvasSnapshot());
     allowEmptySaveRef.current = false;
@@ -580,7 +607,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     const result = await window.easyTool.createCanvas({
       title: `${t("infiniteCanvas:canvasBaseName")} ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
       projectId,
-      ...snapshotForStorage(emptyCanvasSnapshot()),
+      ...canvasSnapshotForStorage(emptyCanvasSnapshot()),
     });
     const document = normalizeCanvasDocument(objectValue(result).canvas);
     await refreshWorkspace();
@@ -721,6 +748,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     if (deletedIds.has(activeCanvasIdRef.current)) {
       activeCanvasIdRef.current = "";
       activeDocumentRef.current = null;
+      persistedViewportRef.current = { x: 0, y: 0, zoom: 1 };
       adoptSavedSnapshot(emptyCanvasSnapshot());
       allowEmptySaveRef.current = false;
       setActiveCanvasId("");
@@ -747,6 +775,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     if (deletedTabIds.has(activeCanvasIdRef.current)) {
       activeCanvasIdRef.current = "";
       activeDocumentRef.current = null;
+      persistedViewportRef.current = { x: 0, y: 0, zoom: 1 };
       activeReadOnlyRef.current = false;
       adoptSavedSnapshot(emptyCanvasSnapshot());
       allowEmptySaveRef.current = false;
@@ -765,7 +794,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
     const result = await window.easyTool.createCanvas({
       title: t("infiniteCanvas:canvasCopyName", { title: source.title }),
       projectId: source.projectId,
-      ...snapshotForStorage(source),
+      ...canvasSnapshotForStorage(source),
     });
     const created = normalizeCanvasDocument(objectValue(result).canvas);
     await refreshWorkspace();

@@ -29,11 +29,13 @@ async function stopMissingGenerationTargets(canvasId, canvasStore, generationTas
         type: task?.target?.kind || task?.target?.type,
       },
     }));
+  if (!activeTasks.length) return [];
   return stopGenerationTasks(canvasStore.findMissingGenerationTargets(activeTasks), generationTaskService);
 }
 
 function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskService }) {
   const canvasSaveSessions = new Map();
+  const canvasSaveQueues = new Map();
   const canvasTransferJobs = new Map();
   const runCanvasTransfer = async (event, operationId, transferType, work) => {
     const id = String(operationId || '').trim();
@@ -62,34 +64,44 @@ function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackag
   ipcMain.handle('canvas:create-project', async (_event, payload) => canvasStore.createProject(payload));
   ipcMain.handle('canvas:load', async (_event, canvasId) => canvasStore.readCanvas(canvasId));
   ipcMain.handle('canvas:save', async (_event, canvasId, payload = {}) => {
-    const sessionId = String(payload.saveSessionId || '').trim();
-    const sessionStartedAt = Number(payload.saveSessionStartedAt || 0);
-    const saveSequence = Number(payload.saveSequence || 0);
-    const previous = canvasSaveSessions.get(String(canvasId || ''));
-    if (sessionId && previous) {
-      const olderSession = sessionStartedAt > 0 && previous.startedAt > sessionStartedAt;
-      const staleSequence = previous.sessionId === sessionId && saveSequence > 0 && previous.sequence >= saveSequence;
-      if (olderSession || staleSequence) return { ok: true, skipped: true, stale: true };
-    }
-    // Task runners persist active anchors and terminal results directly.
-    // A regular canvas save must not replay in-memory task state.
-    const result = canvasStore.saveCanvas(canvasId, payload);
+    const key = String(canvasId || '');
+    const preceding = canvasSaveQueues.get(key) || Promise.resolve();
+    const operation = preceding.catch(() => undefined).then(async () => {
+      const sessionId = String(payload.saveSessionId || '').trim();
+      const sessionStartedAt = Number(payload.saveSessionStartedAt || 0);
+      const saveSequence = Number(payload.saveSequence || 0);
+      const previous = canvasSaveSessions.get(key);
+      if (sessionId && previous) {
+        const olderSession = sessionStartedAt > 0 && previous.startedAt > sessionStartedAt;
+        const staleSequence = previous.sessionId === sessionId && saveSequence > 0 && previous.sequence >= saveSequence;
+        if (olderSession || staleSequence) return { ok: true, skipped: true, stale: true };
+      }
+      // Task runners persist active anchors and terminal results directly.
+      // A regular canvas save must not replay in-memory task state.
+      const result = await canvasStore.saveCanvasText(canvasId, payload);
+      try {
+        await stopMissingGenerationTargets(canvasId, canvasStore, generationTaskService);
+      } catch (error) {
+        console.error('Generation target reconciliation failed after canvas save:', error);
+      }
+      if (sessionId) {
+        canvasSaveSessions.set(key, {
+          sessionId,
+          startedAt: sessionStartedAt,
+          sequence: saveSequence,
+        });
+      }
+      return {
+        ok: result?.ok !== false,
+        ...(result?.record ? { record: result.record } : {}),
+      };
+    });
+    canvasSaveQueues.set(key, operation);
     try {
-      await stopMissingGenerationTargets(canvasId, canvasStore, generationTaskService);
-    } catch (error) {
-      console.error('Generation target reconciliation failed after canvas save:', error);
+      return await operation;
+    } finally {
+      if (canvasSaveQueues.get(key) === operation) canvasSaveQueues.delete(key);
     }
-    if (sessionId) {
-      canvasSaveSessions.set(String(canvasId || ''), {
-        sessionId,
-        startedAt: sessionStartedAt,
-        sequence: saveSequence,
-      });
-    }
-    return {
-      ok: result?.ok !== false,
-      ...(result?.record ? { record: result.record } : {}),
-    };
   });
   ipcMain.handle('canvas:update-meta', async (_event, canvasId, patch) => canvasStore.updateCanvasMeta(canvasId, patch));
   ipcMain.handle('canvas:update-project', async (_event, projectId, patch) => canvasStore.updateProject(projectId, patch));

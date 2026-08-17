@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { ensureDir, safePathPart } from "./canvas-exchange-paths.mjs";
 import { DEFAULT_PROJECT_ID, DEFAULT_PROJECT_TITLE, PACKAGE_FORMAT, SCHEMA_VERSION, nowIso } from "./canvas-exchange-types.mjs";
+import { generateSharpImageThumbnail } from "../shared/image-thumbnail-sharp.mjs";
 
 const RESERVED_FILE_NAMES = new Set(["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"]);
 
@@ -32,6 +33,31 @@ function writeJson(filePath, payload) {
 
 function unlinkIfExists(filePath) {
   if (filePath && existsSync(filePath)) unlinkSync(filePath);
+}
+
+function canvasAssetThumbnailUrl(value) {
+  if (typeof value !== "string" || !value.startsWith("/api/canvas-exchange/canvases/")) return "";
+  try {
+    const url = new URL(value, "http://forart.local");
+    if (!/^\/api\/canvas-exchange\/canvases\/[^/]+\/assets\/.+/.test(url.pathname)) return "";
+    url.searchParams.set("thumbnail", "1");
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return "";
+  }
+}
+
+function canvasForDisplay(value) {
+  if (Array.isArray(value)) return value.map(canvasForDisplay);
+  if (!value || typeof value !== "object") return value;
+  const next = Object.fromEntries(Object.entries(value).map(([key, item]) => [key, canvasForDisplay(item)]));
+  const previewUrl = canvasAssetThumbnailUrl(next.imageUrl || next.localUrl || next.url);
+  if (previewUrl && !String(next.thumbUrl || "").trim()) next.thumbUrl = previewUrl;
+  const resultPreviewUrl = canvasAssetThumbnailUrl(next.resultUrl);
+  if (resultPreviewUrl && !String(next.resultThumbUrl || "").trim()) next.resultThumbUrl = resultPreviewUrl;
+  const actionPreviewUrl = canvasAssetThumbnailUrl(next.selectedActionAssetUrl);
+  if (actionPreviewUrl && !String(next.selectedActionThumbUrl || "").trim()) next.selectedActionThumbUrl = actionPreviewUrl;
+  return next;
 }
 
 function receiveStreamToFile(stream, filePath, expectedSize = 0) {
@@ -131,6 +157,7 @@ export function createCanvasExchangeStore({ paths, index, packages, uploadSessio
       for (const asset of manifest.assets) {
         const target = paths.assetAbsolutePath(asset.relativePath);
         unlinkIfExists(target);
+        unlinkIfExists(paths.assetThumbnailPath(asset.relativePath));
       }
     }
     unlinkIfExists(paths.canvasJsonPath(canvasId));
@@ -224,6 +251,11 @@ export function createCanvasExchangeStore({ paths, index, packages, uploadSessio
     const filePath = uploadSessionFile(canvasId);
     if (!existsSync(filePath)) throw new Error("Canvas upload session not found");
     return readJson(filePath);
+  }
+
+  function loadCanvasForDisplay(canvasId) {
+    const canvas = loadCanvas(canvasId);
+    return canvas ? canvasForDisplay(canvas) : null;
   }
 
   function beginCanvasUpload({ projectId, canvas, manifest } = {}) {
@@ -355,6 +387,20 @@ export function createCanvasExchangeStore({ paths, index, packages, uploadSessio
     return { filePath, stream: createReadStream(filePath) };
   }
 
+  async function readAssetThumbnail(relativePath) {
+    const sourcePath = paths.assetAbsolutePath(relativePath);
+    const targetPath = paths.assetThumbnailPath(relativePath);
+    if (!sourcePath || !targetPath || !existsSync(sourcePath)) return null;
+    const thumbnail = await generateSharpImageThumbnail({
+      key: `shared-canvas:${targetPath}`,
+      sourcePath,
+      targetPath,
+      logger: (message) => console.warn(`[shared-canvas-thumbnail] ${message}`),
+    });
+    const filePath = thumbnail?.filePath && existsSync(thumbnail.filePath) ? thumbnail.filePath : sourcePath;
+    return { filePath, stream: createReadStream(filePath) };
+  }
+
   paths.ensureAll();
   cleanupStaleUploadSessions();
   ensureDefaultProject();
@@ -370,8 +416,10 @@ export function createCanvasExchangeStore({ paths, index, packages, uploadSessio
     listCanvases,
     listProjects,
     loadCanvas,
+    loadCanvasForDisplay,
     loadCanvasTransfer,
     readAsset,
+    readAssetThumbnail,
     receiveCanvasAsset,
     updateCanvas,
     updateProject,

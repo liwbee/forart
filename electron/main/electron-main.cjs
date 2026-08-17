@@ -228,8 +228,12 @@ app.on('before-quit', (event) => {
   if (localApiClosed) return;
   event.preventDefault();
   if (!localApiClosePromise) {
-    localApiClosePromise = Promise.resolve(localApi?.close?.())
-      .catch((error) => console.error('Local library database shutdown failed:', error))
+    localApiClosePromise = Promise.all([
+      Promise.resolve(localApi?.close?.())
+        .catch((error) => console.error('Local library database shutdown failed:', error)),
+      canvasStore.flushPendingIndexWrite()
+        .catch((error) => console.error('Canvas index shutdown flush failed:', error)),
+    ])
       .finally(() => {
         localApiClosed = true;
         app.quit();

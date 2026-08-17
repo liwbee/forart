@@ -1,7 +1,7 @@
 {
   "name": "forart-server",
   "private": true,
-  "version": "0.2.3",
+  "version": "0.2.4",
   "type": "module",
   "scripts": {
     "start": "node forart-server.mjs",
@@ -9,7 +9,7 @@
     "migrate:legacy-postgres": "node scripts/migrate-legacy-sqlite-to-postgres.mjs",
     "build:admin": "vite build --config admin-app/vite.config.mjs",
     "check:admin": "tsc -p admin-app/tsconfig.json --noEmit",
-    "test": "node --test tests/library-database-smoke.mjs tests/auth-runtime-smoke.mjs tests/permission-matrix.test.mjs tests/legacy-postgres-import.test.mjs tests/library-storage-layout.test.mjs tests/admin-context.test.mjs",
+    "test": "node --test tests/library-database-smoke.mjs tests/auth-runtime-smoke.mjs tests/permission-matrix.test.mjs tests/legacy-postgres-import.test.mjs tests/library-storage-layout.test.mjs tests/admin-context.test.mjs tests/canvas-exchange-direct-smoke.mjs",
     "test:http": "node --test tests/library-http-smoke.mjs",
     "test:local-ipc": "node --test tests/local-library-ipc-smoke.mjs"
   },

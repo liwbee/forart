@@ -6,12 +6,14 @@ import {
   type NativeCanvasNode,
   type NativeCanvasNodeKind,
 } from "./nativeCanvas";
-import { canvasSnapshotForStorage } from "./canvasSnapshotSemantics";
 
 export interface CanvasRecord {
   id: string;
   title: string;
+  icon: string;
   projectId: string;
+  color: string;
+  pinned: boolean;
   createdAt: number;
   updatedAt: number;
   revision: number;
@@ -60,7 +62,10 @@ function recordOf(input: unknown): CanvasRecord | null {
   return {
     id,
     title: String(value.title || "Untitled canvas"),
+    icon: String(value.icon || "layers"),
     projectId: String(value.projectId || ""),
+    color: String(value.color || ""),
+    pinned: Boolean(value.pinned),
     createdAt: timestampOf(value.createdAt),
     updatedAt: timestampOf(value.updatedAt || value.uploadedAt || value.createdAt),
     revision: Math.max(1, Number(value.revision || 1)),
@@ -273,8 +278,4 @@ export function normalizeCanvasDocument(input: unknown): NativeCanvasDocument | 
       zoom: Number(rawViewport.zoom || rawViewport.scale || 1),
     },
   };
-}
-
-export function snapshotForStorage(snapshot: NativeCanvasSnapshot) {
-  return canvasSnapshotForStorage(snapshot);
 }
