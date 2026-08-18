@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ReactCrop, { type PercentCrop } from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
 
+import { ImageWithFallback } from "../../../components/ImageWithFallback";
 import type { CanvasImageCropRect } from "../canvasActions";
 
 export type ImageCropAspect = "original" | "free" | "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "16:9" | "9:16";
 
 interface ImageNodeCropEditorProps {
   src: string;
+  fallbackSrc?: string;
   alt: string;
   aspect: ImageCropAspect;
   sourceWidth?: number;
@@ -46,6 +48,7 @@ function naturalCrop(crop: PercentCrop, naturalWidth: number, naturalHeight: num
 
 export function ImageNodeCropEditor({
   src,
+  fallbackSrc,
   alt,
   aspect,
   sourceWidth,
@@ -86,9 +89,10 @@ export function ImageNodeCropEditor({
           updateCrop(percentCrop, imageSize.width, imageSize.height);
         }}
       >
-        <img
+        <ImageWithFallback
           ref={imageRef}
           src={src}
+          fallbackSrc={fallbackSrc}
           alt={alt}
           draggable={false}
           onLoad={(event) => {

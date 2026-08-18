@@ -39,6 +39,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
+import { ImageWithFallback } from "../../../components/ImageWithFallback";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTitle } from "../../../components/ui/popover";
 import { ScrollArea } from "../../../components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip";
@@ -96,10 +97,11 @@ function ImageReferenceToken({ edgeId }: { edgeId: string }) {
       aria-label={valid ? context?.referenceLabel(index) : context?.invalidLabel}
       contentEditable={false}
     >
-      {reference?.previewUrl ? (
-        <img
+      {reference?.previewUrl || reference?.imageUrl ? (
+        <ImageWithFallback
           className="rf-image-prompt-reference-thumbnail"
           src={reference.previewUrl}
+          fallbackSrc={reference.imageUrl}
           alt=""
           loading="lazy"
           decoding="async"
@@ -109,12 +111,12 @@ function ImageReferenceToken({ edgeId }: { edgeId: string }) {
       {valid ? context?.referenceLabel(index) : context?.invalidLabel}
     </span>
   );
-  if (!reference?.previewUrl) return token;
+  if (!reference?.previewUrl && !reference?.imageUrl) return token;
   return (
     <Tooltip delayDuration={250}>
       <TooltipTrigger asChild>{token}</TooltipTrigger>
       <TooltipContent className="rf-image-prompt-reference-preview" side="top" sideOffset={6}>
-        <img src={reference.previewUrl} alt="" loading="lazy" decoding="async" draggable={false} />
+        <ImageWithFallback src={reference.previewUrl} fallbackSrc={reference.imageUrl} alt="" loading="lazy" decoding="async" draggable={false} />
       </TooltipContent>
     </Tooltip>
   );
@@ -285,7 +287,7 @@ function MentionPickerPlugin({ references }: { references: ImageGeneratorReferen
               onMouseEnter={() => setActiveIndex(index)}
               onClick={() => chooseReference(index)}
             >
-              <img className="size-8 shrink-0 rounded-sm object-cover" src={reference.previewUrl} alt="" loading="lazy" decoding="async" draggable={false} />
+              <ImageWithFallback className="size-8 shrink-0 rounded-sm object-cover" src={reference.previewUrl} fallbackSrc={reference.imageUrl} alt="" loading="lazy" decoding="async" draggable={false} />
               <span className="min-w-0 flex-1 truncate text-left">{context?.referenceLabel(references.indexOf(reference))}</span>
             </Button>
           ))}

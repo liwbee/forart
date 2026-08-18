@@ -299,7 +299,7 @@ export interface CanvasSaveRequest {
 }
 
 export interface EasyToolApi {
-  saveResult: (payload: { dataUrl?: string; url?: string; defaultName?: string; directory?: string }) => Promise<{ canceled: boolean; filePath?: string }>;
+  saveResult: (payload: { dataUrl?: string; url?: string; defaultName?: string; directory?: string; convertToPng?: boolean }) => Promise<{ canceled: boolean; filePath?: string }>;
   listCanvases: () => Promise<{
     canvases: Array<{ id: string; title: string; icon?: string; canvasType?: string; source?: string; projectId?: string; color?: string; pinned?: boolean; createdAt: number; updatedAt: number; revision?: number; nodeCount: number }>;
     projects: Array<{ id: string; title: string; color?: string; sortOrder: number; createdAt: number; updatedAt: number }>;

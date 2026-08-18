@@ -23,6 +23,7 @@ import { useCallback, useRef, useState, type CSSProperties, type PointerEvent, t
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
+import { ImageWithFallback } from "../../../components/ImageWithFallback";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "../../../components/ui/hover-card";
 import { Separator } from "../../../components/ui/separator";
 import { ImageViewer } from "../../../lib/ImageViewer";
@@ -85,13 +86,13 @@ function SortableReferenceItem({ item, index, invalid, onRemove, onView }: Refer
     >
       <HoverCard openDelay={350} closeDelay={80}>
         <HoverCardTrigger asChild>
-          {item.previewUrl ? (
-            <img src={item.previewUrl} alt={item.title} loading="lazy" decoding="async" draggable={false} />
+          {item.previewUrl || item.imageUrl ? (
+            <ImageWithFallback src={item.previewUrl} fallbackSrc={item.imageUrl} alt={item.title} loading="lazy" decoding="async" draggable={false} />
           ) : <Images aria-hidden="true" />}
         </HoverCardTrigger>
         <HoverCardContent className="rf-reference-preview" side="top" sideOffset={8}>
-          {item.previewUrl ? (
-            <img src={item.previewUrl} alt={item.title} loading="lazy" decoding="async" draggable={false} />
+          {item.previewUrl || item.imageUrl ? (
+            <ImageWithFallback src={item.previewUrl} fallbackSrc={item.imageUrl} alt={item.title} loading="lazy" decoding="async" draggable={false} />
           ) : <Images aria-hidden="true" />}
         </HoverCardContent>
       </HoverCard>
@@ -150,7 +151,7 @@ function PromptReferenceItem({
 function ReferenceOverlay({ item }: { item: ImageGeneratorReferenceInput }) {
   return (
     <div className="rf-reference-item rf-reference-item--overlay" aria-hidden="true">
-      {item.previewUrl ? <img src={item.previewUrl} alt="" loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
+      {item.previewUrl || item.imageUrl ? <ImageWithFallback src={item.previewUrl} fallbackSrc={item.imageUrl} alt="" loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
     </div>
   );
 }

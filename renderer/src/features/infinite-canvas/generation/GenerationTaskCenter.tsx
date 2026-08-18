@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 import type { GenerationTaskDto, GenerationTaskStatus } from "../../../app/appConfig";
 import { NativeTabs, type NativeTabItem } from "../../../components/NativeTabs";
+import { ImageWithFallback } from "../../../components/ImageWithFallback";
 import { copyText } from "../../../components/ErrorCopyLine";
 import { VirtualList } from "../../../components/VirtualList";
 import { Badge } from "../../../components/ui/badge";
@@ -26,6 +27,7 @@ import { ImageViewer } from "../../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import { formatGenerationDuration } from "./generationStatus";
 import { buildTaskDownloadName } from "./generationDownloadName";
+import { generationTaskImageAt } from "./generationDownloadTarget";
 import {
   isGenerationTaskActive,
   useGenerationTaskCache,
@@ -171,8 +173,8 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
     }
   }, [t]);
 
-  const downloadTaskImage = useCallback(async (task: GenerationTaskDto) => {
-    const image = task.result?.images[0];
+  const downloadTaskImage = useCallback(async (task: GenerationTaskDto, imageIndex = 0) => {
+    const image = generationTaskImageAt(task, imageIndex);
     if (!image || downloadingTaskId) return;
     setDownloadingTaskId(task.id);
     try {
@@ -182,6 +184,7 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
           url: imageUrl,
           dataUrl: imageUrl,
           defaultName: buildTaskDownloadName(task, image.fileName, image.assetUrl),
+          convertToPng: true,
         });
         toast.success(result.filePath
           ? t("infiniteCanvas:downloadSaved", { path: result.filePath })
@@ -238,7 +241,9 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
         getItemKey={(task) => task.id}
         renderItem={(task) => {
               const active = isGenerationTaskActive(task);
-              const image = task.result?.images[0];
+              const image = generationTaskImageAt(task, 0);
+              const imageOriginalUrl = image?.assetUrl ? resolveLibraryImageUrl(image.assetUrl) : "";
+              const imagePreviewUrl = image?.thumbUrl ? resolveLibraryImageUrl(image.thumbUrl) : imageOriginalUrl;
               const sourceLabel = t(task.target.kind === "actionFissionRow"
                 ? "infiniteCanvas:taskKindActionFission"
                 : "infiniteCanvas:taskKindImageGeneration");
@@ -290,8 +295,8 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
                       aria-label={t("shared:imagePreview")}
                       onClick={() => setViewer({ taskId: task.id, index: 0 })}
                     >
-                      {image.thumbUrl ? (
-                        <img src={resolveLibraryImageUrl(image.thumbUrl)} alt="" loading="lazy" decoding="async" />
+                      {imagePreviewUrl ? (
+                        <ImageWithFallback src={imagePreviewUrl} fallbackSrc={imageOriginalUrl} alt="" loading="lazy" decoding="async" />
                       ) : <ImageIcon aria-hidden="true" />}
                     </button>
                   ) : (
@@ -322,7 +327,7 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
                         disabled={Boolean(downloadingTaskId)}
                         aria-label={t("infiniteCanvas:downloadImage")}
                         title={t("infiniteCanvas:downloadImage")}
-                        onClick={() => void downloadTaskImage(task)}
+                        onClick={() => void downloadTaskImage(task, 0)}
                       >
                         {downloadingTaskId === task.id ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Download aria-hidden="true" />}
                       </Button>
@@ -380,6 +385,13 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
           src={resolveLibraryImageUrl(viewerImage.assetUrl)}
           alt={viewerTask?.model || t("infiniteCanvas:imageGenerationTask")}
           onClose={() => setViewer(null)}
+          actions={viewerTask ? [{
+            id: "download",
+            label: t("infiniteCanvas:downloadImage"),
+            icon: "download",
+            disabled: Boolean(downloadingTaskId),
+            onClick: () => void downloadTaskImage(viewerTask, viewerIndex),
+          }] : []}
           navigation={viewerImages.length > 1 ? {
             index: viewerIndex,
             total: viewerImages.length,

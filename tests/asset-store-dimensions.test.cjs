@@ -75,3 +75,101 @@ test('internal canvas assets use unique UUID names and isolated thumbnail stems'
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+test('generated output assets are encoded and named as PNG while input assets keep their format', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-asset-output-png-'));
+  try {
+    const { default: sharp } = await import('sharp');
+    const jpegBuffer = await sharp({
+      create: {
+        width: 7,
+        height: 5,
+        channels: 3,
+        background: { r: 140, g: 90, b: 40 },
+      },
+    }).jpeg().toBuffer();
+    const store = createAssetStore({
+      rootDir,
+      net: { fetch: async () => { throw new Error('Unexpected network request.'); } },
+    });
+
+    const input = await store.saveAsset({
+      dataUrl: `data:image/jpeg;base64,${jpegBuffer.toString('base64')}`,
+      kind: 'input',
+    });
+    const output = await store.saveAsset({
+      dataUrl: `data:image/jpeg;base64,${jpegBuffer.toString('base64')}`,
+      kind: 'output',
+    });
+
+    assert.equal(path.extname(input.filePath), '.jpg');
+    assert.equal((await sharp(input.filePath).metadata()).format, 'jpeg');
+    assert.equal(path.extname(output.filePath), '.png');
+    assert.equal((await sharp(output.filePath).metadata()).format, 'png');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('generated output ignores a misleading text/plain response type and saves valid PNG', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-asset-plain-mime-'));
+  try {
+    const { default: sharp } = await import('sharp');
+    const pngBuffer = await sharp({
+      create: {
+        width: 6,
+        height: 4,
+        channels: 4,
+        background: { r: 20, g: 60, b: 100, alpha: 1 },
+      },
+    }).png().toBuffer();
+    const store = createAssetStore({
+      rootDir,
+      net: {
+        fetch: async () => ({
+          ok: true,
+          headers: { get: () => 'text/plain' },
+          arrayBuffer: async () => pngBuffer,
+        }),
+      },
+    });
+
+    const saved = await store.saveAsset({ url: 'https://example.test/result', kind: 'output' });
+
+    assert.equal(path.extname(saved.filePath), '.png');
+    assert.equal((await sharp(saved.filePath).metadata()).format, 'png');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('PNG result downloads replace legacy extensions and contain PNG bytes', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-result-png-'));
+  const downloadsPath = path.join(rootDir, 'downloads');
+  try {
+    const { default: sharp } = await import('sharp');
+    const jpegBuffer = await sharp({
+      create: {
+        width: 8,
+        height: 3,
+        channels: 3,
+        background: { r: 210, g: 170, b: 130 },
+      },
+    }).jpeg().toBuffer();
+    const store = createAssetStore({
+      rootDir,
+      net: { fetch: async () => { throw new Error('Unexpected network request.'); } },
+    });
+
+    const saved = await store.saveResult({
+      dataUrl: `data:image/jpeg;base64,${jpegBuffer.toString('base64')}`,
+      defaultName: 'legacy-result.plain',
+      convertToPng: true,
+    }, downloadsPath);
+
+    assert.equal(path.basename(saved.filePath), 'legacy-result.png');
+    assert.equal((await sharp(saved.filePath).metadata()).format, 'png');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});

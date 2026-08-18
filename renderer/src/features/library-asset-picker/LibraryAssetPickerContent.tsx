@@ -176,10 +176,13 @@ export function LibraryAssetPickerContent({ onSelect }: LibraryAssetPickerConten
         {picker.projectLoadState === "ready" && !picker.isLoading && picker.activeItems.length ? (
           <div className="library-asset-picker__grid">
             {picker.activeItems.map((item) => {
-              const src = item.url ? cacheBustedLibraryAssetUrl(item.thumbnailUrl || item.url, item.updatedAt || item.assetId || item.id) : "";
+              const cacheStamp = item.updatedAt || item.assetId || item.id;
+              const originalSrc = item.url ? cacheBustedLibraryAssetUrl(item.url, cacheStamp) : "";
+              const thumbnailSrc = item.thumbnailUrl ? cacheBustedLibraryAssetUrl(item.thumbnailUrl, cacheStamp) : "";
+              const src = thumbnailSrc || originalSrc;
               const itemButton = (
                 <button type="button" data-kind={item.kind} disabled={!src} onClick={item.needsChoices ? undefined : () => selectItem(item)}>
-                  {src ? <LazyImage src={src} alt={item.name} draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
+                  {src ? <LazyImage src={src} fallbackSrc={originalSrc} alt={item.name} draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
                   <strong>{item.name || t("infiniteCanvas:untitledCanvas")}</strong>
                 </button>
               );
@@ -224,7 +227,10 @@ export function LibraryAssetPickerContent({ onSelect }: LibraryAssetPickerConten
                       {picker.modelChoicesFailure ? <RemoteDataState failure={picker.modelChoicesFailure} scope="panel" onRetry={() => picker.modelChoicesQuery.refetch()} /> : null}
                       {!picker.modelChoicesFailure && !picker.modelChoicesQuery.isLoading && !(picker.modelChoicesQuery.data?.images || []).length ? <div className="library-asset-picker__state">{t("freeCanvasEditor:noModelImages")}</div> : null}
                       {(picker.modelChoicesQuery.data?.images || []).map((image) => {
-                        const choiceSrc = image.asset_url ? cacheBustedLibraryAssetUrl(image.thumbnail_url || image.asset_url, image.created_at || image.asset_id || image.id) : "";
+                        const cacheStamp = image.created_at || image.asset_id || image.id;
+                        const originalSrc = image.asset_url ? cacheBustedLibraryAssetUrl(image.asset_url, cacheStamp) : "";
+                        const thumbnailSrc = image.thumbnail_url ? cacheBustedLibraryAssetUrl(image.thumbnail_url, cacheStamp) : "";
+                        const choiceSrc = thumbnailSrc || originalSrc;
                         return (
                           <PopoverClose key={image.id} asChild>
                             <button
@@ -243,7 +249,7 @@ export function LibraryAssetPickerContent({ onSelect }: LibraryAssetPickerConten
                                 });
                               }}
                             >
-                              {choiceSrc ? <LazyImage src={choiceSrc} alt={image.caption || image.filename || item.name} draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
+                              {choiceSrc ? <LazyImage src={choiceSrc} fallbackSrc={originalSrc} alt={image.caption || image.filename || item.name} draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
                             </button>
                           </PopoverClose>
                         );

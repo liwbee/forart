@@ -1,5 +1,6 @@
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import type { ImageModelRule } from "../../settings/imageModelRules";
+import { canvasPreviewSourceUrl } from "../canvasThumbnails";
 import { nativeCanvasNodePrimaryImage } from "../nativeCanvas";
 import type {
   NativeCanvasEdge,
@@ -85,15 +86,14 @@ function collectReferenceInputs(
       const primaryImage = source ? nativeCanvasNodePrimaryImage(source.data) : null;
       const imageUrl = String(primaryImage?.localUrl || primaryImage?.url || "").trim();
       if (!source || !imageUrl) return [];
+      const previewSourceUrl = canvasPreviewSourceUrl(imageUrl, primaryImage?.thumbUrl);
       return [{
         edgeId: edge.id,
         nodeId: source.id,
         order: Math.max(1, Number(edge.data?.referenceOrder || 1)),
         title: String(source.data.label || fallbackTitle),
         imageUrl: resolveLibraryImageUrl(imageUrl),
-        previewUrl: primaryImage?.thumbUrl
-          ? resolveLibraryImageUrl(String(primaryImage.thumbUrl))
-          : "",
+        previewUrl: previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "",
       }];
     })
     .sort((left, right) => left.order - right.order || left.edgeId.localeCompare(right.edgeId));

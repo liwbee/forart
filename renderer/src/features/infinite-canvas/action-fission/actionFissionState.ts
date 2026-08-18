@@ -88,11 +88,16 @@ export function normalizeActionFissionRow(row: ActionFissionRow): ActionFissionR
         .map((group, index) => normalizeActionFissionGroup(group, `${row.id}_group_${index + 1}`))
     : [normalizeActionFissionGroup(createActionFissionCategoryGroup(), `${row.id}_group_1`)];
   const selectedGroup = groups.find((group) => group.id === row.selectedCategoryGroupId) || groups[0];
+  const selectedActionAssetUrl = String(row.selectedActionAssetUrl || "");
+  const selectedActionThumbUrl = String(row.selectedActionThumbUrl || "");
   return {
     ...row,
     latestGenerationTaskId: actionFissionRowTaskId(row) || undefined,
     categoryGroups: groups,
     selectedCategoryGroupId: selectedGroup.id,
+    selectedActionThumbUrl: selectedActionThumbUrl && selectedActionThumbUrl !== selectedActionAssetUrl
+      ? selectedActionThumbUrl
+      : undefined,
   };
 }
 
@@ -103,7 +108,7 @@ export function actionPatchFromEntry(action: ActionEntry) {
     selectedActionPrompt: action.prompt,
     selectedActionTags: action.tags,
     selectedActionAssetUrl: action.asset_url,
-    selectedActionThumbUrl: action.thumbnail_url || action.asset_url,
+    selectedActionThumbUrl: action.thumbnail_url || undefined,
   } satisfies Partial<ActionFissionRow>;
 }
 

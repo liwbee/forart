@@ -18,7 +18,11 @@ const tasks: GenerationTaskDto[] = Array.from({ length: 65 }, (_, index) => ({
   startedAt: index + 1,
   updatedAt: 10_000 - index,
   result: {
-    images: [{ assetUrl: `/task-original-${index}.png`, fileName: `task-${index}.png` }],
+    images: [{
+      assetUrl: `/task-original-${index}.png`,
+      thumbUrl: `/task-thumb-${index}.webp`,
+      fileName: `task-${index}.png`,
+    }],
   },
 }));
 

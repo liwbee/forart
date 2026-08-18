@@ -80,6 +80,7 @@ import {
   requiresGenerationStopConfirmation,
 } from "./generation/generationTaskCache";
 import { buildGenerationDownloadName, buildTaskDownloadName } from "./generation/generationDownloadName";
+import { actionFissionDownloadTarget } from "./generation/generationDownloadTarget";
 import { loadApiSettings } from "../settings/apiProviders";
 import {
   beginInfiniteCanvasHistoryGesture,
@@ -959,6 +960,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
           dataUrl: resolveLibraryImageUrl(imageUrl),
           defaultName,
           directory: imageDownloadPath,
+          convertToPng: true,
         });
         toast.success(result.filePath
           ? t("infiniteCanvas:downloadSaved", { path: result.filePath })
@@ -1030,21 +1032,22 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     const node = nodes.find((item) => item.id === nodeId);
     const actionFission = node?.data.actionFission;
     const row = actionFission?.rows.find((item) => item.id === rowId);
-    const imageUrl = String(row?.resultUrl || "");
-    if (!row || !imageUrl) return;
+    if (!row) return;
     const taskId = actionFissionRowTaskId(row);
     const [task] = taskId ? await loadGenerationTasks([taskId]) : [];
+    const target = actionFissionDownloadTarget(row, task);
+    if (!target) return;
     const apiSettings = task?.executorKind === "libtv" || actionFission?.apiType === "libtv-api"
       ? null
       : await loadApiSettings();
     const provider = apiSettings?.providers.find((item) => item.id === (task?.providerId || actionFission?.providerId));
-    await saveGeneratedImage(imageUrl, task
-      ? buildTaskDownloadName(task, row.resultFileName, imageUrl)
+    await saveGeneratedImage(target.imageUrl, task
+      ? buildTaskDownloadName(task, target.fileName, target.imageUrl)
       : buildGenerationDownloadName({
         platform: actionFission?.apiType === "libtv-api" ? "LibTV" : provider?.name || actionFission?.providerId,
         model: actionFission?.apiType === "libtv-api" ? actionFission?.libtvModelName : actionFission?.model,
-        sourceFileName: row.resultFileName,
-        sourceUrl: imageUrl,
+        sourceFileName: target.fileName,
+        sourceUrl: target.imageUrl,
       }));
     patchActionFissionRow(nodeId, rowId, { resultDownloadState: "downloaded", resultDownloadedAt: Date.now() });
   }, [nodes, patchActionFissionRow, saveGeneratedImage]);

@@ -5,6 +5,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type C
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AppSelect } from "../../../components/AppSelect";
+import { ImageWithFallback } from "../../../components/ImageWithFallback";
 import { Button } from "../../../components/ui/button";
 import { Textarea } from "../../../components/ui/textarea";
 import { copyText } from "../../../components/ErrorCopyLine";
@@ -540,6 +541,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
             data.kind === "imageLoader" && isCropping && resolvedPreviewUrl ? (
               <ImageNodeCropEditor
                 src={resolvedPreviewUrl}
+                fallbackSrc={resolvedImageUrl}
                 alt={displayLabel}
                 aspect={cropAspect}
                 sourceWidth={data.imageNaturalWidth}
@@ -571,7 +573,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                         setViewerOpen(true);
                       }}
                     >
-                      {previewUrl ? <img src={previewUrl} alt={displayLabel} loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
+                      {previewUrl ? <ImageWithFallback src={previewUrl} fallbackSrc={resolveLibraryImageUrl(resultUrl)} alt={displayLabel} loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
                       <div className="rf-native-generated-tile-actions nodrag nopan nowheel">
                         <Button
                           type="button"
@@ -610,8 +612,9 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               </div>
             ) : resolvedPreviewUrl ? hasMultipleGeneratedImages ? (
               <>
-                <img
+                <ImageWithFallback
                   src={resolvedPreviewUrl}
+                  fallbackSrc={resolvedImageUrl}
                   alt={displayLabel}
                   loading="lazy"
                   decoding="async"
@@ -640,8 +643,9 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 </Button>
               </>
             ) : (
-              <img
+              <ImageWithFallback
                 src={resolvedPreviewUrl}
+                fallbackSrc={resolvedImageUrl}
                 alt={displayLabel}
                 loading="lazy"
                 decoding="async"

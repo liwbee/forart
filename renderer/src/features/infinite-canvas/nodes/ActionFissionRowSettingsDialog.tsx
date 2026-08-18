@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, FolderClosed, Images, Plus, Shuffle, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { AppScrollArea } from "../../../components/AppScrollArea";
+import { ImageWithFallback } from "../../../components/ImageWithFallback";
 import { RemoteDataState } from "../../../components/RemoteDataState";
 import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
@@ -420,7 +421,8 @@ export function ActionFissionRowSettingsDialog({
                   </Button>
                   {draftActions.map((action) => {
                     const selected = draftActionId === action.id;
-                    const previewUrl = action.thumbnail_url || "";
+                    const originalUrl = action.asset_url ? resolveLibraryImageUrl(action.asset_url) : "";
+                    const previewUrl = action.thumbnail_url ? resolveLibraryImageUrl(action.thumbnail_url) : originalUrl;
                     return (
                       <Button
                         key={action.id}
@@ -436,7 +438,7 @@ export function ActionFissionRowSettingsDialog({
                       >
                         <span className="rf-action-fission-action-choice-image">
                           {previewUrl
-                            ? <img src={resolveLibraryImageUrl(previewUrl)} alt={action.name} loading="lazy" decoding="async" draggable={false} />
+                            ? <ImageWithFallback src={previewUrl} fallbackSrc={originalUrl} alt={action.name} loading="lazy" decoding="async" draggable={false} />
                             : <Images aria-hidden="true" />}
                         </span>
                         <span className="rf-action-fission-action-choice-label" title={action.name}>{action.name}</span>

@@ -56,6 +56,19 @@ async function readImageDimensions(buffer) {
   return { width, height };
 }
 
+async function convertImageBufferToPng(buffer) {
+  const { default: sharp } = await import('sharp');
+  return sharp(buffer, { animated: false })
+    .rotate()
+    .png()
+    .toBuffer();
+}
+
+function pngFileName(fileName) {
+  const parsed = path.parse(String(fileName || 'generated-image'));
+  return `${parsed.name || 'generated-image'}.png`;
+}
+
 function createAssetStore({ rootDir, net }) {
   function canvasAssetsRoot() {
     const root = path.join(rootDir, 'CanvasAssests');
@@ -137,10 +150,13 @@ function createAssetStore({ rootDir, net }) {
 
   async function saveAsset(payload = {}) {
     const source = await readImageSource(payload);
+    const output = payload.kind === 'output'
+      ? { buffer: await convertImageBufferToPng(source.buffer), extension: '.png' }
+      : source;
     const directory = assetDirectory(payload.kind);
-    const filePath = internalAssetFilePath(directory, source.extension);
-    fs.writeFileSync(filePath, source.buffer);
-    const dimensions = await readImageDimensions(source.buffer);
+    const filePath = internalAssetFilePath(directory, output.extension);
+    fs.writeFileSync(filePath, output.buffer);
+    const dimensions = await readImageDimensions(output.buffer);
     const thumb = await thumbnailStore.ensureCanvasAssetThumbnail({ filePath });
     return {
       url: assetUrl(filePath),
@@ -246,10 +262,16 @@ function createAssetStore({ rootDir, net }) {
 
   async function saveResult(payload = {}, downloadsPath) {
     const source = await readImageSource(payload);
+    const buffer = payload.convertToPng
+      ? await convertImageBufferToPng(source.buffer)
+      : source.buffer;
+    const defaultName = payload.convertToPng
+      ? pngFileName(payload.defaultName)
+      : payload.defaultName || ('generated-image' + (source.extension || '.png'));
     const directory = path.resolve(String(payload.directory || '').trim() || downloadsPath);
     fs.mkdirSync(directory, { recursive: true });
-    const filePath = uniqueFilePath(directory, payload.defaultName || ('generated-image' + (source.extension || '.png')));
-    fs.writeFileSync(filePath, source.buffer);
+    const filePath = uniqueFilePath(directory, defaultName);
+    fs.writeFileSync(filePath, buffer);
     return { canceled: false, filePath };
   }
 

@@ -17,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { AppScrollArea } from "../../../components/AppScrollArea";
+import { ImageWithFallback } from "../../../components/ImageWithFallback";
 import { RemoteDataState } from "../../../components/RemoteDataState";
 import { Button } from "../../../components/ui/button";
 import { ButtonGroup } from "../../../components/ui/button-group";
@@ -246,7 +247,7 @@ function ActionPreview({
           onOpen({ id: row.id, kind: "action", src: originalUrl, alt });
         } : undefined}
       >
-        {previewUrl ? <img src={previewUrl} alt={alt} loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
+        {previewUrl ? <ImageWithFallback src={previewUrl} fallbackSrc={originalUrl} alt={alt} loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
       </div>
     </div>
   );
@@ -307,7 +308,7 @@ function ResultPreview({
           }}
         >
           {resolvedPreviewUrl
-            ? <img src={resolvedPreviewUrl} alt={alt} loading="lazy" decoding="async" draggable={false} />
+            ? <ImageWithFallback src={resolvedPreviewUrl} fallbackSrc={resolvedOriginalUrl} alt={alt} loading="lazy" decoding="async" draggable={false} />
             : !hasGenerationMessage ? <Images aria-hidden="true" /> : null}
         </div>
       ) : !hasGenerationMessage ? <Images aria-hidden="true" /> : null}

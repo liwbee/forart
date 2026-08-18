@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw, Shuffle } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, RefreshCw, Shuffle } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "../components/ui/button";
@@ -18,7 +18,7 @@ export interface ImageViewerNavigation {
 export interface ImageViewerAction {
   id: string;
   label: string;
-  icon: "refresh" | "shuffle";
+  icon: "download" | "refresh" | "shuffle";
   disabled?: boolean;
   onClick: () => void;
 }
@@ -92,6 +92,7 @@ export function useImageViewerDialog({ sourceKey, onClose, navigation }: ImageVi
 
 function actionIcon(icon: ImageViewerAction["icon"]) {
   if (icon === "shuffle") return <Shuffle data-icon="inline-start" aria-hidden="true" />;
+  if (icon === "download") return <Download data-icon="inline-start" aria-hidden="true" />;
   return <RefreshCw data-icon="inline-start" aria-hidden="true" />;
 }
 
