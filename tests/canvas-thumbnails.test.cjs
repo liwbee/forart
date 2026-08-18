@@ -33,12 +33,20 @@ function loadTypeScriptModule(filePath) {
 const featureRoot = path.join(__dirname, '..', 'renderer', 'src', 'features', 'infinite-canvas');
 const {
   applyCanvasNodeThumbnail,
+  canvasPreviewSourceUrl,
   collectMissingCanvasThumbnailTargets,
 } = loadTypeScriptModule(path.join(featureRoot, 'canvasThumbnails.ts'));
 
 function node(id, kind, data = {}) {
   return { id, type: 'canvasNode', position: { x: 0, y: 0 }, data: { kind, label: id, ...data } };
 }
+
+test('prefers thumbnails and falls back to the original image', () => {
+  assert.equal(canvasPreviewSourceUrl('original.png', 'thumb.webp'), 'thumb.webp');
+  assert.equal(canvasPreviewSourceUrl('small.png', ''), 'small.png');
+  assert.equal(canvasPreviewSourceUrl('small.png', undefined), 'small.png');
+  assert.equal(canvasPreviewSourceUrl('', ''), '');
+});
 
 test('collects every missing thumbnail in image and multi-result generator nodes', () => {
   const nodes = [

@@ -23,6 +23,7 @@ import {
 import { NativeNodeResizeControl } from "./NativeNodeResizeControl";
 import { ImageGeneratorParamPanel } from "./ImageGeneratorParamPanel";
 import { ActionFissionNodeBody } from "./ActionFissionNodeBody";
+import { canvasPreviewSourceUrl } from "../canvasThumbnails";
 import { formatGenerationDuration, generationStatusMessage } from "../generation/generationStatus";
 import {
   clearNodeGenerationRuntimeErrors,
@@ -142,7 +143,8 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     ? { "--rf-annotation-outline-width": `${(1 / Math.max(zoom, 0.01)).toFixed(2)}px` } as CSSProperties
     : undefined;
   const resolvedImageUrl = primaryImageUrl ? resolveLibraryImageUrl(primaryImageUrl) : "";
-  const resolvedPreviewUrl = primaryImage?.thumbUrl ? resolveLibraryImageUrl(primaryImage.thumbUrl) : "";
+  const previewSourceUrl = canvasPreviewSourceUrl(primaryImageUrl, primaryImage?.thumbUrl);
+  const resolvedPreviewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
   const hasMultipleGeneratedImages = generatedImages.length > 1;
   const isMultiImageExpanded = hasMultipleGeneratedImages
     && Boolean(data.multiImageExpanded)
@@ -552,7 +554,9 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 }}
               >
                 {generatedImages.map((result, index) => {
-                  const previewUrl = result.thumbUrl ? resolveLibraryImageUrl(String(result.thumbUrl)) : "";
+                  const resultUrl = String(result.localUrl || result.url || "");
+                  const previewSourceUrl = canvasPreviewSourceUrl(resultUrl, result.thumbUrl);
+                  const previewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
                   const isPending = result.downloadState !== "downloaded";
                   return (
                     <div

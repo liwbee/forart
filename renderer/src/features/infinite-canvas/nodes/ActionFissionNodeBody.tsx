@@ -25,6 +25,7 @@ import { ToggleGroup, ToggleGroupItem } from "../../../components/ui/toggle-grou
 import { ImageViewer } from "../../../lib/ImageViewer";
 import { cn } from "../../../lib/utils";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
+import { canvasPreviewSourceUrl } from "../canvasThumbnails";
 import type { ActionEntry, ActionProject, ActionTag } from "../../action-library/types";
 import {
   addActionFissionRow,
@@ -229,9 +230,8 @@ function ActionPreview({
 }) {
   const { t } = useTranslation();
   const originalUrl = row.selectedActionAssetUrl ? resolveLibraryImageUrl(row.selectedActionAssetUrl) : "";
-  const previewUrl = row.selectedActionThumbUrl
-    ? resolveLibraryImageUrl(row.selectedActionThumbUrl)
-    : "";
+  const previewSourceUrl = canvasPreviewSourceUrl(row.selectedActionAssetUrl, row.selectedActionThumbUrl);
+  const previewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
   const alt = t("infiniteCanvas:actionFissionActionPreview");
   return (
     <div className={cn("rf-action-fission-action-preview nodrag nopan", originalUrl && "is-viewable")}>
@@ -278,7 +278,8 @@ function ResultPreview({
   const originalUrl = row.resultUrl || taskImage?.assetUrl || "";
   const previewUrl = row.resultThumbUrl || taskImage?.thumbUrl || "";
   const resolvedOriginalUrl = originalUrl ? resolveLibraryImageUrl(originalUrl) : "";
-  const resolvedPreviewUrl = previewUrl ? resolveLibraryImageUrl(previewUrl) : "";
+  const previewSourceUrl = canvasPreviewSourceUrl(originalUrl, previewUrl);
+  const resolvedPreviewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
   const alt = t("infiniteCanvas:actionFissionResultPreview");
   const canDownload = Boolean(resolvedOriginalUrl) && !launching && !isRowRunning(task) && toneForRow(row, task, false, runtimeError) !== "error";
   const isPendingDownload = canDownload && row.resultDownloadState !== "downloaded";

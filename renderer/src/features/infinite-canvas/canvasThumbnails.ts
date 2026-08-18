@@ -6,6 +6,11 @@ export interface CanvasThumbnailTarget {
   sourceUrl: string;
 }
 
+/** Prefer the derived thumbnail, but keep small/SVG/failed thumbnails visible. */
+export function canvasPreviewSourceUrl(originalUrl: unknown, thumbnailUrl: unknown): string {
+  return String(thumbnailUrl || originalUrl || "").trim();
+}
+
 export function collectMissingCanvasThumbnailTargets(nodes: NativeCanvasNode[]): CanvasThumbnailTarget[] {
   return nodes.flatMap((node) => {
     const images = node.data.kind === "imageLoader"
