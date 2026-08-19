@@ -73,12 +73,19 @@ function waitFor(predicate, timeoutMs = 3000) {
 
 function createCanvasRecorder() {
   const anchors = [];
+  const anchorBatches = [];
   const terminals = [];
   return {
     anchors,
+    anchorBatches,
     terminals,
     setActionFissionRowTaskAnchor(canvasId, nodeId, rowId, payload) {
       anchors.push({ canvasId, nodeId, rowId, ...payload });
+    },
+    setActionFissionRowTaskAnchors(canvasId, nodeId, items) {
+      anchorBatches.push({ canvasId, nodeId, items: structuredClone(items) });
+      items.forEach((item) => anchors.push({ canvasId, nodeId, ...item }));
+      return { ok: true };
     },
     setGenerationTaskAnchor(canvasId, nodeId, payload) {
       anchors.push({ canvasId, nodeId, ...payload });
@@ -532,6 +539,45 @@ test('an older action row attempt cannot overwrite the current task anchor', () 
   }
 });
 
+test('LibTV action group persists all row task anchors in one canvas batch before execution', async () => {
+  const canvasStore = createCanvasRecorder();
+  const taskStore = createLibtvGenerationTaskStore();
+  const runner = createLibtvGenerationRunner({
+    libtv: {
+      async ensureNamedWorkspace() { return { workspace: { id: 'workspace' } }; },
+      async ensureDailyProject() { return { project: { uuid: 'project', name: 'today' } }; },
+      async waitForProjectReady(input) { return { project: { uuid: input.projectUuid, name: input.projectName } }; },
+      async createImageNode(_project, payload) { return { payload: { id: payload.prompt }, stdout: '' }; },
+      async connectLeft() {},
+      async runNode(_project, remoteNodeId) { return { payload: { url: `https://example.test/${remoteNodeId}.png` }, stdout: '' }; },
+      async queryNode() { return { payload: {}, stdout: '' }; },
+      async deleteNode() {},
+    },
+    assetStore: {
+      resolveAssetUrl() { return ''; },
+      async saveAsset() { return { url: 'forart-asset://output/libtv-batched.png', fileName: 'libtv-batched.png' }; },
+    },
+    canvasStore,
+    taskStore,
+  });
+  const tasks = runner.startImageTasks([1, 2, 3].map((row) => ({
+    canvasId: 'canvas-batch-libtv',
+    nodeId: 'node-batch-libtv',
+    target: { type: 'actionFissionRow', nodeId: 'node-batch-libtv', rowId: `row-${row}` },
+    queueKey: 'canvas-batch-libtv:node-batch-libtv',
+    prompt: `row-${row}`,
+    modelName: 'Qwen Edit',
+    aspectRatio: '3:4',
+  })));
+
+  assert.equal(canvasStore.anchorBatches.length, 1);
+  assert.deepEqual(canvasStore.anchorBatches[0].items, tasks.map((task, index) => ({
+    rowId: `row-${index + 1}`,
+    taskId: task.id,
+  })));
+  await waitFor(() => tasks.every((task) => taskStore.getTask(task.id)?.status === 'succeeded'));
+});
+
 test('LibTV serializes remote runNode submissions across action-fission nodes', async () => {
   const canvasStore = createCanvasRecorder();
   const taskStore = createLibtvGenerationTaskStore();
@@ -612,6 +658,88 @@ test('LibTV serializes remote runNode submissions across action-fission nodes', 
   assert.deepEqual(new Set(workspaceNames), new Set(['LibtvImage-PC01']));
   assert.equal(canvasStore.terminals.filter((item) => item.backend === 'libtv' && item.status === 'succeeded').length, 6);
   assert.equal(new Set(canvasStore.terminals.map((item) => `${item.canvasId}:${item.nodeId}:${item.rowId}`)).size, 6);
+});
+
+test('API action group persists all row task anchors in one canvas batch before returning', async () => {
+  const canvasStore = createCanvasRecorder();
+  const generationTaskStore = createGenerationTaskStore();
+  let releaseResponses;
+  const responseGate = new Promise((resolve) => { releaseResponses = resolve; });
+  const runner = createImageGenerationRunner({
+    net: {
+      async fetch() {
+        await responseGate;
+        return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from('result').toString('base64') }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      },
+    },
+    assetStore: {
+      async saveAsset() { return { url: 'forart-asset://output/batched.png', fileName: 'batched.png' }; },
+    },
+    canvasStore,
+    generationTaskStore,
+  });
+  const tasks = await runner.startTasks([1, 2, 3].map((row) => ({
+    canvasId: 'canvas-batch-api',
+    nodeId: 'node-batch-api',
+    target: { type: 'actionFissionRow', nodeId: 'node-batch-api', rowId: `row-${row}` },
+    providerId: 'provider',
+    provider: { id: 'provider', baseUrl: 'https://example.test/v1', apiKey: 'test', protocol: 'compatible' },
+    model: 'gpt-image-2',
+    prompt: `row ${row}`,
+  })));
+
+  assert.equal(canvasStore.anchorBatches.length, 1);
+  assert.deepEqual(canvasStore.anchorBatches[0].items, tasks.map((task, index) => ({
+    rowId: `row-${index + 1}`,
+    taskId: task.id,
+  })));
+  assert.equal(canvasStore.anchors.length, 3);
+
+  tasks.forEach((task) => runner.stopTask(task.id));
+  releaseResponses();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+});
+
+test('canvas store writes a batch of action-row task anchors in one revision', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-action-anchor-batch-'));
+  try {
+    const canvasStore = createCanvasStore({ rootDir });
+    const canvas = canvasStore.createCanvas({
+      nodes: [{
+        id: 'node-batch',
+        data: {
+          actionFission: {
+            rows: [1, 2, 3].map((row) => ({ id: `row-${row}`, selectedActionName: `Action ${row}` })),
+          },
+        },
+      }],
+    }).canvas;
+
+    const rejected = canvasStore.setActionFissionRowTaskAnchors(canvas.id, 'node-batch', [{
+      rowId: 'missing-row',
+      taskId: 'missing-task',
+    }]);
+    assert.deepEqual(rejected, { ok: false, reason: 'row_not_found' });
+    assert.equal(canvasStore.readCanvas(canvas.id).revision, canvas.revision);
+
+    const result = canvasStore.setActionFissionRowTaskAnchors(canvas.id, 'node-batch', [1, 2, 3].map((row) => ({
+      rowId: `row-${row}`,
+      taskId: `task-${row}`,
+    })));
+    const persisted = canvasStore.readCanvas(canvas.id);
+
+    assert.equal(result.ok, true);
+    assert.equal(persisted.revision, canvas.revision + 1);
+    assert.deepEqual(
+      persisted.nodes[0].data.actionFission.rows.map((row) => row.latestGenerationTaskId),
+      ['task-1', 'task-2', 'task-3'],
+    );
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
 });
 
 test('LibTV unlimited task concurrency serializes remote runNode submissions', async () => {

@@ -115,6 +115,41 @@ test('generation task cache bounds terminal history while retaining active tasks
   }
 });
 
+test('generation task events coalesce to their latest versions once per frame', () => {
+  const previousWindow = global.window;
+  let eventListener = null;
+  let scheduledFrame = null;
+  const cache = loadTaskCache({
+    onChanged(listener) {
+      eventListener = listener;
+      return () => {};
+    },
+  });
+  global.window.requestAnimationFrame = (callback) => {
+    scheduledFrame = callback;
+    return 1;
+  };
+  global.window.cancelAnimationFrame = () => {};
+
+  try {
+    const disconnect = cache.connectGenerationTaskEvents();
+    eventListener(task('task-a', 1, 'queued'));
+    eventListener(task('task-a', 2, 'running'));
+    eventListener(task('task-b', 1, 'running'));
+
+    assert.equal(cache.useGenerationTaskCache.getState().revision, 0);
+    scheduledFrame(16);
+    const state = cache.useGenerationTaskCache.getState();
+    assert.equal(state.revision, 1);
+    assert.equal(state.tasksById['task-a'].version, 2);
+    assert.equal(state.tasksById['task-a'].status, 'running');
+    assert.equal(state.tasksById['task-b'].version, 1);
+    disconnect();
+  } finally {
+    global.window = previousWindow;
+  }
+});
+
 test('canvas hydration pins all latest terminal tasks beyond the global history limit', async () => {
   const previousWindow = global.window;
   const latestTasks = Array.from({ length: 160 }, (_, index) => ({

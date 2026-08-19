@@ -174,6 +174,38 @@ test('PNG result downloads replace legacy extensions and contain PNG bytes', asy
   }
 });
 
+test('result downloads preserve original JPEG bytes and extension when PNG conversion is disabled', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-result-original-'));
+  const downloadsPath = path.join(rootDir, 'downloads');
+  try {
+    const { default: sharp } = await import('sharp');
+    const jpegBuffer = await sharp({
+      create: {
+        width: 8,
+        height: 3,
+        channels: 3,
+        background: { r: 210, g: 170, b: 130 },
+      },
+    }).jpeg().toBuffer();
+    const store = createAssetStore({
+      rootDir,
+      net: { fetch: async () => { throw new Error('Unexpected network request.'); } },
+    });
+
+    const saved = await store.saveResult({
+      dataUrl: `data:image/jpeg;base64,${jpegBuffer.toString('base64')}`,
+      defaultName: 'uploaded-original.jpg',
+      convertToPng: false,
+    }, downloadsPath);
+
+    assert.equal(path.basename(saved.filePath), 'uploaded-original.jpg');
+    assert.deepEqual(fs.readFileSync(saved.filePath), jpegBuffer);
+    assert.equal((await sharp(saved.filePath).metadata()).format, 'jpeg');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('download can consume the normalized local URL returned by generation', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-local-result-download-'));
   const downloadsPath = path.join(rootDir, 'downloads');
@@ -203,6 +235,8 @@ test('download can consume the normalized local URL returned by generation', asy
       convertToPng: true,
     }, downloadsPath);
 
+    assert.deepEqual(fs.readFileSync(generated.filePath), sourceBuffer);
+    assert.deepEqual(fs.readFileSync(downloaded.filePath), sourceBuffer);
     assert.equal((await sharp(downloaded.filePath).metadata()).format, 'png');
     assert.deepEqual(await sharp(downloaded.filePath).metadata().then((metadata) => ({
       width: metadata.width,

@@ -826,20 +826,58 @@ function createImageGenerationRunner({
   if (!resultCommitter?.commit) throw new Error('Generation result committer is required.');
   const context = { net, assetStore, canvasStore, generationTaskStore, resultCommitter };
 
-  async function startTask(payload = {}) {
+  function prepareTask(payload = {}) {
     const supersededTaskIds = generationTaskStore.activeTaskIdsForTarget?.(payload.canvasId, payload.target) || [];
     const task = generationTaskStore.createTask({ ...payload, status: payload.status || 'submitting' });
-    const anchorResult = task.target?.type === 'actionFissionRow'
-      ? context.canvasStore?.setActionFissionRowTaskAnchor(task.canvasId, task.target.nodeId, task.target.rowId, { taskId: task.id })
-      : context.canvasStore?.setGenerationTaskAnchor(task.canvasId, task.target.nodeId, { taskId: task.id });
-    if (anchorResult?.ok === false) {
+    return { payload, task, supersededTaskIds };
+  }
+
+  function failPreparedTasks(entries, reason) {
+    for (const { task } of entries) {
       generationTaskStore.updateTask(task.id, {
         status: 'interrupted',
-        error: `Canvas task anchor failed: ${anchorResult.reason || 'unknown'}`,
+        error: `Canvas task anchor failed: ${reason}`,
         interruptReason: 'provider_lost',
       });
-      throw new Error(`Canvas task anchor failed: ${anchorResult.reason || 'unknown'}`);
     }
+    throw new Error(`Canvas task anchor failed: ${reason}`);
+  }
+
+  function anchorPreparedTasks(entries) {
+    const actionGroups = new Map();
+    const generationEntries = [];
+    for (const entry of entries) {
+      const { task } = entry;
+      if (task.target?.type !== 'actionFissionRow') {
+        generationEntries.push(entry);
+        continue;
+      }
+      const key = `${task.canvasId}\u0000${task.target.nodeId}`;
+      const group = actionGroups.get(key) || [];
+      group.push(entry);
+      actionGroups.set(key, group);
+    }
+
+    for (const group of actionGroups.values()) {
+      const firstTask = group[0].task;
+      const anchors = group.map(({ task }) => ({ rowId: task.target.rowId, taskId: task.id }));
+      const anchorResult = typeof context.canvasStore?.setActionFissionRowTaskAnchors === 'function'
+        ? context.canvasStore.setActionFissionRowTaskAnchors(firstTask.canvasId, firstTask.target.nodeId, anchors)
+        : anchors.reduce((result, anchor) => result?.ok === false ? result : context.canvasStore?.setActionFissionRowTaskAnchor(
+          firstTask.canvasId,
+          firstTask.target.nodeId,
+          anchor.rowId,
+          { taskId: anchor.taskId },
+        ), { ok: true });
+      if (anchorResult?.ok === false) failPreparedTasks(entries, anchorResult.reason || 'unknown');
+    }
+    for (const { task } of generationEntries) {
+      const anchorResult = context.canvasStore?.setGenerationTaskAnchor(task.canvasId, task.target.nodeId, { taskId: task.id });
+      if (anchorResult?.ok === false) failPreparedTasks(entries, anchorResult.reason || 'unknown');
+    }
+  }
+
+  function launchPreparedTask({ payload, task, supersededTaskIds }) {
     supersededTaskIds.forEach((taskId) => {
       const superseded = generationTaskStore.getTask(taskId);
       activeControllers.get(taskId)?.abort();
@@ -879,8 +917,16 @@ function createImageGenerationRunner({
     return task;
   }
 
+  async function startTask(payload = {}) {
+    const entry = prepareTask(payload);
+    anchorPreparedTasks([entry]);
+    return launchPreparedTask(entry);
+  }
+
   async function startTasks(payloads = []) {
-    return Promise.all((Array.isArray(payloads) ? payloads : []).map((payload) => startTask(payload)));
+    const entries = (Array.isArray(payloads) ? payloads : []).map((payload) => prepareTask(payload));
+    anchorPreparedTasks(entries);
+    return entries.map((entry) => launchPreparedTask(entry));
   }
 
   async function resumeTask(taskId, payload = {}) {

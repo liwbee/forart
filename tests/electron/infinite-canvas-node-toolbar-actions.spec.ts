@@ -164,6 +164,10 @@ test.beforeEach(async ({ page }) => {
     Object.defineProperty(window, "easyTool", {
       configurable: true,
       value: {
+        saveResult: async (payload: { defaultName?: string; convertToPng?: boolean }) => {
+          document.documentElement.dataset.lastSaveResult = JSON.stringify(payload);
+          return { canceled: false, filePath: `C:\\Downloads\\${payload.defaultName || "image"}` };
+        },
         listCanvases: async () => ({
           projects: [{ id: "project-1", title: "Test project", sortOrder: 1, createdAt: 1, updatedAt: 1 }],
           canvases: [{ id: "canvas-toolbar", title: "Toolbar", projectId: "project-1", createdAt: 1, updatedAt: 1, revision: 1, nodeCount: 4 }],
@@ -180,7 +184,7 @@ test.beforeEach(async ({ page }) => {
             { id: "image-generator", type: "canvasNode", position: { x: 80, y: 100 }, style: { width: 420, height: 360 }, data: { kind: "imageGenerator", label: "Generator", text: "Generate a test image", imageProviderId: provider.id, imageModel: provider.imageModels[0], generatedImages: [{ url: pixel, fileName: "generated.png", downloadState: "pending" }] } },
             { id: "empty-image-generator", type: "canvasNode", position: { x: 320, y: 600 }, style: { width: 420, height: 360 }, data: { kind: "imageGenerator", label: "Empty generator", text: "Generate another test image", imageProviderId: provider.id, imageModel: provider.imageModels[0], generatedImages: [] } },
             { id: "action-fission", type: "canvasNode", position: { x: 620, y: 100 }, style: { width: 700, height: 560 }, data: { kind: "actionFission", label: "Fission", actionFission } },
-            { id: "reference", type: "canvasNode", position: { x: 80, y: 600 }, style: { width: 180, height: 120 }, data: { kind: "imageLoader", label: "Reference", imageUrl: pixel } },
+            { id: "reference", type: "canvasNode", position: { x: 80, y: 600 }, style: { width: 180, height: 120 }, data: { kind: "imageLoader", label: "Reference", imageUrl: pixel, imageFileName: "uploaded.jpg" } },
           ],
           edges: [{ id: "edge-reference", source: "reference", target: "action-fission", sourceHandle: "output", targetHandle: "input", data: { inputKind: "referenceImage", referenceOrder: 1 } }],
           viewport: { x: 0, y: 0, zoom: 0.8 },
@@ -211,6 +215,22 @@ test("exposes generation actions in the image generator top toolbar", async ({ p
 
   await toolbar.getByRole("button", { name: "Run" }).click();
   await expect.poll(() => page.locator("html").getAttribute("data-started-node-id")).toBe("image-generator");
+});
+
+test("preserves uploaded image format while generated images still download as PNG", async ({ page }) => {
+  let toolbar = await selectNode(page, "reference");
+  await toolbar.getByRole("button", { name: "Download image" }).click();
+  await expect.poll(async () => page.locator("html").getAttribute("data-last-save-result")).not.toBeNull();
+  let payload = JSON.parse(String(await page.locator("html").getAttribute("data-last-save-result")));
+  expect(payload.convertToPng).toBe(false);
+  expect(payload.defaultName).toMatch(/\.jpg$/);
+
+  toolbar = await selectNode(page, "image-generator");
+  await toolbar.getByRole("button", { name: "Download image" }).click();
+  await expect.poll(async () => {
+    const saved = await page.locator("html").getAttribute("data-last-save-result");
+    return saved ? JSON.parse(saved).convertToPng : null;
+  }).toBe(true);
 });
 
 test("hides the empty generator icon as soon as generation starts", async ({ page }) => {

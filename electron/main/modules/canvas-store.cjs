@@ -576,12 +576,16 @@ function createCanvasStore({ rootDir }) {
     const existing = readCanvas(canvasId);
     if (!existing) return { ok: false, reason: 'canvas_not_found' };
     let matched = false;
+    let changed = false;
     const nodes = existing.nodes.map((node) => {
       if (String(node?.id || '') !== String(nodeId || '')) return node;
       matched = true;
-      return updater(node || {});
+      const updated = updater(node || {});
+      if (updated !== node) changed = true;
+      return updated;
     });
     if (!matched) return { ok: false, reason: 'node_not_found' };
+    if (!changed) return { ok: false, reason: 'no_change' };
     const result = writeCanvas({ ...existing, nodes, updatedAt: nowMs(), revision: existing.revision + 1 });
     return { ok: true, canvas: result.canvas, record: canvasRecord(result.canvas), filePath: result.filePath };
   }
@@ -626,13 +630,47 @@ function createCanvasStore({ rootDir }) {
     });
   }
 
+  function setActionFissionRowTaskAnchors(canvasId, nodeId, items = []) {
+    const anchorsByRowId = new Map();
+    for (const item of Array.isArray(items) ? items : []) {
+      const rowId = String(item?.rowId || '').trim();
+      const taskId = String(item?.taskId || '').trim();
+      if (!rowId) return { ok: false, reason: 'row_id_required' };
+      if (!taskId) return { ok: false, reason: 'task_id_required' };
+      anchorsByRowId.set(rowId, taskId);
+    }
+    if (!anchorsByRowId.size) return { ok: false, reason: 'task_anchor_required' };
+
+    let validationFailure = '';
+    const result = updateCanvasNode(canvasId, nodeId, (node) => {
+      const data = node?.data && typeof node.data === 'object' ? node.data : {};
+      const actionFission = data.actionFission && typeof data.actionFission === 'object' ? data.actionFission : null;
+      const rows = Array.isArray(actionFission?.rows) ? actionFission.rows : [];
+      const existingRowIds = new Set(rows.map((row) => String(row?.id || '')));
+      const missingRowId = [...anchorsByRowId.keys()].find((rowId) => !existingRowIds.has(rowId));
+      if (missingRowId) {
+        validationFailure = 'row_not_found';
+        return node;
+      }
+      return {
+        ...node,
+        data: {
+          ...data,
+          actionFission: {
+            ...actionFission,
+            rows: rows.map((row) => {
+              const taskId = anchorsByRowId.get(String(row?.id || ''));
+              return taskId ? { ...row, latestGenerationTaskId: taskId } : row;
+            }),
+          },
+        },
+      };
+    });
+    return validationFailure ? { ok: false, reason: validationFailure } : result;
+  }
+
   function setActionFissionRowTaskAnchor(canvasId, nodeId, rowId, payload = {}) {
-    const taskId = String(payload.taskId || '').trim();
-    if (!taskId) return { ok: false, reason: 'task_id_required' };
-    return updateActionFissionRow(canvasId, nodeId, rowId, (row) => ({
-      ...row,
-      latestGenerationTaskId: taskId,
-    }));
+    return setActionFissionRowTaskAnchors(canvasId, nodeId, [{ rowId, taskId: payload.taskId }]);
   }
 
   function completeActionFissionRow(payload = {}) {
@@ -826,6 +864,7 @@ function createCanvasStore({ rootDir }) {
     saveCanvasText,
     setGenerationTaskAnchor,
     setActionFissionRowTaskAnchor,
+    setActionFissionRowTaskAnchors,
     completeActionFissionRow,
     completeGenerationNode,
     updateCanvasMeta,

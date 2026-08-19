@@ -55,6 +55,7 @@ export interface NativeCanvasNodeData extends Record<string, unknown> {
   groupId?: string;
   groupColor?: string;
   imageUrl?: string;
+  imageFileName?: string;
   thumbUrl?: string;
   text?: string;
   imagePromptDocument?: NativeImagePromptDocument;
@@ -113,6 +114,7 @@ export function nativeCanvasNodePrimaryImage(data: NativeCanvasNodeData): Native
   if (!data.imageUrl) return null;
   return {
     localUrl: data.imageUrl,
+    fileName: data.imageFileName,
     thumbUrl: data.thumbUrl,
     width: data.imageNaturalWidth,
     height: data.imageNaturalHeight,

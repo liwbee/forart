@@ -58,7 +58,10 @@ async function readImageDimensions(buffer) {
 
 async function convertImageBufferToPng(buffer) {
   const { default: sharp } = await import('sharp');
-  return sharp(buffer, { animated: false })
+  const image = sharp(buffer, { animated: false });
+  const metadata = await image.metadata();
+  if (metadata.format === 'png') return buffer;
+  return image
     .rotate()
     .png()
     .toBuffer();

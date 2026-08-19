@@ -69,3 +69,30 @@ test('every renderer-owned generation hook uses the StrictMode-safe lifecycle', 
     assert.doesNotMatch(source, /forartGenerationTasks\.get\(taskId\)/);
   }
 });
+
+test('action-fission group startup applies returned task anchors through one renderer batch', () => {
+  const hookSource = fs.readFileSync(path.join(
+    __dirname,
+    '..',
+    'renderer',
+    'src',
+    'features',
+    'infinite-canvas',
+    'generation',
+    'useNativeActionFissionGeneration.ts',
+  ), 'utf8');
+  const canvasSource = fs.readFileSync(path.join(
+    __dirname,
+    '..',
+    'renderer',
+    'src',
+    'features',
+    'infinite-canvas',
+    'ReactFlowCanvasPage.tsx',
+  ), 'utf8');
+
+  assert.match(hookSource, /patchRows\(node\.id, tasks\.map/);
+  assert.doesNotMatch(hookSource, /tasks\.forEach\(\(task, index\) => patchRow/);
+  assert.match(canvasSource, /const patchActionFissionRows = useCallback/);
+  assert.match(canvasSource, /patchRows: patchActionFissionRows/);
+});

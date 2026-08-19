@@ -317,6 +317,35 @@ function createLibtvGenerationRunner({
     }
   }
 
+  function writeTaskAnchors(tasks) {
+    const actionGroups = new Map();
+    const generationTasks = [];
+    for (const task of tasks) {
+      if (!isActionFissionTask(task)) {
+        generationTasks.push(task);
+        continue;
+      }
+      const key = `${task.canvasId}\u0000${task.target.nodeId}`;
+      const group = actionGroups.get(key) || [];
+      group.push(task);
+      actionGroups.set(key, group);
+    }
+
+    for (const group of actionGroups.values()) {
+      const firstTask = group[0];
+      const anchors = group.map((task) => ({ rowId: task.target.rowId, taskId: task.id }));
+      const result = typeof canvasStore?.setActionFissionRowTaskAnchors === 'function'
+        ? canvasStore.setActionFissionRowTaskAnchors(firstTask.canvasId, firstTask.target.nodeId, anchors)
+        : group.reduce((current, task) => current === false ? false : writeTaskAnchor(task), true);
+      if (result === false || result?.ok === false) return false;
+      group.forEach((task) => anchoredTaskIds.add(task.id));
+    }
+    for (const task of generationTasks) {
+      if (!writeTaskAnchor(task)) return false;
+    }
+    return true;
+  }
+
   function writeTaskTerminal(task, status, result, error) {
     if (!task?.canvasId || !task.target?.nodeId) return;
     try {
@@ -657,20 +686,18 @@ function createLibtvGenerationRunner({
     }
   }
 
-  function startImageTask(payload = {}, queueConcurrency = configuredActionFissionConcurrency()) {
+  function prepareImageTask(payload = {}) {
     if (!taskStore) throw new Error('LibTV task store is unavailable.');
-    const task = taskStore.createTask({
+    return taskStore.createTask({
       ...payload,
       status: payload.queueKey ? 'queued' : 'preparing',
       message: '',
       messageCode: payload.queueKey ? 'libtv.queueWaiting' : 'libtv.generationPreparing',
       messageParams: null,
     });
-    if (!writeTaskAnchor(task)) {
-      taskStore.stopTask(task.id);
-      throw new Error('Canvas task anchor failed.');
-    }
+  }
 
+  function launchImageTask(task, payload, queueConcurrency) {
     const execute = async () => {
       const queued = taskStore.getTask(task.id);
       if (!queued || queued.status === 'interrupted') return;
@@ -709,6 +736,15 @@ function createLibtvGenerationRunner({
       void execute();
     }
     return task;
+  }
+
+  function startImageTask(payload = {}, queueConcurrency = configuredActionFissionConcurrency()) {
+    const task = prepareImageTask(payload);
+    if (!writeTaskAnchor(task)) {
+      taskStore.stopTask(task.id);
+      throw new Error('Canvas task anchor failed.');
+    }
+    return launchImageTask(task, payload, queueConcurrency);
   }
 
   function resumeRemoteImageTask(task) {
@@ -798,7 +834,15 @@ function createLibtvGenerationRunner({
 
   function startImageTasks(payloads = []) {
     const queueConcurrency = configuredActionFissionConcurrency();
-    return (Array.isArray(payloads) ? payloads : []).map((payload) => startImageTask(payload, queueConcurrency));
+    const entries = (Array.isArray(payloads) ? payloads : []).map((payload) => ({
+      payload,
+      task: prepareImageTask(payload),
+    }));
+    if (!writeTaskAnchors(entries.map(({ task }) => task))) {
+      entries.forEach(({ task }) => taskStore.stopTask(task.id));
+      throw new Error('Canvas task anchor failed.');
+    }
+    return entries.map(({ task, payload }) => launchImageTask(task, payload, queueConcurrency));
   }
 
   function stopImageTask(taskId) {

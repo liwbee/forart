@@ -8,9 +8,12 @@ test('generation task IPC exposes snapshots and publishes changed events', async
   const sent = [];
   let changedListener = null;
   let disposed = false;
+  let getTaskCount = 0;
+  let getManyCount = 0;
   const service = {
-    getTask(taskId) { return { id: taskId, version: 2 }; },
-    getManyTasks(taskIds) { return taskIds.map((taskId) => ({ id: taskId, version: 2 })); },
+    getTask(taskId) { getTaskCount += 1; return { id: taskId, version: 2 }; },
+    getManyTasks(taskIds) { getManyCount += 1; return taskIds.map((taskId) => ({ id: taskId, version: 2 })); },
+    async startTasks(_executorKind, payloads) { return payloads.map((payload) => ({ id: payload.id })); },
     listLatestTasksForCanvas(canvasId) { return [{ id: `task:${canvasId}`, version: 1 }]; },
     listTaskCenterPage(payload) { return { tasks: [{ id: `page:${payload.offset}`, version: 1 }], total: 1, counts: { all: 1, active: 0, succeeded: 1, exceptional: 0 } }; },
     stopTask(taskId) { return { id: taskId, status: 'interrupted' }; },
@@ -43,6 +46,15 @@ test('generation task IPC exposes snapshots and publishes changed events', async
     counts: { all: 1, active: 0, succeeded: 1, exceptional: 0 },
   });
   assert.deepEqual(await handlers.get('generation-task-system:stop')(null, 'task-a'), { id: 'task-a', status: 'interrupted' });
+
+  getTaskCount = 0;
+  getManyCount = 0;
+  assert.deepEqual(await handlers.get('generation-task-system:start-many')(null, 'api', [{ id: 'task-a' }, { id: 'task-b' }]), [
+    { id: 'task-a', version: 2 },
+    { id: 'task-b', version: 2 },
+  ]);
+  assert.equal(getTaskCount, 0);
+  assert.equal(getManyCount, 1);
 
   changedListener({ id: 'task-a', version: 3 });
   assert.deepEqual(sent, [{ channel: 'generation-task:changed', payload: { id: 'task-a', version: 3 } }]);

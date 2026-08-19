@@ -46,6 +46,7 @@ interface UseNativeActionFissionGenerationOptions {
   edges: NativeCanvasEdge[];
   nodes: NativeCanvasNode[];
   patchRow: (nodeId: string, rowId: string, patch: Partial<ActionFissionRow>) => void;
+  patchRows: (nodeId: string, patches: Array<{ rowId: string; patch: Partial<ActionFissionRow> }>) => void;
   t: TFunction;
 }
 
@@ -54,6 +55,7 @@ export function useNativeActionFissionGeneration({
   edges,
   nodes,
   patchRow,
+  patchRows,
   t,
 }: UseNativeActionFissionGenerationOptions) {
   const mountedRef = useRef(true);
@@ -227,14 +229,17 @@ export function useNativeActionFissionGeneration({
     const tasks = await window.forartGenerationTasks.startMany("api", payloads);
     if (tasks.length !== rows.length) throw new Error(t("infiniteCanvas:generationTaskCreateFailed"));
     if (!mountedRef.current) return;
-    tasks.forEach((task, index) => patchRow(node.id, rows[index].id, {
-      latestGenerationTaskId: task.id,
-      resultDownloadState: undefined,
-      resultDownloadedAt: undefined,
-    }));
+    patchRows(node.id, tasks.map((task, index) => ({
+      rowId: rows[index].id,
+      patch: {
+        latestGenerationTaskId: task.id,
+        resultDownloadState: undefined,
+        resultDownloadedAt: undefined,
+      },
+    })));
     endGenerationLaunching(rows.map((row) => actionFissionLaunchKey(canvasId, node.id, row.id)));
     await Promise.allSettled(tasks.map((task, index) => watchRowTask(task.id, node.id, rows[index].id)));
-  }, [canvasId, patchRow, t, watchRowTask]);
+  }, [canvasId, patchRows, t, watchRowTask]);
 
   const runLibtvRows = useCallback(async (
     node: NativeCanvasNode,
@@ -296,14 +301,17 @@ export function useNativeActionFissionGeneration({
     const tasks = await window.forartGenerationTasks.startMany("libtv", payloads);
     if (tasks.length !== rows.length) throw new Error(t("infiniteCanvas:generationTaskCreateFailed"));
     if (!mountedRef.current) return;
-    tasks.forEach((task, index) => patchRow(node.id, rows[index].id, {
-      latestGenerationTaskId: task.id,
-      resultDownloadState: undefined,
-      resultDownloadedAt: undefined,
-    }));
+    patchRows(node.id, tasks.map((task, index) => ({
+      rowId: rows[index].id,
+      patch: {
+        latestGenerationTaskId: task.id,
+        resultDownloadState: undefined,
+        resultDownloadedAt: undefined,
+      },
+    })));
     endGenerationLaunching(rows.map((row) => actionFissionLaunchKey(canvasId, node.id, row.id)));
     await Promise.allSettled(tasks.map((task, index) => watchRowTask(task.id, node.id, rows[index].id)));
-  }, [canvasId, patchRow, t, watchRowTask]);
+  }, [canvasId, patchRows, t, watchRowTask]);
 
   useEffect(() => {
     nodes.forEach((node) => {

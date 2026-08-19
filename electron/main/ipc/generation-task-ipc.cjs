@@ -15,9 +15,8 @@ function registerGenerationTaskIpc({ ipcMain, generationTaskService, getWebConte
   });
   ipcMain.handle('generation-task-system:start-many', async (_event, executorKind, payloads) => {
     const tasks = await generationTaskService.startTasks(executorKind, payloads);
-    return (Array.isArray(tasks) ? tasks : [])
-      .map((task) => task?.id ? generationTaskService.getTask(task.id) : null)
-      .filter(Boolean);
+    const taskIds = (Array.isArray(tasks) ? tasks : []).map((task) => task?.id).filter(Boolean);
+    return taskIds.length ? generationTaskService.getManyTasks(taskIds) : [];
   });
   ipcMain.handle('generation-task-system:stop', async (_event, taskId) => generationTaskService.stopTask(taskId));
 

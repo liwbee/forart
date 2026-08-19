@@ -834,7 +834,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
                     ...(node.data.generatedImages?.slice(1) || []),
                   ],
                 }
-              : { imageUrl: storedUrl, thumbUrl: thumbUrl || undefined }),
+              : { imageUrl: storedUrl, imageFileName: fileName, thumbUrl: thumbUrl || undefined }),
             imageNaturalWidth: dimensions?.width,
             imageNaturalHeight: dimensions?.height,
           },
@@ -876,6 +876,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
           data: {
             ...item.data,
             imageUrl: result.url,
+            imageFileName: result.fileName,
             thumbUrl: result.thumbUrl || undefined,
             imageNaturalWidth: result.width,
             imageNaturalHeight: result.height,
@@ -978,14 +979,29 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     void Promise.all([worker(), worker()]);
   }, [nodes, patchImageNodeThumbnail]);
 
-  const patchActionFissionRow = useCallback((nodeId: string, rowId: string, patch: Partial<ActionFissionRow>) => {
-    const transformWithPatch = (node: NativeCanvasNode, rowPatch: Partial<ActionFissionRow>) => {
+  const patchActionFissionRows = useCallback((
+    nodeId: string,
+    patches: Array<{ rowId: string; patch: Partial<ActionFissionRow> }>,
+  ) => {
+    if (!patches.length) return;
+    const currentPatches = new Map<string, Partial<ActionFissionRow>>();
+    const historyPatches = new Map<string, Partial<ActionFissionRow>>();
+    patches.forEach(({ rowId, patch }) => {
+      currentPatches.set(rowId, { ...(currentPatches.get(rowId) || {}), ...patch });
+      const historyPatch = { ...(historyPatches.get(rowId) || {}), ...patch };
+      delete historyPatch.selectedActionThumbUrl;
+      if (Object.keys(historyPatch).length) historyPatches.set(rowId, historyPatch);
+      else historyPatches.delete(rowId);
+    });
+    const transformWithPatches = (
+      node: NativeCanvasNode,
+      rowPatches: ReadonlyMap<string, Partial<ActionFissionRow>>,
+    ) => {
       if (node.id !== nodeId || node.data.kind !== "actionFission") return node;
       const actionFission = normalizeActionFissionState(node.data.actionFission);
       const nextRows = actionFission.rows.map((row) => {
-        if (row.id !== rowId) return row;
-        const next = { ...row, ...rowPatch } as ActionFissionRow & Record<string, unknown>;
-        return next;
+        const rowPatch = rowPatches.get(row.id);
+        return rowPatch ? { ...row, ...rowPatch } as ActionFissionRow & Record<string, unknown> : row;
       });
       return {
         ...node,
@@ -998,15 +1014,17 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
         },
       };
     };
-    const transformCurrent = (node: NativeCanvasNode) => transformWithPatch(node, patch);
-    const historyPatch = { ...patch };
-    delete historyPatch.selectedActionThumbUrl;
-    const transformHistory = Object.keys(historyPatch).length
-      ? (node: NativeCanvasNode) => transformWithPatch(node, historyPatch)
+    const transformCurrent = (node: NativeCanvasNode) => transformWithPatches(node, currentPatches);
+    const transformHistory = historyPatches.size
+      ? (node: NativeCanvasNode) => transformWithPatches(node, historyPatches)
       : (node: NativeCanvasNode) => node;
     rebaseNode(nodeId, transformCurrent, transformHistory);
     setNodes((current) => current.map((node) => node.id === nodeId ? transformCurrent(node) : node));
   }, [rebaseNode, setNodes]);
+
+  const patchActionFissionRow = useCallback((nodeId: string, rowId: string, patch: Partial<ActionFissionRow>) => {
+    patchActionFissionRows(nodeId, [{ rowId, patch }]);
+  }, [patchActionFissionRows]);
 
   const {
     runImageGeneration: runApiImageGeneration,
@@ -1030,6 +1048,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     edges,
     nodes,
     patchRow: patchActionFissionRow,
+    patchRows: patchActionFissionRows,
     t,
   });
   const runImageGeneration = useCallback(async (nodeId: string, options?: ImageGenerationRunOptions) => {
@@ -1099,7 +1118,11 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     }
   }, [generationStopPending, pendingGenerationStop, stopActionFissionImmediately, stopImageGenerationTaskImmediately]);
 
-  const saveGeneratedImage = useCallback(async (imageUrl: string, defaultName: string) => {
+  const saveGeneratedImage = useCallback(async (
+    imageUrl: string,
+    defaultName: string,
+    { convertToPng = true }: { convertToPng?: boolean } = {},
+  ) => {
     try {
       if (window.easyTool?.saveResult) {
         const result = await window.easyTool.saveResult({
@@ -1107,7 +1130,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
           dataUrl: resolveLibraryImageUrl(imageUrl),
           defaultName,
           directory: imageDownloadPath,
-          convertToPng: true,
+          convertToPng,
         });
         toast.success(result.filePath
           ? t("infiniteCanvas:downloadSaved", { path: result.filePath })
@@ -1139,7 +1162,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
         model: "Local",
         sourceFileName: image.fileName,
         sourceUrl: imageUrl,
-      }));
+      }), { convertToPng: false });
       return;
     }
 
@@ -1244,6 +1267,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       y: latestTarget.position.y + Number(source.verticalOffset || 0),
     }, {
       imageUrl,
+      imageFileName: source.label,
       thumbUrl: thumbUrl || undefined,
       imageNaturalWidth: dimensions.width,
       imageNaturalHeight: dimensions.height,
@@ -1452,6 +1476,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
         y: flowPoint.y - size.height / 2 + index * 32,
       }, {
         imageUrl,
+        imageFileName: file.name,
         thumbUrl,
         imageNaturalWidth: dimensions.width,
         imageNaturalHeight: dimensions.height,

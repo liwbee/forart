@@ -103,12 +103,41 @@ export const useGenerationTaskCache = create<GenerationTaskCacheState>((set) => 
 
 let eventSubscribers = 0;
 let disconnectEvents: (() => void) | null = null;
+let pendingChangedTasks = new Map<string, GenerationTaskDto>();
+let cancelPendingTaskFlush: (() => void) | null = null;
+
+function flushPendingChangedTasks() {
+  const cancelScheduledFlush = cancelPendingTaskFlush;
+  cancelPendingTaskFlush = null;
+  cancelScheduledFlush?.();
+  if (!pendingChangedTasks.size) return;
+  const tasks = [...pendingChangedTasks.values()];
+  pendingChangedTasks = new Map();
+  useGenerationTaskCache.getState().mergeTasks(tasks);
+}
+
+function scheduleChangedTask(task: GenerationTaskDto) {
+  const pending = pendingChangedTasks.get(task.id);
+  if (!pending || pending.version < task.version) pendingChangedTasks.set(task.id, task);
+  if (cancelPendingTaskFlush) return;
+  if (typeof window.requestAnimationFrame === "function") {
+    const frameId = window.requestAnimationFrame(flushPendingChangedTasks);
+    const fallbackTimerId = setTimeout(flushPendingChangedTasks, 32);
+    cancelPendingTaskFlush = () => {
+      window.cancelAnimationFrame(frameId);
+      clearTimeout(fallbackTimerId);
+    };
+    return;
+  }
+  const timerId = setTimeout(flushPendingChangedTasks, 0);
+  cancelPendingTaskFlush = () => clearTimeout(timerId);
+}
 
 export function connectGenerationTaskEvents() {
   eventSubscribers += 1;
   if (!disconnectEvents && window.forartGenerationTasks?.onChanged) {
     disconnectEvents = window.forartGenerationTasks.onChanged((task) => {
-      useGenerationTaskCache.getState().mergeTask(task);
+      scheduleChangedTask(task);
     });
   }
   return () => {
@@ -116,6 +145,7 @@ export function connectGenerationTaskEvents() {
     if (!eventSubscribers && disconnectEvents) {
       disconnectEvents();
       disconnectEvents = null;
+      if (cancelPendingTaskFlush) flushPendingChangedTasks();
     }
   };
 }
