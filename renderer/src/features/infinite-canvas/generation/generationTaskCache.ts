@@ -23,23 +23,29 @@ const MAX_CACHED_TERMINAL_TASKS = 120;
 
 interface GenerationTaskCacheState {
   tasksById: Record<string, GenerationTaskDto>;
+  hydratedCanvasId: string;
+  pinnedTaskIds: Set<string>;
   revision: number;
   mergeTask: (task: GenerationTaskDto) => void;
   mergeTasks: (tasks: GenerationTaskDto[]) => void;
+  replaceHydratedTasks: (canvasId: string, tasks: GenerationTaskDto[]) => void;
+  clearHydratedTasks: () => void;
 }
 
 function mergeTaskRecord(
   current: Record<string, GenerationTaskDto>,
   task: GenerationTaskDto,
+  pinnedTaskIds: ReadonlySet<string>,
 ) {
   const existing = current[task.id];
   if (existing && existing.version >= task.version) return current;
-  return pruneTerminalTasks({ ...current, [task.id]: task });
+  return pruneTerminalTasks({ ...current, [task.id]: task }, pinnedTaskIds);
 }
 
 function mergeTaskRecords(
   current: Record<string, GenerationTaskDto>,
   tasks: GenerationTaskDto[],
+  pinnedTaskIds: ReadonlySet<string>,
 ) {
   let next: Record<string, GenerationTaskDto> | null = null;
   for (const task of tasks) {
@@ -48,12 +54,15 @@ function mergeTaskRecords(
     if (!next) next = { ...current };
     next[task.id] = task;
   }
-  return next ? pruneTerminalTasks(next) : current;
+  return next ? pruneTerminalTasks(next, pinnedTaskIds) : current;
 }
 
-function pruneTerminalTasks(tasksById: Record<string, GenerationTaskDto>) {
+function pruneTerminalTasks(
+  tasksById: Record<string, GenerationTaskDto>,
+  pinnedTaskIds: ReadonlySet<string>,
+) {
   const terminalTasks = Object.values(tasksById)
-    .filter((task) => TERMINAL_STATUSES.has(task.status))
+    .filter((task) => TERMINAL_STATUSES.has(task.status) && !pinnedTaskIds.has(task.id))
     .sort((left, right) => right.updatedAt - left.updatedAt);
   if (terminalTasks.length <= MAX_CACHED_TERMINAL_TASKS) return tasksById;
   const next = { ...tasksById };
@@ -63,15 +72,33 @@ function pruneTerminalTasks(tasksById: Record<string, GenerationTaskDto>) {
 
 export const useGenerationTaskCache = create<GenerationTaskCacheState>((set) => ({
   tasksById: {},
+  hydratedCanvasId: "",
+  pinnedTaskIds: new Set(),
   revision: 0,
   mergeTask: (task) => set((state) => {
-    const tasksById = mergeTaskRecord(state.tasksById, task);
+    const tasksById = mergeTaskRecord(state.tasksById, task, state.pinnedTaskIds);
     return tasksById === state.tasksById ? state : { tasksById, revision: state.revision + 1 };
   }),
   mergeTasks: (tasks) => set((state) => {
-    const tasksById = mergeTaskRecords(state.tasksById, tasks);
+    const tasksById = mergeTaskRecords(state.tasksById, tasks, state.pinnedTaskIds);
     return tasksById === state.tasksById ? state : { tasksById, revision: state.revision + 1 };
   }),
+  replaceHydratedTasks: (canvasId, tasks) => set((state) => {
+    const pinnedTaskIds = new Set(tasks.map((task) => task.id));
+    const tasksById = mergeTaskRecords(state.tasksById, tasks, pinnedTaskIds);
+    return {
+      hydratedCanvasId: canvasId,
+      pinnedTaskIds,
+      tasksById: pruneTerminalTasks(tasksById, pinnedTaskIds),
+      revision: state.revision + 1,
+    };
+  }),
+  clearHydratedTasks: () => set((state) => ({
+    hydratedCanvasId: "",
+    pinnedTaskIds: new Set(),
+    tasksById: pruneTerminalTasks(state.tasksById, new Set()),
+    revision: state.revision + 1,
+  })),
 }));
 
 let eventSubscribers = 0;
@@ -93,18 +120,26 @@ export function connectGenerationTaskEvents() {
   };
 }
 
-export async function hydrateGenerationTasks(canvasId: string) {
+let hydrationRequestSequence = 0;
+
+export async function hydrateGenerationTasks(canvasId: string, legacyTaskIds: string[] = []) {
   if (!canvasId || !window.forartGenerationTasks?.listForCanvas) return [];
-  const tasks = await window.forartGenerationTasks.listForCanvas(canvasId);
-  useGenerationTaskCache.getState().mergeTasks(tasks);
+  const requestSequence = ++hydrationRequestSequence;
+  const headTasks = await window.forartGenerationTasks.listForCanvas(canvasId);
+  const headTaskIds = new Set(headTasks.map((task) => task.id));
+  const fallbackIds = [...new Set(legacyTaskIds.filter(Boolean))].filter((taskId) => !headTaskIds.has(taskId));
+  const fallbackTasks = fallbackIds.length && window.forartGenerationTasks.getMany
+    ? await window.forartGenerationTasks.getMany(fallbackIds)
+    : [];
+  if (requestSequence !== hydrationRequestSequence) return [];
+  const tasks = [...headTasks, ...fallbackTasks];
+  useGenerationTaskCache.getState().replaceHydratedTasks(canvasId, tasks);
   return tasks;
 }
 
-export async function hydrateRecentGenerationTasks(limit = 100) {
-  if (!window.forartGenerationTasks?.listRecent) return [];
-  const tasks = await window.forartGenerationTasks.listRecent(limit);
-  useGenerationTaskCache.getState().mergeTasks(tasks);
-  return tasks;
+export function clearHydratedGenerationTasks() {
+  hydrationRequestSequence += 1;
+  useGenerationTaskCache.getState().clearHydratedTasks();
 }
 
 export function isGenerationTaskTerminal(status: GenerationTaskStatus) {

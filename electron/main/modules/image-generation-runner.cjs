@@ -575,9 +575,12 @@ async function saveOutputAsset(context, result, taskId) {
     defaultName: result.fileName || 'generated-image.png',
     kind: 'output',
   });
+  const { dataUrl: _dataUrl, ...resultMetadata } = result || {};
   return {
-    ...result,
-    url: result.url || result.dataUrl || '',
+    ...resultMetadata,
+    // The provider URL may be a large data URL. Once the asset is persisted,
+    // keep only the stable local asset reference in task/canvas state.
+    url: saved.url,
     localUrl: saved.url,
     thumbUrl: saved.thumbUrl || '',
     fileName: saved.fileName || result.fileName || 'generated-image.png',
@@ -614,7 +617,15 @@ function markRemoteExecutionStarted(context, taskId) {
 
 function writeTaskTerminalToCanvas(context, task, status, result, error) {
   if (!task?.canvasId || !task.target?.nodeId) return;
-  context.resultCommitter.commit(task, { status, result, error, backend: 'api' });
+  try {
+    return context.resultCommitter.commit(task, { status, result, error, backend: 'api' });
+  } catch (commitError) {
+    // The committer has already returned this task to `pending`. Execution is
+    // terminal and must not be reclassified or updated through the active-task
+    // store; startup recovery will retry the canvas write independently.
+    console.error('API generation result commit deferred:', commitError);
+    return { ok: false, reason: 'deferred' };
+  }
 }
 
 async function submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, size, quality, imageCount, taskId, signal) {

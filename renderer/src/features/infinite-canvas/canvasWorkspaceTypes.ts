@@ -1,4 +1,5 @@
 import type { Viewport } from "@xyflow/react";
+import { normalizeActionFissionState } from "./action-fission/actionFissionState";
 import {
   NATIVE_CANVAS_NODE_DEFINITIONS,
   createNativeCanvasGroupNode,
@@ -143,6 +144,10 @@ function normalizeCurrentNodeData(data: Record<string, unknown>, kind: NativeCan
   }
   delete normalized.title;
   normalized.latestGenerationTaskId = String(data.latestGenerationTaskId || "") || undefined;
+  if (kind === "actionFission") {
+    normalized.actionFission = normalizeActionFissionState(normalized.actionFission);
+    return normalized;
+  }
   if (kind !== "imageGenerator") return normalized;
   normalized.libtvImageGeneration = normalizeLibtvImageGeneration(data.libtvImageGeneration);
   normalized.generatedImages = normalizeGeneratedImages(data);

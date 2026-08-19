@@ -35,6 +35,54 @@ function recordOf(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
 
+function compactActionFissionRow(value: unknown) {
+  const row = { ...recordOf(value) };
+
+  // These fields are unused response metadata. Keep thumbnail URLs so opening
+  // a saved canvas does not have to probe or regenerate every thumbnail again.
+  delete row.selectedActionTags;
+  delete row.resultWidth;
+  delete row.resultHeight;
+  if (row.useAdditionalReferences === false) delete row.useAdditionalReferences;
+
+  // Most action-fission rows have one unnamed group. Store that group's
+  // selection directly on the row; both schema normalizers understand this
+  // representation and recreate the deterministic group id when opening it.
+  const groups = Array.isArray(row.categoryGroups) ? row.categoryGroups : [];
+  if (groups.length === 1) {
+    const group = recordOf(groups[0]);
+    const selectedGroupId = String(row.selectedCategoryGroupId || "");
+    const groupId = String(group.id || "");
+    const groupName = String(group.name || "").trim();
+    if (!groupName && (!selectedGroupId || selectedGroupId === groupId)) {
+      row.actionProjectId = String(group.actionProjectId || "");
+      const includeIds = Array.isArray(group.includeActionTagIds) ? group.includeActionTagIds : [];
+      const excludeIds = Array.isArray(group.excludeActionTagIds) ? group.excludeActionTagIds : [];
+      if (includeIds.length) row.includeActionTagIds = includeIds;
+      else delete row.includeActionTagIds;
+      if (excludeIds.length) row.excludeActionTagIds = excludeIds;
+      else delete row.excludeActionTagIds;
+      delete row.categoryGroups;
+      delete row.selectedCategoryGroupId;
+    }
+  }
+
+  return row;
+}
+
+function durableNodeData(value: unknown) {
+  const data = { ...recordOf(value) };
+  delete data.groupId;
+  if (data.actionFission && typeof data.actionFission === "object") {
+    const actionFission = { ...recordOf(data.actionFission) };
+    if (Array.isArray(actionFission.rows)) {
+      actionFission.rows = actionFission.rows.map(compactActionFissionRow);
+    }
+    data.actionFission = actionFission;
+  }
+  return data;
+}
+
 function durableNode(value: object) {
   const node = { ...recordOf(value) };
   const resizedWidth = Number(node.width);
@@ -56,9 +104,7 @@ function durableNode(value: object) {
     delete node.expandParent;
   }
 
-  const nodeData = { ...recordOf(node.data) };
-  delete nodeData.groupId;
-  node.data = nodeData;
+  node.data = durableNodeData(node.data);
   return node;
 }
 
@@ -131,10 +177,11 @@ export function serializeCanvasDocument(
     canvasSchemaVersion: 2,
     id: document.id,
     title: document.title,
-    icon: document.icon || "layers",
-    canvasType: "forart",
+    // The current canvas type is always Forart and is restored by the schema
+    // normalizers. Keep custom icon metadata, but omit the default value.
+    ...(document.icon && document.icon !== "layers" ? { icon: document.icon } : {}),
     projectId: document.projectId,
-    color: document.color || "",
+    ...(document.color ? { color: document.color } : {}),
     pinned: Boolean(document.pinned),
     createdAt: document.createdAt,
     updatedAt: CANVAS_SAVE_UPDATED_AT_PLACEHOLDER,

@@ -51,14 +51,16 @@ test('canvas cache protects current canvas assets and SQLite task assets', () =>
       }),
     };
     const generationTaskRepository = {
-      listTaskRecords: () => [{
-        task: {
-          id: 'task-1',
-          canvasId: 'canvas-1',
-          target: { type: 'imageGenerator', nodeId: 'node-1' },
-          referenceImages: [urlsByPath.get(files.taskInput)],
-          result: { localUrl: urlsByPath.get(files.taskResult) },
-        },
+      listTaskAssetReferences: () => [{
+        url: urlsByPath.get(files.taskInput),
+        canvasId: 'canvas-1',
+        nodeId: 'node-1',
+        source: 'task.referenceImages',
+      }, {
+        url: urlsByPath.get(files.taskResult),
+        canvasId: 'canvas-1',
+        nodeId: 'node-1',
+        source: 'task.result.localUrl',
       }],
     };
     const cache = createCanvasCacheStore({
@@ -109,7 +111,7 @@ test('cache cleanup does not remove a shared legacy thumbnail used by another as
         listCanvases: () => [{ id: 'canvas-1' }],
         readCanvas: () => ({ id: 'canvas-1', nodes: [{ id: 'node-1', data: { imageUrl: urlsByPath.get(legacyPng) } }] }),
       },
-      generationTaskRepository: { listTaskRecords: () => [] },
+      generationTaskRepository: { listTaskAssetReferences: () => [] },
       shell: { openPath() {}, showItemInFolder() {} },
     });
 
@@ -148,7 +150,7 @@ test('canvas cache cleanup never scans or deletes resource-library databases and
         assetUrl: (filePath) => `forart-asset://canvas/${path.basename(filePath)}`,
       },
       canvasStore: { listCanvases: () => [], readCanvas: () => null },
-      generationTaskRepository: { listTaskRecords: () => [] },
+      generationTaskRepository: { listTaskAssetReferences: () => [] },
       shell: { openPath() {}, showItemInFolder() {} },
     });
 

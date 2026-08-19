@@ -114,3 +114,89 @@ test('generation task cache bounds terminal history while retaining active tasks
     global.window = previousWindow;
   }
 });
+
+test('canvas hydration pins all latest terminal tasks beyond the global history limit', async () => {
+  const previousWindow = global.window;
+  const latestTasks = Array.from({ length: 160 }, (_, index) => ({
+    ...task(`head-${index}`, 1, index % 2 ? 'failed' : 'succeeded'),
+    target: { canvasId: 'large-canvas', kind: 'imageGenerator', nodeId: `node-${index}` },
+    updatedAt: index + 1,
+  }));
+  const cache = loadTaskCache({
+    async listForCanvas() { return latestTasks; },
+    async getMany() { return []; },
+  });
+  try {
+    await cache.hydrateGenerationTasks('large-canvas');
+    const state = cache.useGenerationTaskCache.getState();
+    assert.equal(state.hydratedCanvasId, 'large-canvas');
+    assert.equal(state.pinnedTaskIds.size, 160);
+    assert.equal(latestTasks.every((value) => state.tasksById[value.id]), true);
+  } finally {
+    global.window = previousWindow;
+  }
+});
+
+test('canvas hydration batch-loads legacy anchors and ignores stale canvas responses', async () => {
+  const previousWindow = global.window;
+  const pending = new Map();
+  let getManyCalls = 0;
+  const cache = loadTaskCache({
+    listForCanvas(canvasId) {
+      return new Promise((resolve) => pending.set(canvasId, resolve));
+    },
+    async getMany(taskIds) {
+      getManyCalls += 1;
+      return taskIds.map((taskId) => ({
+        ...task(taskId, 1, 'failed'),
+        target: { canvasId: 'canvas-b', kind: 'imageGenerator', nodeId: 'legacy-node' },
+      }));
+    },
+  });
+  try {
+    const hydrationA = cache.hydrateGenerationTasks('canvas-a');
+    const hydrationB = cache.hydrateGenerationTasks('canvas-b', ['legacy-failure']);
+    pending.get('canvas-b')([]);
+    await hydrationB;
+    pending.get('canvas-a')([{
+      ...task('stale-a', 1, 'failed'),
+      target: { canvasId: 'canvas-a', kind: 'imageGenerator', nodeId: 'node-a' },
+    }]);
+    await hydrationA;
+
+    let state = cache.useGenerationTaskCache.getState();
+    assert.equal(getManyCalls, 1);
+    assert.equal(state.hydratedCanvasId, 'canvas-b');
+    assert.equal(state.tasksById['legacy-failure'].status, 'failed');
+    assert.equal(state.tasksById['stale-a'], undefined);
+
+    cache.clearHydratedGenerationTasks();
+    state = cache.useGenerationTaskCache.getState();
+    assert.equal(state.hydratedCanvasId, '');
+    assert.equal(state.pinnedTaskIds.size, 0);
+  } finally {
+    global.window = previousWindow;
+  }
+});
+
+test('canvas hydration tolerates an old JSON anchor after the task database was rebuilt', async () => {
+  const previousWindow = global.window;
+  let requestedIds = [];
+  const cache = loadTaskCache({
+    async listForCanvas() { return []; },
+    async getMany(taskIds) {
+      requestedIds = taskIds;
+      return [];
+    },
+  });
+  try {
+    const hydrated = await cache.hydrateGenerationTasks('old-json-canvas', ['deleted-task-id']);
+    assert.deepEqual(requestedIds, ['deleted-task-id']);
+    assert.deepEqual(hydrated, []);
+    const state = cache.useGenerationTaskCache.getState();
+    assert.equal(state.hydratedCanvasId, 'old-json-canvas');
+    assert.equal(state.pinnedTaskIds.size, 0);
+  } finally {
+    global.window = previousWindow;
+  }
+});

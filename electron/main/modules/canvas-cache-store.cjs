@@ -136,23 +136,14 @@ function createCanvasCacheStore({ assetStore, canvasStore, generationTaskReposit
   }
 
   function collectTaskReferences(referenceMap) {
-    for (const record of generationTaskRepository?.listTaskRecords?.() || []) {
-      const task = record?.task;
-      if (!isRecord(task)) continue;
-      const reference = (source) => ({
-        canvasId: safeString(task.canvasId),
-        canvasTitle: safeString(task.canvasId || 'Generation task'),
-        nodeId: safeString(task.nodeId || task.target?.nodeId),
-        nodeTitle: safeString(task.nodeTitle),
-        source,
+    for (const taskReference of generationTaskRepository?.listTaskAssetReferences?.() || []) {
+      addReference(referenceMap, taskReference?.url, {
+        canvasId: safeString(taskReference?.canvasId),
+        canvasTitle: safeString(taskReference?.canvasId || 'Generation task'),
+        nodeId: safeString(taskReference?.nodeId),
+        nodeTitle: safeString(taskReference?.nodeTitle),
+        source: safeString(taskReference?.source || 'task.asset'),
       });
-      addReference(referenceMap, task.result?.localUrl, reference('task.result.localUrl'));
-      for (const result of Array.isArray(task.result?.results) ? task.result.results : []) {
-        addReference(referenceMap, result?.localUrl, reference('task.result.results.localUrl'));
-      }
-      if (Array.isArray(task.referenceImages)) {
-        task.referenceImages.forEach((url) => addReference(referenceMap, url, reference('task.referenceImages')));
-      }
     }
   }
 

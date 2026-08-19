@@ -297,7 +297,14 @@ function createLibtvGenerationRunner({
 
   function writeTaskTerminal(task, status, result, error) {
     if (!task?.canvasId || !task.target?.nodeId) return;
-    resultCommitter.commit(task, { status, result, error, backend: 'libtv' });
+    try {
+      return resultCommitter.commit(task, { status, result, error, backend: 'libtv' });
+    } catch (commitError) {
+      // A failed canvas write is already marked pending by the committer. Keep
+      // the execution terminal and let independent startup recovery retry it.
+      console.error('LibTV generation result commit deferred:', commitError);
+      return { ok: false, reason: 'deferred' };
+    }
   }
   async function prepareReferenceFile(url, index) {
     const localPath = assetStore.resolveAssetUrl(url);
@@ -452,7 +459,9 @@ function createLibtvGenerationRunner({
     }
     if (!saved) throw lastError;
     return {
-      url: resultUrl,
+      // The remote result can be a large data URL. Once materialized, expose
+      // only the stable local asset URL to task, canvas, and event state.
+      url: saved.url,
       localUrl: saved.url,
       thumbUrl: saved.thumbUrl || '',
       fileName: saved.fileName,

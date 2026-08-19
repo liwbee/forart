@@ -98,7 +98,12 @@ export function ImageGeneratorParamPanel({
   const actions = useNativeCanvasActions();
   const canvasNodes = useNodes<NativeCanvasNode>();
   const canvasEdges = useEdges<NativeCanvasEdge>();
-  const { patchNodeData } = actions;
+  const {
+    beginHistoryGesture,
+    endHistoryGesture,
+    patchNodeData,
+    patchNodeDataSilently,
+  } = actions;
   const [apiSettings, setApiSettings] = useState<ApiSettings>(() => readApiSettings());
   const [libtvModels, setLibtvModels] = useState<LibtvImageModelRecord[]>([]);
   const [libtvSchema, setLibtvSchema] = useState<unknown>(null);
@@ -376,7 +381,7 @@ export function ImageGeneratorParamPanel({
       && data.imageCount === apiGenerationSelection.imageCount
     ) return;
 
-    patchNodeData(nodeId, {
+    patchNodeDataSilently(nodeId, {
       imageProviderId: provider.id,
       imageModel: model,
       imageResolution: sizeSelection.resolution,
@@ -396,7 +401,7 @@ export function ImageGeneratorParamPanel({
     isLibtv,
     model,
     nodeId,
-    patchNodeData,
+    patchNodeDataSilently,
     provider,
     sizeSelection.aspectRatio,
     sizeSelection.resolution,
@@ -425,7 +430,7 @@ export function ImageGeneratorParamPanel({
       && libtvState.aspectRatio === libtvAspectRatio
       && libtvState.count === Number(libtvImageCount)
     ) return;
-    patchNodeData(nodeId, {
+    patchNodeDataSilently(nodeId, {
       libtvImageGeneration: {
         ...libtvState,
         modelName,
@@ -447,7 +452,7 @@ export function ImageGeneratorParamPanel({
     libtvSchemaReady,
     libtvState,
     nodeId,
-    patchNodeData,
+    patchNodeDataSilently,
     pendingLibtvSelectionApplies,
     visible,
   ]);
@@ -693,6 +698,8 @@ export function ImageGeneratorParamPanel({
                         ariaLabel={t("infiniteCanvas:prompt")}
                         onFocusChange={(focused) => {
                           promptFocusedRef.current = focused;
+                          if (focused) beginHistoryGesture();
+                          else endHistoryGesture();
                         }}
                         onCompositionChange={(composing) => {
                           promptComposingRef.current = composing;
@@ -720,7 +727,11 @@ export function ImageGeneratorParamPanel({
                         placeholder={t("infiniteCanvas:negativePromptPlaceholder")}
                         aria-label={t("infiniteCanvas:negativePrompt")}
                         disabled={taskBusy}
-                        onBlur={() => commitNegativePrompt()}
+                        onFocus={beginHistoryGesture}
+                        onBlur={() => {
+                          commitNegativePrompt();
+                          endHistoryGesture();
+                        }}
                         onChange={(event) => {
                           const negativePrompt = event.currentTarget.value;
                           negativePromptDraftRef.current = negativePrompt;

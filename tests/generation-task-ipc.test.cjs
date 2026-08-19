@@ -10,8 +10,8 @@ test('generation task IPC exposes snapshots and publishes changed events', async
   let disposed = false;
   const service = {
     getTask(taskId) { return { id: taskId, version: 2 }; },
-    listTasksForCanvas(canvasId) { return [{ id: `task:${canvasId}`, version: 1 }]; },
-    listRecentTasks(limit) { return [{ id: `recent:${limit}`, version: 1 }]; },
+    getManyTasks(taskIds) { return taskIds.map((taskId) => ({ id: taskId, version: 2 })); },
+    listLatestTasksForCanvas(canvasId) { return [{ id: `task:${canvasId}`, version: 1 }]; },
     listTaskCenterPage(payload) { return { tasks: [{ id: `page:${payload.offset}`, version: 1 }], total: 1, counts: { all: 1, active: 0, succeeded: 1, exceptional: 0 } }; },
     stopTask(taskId) { return { id: taskId, status: 'interrupted' }; },
     subscribe(listener) {
@@ -36,9 +36,7 @@ test('generation task IPC exposes snapshots and publishes changed events', async
   assert.deepEqual(await handlers.get('generation-task-system:list-for-canvas')(null, 'canvas-a'), [
     { id: 'task:canvas-a', version: 1 },
   ]);
-  assert.deepEqual(await handlers.get('generation-task-system:list-recent')(null, 40), [
-    { id: 'recent:40', version: 1 },
-  ]);
+  assert.equal(handlers.has('generation-task-system:list-recent'), false);
   assert.deepEqual(await handlers.get('generation-task-system:list-page')(null, { limit: 30, offset: 30 }), {
     tasks: [{ id: 'page:30', version: 1 }],
     total: 1,

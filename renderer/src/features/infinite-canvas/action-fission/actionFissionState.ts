@@ -81,16 +81,37 @@ function categoryGroupSelectionSignature(group: ActionFissionCategoryGroup | und
   });
 }
 
+function actionLibraryThumbnailUrl(assetUrl: string) {
+  return assetUrl.replace(
+    /(\/api\/assets\/[^/?#]+)\/file(?=([?#]|$))/,
+    "$1/thumb",
+  );
+}
+
 export function normalizeActionFissionRow(row: ActionFissionRow): ActionFissionRow {
-  const groups = row.categoryGroups.length
+  const storedRow = row as ActionFissionRow & {
+    actionProjectId?: unknown;
+    includeActionTagIds?: unknown;
+    excludeActionTagIds?: unknown;
+  };
+  const sourceGroups = Array.isArray(row.categoryGroups) && row.categoryGroups.length
     ? row.categoryGroups
+    : [{
+        id: `${row.id}_group_1`,
+        actionProjectId: String(storedRow.actionProjectId || ""),
+        includeActionTagIds: normalizedIds(storedRow.includeActionTagIds),
+        excludeActionTagIds: normalizedIds(storedRow.excludeActionTagIds),
+      }];
+  const groups = sourceGroups.length
+    ? sourceGroups
         .slice(0, MAX_ACTION_FISSION_CATEGORY_GROUPS)
         .map((group, index) => normalizeActionFissionGroup(group, `${row.id}_group_${index + 1}`))
     : [normalizeActionFissionGroup(createActionFissionCategoryGroup(), `${row.id}_group_1`)];
   const selectedGroup = groups.find((group) => group.id === row.selectedCategoryGroupId) || groups[0];
   const selectedActionAssetUrl = String(row.selectedActionAssetUrl || "");
-  const selectedActionThumbUrl = String(row.selectedActionThumbUrl || "");
-  return {
+  const selectedActionThumbUrl = String(row.selectedActionThumbUrl || "")
+    || actionLibraryThumbnailUrl(selectedActionAssetUrl);
+  const normalized = {
     ...row,
     latestGenerationTaskId: actionFissionRowTaskId(row) || undefined,
     categoryGroups: groups,
@@ -98,7 +119,11 @@ export function normalizeActionFissionRow(row: ActionFissionRow): ActionFissionR
     selectedActionThumbUrl: selectedActionThumbUrl && selectedActionThumbUrl !== selectedActionAssetUrl
       ? selectedActionThumbUrl
       : undefined,
-  };
+  } as ActionFissionRow & Record<string, unknown>;
+  delete normalized.actionProjectId;
+  delete normalized.includeActionTagIds;
+  delete normalized.excludeActionTagIds;
+  return normalized;
 }
 
 export function actionPatchFromEntry(action: ActionEntry) {

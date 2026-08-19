@@ -39,17 +39,13 @@ function normalizeTaskStatus(status) {
 }
 
 function normalizeTaskTarget(task = {}) {
-  const source = task.target && typeof task.target === 'object' ? task.target : {};
-  const kind = source.kind === 'actionFissionRow' || source.type === 'actionFissionRow'
-    ? 'actionFissionRow'
-    : 'imageGenerator';
-  const target = {
-    canvasId: safeString(source.canvasId || task.canvasId),
-    kind,
-    nodeId: safeString(source.nodeId || task.nodeId),
+  const target = normalizeDomainTarget(task, task.nodeId);
+  return {
+    canvasId: safeString(task.target?.canvasId || task.canvasId),
+    kind: target.kind,
+    nodeId: target.nodeId,
+    ...(target.kind === 'actionFissionRow' ? { rowId: safeString(task.target?.rowId || task.rowId) } : {}),
   };
-  const rowId = safeString(source.rowId || task.rowId);
-  return kind === 'actionFissionRow' ? { ...target, rowId } : target;
 }
 
 function normalizeResultImage(input = {}) {
@@ -122,3 +118,4 @@ module.exports = {
   normalizeTaskStatus,
   normalizeTaskTarget,
 };
+const { normalizeTarget: normalizeDomainTarget } = require('./generation-task-domain.cjs');

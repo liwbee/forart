@@ -504,6 +504,9 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   const setState = useCallback((nextState: typeof state) => {
     actions.patchNodeData(nodeId, { actionFission: nextState });
   }, [actions, nodeId]);
+  const setSelectionStateSilently = useCallback((nextState: typeof state) => {
+    actions.patchActionFissionSelectionSilently(nodeId, nextState);
+  }, [actions, nodeId]);
   const deleteRow = useCallback((rowId: string) => {
     void actions.discardActionFissionRow(nodeId, rowId);
     setState(removeActionFissionRow(state, rowId));
@@ -561,7 +564,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   });
 
   useEffect(() => {
-    if (!data.actionFission) actions.patchNodeData(nodeId, { actionFission: state });
+    if (!data.actionFission) actions.patchNodeDataSilently(nodeId, { actionFission: state });
   }, [actions, data.actionFission, nodeId, state]);
 
   useEffect(() => {
@@ -577,11 +580,11 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
     ));
     if (libraryFailure || !pendingRows.length) return;
     const pendingRowIds = new Set(pendingRows.map(({ row }) => row.id));
-    setState({
+    setSelectionStateSilently({
       ...state,
       rows: randomizeActionFissionRows(state.rows, candidatesByRowId, { rowIds: pendingRowIds }),
     });
-  }, [candidatesByRowId, libraryFailure, rowData, setState, state]);
+  }, [candidatesByRowId, libraryFailure, rowData, setSelectionStateSilently, state]);
 
   const refreshRow = (rowId: string) => {
     const nextState = {

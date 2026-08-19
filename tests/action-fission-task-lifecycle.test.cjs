@@ -11,7 +11,10 @@ const {
   extractImageUrl,
   pollRecoveredImageResult,
 } = require('../electron/main/modules/libtv-generation-runner.cjs');
-const { createMemoryGenerationTaskStore } = require('./fixtures/generation-task-memory.cjs');
+const {
+  createMemoryGenerationTaskService,
+  createMemoryGenerationTaskStore,
+} = require('./fixtures/generation-task-memory.cjs');
 const { GENERATION_EXECUTION_TIMEOUT_MS } = require('../electron/main/modules/generation/generation-execution-timeout.cjs');
 
 const createGenerationTaskStore = () => createMemoryGenerationTaskStore('api');
@@ -148,6 +151,172 @@ test('API action rows write terminal results without renderer polling', async ()
   assert.equal(canvasStore.terminals[0].rowId, 'row-2');
   assert.equal(canvasStore.terminals[0].taskId, task.id);
 
+});
+
+test('API image results materialize provider base64 before task and canvas persistence', async () => {
+  const canvasStore = createCanvasRecorder();
+  const generationTaskStore = createGenerationTaskStore();
+  const savedInputs = [];
+  const providerBase64 = Buffer.from('large-provider-result').toString('base64');
+  const net = {
+    async fetch() {
+      return new Response(JSON.stringify({ data: [{ b64_json: providerBase64 }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  };
+  const assetStore = {
+    async saveAsset(input) {
+      savedInputs.push(input);
+      return {
+        url: 'forart-asset://output/materialized.png',
+        thumbUrl: 'forart-asset://output/materialized.thumb.png',
+        fileName: 'materialized.png',
+        width: 1024,
+        height: 1024,
+      };
+    },
+  };
+  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore });
+  const task = await runner.startTask({
+    canvasId: 'canvas-materialized',
+    target: { type: 'imageGenerator', nodeId: 'node-materialized' },
+    providerId: 'provider',
+    provider: { id: 'provider', baseUrl: 'https://example.test/v1', apiKey: 'test', protocol: 'compatible' },
+    model: 'gpt-image-2',
+    prompt: 'materialize result',
+  });
+
+  await waitFor(() => generationTaskStore.getTask(task.id)?.status === 'succeeded');
+  assert.equal(savedInputs.length, 1);
+  assert.match(savedInputs[0].dataUrl, /^data:image\/png;base64,/i);
+  const persistedTask = generationTaskStore.getTask(task.id);
+  assert.equal(persistedTask.result.url, 'forart-asset://output/materialized.png');
+  assert.equal(persistedTask.result.localUrl, 'forart-asset://output/materialized.png');
+  assert.equal(Object.hasOwn(persistedTask.result, 'dataUrl'), false);
+  assert.equal(canvasStore.terminals[0].result.url, 'forart-asset://output/materialized.png');
+  assert.equal(Object.hasOwn(canvasStore.terminals[0].result, 'dataUrl'), false);
+});
+
+test('API keeps a terminal task successful when canvas result commit is deferred', async () => {
+  const generationTaskStore = createGenerationTaskStore();
+  const deferredErrors = [];
+  const runner = createImageGenerationRunner({
+    net: {
+      async fetch() {
+        return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from('result').toString('base64') }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      },
+    },
+    assetStore: {
+      async saveAsset() {
+        return { url: 'forart-asset://output/deferred.png', localUrl: 'forart-asset://output/deferred.png' };
+      },
+    },
+    canvasStore: {
+      setGenerationTaskAnchor() { return { ok: true }; },
+    },
+    generationTaskStore,
+    resultCommitter: {
+      commit() {
+        deferredErrors.push('write_failed');
+        throw new Error('Canvas result commit failed: write_failed');
+      },
+    },
+  });
+
+  const task = await runner.startTask({
+    canvasId: 'canvas-deferred',
+    target: { type: 'imageGenerator', nodeId: 'node-deferred' },
+    providerId: 'provider',
+    provider: { id: 'provider', baseUrl: 'https://example.test/v1', apiKey: 'test', protocol: 'compatible' },
+    model: 'gpt-image-2',
+    prompt: 'deferred commit',
+  });
+
+  await waitFor(() => generationTaskStore.getTask(task.id)?.status === 'succeeded');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(deferredErrors, ['write_failed']);
+  assert.equal(generationTaskStore.getTask(task.id)?.status, 'succeeded');
+});
+
+test('LibTV keeps a stopped task terminal when canvas result commit is deferred', () => {
+  const taskStore = createLibtvGenerationTaskStore();
+  const task = taskStore.createTask({
+    id: 'libtv-deferred',
+    canvasId: 'canvas-deferred',
+    target: { type: 'imageGenerator', nodeId: 'node-deferred' },
+    status: 'running',
+  });
+  const runner = createLibtvGenerationRunner({
+    taskStore,
+    resultCommitter: {
+      commit() { throw new Error('Canvas result commit failed: write_failed'); },
+    },
+  });
+
+  const stopped = runner.stopImageTask(task.id);
+
+  assert.equal(stopped.status, 'interrupted');
+  assert.equal(taskStore.getTask(task.id)?.status, 'interrupted');
+});
+
+test('API multi-image results preserve order while replacing every provider payload with local assets', async () => {
+  const canvasStore = createCanvasRecorder();
+  const generationTaskStore = createGenerationTaskStore();
+  const savedInputs = [];
+  const net = {
+    async fetch() {
+      return new Response(JSON.stringify({
+        data: [
+          { b64_json: Buffer.from('result-one').toString('base64') },
+          { b64_json: Buffer.from('result-two').toString('base64') },
+        ],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  };
+  const assetStore = {
+    async saveAsset(input) {
+      savedInputs.push(input);
+      const index = savedInputs.length;
+      return {
+        url: `forart-asset://output/materialized-${index}.png`,
+        fileName: `materialized-${index}.png`,
+        width: 512,
+        height: 512,
+      };
+    },
+  };
+  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore });
+  const task = await runner.startTask({
+    canvasId: 'canvas-materialized-multi',
+    target: { type: 'imageGenerator', nodeId: 'node-materialized-multi' },
+    providerId: 'provider',
+    provider: { id: 'provider', baseUrl: 'https://example.test/v1', apiKey: 'test', protocol: 'compatible' },
+    model: 'gpt-image-2',
+    prompt: 'materialize multiple results',
+    imageCount: 2,
+  });
+
+  await waitFor(() => generationTaskStore.getTask(task.id)?.status === 'succeeded');
+  const completed = generationTaskStore.getTask(task.id);
+  assert.equal(savedInputs.length, 2);
+  assert.equal(savedInputs.every((input) => /^data:image\/png;base64,/i.test(input.dataUrl)), true);
+  assert.deepEqual(completed.result.results.map((result) => result.localUrl), [
+    'forart-asset://output/materialized-1.png',
+    'forart-asset://output/materialized-2.png',
+  ]);
+  assert.doesNotMatch(JSON.stringify(completed.result), /data:image\//i);
+  assert.deepEqual(canvasStore.terminals[0].result.results.map((result) => result.url), [
+    'forart-asset://output/materialized-1.png',
+    'forart-asset://output/materialized-2.png',
+  ]);
 });
 
 test('LibTV recovery keeps polling beyond the former fixed attempt limit', async () => {
@@ -772,6 +941,64 @@ test('LibTV image nodes keep anchors and write terminal results without renderer
   releaseRun();
   await waitFor(() => taskStore.getTask(task.id)?.status === 'succeeded');
   assert.equal(canvasStore.terminals.some((terminal) => terminal.nodeId === 'node-libtv' && terminal.taskId === task.id), true);
+});
+
+test('LibTV materializes data URL results before task, canvas, and task-center state', async () => {
+  const canvasStore = createCanvasRecorder();
+  const taskService = createMemoryGenerationTaskService();
+  const taskStore = taskService.createStoreAdapter('libtv');
+  const providerDataUrl = `data:image/png;base64,${Buffer.from('libtv-result').toString('base64')}`;
+  const savedInputs = [];
+  const libtv = {
+    async ensureNamedWorkspace() { return { workspace: { id: 'workspace' } }; },
+    async ensureDailyProject() { return { project: { uuid: 'project', name: 'today' } }; },
+    async createImageNode() { return { payload: { id: 'remote-node-data' }, stdout: '' }; },
+    async connectLeft() {},
+    async runNode() { return { payload: { url: providerDataUrl }, stdout: '' }; },
+    async queryNode() { return { payload: {}, stdout: '' }; },
+    async deleteNode() {},
+  };
+  const assetStore = {
+    resolveAssetUrl() { return ''; },
+    async saveAsset(input) {
+      savedInputs.push(input);
+      return {
+        url: 'forart-asset://canvas/output/libtv-materialized.png',
+        thumbUrl: 'forart-asset://canvas/thumbnails/libtv-materialized.webp',
+        fileName: 'libtv-materialized.png',
+        filePath: 'C:/canvas/output/libtv-materialized.png',
+        width: 1024,
+        height: 768,
+      };
+    },
+  };
+  const runner = createLibtvGenerationRunner({ libtv, assetStore, canvasStore, taskStore });
+  const task = runner.startImageTask({
+    canvasId: 'canvas-libtv-materialized',
+    nodeId: 'node-libtv-materialized',
+    target: { type: 'imageGenerator', nodeId: 'node-libtv-materialized' },
+    prompt: 'test data URL',
+    modelName: 'Qwen Edit',
+    aspectRatio: '4:3',
+    nodeTitle: 'Node',
+  });
+
+  await waitFor(() => taskStore.getTask(task.id)?.status === 'succeeded');
+  assert.equal(savedInputs.length, 1);
+  assert.equal(savedInputs[0].url, providerDataUrl);
+
+  const completed = taskStore.getTask(task.id);
+  assert.equal(completed.result.url, 'forart-asset://canvas/output/libtv-materialized.png');
+  assert.equal(completed.result.localUrl, 'forart-asset://canvas/output/libtv-materialized.png');
+  assert.doesNotMatch(JSON.stringify(completed.result), /data:image\//i);
+
+  const terminal = canvasStore.terminals.find((item) => item.taskId === task.id);
+  assert.equal(terminal.result.url, 'forart-asset://canvas/output/libtv-materialized.png');
+  assert.doesNotMatch(JSON.stringify(terminal.result), /data:image\//i);
+
+  const taskCenterDto = taskService.getTask(task.id);
+  assert.equal(taskCenterDto.result.images[0].assetUrl, 'forart-asset://canvas/output/libtv-materialized.png');
+  assert.equal(taskCenterDto.result.images[0].thumbUrl, 'forart-asset://canvas/thumbnails/libtv-materialized.webp');
 });
 
 test('stopping one queued LibTV row does not run it or block the following row', async () => {

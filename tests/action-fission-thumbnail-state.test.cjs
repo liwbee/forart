@@ -80,3 +80,47 @@ test('legacy action rows stop treating the original URL as a completed thumbnail
 
   assert.equal(normalized.selectedActionThumbUrl, undefined);
 });
+
+test('action rows restore the canonical API thumbnail from the original asset URL', () => {
+  const relative = normalizeActionFissionRow({
+    id: 'row-relative',
+    categoryGroups: [],
+    selectedActionAssetUrl: '/api/assets/asset-1/file',
+  });
+  const absolute = normalizeActionFissionRow({
+    id: 'row-absolute',
+    categoryGroups: [],
+    selectedActionAssetUrl: 'https://example.com/api/assets/asset-2/file?forart_token=token',
+  });
+
+  assert.equal(relative.selectedActionThumbUrl, '/api/assets/asset-1/thumb');
+  assert.equal(
+    absolute.selectedActionThumbUrl,
+    'https://example.com/api/assets/asset-2/thumb?forart_token=token',
+  );
+});
+
+test('compact single-group rows restore their durable category configuration', () => {
+  const normalized = normalizeActionFissionRow({
+    id: 'row-compact',
+    actionProjectId: 'project-1',
+    includeActionTagIds: ['tag-a', 'tag-a', ''],
+    excludeActionTagIds: ['tag-b'],
+    selectedActionId: 'action-1',
+    selectedActionPrompt: 'Offline prompt',
+  });
+
+  assert.deepEqual(normalized.categoryGroups, [{
+    id: 'row-compact_group_1',
+    name: undefined,
+    actionProjectId: 'project-1',
+    includeActionTagIds: ['tag-a'],
+    excludeActionTagIds: ['tag-b'],
+  }]);
+  assert.equal(normalized.selectedCategoryGroupId, 'row-compact_group_1');
+  assert.equal(normalized.selectedActionId, 'action-1');
+  assert.equal(normalized.selectedActionPrompt, 'Offline prompt');
+  assert.equal('actionProjectId' in normalized, false);
+  assert.equal('includeActionTagIds' in normalized, false);
+  assert.equal('excludeActionTagIds' in normalized, false);
+});

@@ -82,6 +82,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const nodeFrameRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const promptInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const promptHistoryGestureActiveRef = useRef(false);
   const isPromptEditing = useNativeCanvasInteractionStore((state) => state.editingNodeId === id);
   const isNodeToolbarActive = useNativeCanvasInteractionStore((state) => state.toolbarNodeId === id);
   const beginNodeEditing = useNativeCanvasInteractionStore((state) => state.beginNodeEditing);
@@ -203,7 +204,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
       width: Math.max(1, Number(node?.style?.width || node?.measured?.width || node?.width || 0)),
       height: Math.max(1, Number(node?.style?.height || node?.measured?.height || node?.height || 0)),
     };
-    actions.patchNodeData(id, {
+    actions.patchNodeDataSilently(id, {
       multiImageExpanded: expanded,
       multiImageCollapsedSize: collapsedSize,
     });
@@ -214,6 +215,20 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     promptInputRef.current?.focus();
     promptInputRef.current?.select();
   }, [isPromptEditing]);
+
+  const beginPromptHistoryGesture = useCallback(() => {
+    if (promptHistoryGestureActiveRef.current) return;
+    promptHistoryGestureActiveRef.current = true;
+    actions.beginHistoryGesture();
+  }, [actions]);
+
+  const endPromptHistoryGesture = useCallback(() => {
+    if (!promptHistoryGestureActiveRef.current) return;
+    promptHistoryGestureActiveRef.current = false;
+    actions.endHistoryGesture();
+  }, [actions]);
+
+  useEffect(() => () => endPromptHistoryGesture(), [endPromptHistoryGesture]);
 
   useEffect(() => {
     if (!isGenerating || isLaunching) return;
@@ -227,7 +242,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     const embeddedWidth = Math.round(Number(primaryImage.width || 0));
     const embeddedHeight = Math.round(Number(primaryImage.height || 0));
     if (embeddedWidth > 0 && embeddedHeight > 0) {
-      actions.patchNodeData(id, {
+      actions.patchNodeDataSilently(id, {
         imageNaturalWidth: embeddedWidth,
         imageNaturalHeight: embeddedHeight,
       });
@@ -239,7 +254,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     const image = new window.Image();
     image.onload = () => {
       if (!active || !image.naturalWidth || !image.naturalHeight) return;
-      actions.patchNodeData(id, {
+      actions.patchNodeDataSilently(id, {
         imageNaturalWidth: image.naturalWidth,
         imageNaturalHeight: image.naturalHeight,
       });
@@ -512,11 +527,15 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 readOnly={!isPromptEditing}
                 placeholder={t("infiniteCanvas:promptPlaceholder")}
                 aria-label={t("infiniteCanvas:prompt")}
-                onBlur={() => endNodeEditing(id)}
+                onBlur={() => {
+                  endNodeEditing(id);
+                  endPromptHistoryGesture();
+                }}
                 onKeyDown={(event) => {
                   if (event.key !== "Escape") return;
                   event.preventDefault();
                   endNodeEditing(id);
+                  endPromptHistoryGesture();
                 }}
                 onChange={(event) => actions.setNodeText(id, event.currentTarget.value)}
               />
@@ -527,6 +546,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                     if (event.button !== 0 || event.detail < 2) return;
                     event.preventDefault();
                     event.stopPropagation();
+                    beginPromptHistoryGesture();
                     beginNodeEditing(id);
                   }}
                   onDoubleClick={(event) => {
@@ -661,7 +681,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                   if (data.kind === "imageGenerator" || primaryImage?.thumbUrl) return;
                   if (!image.naturalWidth || !image.naturalHeight) return;
                   if (image.naturalWidth === imageWidth && image.naturalHeight === imageHeight) return;
-                  actions.patchNodeData(id, {
+                  actions.patchNodeDataSilently(id, {
                     imageNaturalWidth: image.naturalWidth,
                     imageNaturalHeight: image.naturalHeight,
                   });

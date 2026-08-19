@@ -1,15 +1,10 @@
 function registerGenerationTaskIpc({ ipcMain, generationTaskService, getWebContents }) {
   ipcMain.handle('generation-task-system:get', async (_event, taskId) => generationTaskService.getTask(taskId));
   ipcMain.handle('generation-task-system:get-many', async (_event, taskIds = []) => (
-    (Array.isArray(taskIds) ? taskIds : [])
-      .map((taskId) => generationTaskService.getTask(taskId))
-      .filter(Boolean)
+    generationTaskService.getManyTasks(taskIds)
   ));
   ipcMain.handle('generation-task-system:list-for-canvas', async (_event, canvasId) => (
-    generationTaskService.listTasksForCanvas(canvasId)
-  ));
-  ipcMain.handle('generation-task-system:list-recent', async (_event, limit) => (
-    generationTaskService.listRecentTasks(limit)
+    generationTaskService.listLatestTasksForCanvas(canvasId)
   ));
   ipcMain.handle('generation-task-system:list-page', async (_event, payload = {}) => (
     generationTaskService.listTaskCenterPage(payload)

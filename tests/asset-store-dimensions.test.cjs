@@ -173,3 +173,42 @@ test('PNG result downloads replace legacy extensions and contain PNG bytes', asy
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+test('download can consume the normalized local URL returned by generation', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-local-result-download-'));
+  const downloadsPath = path.join(rootDir, 'downloads');
+  try {
+    const { default: sharp } = await import('sharp');
+    const sourceBuffer = await sharp({
+      create: {
+        width: 7,
+        height: 5,
+        channels: 4,
+        background: { r: 40, g: 120, b: 200, alpha: 1 },
+      },
+    }).png().toBuffer();
+    const store = createAssetStore({
+      rootDir,
+      net: { fetch: async () => { throw new Error('Unexpected network request.'); } },
+    });
+
+    const generated = await store.saveAsset({
+      dataUrl: `data:image/png;base64,${sourceBuffer.toString('base64')}`,
+      defaultName: 'generated.png',
+      kind: 'output',
+    });
+    const downloaded = await store.saveResult({
+      url: generated.url,
+      defaultName: 'downloaded-from-local.png',
+      convertToPng: true,
+    }, downloadsPath);
+
+    assert.equal((await sharp(downloaded.filePath).metadata()).format, 'png');
+    assert.deepEqual(await sharp(downloaded.filePath).metadata().then((metadata) => ({
+      width: metadata.width,
+      height: metadata.height,
+    })), { width: 7, height: 5 });
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});

@@ -1,6 +1,7 @@
 const ACTIVE_GENERATION_STATUSES = new Set([
   'queued',
   'preparing',
+  'uploading',
   'submitting',
   'running',
   'result_processing',
@@ -17,8 +18,10 @@ async function stopGenerationTasks(tasks, generationTaskService) {
 }
 
 async function stopMissingGenerationTargets(canvasId, canvasStore, generationTaskService) {
-  if (!generationTaskService?.listTasksForCanvas || !canvasStore?.findMissingGenerationTargets) return [];
-  const tasks = await Promise.resolve(generationTaskService.listTasksForCanvas(canvasId));
+  const listTargets = generationTaskService?.listActiveTaskRefsForCanvas
+    || generationTaskService?.listActiveTasksForCanvas;
+  if (!listTargets || !canvasStore?.findMissingGenerationTargets) return [];
+  const tasks = await Promise.resolve(listTargets.call(generationTaskService, canvasId));
   const activeTasks = (Array.isArray(tasks) ? tasks : [])
     .filter((task) => ACTIVE_GENERATION_STATUSES.has(String(task?.status || '')))
     .map((task) => ({
@@ -29,14 +32,51 @@ async function stopMissingGenerationTargets(canvasId, canvasStore, generationTas
         type: task?.target?.kind || task?.target?.type,
       },
     }));
-  if (!activeTasks.length) return [];
-  return stopGenerationTasks(canvasStore.findMissingGenerationTargets(activeTasks), generationTaskService);
+  const heads = generationTaskService?.listTargetHeadsForCanvas
+    ? await Promise.resolve(generationTaskService.listTargetHeadsForCanvas(canvasId))
+    : [];
+  const missingTargets = canvasStore.findMissingGenerationTargets([...activeTasks, ...heads]);
+  const stopResults = await stopGenerationTasks(
+    missingTargets.filter((target) => ACTIVE_GENERATION_STATUSES.has(String(target?.status || ''))),
+    generationTaskService,
+  );
+  const missingHeadKeys = [...new Set(missingTargets.map((target) => String(target?.targetKey || '').trim()).filter(Boolean))];
+  if (missingHeadKeys.length) generationTaskService?.removeTargetHeads?.(missingHeadKeys);
+  return stopResults;
 }
 
 function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskService }) {
   const canvasSaveSessions = new Map();
   const canvasSaveQueues = new Map();
+  const pendingTargetReconciliations = new Map();
   const canvasTransferJobs = new Map();
+  const scheduleMissingGenerationTargetReconciliation = (canvasId) => {
+    const key = String(canvasId || '').trim();
+    if (!key) return;
+    const pending = pendingTargetReconciliations.get(key);
+    if (pending) {
+      // A save can happen while the previous reconciliation is reading the
+      // canvas. Do not drop that save: the completed pass must be followed by
+      // one more pass against the newest canvas snapshot.
+      pending.rerun = true;
+      return;
+    }
+    const state = { rerun: false };
+    pendingTargetReconciliations.set(key, state);
+    const run = () => {
+      void stopMissingGenerationTargets(key, canvasStore, generationTaskService).catch((error) => {
+        console.error('Generation target reconciliation failed after canvas save:', error);
+      }).finally(() => {
+        if (state.rerun) {
+          state.rerun = false;
+          setImmediate(run);
+          return;
+        }
+        if (pendingTargetReconciliations.get(key) === state) pendingTargetReconciliations.delete(key);
+      });
+    };
+    setImmediate(run);
+  };
   const runCanvasTransfer = async (event, operationId, transferType, work) => {
     const id = String(operationId || '').trim();
     const controller = new AbortController();
@@ -79,11 +119,10 @@ function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackag
       // Task runners persist active anchors and terminal results directly.
       // A regular canvas save must not replay in-memory task state.
       const result = await canvasStore.saveCanvasText(canvasId, payload);
-      try {
-        await stopMissingGenerationTargets(canvasId, canvasStore, generationTaskService);
-      } catch (error) {
-        console.error('Generation target reconciliation failed after canvas save:', error);
-      }
+      // Reconciliation is deliberately outside the save response path. It uses
+      // the lightweight active-target index and can safely lag because result
+      // commits reject missing canvas targets as a second line of defense.
+      scheduleMissingGenerationTargetReconciliation(canvasId);
       if (sessionId) {
         canvasSaveSessions.set(key, {
           sessionId,
@@ -107,8 +146,10 @@ function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackag
   ipcMain.handle('canvas:update-project', async (_event, projectId, patch) => canvasStore.updateProject(projectId, patch));
   ipcMain.handle('canvas:delete', async (_event, canvasId) => {
     try {
-      const tasks = generationTaskService?.listTasksForCanvas
-        ? await Promise.resolve(generationTaskService.listTasksForCanvas(canvasId))
+      const listTasks = generationTaskService?.listActiveTaskRefsForCanvas
+        || generationTaskService?.listActiveTasksForCanvas;
+      const tasks = listTasks
+        ? await Promise.resolve(listTasks.call(generationTaskService, canvasId))
         : [];
       await stopGenerationTasks(
         (Array.isArray(tasks) ? tasks : []).filter((task) => ACTIVE_GENERATION_STATUSES.has(String(task?.status || ''))),
@@ -117,9 +158,41 @@ function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackag
     } catch (error) {
       console.error('Generation task stop failed before canvas deletion:', error);
     }
-    return canvasStore.deleteCanvas(canvasId);
+    const result = canvasStore.deleteCanvas(canvasId);
+    try {
+      generationTaskService?.removeTargetHeadsForCanvas?.(canvasId);
+    } catch (error) {
+      console.error('Generation target head cleanup failed after canvas deletion:', error);
+    }
+    return result;
   });
-  ipcMain.handle('canvas:delete-project', async (_event, projectId) => canvasStore.deleteProject(projectId));
+  ipcMain.handle('canvas:delete-project', async (_event, projectId) => {
+    const canvasIds = (canvasStore.listCanvases?.() || [])
+      .filter((canvas) => String(canvas?.projectId || '') === String(projectId || ''))
+      .map((canvas) => String(canvas.id || ''))
+      .filter(Boolean);
+    try {
+      const listTasks = generationTaskService?.listActiveTaskRefsForCanvas
+        || generationTaskService?.listActiveTasksForCanvas;
+      if (listTasks) {
+        const taskGroups = await Promise.all(canvasIds.map((canvasId) => (
+          Promise.resolve(listTasks.call(generationTaskService, canvasId))
+        )));
+        await stopGenerationTasks(taskGroups.flat(), generationTaskService);
+      }
+    } catch (error) {
+      console.error('Generation task stop failed before canvas project deletion:', error);
+    }
+    const result = await canvasStore.deleteProject(projectId);
+    for (const canvasId of result?.deletedCanvasIds || canvasIds) {
+      try {
+        generationTaskService?.removeTargetHeadsForCanvas?.(canvasId);
+      } catch (error) {
+        console.error('Generation target head cleanup failed after canvas project deletion:', error);
+      }
+    }
+    return result;
+  });
   ipcMain.handle('canvas:move-to-project', async (_event, canvasId, projectId) => canvasStore.moveCanvasToProject(canvasId, projectId));
   ipcMain.handle('canvas:export-json', async (event, canvasId, operationId) => (
     runCanvasTransfer(event, operationId, 'export', (options) => canvasPackageStore.exportJson(canvasId, options))

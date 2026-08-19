@@ -66,7 +66,12 @@ const libtvGenerationTaskStore = generationTaskService.createStoreAdapter('libtv
 const generationTaskCleanup = createGenerationTaskCleanup({
   repository: generationTaskRepository,
   findMissingTargets: (heads) => canvasStore.findMissingGenerationTargets(heads),
-  onTasksDeleted: (taskIds) => generationTaskService.removeTasks(taskIds),
+  onOrphanedHeads: (heads) => {
+    for (const head of heads) {
+      if (!['queued', 'preparing', 'uploading', 'submitting', 'running', 'result_processing'].includes(head.status)) continue;
+      generationTaskService.stopTask(head.taskId);
+    }
+  },
 });
 const actionFolderImportStore = createActionFolderImportStore();
 const imageGenerationRunner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore, resultCommitter: generationResultCommitter });
@@ -199,6 +204,11 @@ app.whenReady().then(async () => {
     }
   } catch (error) {
     console.error('Generation result commit recovery failed:', error);
+  }
+  try {
+    generationTaskCleanup.reconcileTargets({ activeOnly: true });
+  } catch (error) {
+    console.error('Generation target startup reconciliation failed:', error);
   }
   try {
     await generationTaskService.recoverActiveTasks({

@@ -57,7 +57,6 @@ contextBridge.exposeInMainWorld('forartGenerationTasks', {
   get: (taskId) => ipcRenderer.invoke('generation-task-system:get', taskId),
   getMany: (taskIds) => ipcRenderer.invoke('generation-task-system:get-many', taskIds),
   listForCanvas: (canvasId) => ipcRenderer.invoke('generation-task-system:list-for-canvas', canvasId),
-  listRecent: (limit) => ipcRenderer.invoke('generation-task-system:list-recent', limit),
   listPage: (payload) => ipcRenderer.invoke('generation-task-system:list-page', payload),
   start: (executorKind, payload) => ipcRenderer.invoke('generation-task-system:start', executorKind, payload),
   startMany: (executorKind, payloads) => ipcRenderer.invoke('generation-task-system:start-many', executorKind, payloads),

@@ -8,6 +8,8 @@ import type {
 
 export interface NativeCanvasActions {
   readOnly: boolean;
+  beginHistoryGesture: () => void;
+  endHistoryGesture: () => void;
   addImageReferenceFiles: (nodeId: string, files: File[]) => Promise<void>;
   cropNodeImage: (nodeId: string, crop: CanvasImageCropRect) => Promise<void>;
   downloadActionFissionResult: (nodeId: string, rowId: string) => Promise<void>;
@@ -19,6 +21,8 @@ export interface NativeCanvasActions {
   openLibraryForReference: (nodeId: string) => void;
   openActionFissionRowSettings: (nodeId: string, rowId: string) => void;
   patchNodeData: (nodeId: string, patch: Partial<NativeCanvasNodeData>) => void;
+  patchNodeDataSilently: (nodeId: string, patch: Partial<NativeCanvasNodeData>) => void;
+  patchActionFissionSelectionSilently: (nodeId: string, actionFission: NonNullable<NativeCanvasNodeData["actionFission"]>) => void;
   runImageGeneration: (nodeId: string, options?: ImageGenerationRunOptions) => Promise<void>;
   runActionFission: (nodeId: string, rowId?: string) => Promise<void>;
   removeCanvasEdge: (edgeId: string) => void;

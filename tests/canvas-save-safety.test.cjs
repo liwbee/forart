@@ -357,12 +357,14 @@ test('canvas save stops active generation tasks whose targets were deleted', asy
     assetStore: {},
     canvasPackageStore: {},
     generationTaskService: {
-      listTasksForCanvas() {
+      listActiveTaskRefsForCanvas() {
         return [
-          { id: 'active-missing', status: 'running', target: { canvasId: 'canvas-1', kind: 'imageGenerator', nodeId: 'deleted-node' } },
-          { id: 'active-existing', status: 'queued', target: { canvasId: 'canvas-1', kind: 'imageGenerator', nodeId: 'existing-node' } },
-          { id: 'terminal-missing', status: 'succeeded', target: { canvasId: 'canvas-1', kind: 'imageGenerator', nodeId: 'deleted-node' } },
+          { taskId: 'active-missing', status: 'running', target: { canvasId: 'canvas-1', kind: 'imageGenerator', nodeId: 'deleted-node' } },
+          { taskId: 'active-existing', status: 'queued', target: { canvasId: 'canvas-1', kind: 'imageGenerator', nodeId: 'existing-node' } },
         ];
+      },
+      listActiveTasksForCanvas() {
+        throw new Error('full active task records must not be loaded during canvas reconciliation');
       },
       stopTask(taskId) {
         stoppedTaskIds.push(taskId);
@@ -375,6 +377,212 @@ test('canvas save stops active generation tasks whose targets were deleted', asy
     jsonText: '{"canvasSchemaVersion":2,"id":"canvas-1","nodes":[{"id":"existing-node"}]}',
     nodeCount: 1,
   });
+  await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(stoppedTaskIds, ['active-missing']);
+});
+
+test('canvas save removes terminal target heads whose targets were deleted', async () => {
+  const handlers = new Map();
+  const removedHeadKeys = [];
+  registerCanvasIpc({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    app: { getPath: () => '' },
+    canvasStore: {
+      async saveCanvasText() { return { ok: true }; },
+      findMissingGenerationTargets(targets) {
+        return targets.filter((target) => target.target.nodeId === 'deleted-node');
+      },
+    },
+    assetStore: {},
+    canvasPackageStore: {},
+    generationTaskService: {
+      listActiveTasksForCanvas() { return []; },
+      listTargetHeadsForCanvas() {
+        return [{
+          targetKey: 'canvas:canvas-1/node:deleted-node',
+          taskId: 'failed-head',
+          status: 'failed',
+          target: { type: 'imageGenerator', nodeId: 'deleted-node' },
+        }];
+      },
+      removeTargetHeads(targetKeys) { removedHeadKeys.push(...targetKeys); },
+    },
+  });
+
+  await handlers.get('canvas:save')(null, 'canvas-1', { jsonText: '{}', nodeCount: 0 });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(removedHeadKeys, ['canvas:canvas-1/node:deleted-node']);
+});
+
+test('canvas deletion stops all active tasks before deleting and then removes target heads', async () => {
+  const handlers = new Map();
+  const calls = [];
+  registerCanvasIpc({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    app: { getPath: () => '' },
+    canvasStore: {
+      deleteCanvas(canvasId) { calls.push(`delete:${canvasId}`); return { ok: true }; },
+    },
+    assetStore: {},
+    canvasPackageStore: {},
+    generationTaskService: {
+      listActiveTasksForCanvas() {
+        return [{ id: 'latest-active', status: 'running' }, { id: 'non-head-active', status: 'running' }];
+      },
+      stopTask(taskId) { calls.push(`stop:${taskId}`); return { id: taskId, status: 'interrupted' }; },
+      removeTargetHeadsForCanvas(canvasId) { calls.push(`heads:${canvasId}`); },
+    },
+  });
+
+  await handlers.get('canvas:delete')(null, 'canvas-1');
+
+  assert.equal(calls.includes('stop:latest-active'), true);
+  assert.equal(calls.includes('stop:non-head-active'), true);
+  assert.equal(calls.indexOf('delete:canvas-1') > calls.indexOf('stop:latest-active'), true);
+  assert.equal(calls.indexOf('heads:canvas-1') > calls.indexOf('delete:canvas-1'), true);
+});
+
+test('canvas project deletion stops tasks for every project canvas before deleting files', async () => {
+  const handlers = new Map();
+  const calls = [];
+  registerCanvasIpc({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    app: { getPath: () => '' },
+    canvasStore: {
+      listCanvases() {
+        return [
+          { id: 'canvas-a', projectId: 'project-1' },
+          { id: 'canvas-b', projectId: 'project-1' },
+          { id: 'canvas-c', projectId: 'project-2' },
+        ];
+      },
+      async deleteProject(projectId) {
+        calls.push(`delete-project:${projectId}`);
+        return { ok: true, deletedCanvasIds: ['canvas-a', 'canvas-b'] };
+      },
+    },
+    assetStore: {},
+    canvasPackageStore: {},
+    generationTaskService: {
+      listActiveTasksForCanvas(canvasId) {
+        return [{ id: `task:${canvasId}`, status: 'running' }];
+      },
+      stopTask(taskId) { calls.push(`stop:${taskId}`); return { id: taskId, status: 'interrupted' }; },
+      removeTargetHeadsForCanvas(canvasId) { calls.push(`heads:${canvasId}`); },
+    },
+  });
+
+  await handlers.get('canvas:delete-project')(null, 'project-1');
+
+  assert.equal(calls.includes('stop:task:canvas-a'), true);
+  assert.equal(calls.includes('stop:task:canvas-b'), true);
+  assert.equal(calls.includes('stop:task:canvas-c'), false);
+  assert.equal(calls.indexOf('delete-project:project-1') > calls.indexOf('stop:task:canvas-b'), true);
+  assert.equal(calls.includes('heads:canvas-a'), true);
+  assert.equal(calls.includes('heads:canvas-b'), true);
+});
+
+test('canvas save response does not await target reconciliation', async () => {
+  const handlers = new Map();
+  let releaseReconciliation;
+  const reconciliationGate = new Promise((resolve) => { releaseReconciliation = resolve; });
+  let reconciliationStarted = false;
+  registerCanvasIpc({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    app: { getPath: () => '' },
+    canvasStore: {
+      async saveCanvasText() { return { ok: true }; },
+      findMissingGenerationTargets() { return []; },
+    },
+    assetStore: {},
+    canvasPackageStore: {},
+    generationTaskService: {
+      listActiveTasksForCanvas() {
+        reconciliationStarted = true;
+        return reconciliationGate;
+      },
+    },
+  });
+
+  const saved = await handlers.get('canvas:save')(null, 'canvas-async-reconcile', {
+    jsonText: '{}',
+    nodeCount: 0,
+  });
+  assert.deepEqual(saved, { ok: true });
+  assert.equal(reconciliationStarted, false);
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reconciliationStarted, true);
+  releaseReconciliation([]);
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test('a save during target reconciliation schedules a second pass against the latest canvas', async () => {
+  const handlers = new Map();
+  const stoppedTaskIds = [];
+  let hasTarget = true;
+  let listCalls = 0;
+  let secondSave;
+  let resolveSecondPass;
+  const secondPass = new Promise((resolve) => { resolveSecondPass = resolve; });
+  registerCanvasIpc({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    app: { getPath: () => '' },
+    canvasStore: {
+      async saveCanvasText(_canvasId, payload) {
+        hasTarget = Boolean(payload.hasTarget);
+        return { ok: true };
+      },
+      findMissingGenerationTargets(tasks) {
+        const missing = hasTarget ? [] : tasks;
+        if (hasTarget && !secondSave) {
+          secondSave = handlers.get('canvas:save')(null, 'canvas-race', {
+            jsonText: '{}',
+            nodeCount: 0,
+            hasTarget: false,
+          });
+        }
+        return missing;
+      },
+    },
+    assetStore: {},
+    canvasPackageStore: {},
+    generationTaskService: {
+      listActiveTasksForCanvas() {
+        listCalls += 1;
+        if (listCalls === 2) resolveSecondPass();
+        return [{
+          taskId: 'active-task',
+          status: 'running',
+          target: { type: 'imageGenerator', nodeId: 'node-race' },
+        }];
+      },
+      stopTask(taskId) {
+        stoppedTaskIds.push(taskId);
+      },
+    },
+  });
+
+  await handlers.get('canvas:save')(null, 'canvas-race', {
+    jsonText: '{}',
+    nodeCount: 1,
+    hasTarget: true,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await secondSave;
+  let secondPassTimeout;
+  await Promise.race([
+    secondPass,
+    new Promise((_, reject) => {
+      secondPassTimeout = setTimeout(() => reject(new Error('Second reconciliation pass did not run.')), 500);
+    }),
+  ]);
+  clearTimeout(secondPassTimeout);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(hasTarget, false);
+  assert.equal(listCalls, 2);
+  assert.deepEqual(stoppedTaskIds, ['active-task']);
 });

@@ -5,10 +5,9 @@ const {
   createGenerationTaskCleanup,
 } = require('../electron/main/modules/generation/generation-task-cleanup.cjs');
 
-test('generation task cleanup respects its interval and synchronizes deleted task ids', () => {
+test('generation task cleanup respects its interval and reports deleted task ids', () => {
   let lastCleanupAt = 1_000;
   let cleanupCalls = 0;
-  const removed = [];
   const repository = {
     getMeta() {
       return String(lastCleanupAt);
@@ -21,7 +20,6 @@ test('generation task cleanup respects its interval and synchronizes deleted tas
   };
   const cleanup = createGenerationTaskCleanup({
     repository,
-    onTasksDeleted: (taskIds) => removed.push(...taskIds),
   });
 
   assert.equal(cleanup.run({ now: lastCleanupAt + 10 }).skipped, true);
@@ -30,7 +28,7 @@ test('generation task cleanup respects its interval and synchronizes deleted tas
   assert.equal(result.skipped, false);
   assert.equal(result.compactedCount, 2);
   assert.equal(cleanupCalls, 1);
-  assert.deepEqual(removed, ['old-task']);
+  assert.deepEqual(result.deletedTaskIds, ['old-task']);
 });
 
 test('generation task cleanup removes orphaned target heads before applying retention', () => {
@@ -65,4 +63,35 @@ test('generation task cleanup removes orphaned target heads before applying rete
   assert.deepEqual(removedHeads, ['orphan']);
   assert.deepEqual(cleanupOptions.orphanedTaskIds, ['task-orphan']);
   assert.deepEqual(result.orphanedTaskIds, ['task-orphan']);
+});
+
+test('generation target reconciliation stops orphaned active tasks before removing their heads', () => {
+  const calls = [];
+  const repository = {
+    listTargetHeads() {
+      return [{
+        targetKey: 'orphan-active',
+        taskId: 'task-active',
+        canvasId: 'missing-canvas',
+        status: 'running',
+        target: { type: 'imageGenerator', nodeId: 'missing-node' },
+      }];
+    },
+    removeTargetHeads(targetKeys) {
+      calls.push(`remove:${targetKeys.join(',')}`);
+      return ['task-active'];
+    },
+  };
+  const cleanup = createGenerationTaskCleanup({
+    repository,
+    findMissingTargets: (heads) => heads,
+    onOrphanedHeads(heads) {
+      calls.push(`stop:${heads.map((head) => head.taskId).join(',')}`);
+    },
+  });
+
+  const result = cleanup.reconcileTargets({ now: 5_000 });
+
+  assert.deepEqual(calls, ['stop:task-active', 'remove:orphan-active']);
+  assert.deepEqual(result.orphanedTaskIds, ['task-active']);
 });

@@ -61,7 +61,7 @@ import {
 import { NativeCanvasNode as NativeCanvasNodeComponent } from "./nodes/NativeCanvasNode";
 import { NativeCanvasGroupNode } from "./nodes/NativeCanvasGroupNode";
 import { ActionFissionRowSettingsDialog } from "./nodes/ActionFissionRowSettingsDialog";
-import { configureActionFissionRow, normalizeActionFissionState } from "./action-fission/actionFissionState";
+import { configureActionFissionRow, createDefaultActionFissionState, normalizeActionFissionState } from "./action-fission/actionFissionState";
 import { actionFissionRowTaskId, type ActionFissionRow } from "./action-fission/actionFissionTypes";
 import { emptyCanvasSnapshot, type NativeCanvasSnapshot } from "./canvasWorkspaceTypes";
 import { useNativeImageGeneration } from "./generation/useNativeImageGeneration";
@@ -86,6 +86,7 @@ import {
   beginInfiniteCanvasHistoryGesture,
   commitInfiniteCanvasHistoryGesture,
   recordInfiniteCanvasHistory,
+  rebaseInfiniteCanvasHistoryNode,
   redoInfiniteCanvasHistory,
   resetInfiniteCanvasHistory,
   restoreInfiniteCanvasHistorySnapshot,
@@ -335,6 +336,75 @@ function NativeCanvasMultiSelectionFrame({
   );
 }
 
+function stopCanvasNodeGenerationTasks(deletedNodes: NativeCanvasNode[]) {
+  if (!window.forartGenerationTasks?.stop) return;
+  const taskIds = new Set<string>();
+  deletedNodes.forEach((node) => {
+    const nodeTaskId = nativeCanvasNodeTaskId(node.data);
+    if (nodeTaskId) taskIds.add(nodeTaskId);
+    normalizeActionFissionState(node.data.actionFission).rows.forEach((row) => {
+      const rowTaskId = actionFissionRowTaskId(row);
+      if (rowTaskId) taskIds.add(rowTaskId);
+    });
+  });
+  void Promise.allSettled([...taskIds].map((taskId) => (
+    Promise.resolve().then(() => window.forartGenerationTasks!.stop(taskId))
+  )));
+}
+
+const HISTORY_REBASED_NODE_DATA_FIELDS: (keyof NativeCanvasNode["data"])[] = [
+  "latestGenerationTaskId",
+  "generatedImages",
+  "multiImageExpanded",
+  "multiImageCollapsedSize",
+  "thumbUrl",
+  "imageNaturalWidth",
+  "imageNaturalHeight",
+];
+
+const ACTION_FISSION_SELECTION_FIELDS = [
+  "selectedCategoryGroupId",
+  "selectedActionId",
+  "selectedActionName",
+  "selectedActionPrompt",
+  "selectedActionTags",
+  "selectedActionAssetUrl",
+  "selectedActionThumbUrl",
+] as const;
+
+function sameActionFissionConfiguration(left: ActionFissionRow, right: ActionFissionRow) {
+  return JSON.stringify(left.categoryGroups || []) === JSON.stringify(right.categoryGroups || []);
+}
+
+function applyRuntimeNodeDataPatch(
+  node: NativeCanvasNode,
+  patch: Partial<NativeCanvasNode["data"]>,
+) {
+  const patchRecord = patch as Record<string, unknown>;
+  const runtimePatch: Record<string, unknown> = {};
+  HISTORY_REBASED_NODE_DATA_FIELDS.forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(patch, field)) runtimePatch[field] = patchRecord[field];
+  });
+  let next = Object.keys(runtimePatch).length
+    ? applyNativeNodeDataPatch(node, runtimePatch as Partial<NativeCanvasNode["data"]>)
+    : node;
+  const libtvPatch = patch.libtvImageGeneration as Record<string, unknown> | undefined;
+  if (libtvPatch && Object.prototype.hasOwnProperty.call(libtvPatch, "error")) {
+    const libtvImageGeneration = {
+      ...(next.data.libtvImageGeneration as Record<string, unknown> | undefined),
+      error: libtvPatch.error,
+    };
+    next = {
+      ...next,
+      data: {
+        ...next.data,
+        libtvImageGeneration: libtvImageGeneration as NativeCanvasNode["data"]["libtvImageGeneration"],
+      },
+    };
+  }
+  return next;
+}
+
 function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onInteractionChange, onSnapshotChange, onViewportChange, onSave, readOnly }: {
   canvasId: string;
   imageDownloadPath?: string;
@@ -355,6 +425,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
   const edgesRef = useRef(edges);
   const imageThumbnailAttemptsRef = useRef(new Set<string>());
   const imageThumbnailMountedRef = useRef(true);
+  const imageMutationVersionRef = useRef(new Map<string, number>());
   nodesRef.current = nodes;
   edgesRef.current = edges;
 
@@ -387,6 +458,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
   const pendingContextPastePointRef = useRef<{ x: number; y: number } | null>(null);
   const altDragCloneGestureRef = useRef<AltDragCloneGesture | null>(null);
   const historyGestureRef = useRef<NativeCanvasHistorySnapshot | null>(null);
+  const historyGestureDepthRef = useRef(0);
   const activeCanvasInteractionsRef = useRef(new Set<string>());
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
   const edgeToolbarFrameRef = useRef<number | null>(null);
@@ -508,6 +580,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
   }, [clearEdgeToolbarHide]);
 
   useEffect(() => {
+    historyGestureDepthRef.current = 0;
+    historyGestureRef.current = null;
     resetInfiniteCanvasHistory(initialSnapshot.nodes, initialSnapshot.edges);
   }, [canvasId, initialSnapshot.edges, initialSnapshot.nodes]);
 
@@ -517,8 +591,31 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     onSnapshotChange?.({ nodes, edges, viewport: viewportRef.current });
   }, [edges, nodes, onSnapshotChange, readOnly]);
 
+  const beginHistoryGesture = useCallback(() => {
+    historyGestureDepthRef.current += 1;
+    if (historyGestureDepthRef.current > 1) return;
+    historyGestureRef.current = beginInfiniteCanvasHistoryGesture();
+  }, []);
+
+  const endHistoryGesture = useCallback((
+    finalNodes: NativeCanvasNode[] = nodesRef.current,
+    finalEdges: NativeCanvasEdge[] = edgesRef.current,
+  ) => {
+    if (!historyGestureDepthRef.current) return;
+    historyGestureDepthRef.current -= 1;
+    if (historyGestureDepthRef.current > 0) return;
+    const previous = historyGestureRef.current;
+    if (!previous) return;
+    recordInfiniteCanvasHistory(finalNodes, finalEdges);
+    commitInfiniteCanvasHistoryGesture(previous);
+    historyGestureRef.current = null;
+  }, []);
+
   const restoreHistory = useCallback((snapshot: NativeCanvasHistorySnapshot) => {
+    imageMutationVersionRef.current.clear();
     const restored = restoreInfiniteCanvasHistorySnapshot(snapshot, nodesRef.current, edgesRef.current);
+    const restoredIds = new Set(restored.nodes.map((node) => node.id));
+    stopCanvasNodeGenerationTasks(nodesRef.current.filter((node) => !restoredIds.has(node.id)));
     setNodes(restored.nodes);
     setEdges(restored.edges);
     syncSelection([]);
@@ -567,6 +664,9 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     const nodeData = {
       ...rememberedData,
       ...data,
+      ...(kind === "actionFission" && !data?.actionFission
+        ? { actionFission: createDefaultActionFissionState() }
+        : {}),
       ...((rememberedData.libtvImageGeneration || data?.libtvImageGeneration) ? {
         libtvImageGeneration: {
           ...rememberedData.libtvImageGeneration,
@@ -681,55 +781,37 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
   }, [deleteElements, getNodes, readOnly, selectedNodeIds]);
 
   const stopDeletedNodeTasks = useCallback((deletedNodes: NativeCanvasNode[]) => {
-    if (!window.forartGenerationTasks?.stop) return;
-    const taskIds = new Set<string>();
-    deletedNodes.forEach((node) => {
-      const nodeTaskId = nativeCanvasNodeTaskId(node.data);
-      if (nodeTaskId) taskIds.add(nodeTaskId);
-      normalizeActionFissionState(node.data.actionFission).rows.forEach((row) => {
-        const rowTaskId = actionFissionRowTaskId(row);
-        if (rowTaskId) taskIds.add(rowTaskId);
-      });
-    });
-    void Promise.allSettled([...taskIds].map((taskId) => (
-      Promise.resolve().then(() => window.forartGenerationTasks!.stop(taskId))
-    )));
+    stopCanvasNodeGenerationTasks(deletedNodes);
   }, []);
 
   const setNodeImage = useCallback((nodeId: string, imageUrl: string, fileName: string) => {
-    const nodeKind = getNodes().find((node) => node.id === nodeId)?.data.kind;
-    setNodes((current) => current.map((node) => node.id === nodeId
-      ? {
-        ...node,
-        data: {
-          ...node.data,
-          ...(node.data.kind === "imageGenerator"
-            ? {
-                imageUrl: undefined,
-                thumbUrl: undefined,
-                generatedImages: [{
-                  localUrl: imageUrl,
-                  fileName,
-                  downloadState: "pending" as const,
-                }],
-              }
-            : { imageUrl, thumbUrl: undefined }),
-        },
-      }
-      : node));
+    const version = (imageMutationVersionRef.current.get(nodeId) || 0) + 1;
+    imageMutationVersionRef.current.set(nodeId, version);
     void (async () => {
       let storedUrl = imageUrl;
       let thumbUrl = "";
-      if (nodeKind === "imageLoader" && /^data:image\//i.test(imageUrl) && window.easyTool?.saveCanvasAsset) {
-        const stored = await window.easyTool.saveCanvasAsset({ dataUrl: imageUrl, defaultName: fileName, kind: "input" });
-        storedUrl = stored.url;
-        thumbUrl = stored.thumbUrl || "";
-      } else if (window.easyTool?.ensureCanvasAssetThumbnail) {
-        const thumbnail = await window.easyTool.ensureCanvasAssetThumbnail({ url: imageUrl });
-        thumbUrl = thumbnail.thumbUrl || "";
+      try {
+        if (/^data:image\//i.test(imageUrl) && window.easyTool?.saveCanvasAsset) {
+          const stored = await window.easyTool.saveCanvasAsset({ dataUrl: imageUrl, defaultName: fileName, kind: "input" });
+          storedUrl = stored.url;
+          thumbUrl = stored.thumbUrl || "";
+        } else if (window.easyTool?.ensureCanvasAssetThumbnail) {
+          const thumbnail = await window.easyTool.ensureCanvasAssetThumbnail({ url: imageUrl });
+          thumbUrl = thumbnail.thumbUrl || "";
+        }
+      } catch {
+        storedUrl = imageUrl;
+        thumbUrl = "";
       }
-      const { width, height } = await readImageDimensions(resolveLibraryImageUrl(storedUrl));
-      const size = getImageNodeSize(width, height);
+      if (!imageThumbnailMountedRef.current || imageMutationVersionRef.current.get(nodeId) !== version) return;
+      let dimensions: { width: number; height: number } | null = null;
+      try {
+        dimensions = await readImageDimensions(resolveLibraryImageUrl(storedUrl));
+      } catch {
+        // Keep the selected image even when its metadata cannot be read.
+      }
+      if (!imageThumbnailMountedRef.current || imageMutationVersionRef.current.get(nodeId) !== version) return;
+      const size = dimensions ? getImageNodeSize(dimensions.width, dimensions.height) : null;
       setNodes((current) => current.map((node) => node.id === nodeId
         ? {
           ...node,
@@ -745,24 +827,26 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
                       localUrl: storedUrl,
                       thumbUrl: thumbUrl || undefined,
                       fileName: node.data.generatedImages?.[0]?.fileName || fileName,
-                      width,
-                      height,
+                      width: dimensions?.width,
+                      height: dimensions?.height,
                       downloadState: node.data.generatedImages?.[0]?.downloadState || "pending" as const,
                     },
                     ...(node.data.generatedImages?.slice(1) || []),
                   ],
                 }
               : { imageUrl: storedUrl, thumbUrl: thumbUrl || undefined }),
-            imageNaturalWidth: width,
-            imageNaturalHeight: height,
+            imageNaturalWidth: dimensions?.width,
+            imageNaturalHeight: dimensions?.height,
           },
-          style: { ...node.style, ...size },
+          style: size ? { ...node.style, ...size } : node.style,
         }
         : node));
-    })().catch(() => undefined);
-  }, [getNodes, setNodes]);
+    })();
+  }, [setNodes]);
 
   const cropNodeImage = useCallback(async (nodeId: string, crop: CanvasImageCropRect) => {
+    const version = (imageMutationVersionRef.current.get(nodeId) || 0) + 1;
+    imageMutationVersionRef.current.set(nodeId, version);
     const node = getNodes().find((item) => item.id === nodeId);
     const sourceUrl = node?.data.kind === "imageLoader" ? String(node.data.imageUrl || "") : "";
     if (!node || !sourceUrl) throw new Error(t("infiniteCanvas:imageCropSourceMissing"));
@@ -784,6 +868,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       ...crop,
       defaultName: node.data.label || "cropped-image.png",
     });
+    if (!imageThumbnailMountedRef.current || imageMutationVersionRef.current.get(nodeId) !== version) return;
     const size = getImageNodeSize(result.width, result.height);
     setNodes((current) => current.map((item) => item.id === nodeId && item.data.kind === "imageLoader"
       ? {
@@ -806,9 +891,63 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       : node));
   }, [setNodes]);
 
+  const rebaseNode = useCallback((
+    nodeId: string,
+    transformCurrent: (node: NativeCanvasNode) => NativeCanvasNode,
+    transformHistory: (node: NativeCanvasNode) => NativeCanvasNode = transformCurrent,
+  ) => {
+    rebaseInfiniteCanvasHistoryNode(nodeId, transformCurrent, transformHistory);
+    const gesture = historyGestureRef.current;
+    if (gesture) {
+      historyGestureRef.current = {
+        ...gesture,
+        nodes: gesture.nodes.map((node) => node.id === nodeId ? transformCurrent(node) : node),
+      };
+    }
+  }, []);
+
+  const patchNodeDataSilently = useCallback((nodeId: string, patch: Partial<NativeCanvasNode["data"]>) => {
+    const transformCurrent = (node: NativeCanvasNode) => applyNativeNodeDataPatch(node, patch);
+    const transformHistory = (node: NativeCanvasNode) => applyRuntimeNodeDataPatch(node, patch);
+    rebaseNode(nodeId, transformCurrent, transformHistory);
+    setNodes((current) => current.map((node) => node.id === nodeId ? transformCurrent(node) : node));
+  }, [rebaseNode, setNodes]);
+
+  const patchActionFissionSelectionSilently = useCallback((
+    nodeId: string,
+    actionFission: NonNullable<NativeCanvasNode["data"]["actionFission"]>,
+  ) => {
+    const transformCurrent = (node: NativeCanvasNode) => applyNativeNodeDataPatch(node, { actionFission });
+    const selectedRows = new Map(actionFission.rows.map((row) => [row.id, row]));
+    const transformHistory = (node: NativeCanvasNode) => {
+      if (node.data.kind !== "actionFission" || !node.data.actionFission) return node;
+      const rows = node.data.actionFission.rows.map((row) => {
+        const selectedRow = selectedRows.get(row.id);
+        if (!selectedRow || !sameActionFissionConfiguration(row, selectedRow)) return row;
+        const nextRow = { ...row } as ActionFissionRow & Record<string, unknown>;
+        const selectedRecord = selectedRow as ActionFissionRow & Record<string, unknown>;
+        ACTION_FISSION_SELECTION_FIELDS.forEach((field) => {
+          (nextRow as Record<string, unknown>)[field] = structuredClone(selectedRecord[field]);
+        });
+        return nextRow;
+      });
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          actionFission: { ...node.data.actionFission, rows },
+        },
+      };
+    };
+    rebaseNode(nodeId, transformCurrent, transformHistory);
+    setNodes((current) => current.map((node) => node.id === nodeId ? transformCurrent(node) : node));
+  }, [rebaseNode, setNodes]);
+
   const patchImageNodeThumbnail = useCallback((nodeId: string, sourceUrl: string, thumbUrl: string) => {
-    setNodes((current) => applyCanvasNodeThumbnail(current, nodeId, sourceUrl, thumbUrl));
-  }, [setNodes]);
+    const transform = (node: NativeCanvasNode) => applyCanvasNodeThumbnail([node], nodeId, sourceUrl, thumbUrl)[0];
+    rebaseNode(nodeId, transform);
+    setNodes((current) => current.map((node) => node.id === nodeId ? transform(node) : node));
+  }, [rebaseNode, setNodes]);
 
   useEffect(() => {
     const ensureThumbnail = window.easyTool?.ensureCanvasAssetThumbnail;
@@ -840,12 +979,12 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
   }, [nodes, patchImageNodeThumbnail]);
 
   const patchActionFissionRow = useCallback((nodeId: string, rowId: string, patch: Partial<ActionFissionRow>) => {
-    setNodes((current) => current.map((node) => {
+    const transformWithPatch = (node: NativeCanvasNode, rowPatch: Partial<ActionFissionRow>) => {
       if (node.id !== nodeId || node.data.kind !== "actionFission") return node;
       const actionFission = normalizeActionFissionState(node.data.actionFission);
       const nextRows = actionFission.rows.map((row) => {
         if (row.id !== rowId) return row;
-        const next = { ...row, ...patch } as ActionFissionRow & Record<string, unknown>;
+        const next = { ...row, ...rowPatch } as ActionFissionRow & Record<string, unknown>;
         return next;
       });
       return {
@@ -858,8 +997,16 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
           },
         },
       };
-    }));
-  }, [setNodes]);
+    };
+    const transformCurrent = (node: NativeCanvasNode) => transformWithPatch(node, patch);
+    const historyPatch = { ...patch };
+    delete historyPatch.selectedActionThumbUrl;
+    const transformHistory = Object.keys(historyPatch).length
+      ? (node: NativeCanvasNode) => transformWithPatch(node, historyPatch)
+      : (node: NativeCanvasNode) => node;
+    rebaseNode(nodeId, transformCurrent, transformHistory);
+    setNodes((current) => current.map((node) => node.id === nodeId ? transformCurrent(node) : node));
+  }, [rebaseNode, setNodes]);
 
   const {
     runImageGeneration: runApiImageGeneration,
@@ -868,14 +1015,14 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     canvasId,
     edges,
     nodes,
-    patchNodeData,
+    patchNodeData: patchNodeDataSilently,
     t,
   });
   const { runLibtvGeneration, stopLibtvGeneration } = useNativeLibtvGeneration({
     canvasId,
     edges,
     nodes,
-    patchNodeData,
+    patchNodeData: patchNodeDataSilently,
     t,
   });
   const { runActionFission, stopActionFission: stopActionFissionImmediately } = useNativeActionFissionGeneration({
@@ -1016,12 +1163,16 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
         sourceFileName: image.fileName,
         sourceUrl: imageUrl,
       }));
-    patchNodeData(nodeId, {
-      generatedImages: images.map((item, index) => index === imageIndex
+    const latestNode = nodesRef.current.find((item) => item.id === nodeId && item.data.kind === "imageGenerator");
+    const latestImages = latestNode?.data.generatedImages || [];
+    const latestIndex = latestImages.findIndex((item) => String(item.localUrl || item.url || "") === imageUrl);
+    if (latestIndex < 0) return;
+    patchNodeDataSilently(nodeId, {
+      generatedImages: latestImages.map((item, index) => index === latestIndex
         ? { ...item, downloadState: "downloaded", downloadedAt: Date.now() }
         : item),
-      });
-  }, [nodes, patchNodeData, saveGeneratedImage]);
+    });
+  }, [nodes, patchNodeDataSilently, saveGeneratedImage]);
 
   const downloadContextNodeImage = useCallback(async () => {
     if (!contextNodeImage || !contextNode) return;
@@ -1049,6 +1200,11 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
         sourceFileName: target.fileName,
         sourceUrl: target.imageUrl,
       }));
+    const latestRow = nodesRef.current
+      .find((item) => item.id === nodeId && item.data.kind === "actionFission")
+      ?.data.actionFission?.rows.find((item) => item.id === rowId);
+    const latestTarget = latestRow ? actionFissionDownloadTarget(latestRow, task) : null;
+    if (!latestTarget || latestTarget.imageUrl !== target.imageUrl) return;
     patchActionFissionRow(nodeId, rowId, { resultDownloadState: "downloaded", resultDownloadedAt: Date.now() });
   }, [nodes, patchActionFissionRow, saveGeneratedImage]);
 
@@ -1077,10 +1233,15 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       thumbUrl = stored.thumbUrl || thumbUrl;
     }
     const dimensions = await readImageDimensions(resolveLibraryImageUrl(imageUrl));
+    const latestTarget = getNodes().find((node) => (
+      node.id === targetNodeId
+      && (node.data.kind === "imageGenerator" || node.data.kind === "actionFission")
+    ));
+    if (!latestTarget) return;
     const size = getImageNodeSize(dimensions.width, dimensions.height);
     const referenceNode = createNativeCanvasNode("imageLoader", {
-      x: target.position.x - size.width - 64,
-      y: target.position.y + Number(source.verticalOffset || 0),
+      x: latestTarget.position.x - size.width - 64,
+      y: latestTarget.position.y + Number(source.verticalOffset || 0),
     }, {
       imageUrl,
       thumbUrl: thumbUrl || undefined,
@@ -1097,22 +1258,28 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       sourceHandle: "output",
       target: targetNodeId,
       targetHandle: "input",
-      data: edgeDataForConnection("imageLoader", target.data.kind, targetNodeId, current),
+      data: edgeDataForConnection("imageLoader", latestTarget.data.kind, targetNodeId, current),
     }, current));
   }, [getNodes, setEdges, setNodes]);
 
   const addImageReferenceFiles = useCallback(async (targetNodeId: string, files: File[]) => {
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-    for (let index = 0; index < imageFiles.length; index += 1) {
-      const file = imageFiles[index];
-      await addReferenceImage(targetNodeId, {
-        imageUrl: await readImageFileAsDataUrl(file),
-        label: file.name || t("infiniteCanvas:pastedImage"),
-        type: file.type,
-        verticalOffset: index * 28,
-      });
+    if (!imageFiles.length) return;
+    beginHistoryGesture();
+    try {
+      for (let index = 0; index < imageFiles.length; index += 1) {
+        const file = imageFiles[index];
+        await addReferenceImage(targetNodeId, {
+          imageUrl: await readImageFileAsDataUrl(file),
+          label: file.name || t("infiniteCanvas:pastedImage"),
+          type: file.type,
+          verticalOffset: index * 28,
+        });
+      }
+    } finally {
+      window.requestAnimationFrame(() => endHistoryGesture());
     }
-  }, [addReferenceImage, t]);
+  }, [addReferenceImage, beginHistoryGesture, endHistoryGesture, t]);
 
   const addLibraryImage = useCallback((selection: LibraryAssetSelection) => {
     if (libraryReferenceTargetNodeId) {
@@ -1164,6 +1331,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
 
   const canvasActions = useMemo<NativeCanvasActions>(() => ({
     readOnly,
+    beginHistoryGesture,
+    endHistoryGesture,
     addImageReferenceFiles: (nodeId, files) => canvasActionHandlersRef.current.addImageReferenceFiles(nodeId, files),
     cropNodeImage,
     downloadActionFissionResult: (nodeId, rowId) => canvasActionHandlersRef.current.downloadActionFissionResult(nodeId, rowId),
@@ -1184,7 +1353,9 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     openActionFissionRowSettings: (nodeId: string, rowId: string) => {
       setActionFissionSettingsTarget({ nodeId, rowId });
     },
+    patchActionFissionSelectionSilently,
     patchNodeData,
+    patchNodeDataSilently,
     removeCanvasEdge: (edgeId: string) => setEdges((current) => current.filter((edge) => edge.id !== edgeId)),
     reorderImageGeneratorReferences: (nodeId: string, orderedEdgeIds: string[]) => {
       const orderById = new Map(orderedEdgeIds.map((edgeId, index) => [edgeId, index + 1]));
@@ -1200,7 +1371,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     setNodeText: (nodeId: string, text: string) => patchNodeData(nodeId, { text }),
     stopImageGeneration: (nodeId) => canvasActionHandlersRef.current.stopImageGeneration(nodeId),
     stopActionFission: (nodeId, rowId) => canvasActionHandlersRef.current.stopActionFission(nodeId, rowId),
-  }), [cropNodeImage, patchNodeData, readOnly, setEdges, setNodeImage, t]);
+  }), [beginHistoryGesture, cropNodeImage, endHistoryGesture, patchActionFissionSelectionSilently, patchNodeData, patchNodeDataSilently, readOnly, setEdges, setNodeImage, t]);
 
   const connectNodes = useCallback((connection: Connection) => {
     setEdges((current) => {
@@ -1410,7 +1581,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     if (readOnly) return;
     stopViewportMomentum();
     setCanvasInteraction("node-drag", true);
-    historyGestureRef.current = beginInfiniteCanvasHistoryGesture();
+    beginHistoryGesture();
     altDragCloneGestureRef.current = null;
     const historyNodeById = new Map(
       (historyGestureRef.current?.nodes || []).map((node) => [node.id, node]),
@@ -1486,7 +1657,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       );
     });
     if (cloned) syncSelection([...cloned.idMap.values()]);
-  }, [getEdges, getNodes, readOnly, setCanvasInteraction, setNodes, stopViewportMomentum, syncSelection]);
+  }, [beginHistoryGesture, getEdges, getNodes, readOnly, setCanvasInteraction, setNodes, stopViewportMomentum, syncSelection]);
 
   const handleNodeDrag = useCallback<OnNodeDrag<NativeCanvasNode>>((_event, draggedNode, draggedNodes) => {
     const cloneGesture = altDragCloneGestureRef.current;
@@ -1523,9 +1694,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       setNodes(finalNodes);
       setEdges(finalEdges);
       syncSelection([...cloneIds]);
-      recordInfiniteCanvasHistory(finalNodes, finalEdges);
-      commitInfiniteCanvasHistoryGesture(historyGestureRef.current);
-      historyGestureRef.current = null;
+      endHistoryGesture(finalNodes, finalEdges);
       return;
     }
 
@@ -1533,10 +1702,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     const draggedIds = new Set([draggedNode.id, ...draggedNodes.map((node) => node.id)]);
     const finalNodes = detachNativeCanvasChildrenOutsideParents(currentNodes, draggedIds);
     if (finalNodes !== currentNodes) setNodes(finalNodes);
-    recordInfiniteCanvasHistory(finalNodes, getEdges());
-    commitInfiniteCanvasHistoryGesture(historyGestureRef.current);
-    historyGestureRef.current = null;
-  }, [getEdges, getNodes, readOnly, setCanvasInteraction, setEdges, setNodes, syncSelection]);
+    endHistoryGesture(finalNodes, getEdges());
+  }, [endHistoryGesture, getEdges, getNodes, readOnly, setCanvasInteraction, setEdges, setNodes, syncSelection]);
 
   return (
     <div ref={wrapperRef} className={`rf-native-canvas${readOnly ? " rf-native-canvas--readonly" : ""}`}>

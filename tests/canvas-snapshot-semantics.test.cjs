@@ -196,6 +196,110 @@ test('download markers persist silently without making canvas content dirty', ()
   assert.notEqual(downloadedSignatures.document, pendingSignatures.document);
 });
 
+test('canvas snapshot storage removes unused action metadata but preserves reusable thumbnails', () => {
+  const { canvasSnapshotForStorage } = loadSnapshotSemantics();
+  const base = snapshot();
+  const stored = canvasSnapshotForStorage(snapshot({
+    nodes: [{
+      ...base.nodes[0],
+      data: {
+        kind: 'actionFission',
+        label: 'Fission',
+        thumbUrl: 'forart-asset://canvas/input/thumb/node.webp',
+        generatedImages: [{
+          localUrl: 'forart-asset://canvas/output/result.png',
+          thumbUrl: 'forart-asset://canvas/output/thumb/result.webp',
+        }],
+        actionFission: {
+          rows: [{
+            id: 'row-1',
+            selectedActionId: 'action-1',
+            selectedActionName: 'Pose 1',
+            selectedActionPrompt: 'Keep this offline prompt',
+            selectedActionTags: ['unused display cache'],
+            selectedActionAssetUrl: '/api/assets/action-1/file',
+            selectedActionThumbUrl: '/api/assets/action-1/thumb',
+            resultUrl: 'forart-asset://canvas/output/result.png',
+            resultThumbUrl: 'forart-asset://canvas/output/thumb/result.webp',
+            resultFileName: 'result.png',
+            resultWidth: 1024,
+            resultHeight: 1365,
+            resultDownloadState: 'downloaded',
+            resultDownloadedAt: 100,
+            useAdditionalReferences: false,
+            categoryGroups: [{
+              id: 'group-1',
+              actionProjectId: 'project-1',
+              includeActionTagIds: ['tag-1'],
+              excludeActionTagIds: [],
+            }],
+            selectedCategoryGroupId: 'group-1',
+          }],
+        },
+      },
+    }],
+  }));
+  const data = stored.nodes[0].data;
+  const image = data.generatedImages[0];
+  const row = data.actionFission.rows[0];
+
+  assert.equal(data.thumbUrl, 'forart-asset://canvas/input/thumb/node.webp');
+  assert.equal(image.thumbUrl, 'forart-asset://canvas/output/thumb/result.webp');
+  assert.equal('selectedActionTags' in row, false);
+  assert.equal(row.selectedActionThumbUrl, '/api/assets/action-1/thumb');
+  assert.equal(row.resultThumbUrl, 'forart-asset://canvas/output/thumb/result.webp');
+  assert.equal('resultWidth' in row, false);
+  assert.equal('resultHeight' in row, false);
+  assert.equal('useAdditionalReferences' in row, false);
+  assert.equal('categoryGroups' in row, false);
+  assert.equal('selectedCategoryGroupId' in row, false);
+  assert.equal(row.actionProjectId, 'project-1');
+  assert.deepEqual(row.includeActionTagIds, ['tag-1']);
+  assert.equal('excludeActionTagIds' in row, false);
+  assert.equal(row.selectedActionPrompt, 'Keep this offline prompt');
+  assert.equal(row.selectedActionAssetUrl, '/api/assets/action-1/file');
+  assert.equal(row.resultUrl, 'forart-asset://canvas/output/result.png');
+  assert.equal(row.resultFileName, 'result.png');
+  assert.equal(row.resultDownloadState, 'downloaded');
+});
+
+test('canvas snapshot storage keeps named or multi-group action-fission configuration expanded', () => {
+  const { canvasSnapshotForStorage } = loadSnapshotSemantics();
+  const base = snapshot();
+  const categoryGroups = [{
+    id: 'group-1',
+    name: 'Primary',
+    actionProjectId: 'project-1',
+    includeActionTagIds: [],
+    excludeActionTagIds: [],
+  }, {
+    id: 'group-2',
+    actionProjectId: 'project-2',
+    includeActionTagIds: [],
+    excludeActionTagIds: [],
+  }];
+  const stored = canvasSnapshotForStorage(snapshot({
+    nodes: [{
+      ...base.nodes[0],
+      data: {
+        kind: 'actionFission',
+        label: 'Fission',
+        actionFission: {
+          rows: [{
+            id: 'row-1',
+            categoryGroups,
+            selectedCategoryGroupId: 'group-2',
+          }],
+        },
+      },
+    }],
+  }));
+  const row = stored.nodes[0].data.actionFission.rows[0];
+
+  assert.deepEqual(row.categoryGroups, categoryGroups);
+  assert.equal(row.selectedCategoryGroupId, 'group-2');
+});
+
 test('durable canvas content changes alter both signatures', () => {
   const module = loadSnapshotSemantics();
   const base = snapshot();
@@ -254,6 +358,9 @@ test('canvas document serializer emits the final schema-v2 JSON with one stringi
     assert.equal(stringifyCalls, 1);
     assert.equal(parsed.canvasSchemaVersion, 2);
     assert.equal(parsed.id, 'canvas-1');
+    assert.equal('icon' in parsed, false);
+    assert.equal('canvasType' in parsed, false);
+    assert.equal('color' in parsed, false);
     assert.equal(parsed.updatedAt, CANVAS_SAVE_UPDATED_AT_PLACEHOLDER);
     assert.equal(parsed.revision, CANVAS_SAVE_REVISION_PLACEHOLDER);
     assert.deepEqual(parsed.connections, stored.connections);
@@ -261,6 +368,24 @@ test('canvas document serializer emits the final schema-v2 JSON with one stringi
   } finally {
     JSON.stringify = originalStringify;
   }
+});
+
+test('canvas document serializer keeps non-default canvas metadata', () => {
+  const { canvasSnapshotForStorage, serializeCanvasDocument } = loadSnapshotSemantics();
+  const stored = canvasSnapshotForStorage(snapshot());
+  const parsed = JSON.parse(serializeCanvasDocument({
+    id: 'canvas-custom-meta',
+    title: 'Custom metadata',
+    icon: 'star',
+    color: '#123456',
+    projectId: 'project-1',
+    createdAt: 100,
+    viewport: { x: 0, y: 0, zoom: 1 },
+  }, stored));
+
+  assert.equal(parsed.icon, 'star');
+  assert.equal(parsed.color, '#123456');
+  assert.equal('canvasType' in parsed, false);
 });
 
 test('canvas document serializer handles a stress-sized snapshot without changing node data', () => {

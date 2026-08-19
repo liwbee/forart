@@ -25,8 +25,8 @@ import {
   storedCanvasContentSignature,
 } from "./canvasSnapshotSemantics";
 import {
+  clearHydratedGenerationTasks,
   connectGenerationTaskEvents,
-  hydrateRecentGenerationTasks,
   hydrateGenerationTasks,
   isGenerationTaskActive,
   useGenerationTaskCache,
@@ -83,6 +83,21 @@ function readStoredTabs(): CanvasDocumentTab[] {
 
 function objectValue(input: unknown) {
   return input && typeof input === "object" ? input as Record<string, unknown> : {};
+}
+
+function collectLegacyGenerationTaskIds(document: NativeCanvasDocument | null) {
+  if (!document) return [];
+  const taskIds = new Set<string>();
+  for (const node of document.nodes) {
+    const nodeTaskId = String(node.data?.latestGenerationTaskId || "").trim();
+    if (nodeTaskId) taskIds.add(nodeTaskId);
+    const rows = node.data?.actionFission?.rows || [];
+    for (const row of rows) {
+      const rowTaskId = String(row.latestGenerationTaskId || "").trim();
+      if (rowTaskId) taskIds.add(rowTaskId);
+    }
+  }
+  return [...taskIds];
 }
 
 interface CanvasWorkspacePageProps {
@@ -461,14 +476,19 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
 
   useEffect(() => {
     const disconnect = connectGenerationTaskEvents();
-    void hydrateRecentGenerationTasks(100).catch(() => undefined);
     return disconnect;
   }, []);
 
   useEffect(() => {
-    if (!activeCanvasId || activeCanvasId.startsWith("shared:")) return;
-    void hydrateGenerationTasks(activeCanvasId).catch(() => undefined);
-  }, [activeCanvasId]);
+    if (!activeCanvasId || activeCanvasId.startsWith("shared:")) {
+      clearHydratedGenerationTasks();
+      return;
+    }
+    const legacyTaskIds = activeDocument?.id === activeCanvasId
+      ? collectLegacyGenerationTaskIds(activeDocument)
+      : [];
+    void hydrateGenerationTasks(activeCanvasId, legacyTaskIds).catch(() => undefined);
+  }, [activeCanvasId, activeDocument]);
 
   useEffect(() => {
     window.localStorage.setItem(OPEN_TABS_KEY, JSON.stringify(tabs));

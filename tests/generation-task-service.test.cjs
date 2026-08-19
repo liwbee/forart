@@ -83,8 +83,8 @@ test('generation task service exposes one query and event stream for both execut
   assert.equal(service.getTask('api-task').status, 'superseded');
   assert.equal(service.getTask('api-task').version, 3);
   assert.equal(service.getTask('libtv-task').executorKind, 'libtv');
-  assert.deepEqual(service.listTasksForCanvas('canvas').map((task) => task.id), ['api-task', 'api-task-next', 'libtv-task']);
-  const recentTasks = service.listRecentTasks(2);
+  assert.deepEqual(service.listLatestTasksForCanvas('canvas').map((task) => task.id), ['api-task-next', 'libtv-task']);
+  const recentTasks = service.listTaskCenterPage({ limit: 2, filter: 'all' }).tasks;
   assert.equal(recentTasks.length, 2);
   assert.equal(recentTasks[0].updatedAt >= recentTasks[1].updatedAt, true);
   assert.deepEqual(changed.map((task) => `${task.id}:${task.version}`), [
@@ -94,6 +94,89 @@ test('generation task service exposes one query and event stream for both execut
     'api-task-next:1',
     'libtv-task:1',
   ]);
+});
+
+test('generation task service does not version or broadcast an equivalent task update', () => {
+  const repository = createMemoryGenerationTaskRepository();
+  const service = createGenerationTaskService({ repository });
+  const api = service.createStoreAdapter('api');
+  const changed = [];
+  service.subscribe((task) => changed.push(task));
+
+  api.createTask({
+    id: 'stable-task',
+    canvasId: 'canvas',
+    target: { type: 'imageGenerator', nodeId: 'node' },
+    status: 'running',
+    messageCode: 'image.waitingForResult',
+    messageParams: { attempt: 1 },
+  });
+  const before = service.getTask('stable-task');
+  const returned = api.updateTask('stable-task', {
+    status: 'running',
+    messageCode: 'image.waitingForResult',
+    messageParams: { attempt: 1 },
+  });
+  const after = service.getTask('stable-task');
+
+  assert.equal(after.version, before.version);
+  assert.equal(after.updatedAt, before.updatedAt);
+  assert.equal(returned.updatedAt, before.updatedAt);
+  assert.deepEqual(changed.map((task) => `${task.id}:${task.version}`), ['stable-task:1']);
+});
+
+test('generation task service publishes the saved record without querying it again', () => {
+  const repository = createMemoryGenerationTaskRepository();
+  const originalGetTask = repository.getTask.bind(repository);
+  let taskReads = 0;
+  repository.getTask = (taskId) => {
+    taskReads += 1;
+    return originalGetTask(taskId);
+  };
+  const service = createGenerationTaskService({ repository });
+  const api = service.createStoreAdapter('api');
+  const changed = [];
+  service.subscribe((task) => changed.push(task));
+
+  api.createTask({
+    id: 'single-write-task',
+    canvasId: 'canvas',
+    target: { type: 'imageGenerator', nodeId: 'node' },
+    status: 'submitting',
+  });
+  api.updateTask('single-write-task', { status: 'running' });
+
+  assert.equal(taskReads, 0);
+  assert.deepEqual(changed.map((task) => task.version), [1, 2]);
+  assert.deepEqual(changed.map((task) => task.status), ['submitting', 'running']);
+});
+
+test('generation task service exposes lightweight active task references for canvas maintenance', () => {
+  const repository = createMemoryGenerationTaskRepository();
+  repository.listActiveTaskRefsForCanvas = (canvasId) => [{
+    id: 'active-ref',
+    canvasId,
+    executorKind: 'api',
+    status: 'running',
+    target: { type: 'imageGenerator', nodeId: 'node' },
+  }];
+  repository.listActiveTaskRecords = () => {
+    throw new Error('full active records must not be loaded for canvas maintenance');
+  };
+  const service = createGenerationTaskService({
+    repository: {
+      ...repository,
+      listActiveTaskRecords: () => [],
+    },
+  });
+
+  assert.deepEqual(service.listActiveTaskRefsForCanvas('canvas'), [{
+    id: 'active-ref',
+    canvasId: 'canvas',
+    executorKind: 'api',
+    status: 'running',
+    target: { type: 'imageGenerator', nodeId: 'node' },
+  }]);
 });
 
 test('generation task service paginates task-center results in groups of thirty', () => {
@@ -153,7 +236,170 @@ test('generation task service routes stop and coalesces concurrent startup recov
   assert.equal(service.getTask('libtv-task').status, 'interrupted');
 });
 
-test('generation task service removes cleaned terminal tasks from executor stores', () => {
+test('generation task service supersedes non-head active tasks before startup recovery', async () => {
+  const repository = createMemoryGenerationTaskRepository();
+  const initialService = createGenerationTaskService({ repository });
+  initialService.createStoreAdapter('api').createTask({
+    id: 'older-api',
+    canvasId: 'canvas',
+    target: { type: 'imageGenerator', nodeId: 'node' },
+    status: 'running',
+  });
+  initialService.createStoreAdapter('libtv').createTask({
+    id: 'latest-libtv',
+    canvasId: 'canvas',
+    target: { type: 'imageGenerator', nodeId: 'node' },
+    status: 'running',
+  });
+
+  const recovered = [];
+  const service = createGenerationTaskService({ repository });
+  service.registerExecutor('api', {
+    recoverPersistedTasks() {
+      recovered.push(...service.createStoreAdapter('api').listTasks().map((task) => task.id));
+      return { ok: true };
+    },
+  });
+  service.registerExecutor('libtv', {
+    recoverPersistedTasks() {
+      recovered.push(...service.createStoreAdapter('libtv').listTasks().map((task) => task.id));
+      return { ok: true };
+    },
+  });
+
+  await service.recoverActiveTasks();
+
+  assert.equal(service.getTask('older-api').status, 'superseded');
+  assert.deepEqual(recovered, ['latest-libtv']);
+});
+
+test('generation task service stops an older cross-executor task before starting its replacement', async () => {
+  const repository = createMemoryGenerationTaskRepository();
+  const service = createGenerationTaskService({ repository });
+  const api = service.createStoreAdapter('api');
+  const libtv = service.createStoreAdapter('libtv');
+  api.createTask({
+    id: 'older-api',
+    canvasId: 'canvas',
+    target: { type: 'imageGenerator', nodeId: 'node' },
+    status: 'running',
+  });
+
+  const calls = [];
+  service.registerExecutor('api', {
+    async stopTask(taskId) {
+      calls.push(`stop:${taskId}:begin`);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      api.stopTask(taskId);
+      calls.push(`stop:${taskId}:end`);
+    },
+  });
+  service.registerExecutor('libtv', {
+    startTask(payload) {
+      calls.push('start:replacement');
+      return libtv.createTask({ ...payload, id: 'latest-libtv' });
+    },
+  });
+
+  await service.startTask('libtv', {
+    canvasId: 'canvas',
+    target: { type: 'imageGenerator', nodeId: 'node' },
+  });
+
+  assert.deepEqual(calls, [
+    'stop:older-api:begin',
+    'stop:older-api:end',
+    'start:replacement',
+  ]);
+  assert.equal(service.getTask('older-api').status, 'interrupted');
+  assert.equal(service.getTask('latest-libtv').status, 'preparing');
+});
+
+test('generation task service locally interrupts a replaced task when its executor stop fails', async () => {
+  const repository = createMemoryGenerationTaskRepository();
+  const service = createGenerationTaskService({ repository });
+  const api = service.createStoreAdapter('api');
+  const libtv = service.createStoreAdapter('libtv');
+  api.createTask({
+    id: 'older-api',
+    canvasId: 'canvas',
+    target: { type: 'imageGenerator', nodeId: 'node' },
+    status: 'running',
+  });
+  service.registerExecutor('api', {
+    stopTask() { throw new Error('remote stop failed'); },
+  });
+  service.registerExecutor('libtv', {
+    startTask(payload) { return libtv.createTask({ ...payload, id: 'latest-libtv' }); },
+  });
+
+  await service.startTask('libtv', {
+    canvasId: 'canvas',
+    target: { type: 'imageGenerator', nodeId: 'node' },
+  });
+
+  assert.equal(service.getTask('older-api').status, 'interrupted');
+  assert.equal(service.getTask('latest-libtv').status, 'preparing');
+});
+
+test('generation task service serializes concurrent starts for the same target', async () => {
+  const repository = createMemoryGenerationTaskRepository();
+  const service = createGenerationTaskService({ repository });
+  const api = service.createStoreAdapter('api');
+  const calls = [];
+  service.registerExecutor('api', {
+    async startTask(payload) {
+      calls.push(`start:${payload.id}`);
+      const task = api.createTask(payload);
+      if (payload.id === 'first') await new Promise((resolve) => setTimeout(resolve, 5));
+      return task;
+    },
+    stopTask(taskId) {
+      calls.push(`stop:${taskId}`);
+      return api.stopTask(taskId);
+    },
+  });
+  const target = { type: 'imageGenerator', nodeId: 'node' };
+
+  await Promise.all([
+    service.startTask('api', { id: 'first', canvasId: 'canvas', target }),
+    service.startTask('api', { id: 'second', canvasId: 'canvas', target }),
+  ]);
+
+  assert.deepEqual(calls, ['start:first', 'stop:first', 'start:second']);
+  assert.equal(service.getTask('first').status, 'interrupted');
+  assert.deepEqual(api.listTasks().map((task) => task.id), ['second']);
+});
+
+test('generation task service startup hydrates only active repository records', () => {
+  let activeReads = 0;
+  const records = new Map();
+  const repository = {
+    listActiveTaskRecords() {
+      activeReads += 1;
+      return [{
+        executorKind: 'api',
+        version: 1,
+        task: {
+          id: 'restored-active',
+          canvasId: 'canvas',
+          target: { type: 'imageGenerator', nodeId: 'node' },
+          status: 'running',
+          startedAt: 1,
+          updatedAt: 2,
+        },
+      }];
+    },
+    getTask(taskId) { return records.get(taskId) || null; },
+    saveTask() { throw new Error('not used'); },
+  };
+
+  const service = createGenerationTaskService({ repository });
+  assert.equal(activeReads, 1);
+  assert.deepEqual(service.createStoreAdapter('api').listTasks().map((task) => task.id), ['restored-active']);
+});
+
+test('generation task service keeps only active tasks in executor stores', () => {
   const repository = createMemoryGenerationTaskRepository();
   const service = createGenerationTaskService({ repository });
   const api = service.createStoreAdapter('api');
@@ -164,8 +410,9 @@ test('generation task service removes cleaned terminal tasks from executor store
   libtv.updateTask('libtv-old', { status: 'failed', error: 'failed' });
   api.createTask({ id: 'api-active', canvasId: 'canvas', target: { type: 'imageGenerator', nodeId: 'node-c' } });
 
-  assert.equal(service.removeTasks(['api-old', 'libtv-old', 'api-active']), 2);
-  assert.equal(api.getTask('api-old'), null);
-  assert.equal(libtv.getTask('libtv-old'), null);
+  assert.deepEqual(api.listTasks().map((task) => task.id), ['api-active']);
+  assert.deepEqual(libtv.listTasks(), []);
+  assert.equal(api.getTask('api-old').status, 'failed');
+  assert.equal(libtv.getTask('libtv-old').status, 'failed');
   assert.notEqual(api.getTask('api-active'), null);
 });

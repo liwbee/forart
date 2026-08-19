@@ -115,7 +115,6 @@ export interface ForartGenerationTasksApi {
   get: (taskId: string) => Promise<GenerationTaskDto | null>;
   getMany: (taskIds: string[]) => Promise<GenerationTaskDto[]>;
   listForCanvas: (canvasId: string) => Promise<GenerationTaskDto[]>;
-  listRecent: (limit?: number) => Promise<GenerationTaskDto[]>;
   listPage: (payload: {
     limit: number;
     offset: number;

@@ -3,14 +3,16 @@ const {
   createGenerationTaskDto,
   normalizeExecutorKind,
 } = require('./generation-task-types.cjs');
+const { isDeepStrictEqual } = require('node:util');
+const {
+  ACTIVE_STATUSES,
+  TERMINAL_STATUSES,
+  normalizeTarget: normalizeDomainTarget,
+  safeString,
+  targetIdentityKey,
+} = require('./generation-task-domain.cjs');
 
-const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'canceled', 'interrupted', 'superseded']);
-const ACTIVE_STATUSES = new Set(['queued', 'preparing', 'submitting', 'uploading', 'running', 'result_processing']);
 const TASK_CENTER_FILTERS = new Set(['all', 'active', 'succeeded', 'exceptional']);
-
-function safeString(value) {
-  return String(value || '').trim();
-}
 
 function newTaskId(executorKind) {
   const prefix = executorKind === EXECUTOR_KINDS.LIBTV ? 'libtv' : 'gen';
@@ -18,21 +20,21 @@ function newTaskId(executorKind) {
 }
 
 function normalizeTarget(input = {}, nodeId = '') {
-  const type = input?.type === 'actionFissionRow' || input?.kind === 'actionFissionRow'
-    ? 'actionFissionRow'
-    : 'imageGenerator';
-  const normalizedNodeId = safeString(input?.nodeId || nodeId);
-  const rowId = safeString(input?.rowId);
-  return type === 'actionFissionRow'
-    ? { type, nodeId: normalizedNodeId, rowId }
-    : { type, nodeId: normalizedNodeId };
+  const target = normalizeDomainTarget(input, nodeId);
+  return target.kind === 'actionFissionRow'
+    ? { type: target.kind, nodeId: target.nodeId, rowId: target.rowId }
+    : { type: target.kind, nodeId: target.nodeId };
 }
 
 function targetKey(target = {}) {
-  const normalized = normalizeTarget(target);
-  return normalized.type === 'actionFissionRow'
-    ? `${normalized.type}:${normalized.nodeId}:${normalized.rowId}`
-    : `${normalized.type}:${normalized.nodeId}`;
+  return targetIdentityKey(target);
+}
+
+function targetScopeKey(payload = {}) {
+  const canvasId = safeString(payload?.canvasId);
+  const target = normalizeTarget(payload?.target);
+  if (!canvasId || !target.nodeId) return '';
+  return `${canvasId}:${targetKey(target)}`;
 }
 
 function normalizeResult(input) {
@@ -65,7 +67,7 @@ function normalizeApiTask(input = {}, fallback = {}) {
     canvasId: safeString(input.canvasId || fallback.canvasId),
     target: normalizeTarget(input.target || fallback.target),
     kind: safeString(input.kind || fallback.kind || 'image') || 'image',
-    providerId: safeString(input.providerId || fallback.providerId),
+    providerId: safeString(input.providerId || input.provider?.id || fallback.providerId),
     providerName: safeString(input.providerName || input.provider?.name || fallback.providerName),
     model: safeString(input.model || fallback.model),
     upstreamTaskId: safeString(input.upstreamTaskId || fallback.upstreamTaskId),
@@ -171,16 +173,19 @@ function createGenerationTaskService({ repository } = {}) {
   const tasks = new Map();
   const executors = new Map();
   const listeners = new Set();
+  const targetStartQueues = new Map();
   let recoveryPromise = null;
 
-  for (const record of repository.listTaskRecords?.() || []) {
+  const persistedActiveRecords = repository.listActiveTaskRecords();
+  for (const record of persistedActiveRecords) {
     const kind = normalizeExecutorKind(record.executorKind);
     const task = normalizeTask(kind, record.task, record.task);
+    if (!ACTIVE_STATUSES.has(task.status)) continue;
     tasks.set(task.id, { executorKind: kind, task });
   }
 
-  function emitTask(taskId) {
-    const record = repository.getTask(taskId);
+  function emitTask(taskId, savedRecord) {
+    const record = savedRecord || repository.getTask(taskId);
     if (!record) return;
     const dto = createGenerationTaskDto(record);
     for (const listener of listeners) listener(dto);
@@ -191,9 +196,10 @@ function createGenerationTaskService({ repository } = {}) {
   }
 
   function persistTask(executorKind, task, setAsLatest = false) {
-    repository.saveTask(task, { executorKind, setAsLatest });
-    tasks.set(task.id, { executorKind, task });
-    return task;
+    const savedRecord = repository.saveTask(task, { executorKind, setAsLatest });
+    if (ACTIVE_STATUSES.has(task.status)) tasks.set(task.id, { executorKind, task });
+    else tasks.delete(task.id);
+    return savedRecord;
   }
 
   function listExecutionTasks(executorKind) {
@@ -213,14 +219,16 @@ function createGenerationTaskService({ repository } = {}) {
     const kind = normalizeExecutorKind(executorKind);
     const current = executionRecord(taskId);
     if (!current || current.executorKind !== kind) throw new Error('Generation task not found.');
-    const task = withTerminalTiming(normalizeTask(kind, {
+    const candidate = normalizeTask(kind, {
       ...current.task,
       ...patch,
       id: current.task.id,
-      updatedAt: Date.now(),
-    }, current.task));
-    persistTask(kind, task);
-    emitTask(task.id);
+      updatedAt: current.task.updatedAt,
+    }, current.task);
+    if (isDeepStrictEqual(candidate, current.task)) return current.task;
+    const task = withTerminalTiming({ ...candidate, updatedAt: Date.now() });
+    const savedRecord = persistTask(kind, task);
+    emitTask(task.id, savedRecord);
     return task;
   }
 
@@ -243,8 +251,8 @@ function createGenerationTaskService({ repository } = {}) {
       status: payload.status || defaultStatus,
       updatedAt: Date.now(),
     }, {});
-    persistTask(kind, task, true);
-    emitTask(task.id);
+    const savedRecord = persistTask(kind, task, true);
+    emitTask(task.id, savedRecord);
     return task;
   }
 
@@ -264,7 +272,9 @@ function createGenerationTaskService({ repository } = {}) {
       createTask: (payload) => createExecutionTask(kind, payload),
       getTask: (taskId) => {
         const record = executionRecord(taskId);
-        return record?.executorKind === kind ? record.task : null;
+        if (record?.executorKind === kind) return record.task;
+        const persisted = repository.getTask(safeString(taskId));
+        return persisted?.executorKind === kind ? persisted.task : null;
       },
       listTasks: () => listExecutionTasks(kind),
       stopTask: (taskId) => stopExecutionTask(kind, taskId),
@@ -287,8 +297,27 @@ function createGenerationTaskService({ repository } = {}) {
     return record ? createGenerationTaskDto(record) : null;
   }
 
-  function listTasksForCanvas(canvasId) {
-    return repository.listTaskRecords({ canvasId: safeString(canvasId) }).map(createGenerationTaskDto);
+  function getManyTasks(taskIds = []) {
+    return repository.getTasks(taskIds).map(createGenerationTaskDto);
+  }
+
+  function listLatestTasksForCanvas(canvasId) {
+    const safeCanvasId = safeString(canvasId);
+    return repository.listLatestTaskRecordsForCanvas(safeCanvasId).map(createGenerationTaskDto);
+  }
+
+  function listActiveTasksForCanvas(canvasId) {
+    const safeCanvasId = safeString(canvasId);
+    return repository.listActiveTaskRecords({ canvasId: safeCanvasId }).map(createGenerationTaskDto);
+  }
+
+  function listActiveTaskRefsForCanvas(canvasId) {
+    const safeCanvasId = safeString(canvasId);
+    return repository.listActiveTaskRefsForCanvas(safeCanvasId);
+  }
+
+  function listTargetHeadsForCanvas(canvasId) {
+    return repository.listTargetHeadsForCanvas(safeString(canvasId));
   }
 
   function listTaskCenterPage(payload = {}) {
@@ -296,62 +325,61 @@ function createGenerationTaskService({ repository } = {}) {
     const offset = Math.max(0, Math.round(Number(payload.offset) || 0));
     const requestedFilter = safeString(payload.filter);
     const filter = TASK_CENTER_FILTERS.has(requestedFilter) ? requestedFilter : 'all';
-    const sortedRecords = [...tasks.values()].sort((left, right) => {
-      const updatedDifference = Number(right.task.updatedAt || 0) - Number(left.task.updatedAt || 0);
-      return updatedDifference || String(right.task.id || '').localeCompare(String(left.task.id || ''));
-    });
-    const matches = (record, targetFilter) => {
-      const status = safeString(record.task.status);
-      const active = ACTIVE_STATUSES.has(status);
-      if (targetFilter === 'active') return active;
-      if (targetFilter === 'succeeded') return status === 'succeeded';
-      if (targetFilter === 'exceptional') return !active && status !== 'succeeded';
-      return true;
-    };
-    const counts = {
-      all: sortedRecords.length,
-      active: sortedRecords.filter((record) => matches(record, 'active')).length,
-      succeeded: sortedRecords.filter((record) => matches(record, 'succeeded')).length,
-      exceptional: sortedRecords.filter((record) => matches(record, 'exceptional')).length,
-    };
-    const filteredRecords = filter === 'all'
-      ? sortedRecords
-      : sortedRecords.filter((record) => matches(record, filter));
+    const repositoryPage = repository.listTaskPage({ limit, offset, filter });
     return {
-      tasks: filteredRecords.slice(offset, offset + limit)
-        .map(({ executorKind, task }) => createGenerationTaskDto({ executorKind, task })),
-      total: filteredRecords.length,
-      counts,
+      tasks: repositoryPage.records.map(createGenerationTaskDto),
+      total: repositoryPage.total,
+      counts: repositoryPage.counts,
     };
   }
 
-  function listRecentTasks(limit = 100) {
-    const safeLimit = Math.min(500, Math.max(1, Math.round(Number(limit) || 100)));
-    return listTaskCenterPage({ limit: safeLimit, filter: 'all' }).tasks;
+  function removeTargetHeadsForCanvas(canvasId) {
+    return repository.removeTargetHeadsForCanvas(safeString(canvasId));
   }
 
-  function removeTasks(taskIds = []) {
-    let removedCount = 0;
-    for (const taskId of Array.isArray(taskIds) ? taskIds : []) {
-      const record = executionRecord(taskId);
-      if (!record || !TERMINAL_STATUSES.has(record.task.status)) continue;
-      removedCount += tasks.delete(safeString(taskId)) ? 1 : 0;
+  function removeTargetHeads(targetKeys = []) {
+    return repository.removeTargetHeads(targetKeys);
+  }
+
+  async function runInTargetStartQueue(payloads, work) {
+    const keys = [...new Set((Array.isArray(payloads) ? payloads : [payloads])
+      .map(targetScopeKey)
+      .filter(Boolean))];
+    const preceding = keys.map((key) => targetStartQueues.get(key)).filter(Boolean);
+    const operation = Promise.allSettled(preceding).then(work);
+    for (const key of keys) targetStartQueues.set(key, operation);
+    try {
+      return await operation;
+    } finally {
+      for (const key of keys) {
+        if (targetStartQueues.get(key) === operation) targetStartQueues.delete(key);
+      }
     }
-    return removedCount;
   }
 
   async function startTask(executorKind, payload = {}) {
     const kind = normalizeExecutorKind(executorKind);
     const executor = executors.get(kind);
     if (!executor?.startTask) throw new Error(`Generation executor cannot start tasks for ${kind}.`);
-    return executor.startTask(payload);
+    return runInTargetStartQueue([payload], async () => {
+      await stopActiveTasksForTargets([payload]);
+      return executor.startTask(payload);
+    });
   }
 
   async function startTasks(executorKind, payloads = []) {
     const kind = normalizeExecutorKind(executorKind);
     const executor = executors.get(kind);
-    if (executor?.startTasks) return executor.startTasks(payloads);
-    return Promise.all((Array.isArray(payloads) ? payloads : []).map((payload) => startTask(kind, payload)));
+    const safePayloads = Array.isArray(payloads) ? payloads : [];
+    if (!safePayloads.length) return [];
+    if (!executor?.startTasks && !executor?.startTask) {
+      throw new Error(`Generation executor cannot start tasks for ${kind}.`);
+    }
+    return runInTargetStartQueue(safePayloads, async () => {
+      await stopActiveTasksForTargets(safePayloads);
+      if (executor.startTasks) return executor.startTasks(safePayloads);
+      return Promise.all(safePayloads.map((payload) => executor.startTask(payload)));
+    });
   }
 
   function stopTask(taskId) {
@@ -362,9 +390,36 @@ function createGenerationTaskService({ repository } = {}) {
     return stopExecutionTask(record.executorKind, taskId);
   }
 
+  async function stopActiveTasksForTargets(payloads = []) {
+    const targets = new Set((Array.isArray(payloads) ? payloads : [payloads])
+      .map(targetScopeKey)
+      .filter(Boolean));
+    const taskIds = [...tasks.values()]
+      .filter((record) => targets.has(targetScopeKey(record.task)))
+      .map((record) => record.task.id);
+    if (!taskIds.length) return;
+    await Promise.allSettled(taskIds.map((taskId) => Promise.resolve().then(() => stopTask(taskId))));
+    // A remote adapter can fail to stop, but the replacement must still own
+    // the target locally. Mark any survivor interrupted so its late result is
+    // rejected and it is not recovered on the next launch.
+    for (const taskId of taskIds) {
+      const current = executionRecord(taskId);
+      if (current) stopExecutionTask(current.executorKind, taskId);
+    }
+  }
+
   async function recoverActiveTasks(contextByExecutor = {}) {
     if (recoveryPromise) return recoveryPromise;
     recoveryPromise = (async () => {
+      for (const { executorKind, task } of [...tasks.values()]) {
+        const latestTaskId = repository.latestTaskIdForTarget(task.canvasId, task.target);
+        if (!latestTaskId || latestTaskId === task.id) continue;
+        updateExecutionTask(executorKind, task.id, {
+          status: 'superseded',
+          error: 'Superseded by a newer task.',
+          interruptReason: 'superseded',
+        });
+      }
       const results = {};
       for (const kind of [EXECUTOR_KINDS.API, EXECUTOR_KINDS.LIBTV]) {
         const executor = executors.get(kind);
@@ -388,10 +443,14 @@ function createGenerationTaskService({ repository } = {}) {
   return {
     createStoreAdapter,
     getTask,
-    listRecentTasks,
+    getManyTasks,
+    listActiveTasksForCanvas,
+    listActiveTaskRefsForCanvas,
     listTaskCenterPage,
-    listTasksForCanvas,
-    removeTasks,
+    listLatestTasksForCanvas,
+    listTargetHeadsForCanvas,
+    removeTargetHeads,
+    removeTargetHeadsForCanvas,
     recoverActiveTasks,
     registerExecutor,
     startTask,
