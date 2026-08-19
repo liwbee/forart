@@ -178,6 +178,12 @@ function createLibtvGenerationRunner({
   const anchoredTaskIds = new Set();
   const queuePools = new Map();
   const queuedTaskPoolKeys = new Map();
+  // LibTV accepts node preparation in parallel, but the remote generation
+  // start endpoint is single-flight for the account/project. Keep that
+  // boundary separate from the action-fission task queue so a concurrency of
+  // 0 still prepares every row concurrently without submitting overlapping
+  // `node --run` requests.
+  let runNodeTail = Promise.resolve();
 
   function configuredActionFissionConcurrency() {
     const requested = Number(typeof resolveActionFissionConcurrency === 'function'
@@ -255,6 +261,22 @@ function createLibtvGenerationRunner({
         (error) => finish(reject, error),
       );
     });
+  }
+
+  function enqueueRunNode(operation, signal) {
+    const predecessor = runNodeTail;
+    let release;
+    runNodeTail = new Promise((resolve) => {
+      release = resolve;
+    });
+    return predecessor
+      .then(() => {
+        throwIfAborted(signal);
+        return operation();
+      })
+      .finally(() => {
+        release();
+      });
   }
 
   async function queryNodeWithRetry(projectUuid, remoteNodeId, signal, attempts = 3) {
@@ -570,7 +592,10 @@ function createLibtvGenerationRunner({
             taskStore.updateTask(task.id, { remoteExecutionStartedAt: Date.now() });
           }
           runAttempted = true;
-          run = await libtv.runNode(project.projectUuid, remoteNodeId, { signal });
+          run = await enqueueRunNode(
+            () => libtv.runNode(project.projectUuid, remoteNodeId, { signal }),
+            signal,
+          );
         } catch (error) {
           if (!isTaskStartBusyError(error) || attempt === 2) throw error;
           startBusy = true;

@@ -532,7 +532,7 @@ test('an older action row attempt cannot overwrite the current task anchor', () 
   }
 });
 
-test('LibTV limits concurrency per node, runs different nodes independently, and writes terminal rows without renderer polling', async () => {
+test('LibTV serializes remote runNode submissions across action-fission nodes', async () => {
   const canvasStore = createCanvasRecorder();
   const taskStore = createLibtvGenerationTaskStore();
   const activeByQueue = new Map();
@@ -605,19 +605,21 @@ test('LibTV limits concurrency per node, runs different nodes independently, and
   const tasks = runner.startImageTasks(payloads);
 
   await waitFor(() => tasks.every((task) => taskStore.getTask(task.id)?.status === 'succeeded'), 5000);
-  assert.equal(maxByQueue.get('node-a'), 2);
-  assert.equal(maxByQueue.get('node-b'), 2);
-  assert.equal(maxGlobalActive, 4);
+  assert.equal(maxByQueue.get('node-a'), 1);
+  assert.equal(maxByQueue.get('node-b'), 1);
+  assert.equal(maxGlobalActive, 1);
   assert.equal(runAttempts, 7);
   assert.deepEqual(new Set(workspaceNames), new Set(['LibtvImage-PC01']));
   assert.equal(canvasStore.terminals.filter((item) => item.backend === 'libtv' && item.status === 'succeeded').length, 6);
   assert.equal(new Set(canvasStore.terminals.map((item) => `${item.canvasId}:${item.nodeId}:${item.rowId}`)).size, 6);
 });
 
-test('LibTV unlimited concurrency starts every row in the node pool', async () => {
+test('LibTV unlimited task concurrency serializes remote runNode submissions', async () => {
   const canvasStore = createCanvasRecorder();
   const taskStore = createLibtvGenerationTaskStore();
   const runs = [];
+  let activeRuns = 0;
+  let maxActiveRuns = 0;
   let releaseRuns;
   const runGate = new Promise((resolve) => { releaseRuns = resolve; });
   const libtv = {
@@ -627,7 +629,10 @@ test('LibTV unlimited concurrency starts every row in the node pool', async () =
     async connectLeft() {},
     async runNode(_project, remoteNodeId) {
       runs.push(remoteNodeId);
+      activeRuns += 1;
+      maxActiveRuns = Math.max(maxActiveRuns, activeRuns);
       await runGate;
+      activeRuns -= 1;
       return { payload: { url: `https://example.test/${encodeURIComponent(remoteNodeId)}.png` }, stdout: '' };
     },
     async queryNode() { return { payload: {}, stdout: '' }; },
@@ -654,10 +659,12 @@ test('LibTV unlimited concurrency starts every row in the node pool', async () =
     aspectRatio: '3:4',
   })));
 
-  await waitFor(() => runs.length === 4);
+  await waitFor(() => runs.length === 1);
   assert.equal(tasks.every((task) => taskStore.getTask(task.id)?.status === 'running'), true);
   releaseRuns();
   await waitFor(() => tasks.every((task) => taskStore.getTask(task.id)?.status === 'succeeded'));
+  assert.equal(runs.length, 4);
+  assert.equal(maxActiveRuns, 1);
 });
 
 test('LibTV accepts intermediate action-fission concurrency values', async () => {
@@ -700,13 +707,14 @@ test('LibTV accepts intermediate action-fission concurrency values', async () =>
     aspectRatio: '3:4',
   })));
 
-  await waitFor(() => runs.length === 3);
-  assert.equal(runs.length, 3);
+  await waitFor(() => runs.length === 1);
+  assert.equal(runs.length, 1);
   releaseRuns();
   await waitFor(() => tasks.every((task) => taskStore.getTask(task.id)?.status === 'succeeded'));
+  assert.equal(runs.length, 4);
 });
 
-test('a failed LibTV row can re-enter an active node pool without bypassing its limit', async () => {
+test('a failed LibTV row can re-enter the serialized runNode queue', async () => {
   const canvasStore = createCanvasRecorder();
   const taskStore = createLibtvGenerationTaskStore();
   let releaseHold;
@@ -749,12 +757,13 @@ test('a failed LibTV row can re-enter an active node pool without bypassing its 
     payload('hold', 'row-hold'),
     payload('retry', 'row-retry'),
   ]);
+  await waitFor(() => taskStore.getTask(holding.id)?.status === 'running');
+  assert.notEqual(taskStore.getTask(failed.id)?.status, 'failed');
+  releaseHold();
   await waitFor(() => taskStore.getTask(failed.id)?.status === 'failed');
 
   const [retried] = runner.startImageTasks([payload('retry', 'row-retry')]);
   await waitFor(() => taskStore.getTask(retried.id)?.status === 'succeeded');
-  assert.equal(taskStore.getTask(holding.id)?.status, 'running');
-  releaseHold();
   await waitFor(() => taskStore.getTask(holding.id)?.status === 'succeeded');
 });
 
