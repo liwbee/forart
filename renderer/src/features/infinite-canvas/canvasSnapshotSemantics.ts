@@ -73,6 +73,8 @@ function compactActionFissionRow(value: unknown) {
 function durableNodeData(value: unknown) {
   const data = { ...recordOf(value) };
   delete data.groupId;
+  delete data.imageUploadState;
+  delete data.imageUploadError;
   if (data.actionFission && typeof data.actionFission === "object") {
     const actionFission = { ...recordOf(data.actionFission) };
     if (Array.isArray(actionFission.rows)) {
@@ -145,7 +147,14 @@ function contentNode(value: Record<string, unknown>) {
 
 export function canvasSnapshotForStorage(snapshot: CanvasSnapshotLike): StoredCanvasSnapshot {
   return {
-    nodes: snapshot.nodes.map(durableNode),
+    // Do not persist a transient upload placeholder. If the app closes before
+    // the asset finishes saving, the next open should not contain a blank node.
+    nodes: snapshot.nodes
+      .filter((node) => {
+        const data = recordOf(recordOf(node).data);
+        return data.imageUploadState !== "processing" && data.imageUploadState !== "error";
+      })
+      .map(durableNode),
     connections: snapshot.edges.map(durableEdge),
     groups: [],
     viewport: {

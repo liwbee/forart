@@ -75,6 +75,9 @@ export interface NativeCanvasNodeData extends Record<string, unknown> {
   multiImageCollapsedSize?: { width: number; height: number };
   imageNaturalWidth?: number;
   imageNaturalHeight?: number;
+  /** Runtime-only state while a dropped/pasted image is being persisted. */
+  imageUploadState?: "processing" | "error";
+  imageUploadError?: string;
   latestGenerationTaskId?: string;
   imageGenerationBackend?: "api" | "libtv";
   libtvImageGeneration?: {

@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { ImageWithFallback } from "../../../components/ImageWithFallback";
 import { Button } from "../../../components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../components/ui/resizable";
 import { Switch } from "../../../components/ui/switch";
@@ -15,9 +16,10 @@ import { ImageViewerSurface, type ImageViewerActivity } from "../../../lib/Image
 import { cn } from "../../../lib/utils";
 
 export interface ReferenceComparisonViewerReference {
+  id: string;
   src: string;
+  thumbnailSrc?: string;
   alt: string;
-  navigation: ImageViewerNavigation;
 }
 
 interface ReferenceComparisonImageViewerProps {
@@ -28,7 +30,9 @@ interface ReferenceComparisonImageViewerProps {
   actions: ImageViewerAction[];
   navigation?: ImageViewerNavigation;
   activity?: ImageViewerActivity;
-  reference?: ReferenceComparisonViewerReference;
+  references?: ReferenceComparisonViewerReference[];
+  referenceIndex?: number;
+  onReferenceIndexChange?: (index: number) => void;
   comparisonEnabled: boolean;
   comparisonLabel: string;
   onComparisonEnabledChange: (enabled: boolean) => void;
@@ -44,7 +48,9 @@ export function ReferenceComparisonImageViewer({
   actions,
   navigation,
   activity,
-  reference,
+  references = [],
+  referenceIndex = 0,
+  onReferenceIndexChange,
   comparisonEnabled,
   comparisonLabel,
   onComparisonEnabledChange,
@@ -55,9 +61,17 @@ export function ReferenceComparisonImageViewer({
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
   const { isClosing, requestClose } = useImageViewerDialog({ sourceKey: src, onClose, navigation });
   const isResizingRef = useRef(false);
+  const referenceStripRef = useRef<HTMLDivElement | null>(null);
   const hasNavigation = Boolean(navigation && navigation.total > 1);
+  const safeReferenceIndex = Math.min(Math.max(0, referenceIndex), Math.max(0, references.length - 1));
+  const reference = references[safeReferenceIndex];
   const showComparison = Boolean(reference && comparisonEnabled);
   const resolutionText = naturalSize.width && naturalSize.height ? `${naturalSize.width} x ${naturalSize.height}` : "";
+
+  useEffect(() => {
+    const activeThumbnail = referenceStripRef.current?.querySelector<HTMLElement>("[aria-current='true']");
+    activeThumbnail?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [safeReferenceIndex]);
 
   const isolatePointerEvent = (event: React.SyntheticEvent) => {
     if (isResizingRef.current || (event.target as Element | null)?.closest?.("[data-separator]")) return;
@@ -139,14 +153,47 @@ export function ReferenceComparisonImageViewer({
               <ResizablePanel id="reference" defaultSize={`${referencePanelPercent}%`} minSize="20%">
                 <div className="rf-reference-comparison-viewer-pane">
                   <ImageViewerSurface src={reference.src} alt={reference.alt} onBlankClick={requestClose} />
-                  <div className="rf-reference-comparison-viewer-reference-nav" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-                    <Button type="button" variant="ghost" size="icon-sm" disabled={reference.navigation.index <= 0} aria-label={reference.navigation.previousLabel} title={reference.navigation.previousLabel} onClick={reference.navigation.onPrevious}>
-                      <ChevronLeft aria-hidden="true" />
-                    </Button>
-                    <span>{reference.navigation.index + 1} / {reference.navigation.total}</span>
-                    <Button type="button" variant="ghost" size="icon-sm" disabled={reference.navigation.index >= reference.navigation.total - 1} aria-label={reference.navigation.nextLabel} title={reference.navigation.nextLabel} onClick={reference.navigation.onNext}>
-                      <ChevronRight aria-hidden="true" />
-                    </Button>
+                  <div
+                    ref={referenceStripRef}
+                    className="rf-reference-comparison-viewer-reference-strip"
+                    role="group"
+                    aria-label={t("infiniteCanvas:referenceImages")}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                    onWheel={(event) => {
+                      const strip = event.currentTarget;
+                      if (strip.scrollWidth <= strip.clientWidth) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+                      strip.scrollBy({ left: delta, behavior: "smooth" });
+                    }}
+                  >
+                    {references.map((item, index) => {
+                      const active = index === safeReferenceIndex;
+                      return (
+                        <Button
+                          key={item.id}
+                          className={cn("rf-reference-comparison-viewer-reference-thumbnail", active && "is-active")}
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={item.alt}
+                          aria-current={active ? "true" : undefined}
+                          title={item.alt}
+                          onClick={() => onReferenceIndexChange?.(index)}
+                        >
+                          <ImageWithFallback
+                            src={item.thumbnailSrc || item.src}
+                            fallbackSrc={item.src}
+                            alt=""
+                            loading="lazy"
+                            decoding="async"
+                            draggable={false}
+                          />
+                        </Button>
+                      );
+                    })}
                   </div>
                 </div>
               </ResizablePanel>
@@ -187,7 +234,7 @@ export function ReferenceComparisonImageViewer({
 
         <div className="image-viewer-top-center" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
           {hasNavigation && navigation ? <span className="image-viewer-counter">{navigation.index + 1} / {navigation.total}</span> : null}
-          {reference ? (
+          {references.length ? (
             <label className="rf-reference-comparison-viewer-toggle">
               <span>{comparisonLabel}</span>
               <Switch size="sm" checked={comparisonEnabled} aria-label={comparisonLabel} onCheckedChange={onComparisonEnabledChange} />

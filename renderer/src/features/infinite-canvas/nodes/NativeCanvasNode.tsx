@@ -12,7 +12,7 @@ import { copyText } from "../../../components/ErrorCopyLine";
 import { ImageViewer } from "../../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import { cn } from "../../../lib/utils";
-import { readImageFileAsDataUrl, useNativeCanvasActions, type CanvasImageCropRect } from "../canvasActions";
+import { readImageFileAsDataUrl, readImageFileDimensions, useNativeCanvasActions, type CanvasImageCropRect } from "../canvasActions";
 import { useNativeCanvasInteractionStore } from "../canvasInteractionStore";
 import {
   nativeCanvasNodePrimaryImage,
@@ -147,6 +147,10 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const resolvedImageUrl = primaryImageUrl ? resolveLibraryImageUrl(primaryImageUrl) : "";
   const previewSourceUrl = canvasPreviewSourceUrl(primaryImageUrl, primaryImage?.thumbUrl);
   const resolvedPreviewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
+  const isImageUploading = data.kind === "imageLoader" && data.imageUploadState === "processing";
+  const imageUploadError = data.kind === "imageLoader" && data.imageUploadState === "error"
+    ? String(data.imageUploadError || "")
+    : "";
   const hasMultipleGeneratedImages = generatedImages.length > 1;
   const isMultiImageExpanded = hasMultipleGeneratedImages
     && Boolean(data.multiImageExpanded)
@@ -472,7 +476,21 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
             const file = event.currentTarget.files?.[0];
             event.currentTarget.value = "";
             if (!file) return;
-            void readImageFileAsDataUrl(file).then((imageUrl) => actions.setNodeImage(id, imageUrl, file.name));
+            void readImageFileDimensions(file)
+              .then((dimensions) => {
+                actions.patchNodeData(id, {
+                  imageNaturalWidth: dimensions.width,
+                  imageNaturalHeight: dimensions.height,
+                  imageUploadState: "processing",
+                  imageUploadError: undefined,
+                });
+                return readImageFileAsDataUrl(file);
+              })
+              .then((imageUrl) => actions.setNodeImage(id, imageUrl, file.name))
+              .catch((error) => actions.patchNodeData(id, {
+                imageUploadState: "error",
+                imageUploadError: error instanceof Error ? error.message : String(error),
+              }));
           }}
         />
       ) : null}
@@ -557,6 +575,11 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 />
               ) : null}
             </>
+          ) : isImageUploading ? (
+            <div className="rf-native-image-placeholder is-uploading" role="status" aria-live="polite">
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+              <span>{t("infiniteCanvas:imageUploading")}</span>
+            </div>
           ) : primaryImageUrl ? (
             data.kind === "imageLoader" && isCropping && resolvedPreviewUrl ? (
               <ImageNodeCropEditor
@@ -692,6 +715,11 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 <Images aria-hidden="true" />
               </div>
             )
+          ) : data.kind === "imageLoader" && imageUploadError ? (
+            <div className="rf-native-image-placeholder is-error" role="alert">
+              <CircleAlert aria-hidden="true" />
+              <span>{imageUploadError}</span>
+            </div>
           ) : data.kind === "imageLoader" ? (
             <div className="rf-native-image-empty">
               <Button className="nodrag justify-start" type="button" variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()}>

@@ -85,6 +85,8 @@ function undoableNodeData(data: NativeCanvasNodeData): NativeCanvasNodeData {
   delete undoable.multiImageExpanded;
   delete undoable.multiImageCollapsedSize;
   delete undoable.thumbUrl;
+  delete undoable.imageUploadState;
+  delete undoable.imageUploadError;
   if (undoable.kind === "imageGenerator" || undoable.kind === "imageLoader") {
     delete undoable.imageNaturalWidth;
     delete undoable.imageNaturalHeight;

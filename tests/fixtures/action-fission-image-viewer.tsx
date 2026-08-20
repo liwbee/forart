@@ -11,12 +11,17 @@ function imageData(label: string, width: number, height: number, color: string) 
 }
 
 const results = Array.from({ length: 6 }, (_, index) => imageData(`Result ${index + 1}`, 768, 1024, index % 2 ? "#cbd5e1" : "#dbeafe"));
-const reference = imageData("Reference 1", 1024, 768, "#fee2e2");
+const references = [
+  imageData("Reference 1", 1024, 768, "#fee2e2"),
+  imageData("Reference 2", 1024, 768, "#dcfce7"),
+  imageData("Reference 3", 1024, 768, "#fef3c7"),
+];
 
 function Fixture() {
   const [resultIndex, setResultIndex] = useState(0);
   const [comparisonEnabled, setComparisonEnabled] = useState(true);
   const [referencePanelPercent, setReferencePanelPercent] = useState(50);
+  const [referenceIndex, setReferenceIndex] = useState(0);
 
   return (
     <ReferenceComparisonImageViewer
@@ -30,18 +35,14 @@ function Fixture() {
       onComparisonEnabledChange={setComparisonEnabled}
       referencePanelPercent={referencePanelPercent}
       onReferencePanelPercentChange={setReferencePanelPercent}
-      reference={{
+      references={references.map((reference, index) => ({
+        id: `reference-${index + 1}`,
         src: reference,
-        alt: "Reference 1",
-        navigation: {
-          index: 0,
-          total: 1,
-          previousLabel: "Previous reference",
-          nextLabel: "Next reference",
-          onPrevious: () => undefined,
-          onNext: () => undefined,
-        },
-      }}
+        thumbnailSrc: reference,
+        alt: `Reference ${index + 1}`,
+      }))}
+      referenceIndex={referenceIndex}
+      onReferenceIndexChange={setReferenceIndex}
       navigation={{
         index: resultIndex,
         total: results.length,

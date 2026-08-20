@@ -499,7 +499,6 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   }, [additionalReferences, primaryReferences, viewerImage?.kind, viewerRow]);
   const selectedViewerReferenceIndex = viewerReferences.findIndex((reference) => reference.nodeId === viewerReferenceNodeId);
   const viewerReferenceIndex = selectedViewerReferenceIndex >= 0 ? selectedViewerReferenceIndex : 0;
-  const viewerReference = viewerReferences[viewerReferenceIndex];
 
   const setState = useCallback((nextState: typeof state) => {
     actions.patchNodeData(nodeId, { actionFission: nextState });
@@ -848,18 +847,14 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           onClose={() => setViewerImage(null)}
           actions={viewerActions}
           activity={viewerActivity}
-          reference={viewerImage.kind === "result" && viewerReference ? {
-            src: viewerReference.imageUrl,
-            alt: viewerReference.title || t("infiniteCanvas:mainReference"),
-            navigation: {
-              index: viewerReferenceIndex,
-              total: viewerReferences.length,
-              previousLabel: t("infiniteCanvas:previousReferenceImage"),
-              nextLabel: t("infiniteCanvas:nextReferenceImage"),
-              onPrevious: () => setViewerReferenceNodeId(viewerReferences[Math.max(0, viewerReferenceIndex - 1)]?.nodeId || ""),
-              onNext: () => setViewerReferenceNodeId(viewerReferences[Math.min(viewerReferences.length - 1, viewerReferenceIndex + 1)]?.nodeId || ""),
-            },
-          } : undefined}
+          references={viewerImage.kind === "result" ? viewerReferences.map((reference) => ({
+            id: reference.nodeId,
+            src: reference.imageUrl,
+            thumbnailSrc: reference.previewUrl,
+            alt: reference.title || t("infiniteCanvas:mainReference"),
+          })) : []}
+          referenceIndex={viewerReferenceIndex}
+          onReferenceIndexChange={(index) => setViewerReferenceNodeId(viewerReferences[index]?.nodeId || "")}
           comparisonEnabled={viewerSettings.referenceComparisonEnabled}
           comparisonLabel={t("infiniteCanvas:referenceComparison")}
           onComparisonEnabledChange={(referenceComparisonEnabled) => updateSettings((current) => ({

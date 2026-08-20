@@ -65,3 +65,31 @@ export function readImageDimensions(imageUrl: string) {
     image.src = imageUrl;
   });
 }
+
+/**
+ * Read dimensions directly from a File without first converting the whole
+ * image to a data URL. This is used to size an upload placeholder before the
+ * expensive asset/thumbnail work starts.
+ */
+export function readImageFileDimensions(file: File) {
+  return new Promise<{ width: number; height: number }>((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    const cleanup = () => {
+      URL.revokeObjectURL(objectUrl);
+      image.onload = null;
+      image.onerror = null;
+    };
+    image.onload = () => {
+      const dimensions = { width: image.naturalWidth, height: image.naturalHeight };
+      cleanup();
+      if (dimensions.width > 0 && dimensions.height > 0) resolve(dimensions);
+      else reject(new Error(i18n.t("infiniteCanvas:imageDimensionsReadFailed")));
+    };
+    image.onerror = () => {
+      cleanup();
+      reject(new Error(i18n.t("infiniteCanvas:imageDimensionsReadFailed")));
+    };
+    image.src = objectUrl;
+  });
+}

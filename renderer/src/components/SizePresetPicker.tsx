@@ -102,11 +102,7 @@ export function SizePresetPicker<R extends string, A extends string>({
   triggerSize = "default",
   triggerVariant = "default",
   disabled = false,
-  formatTrigger = (currentResolution, currentAspectRatio, currentQuality, currentCustomSize) => (
-    currentCustomSize
-      ? currentCustomSize
-      : [currentResolution.toUpperCase(), currentQuality, currentAspectRatio].filter(Boolean).join(" • ")
-  ),
+  formatTrigger,
   renderResolutionLabel,
   renderAspectRatioLabel,
   renderImageCountLabel,
@@ -123,6 +119,13 @@ export function SizePresetPicker<R extends string, A extends string>({
   const customSizeMatch = customSize.match(/^(\d*)x(\d*)$/i);
   const customWidth = customSizeMatch?.[1] || "";
   const customHeight = customSizeMatch?.[2] || "";
+  const triggerText = formatTrigger
+    ? formatTrigger(resolution, aspectRatio, quality, customSize)
+    : customSize || [
+        resolutionOptions.find((option) => option.value === resolution)?.label || resolution.toUpperCase(),
+        qualityOptions.find((option) => option.value === quality)?.label || quality,
+        aspectRatioOptions.find((option) => option.value === aspectRatio)?.label || aspectRatio,
+      ].filter(Boolean).join(" • ");
 
   return (
     <Popover
@@ -149,7 +152,7 @@ export function SizePresetPicker<R extends string, A extends string>({
             disabled={disabled}
           >
             <span className="min-w-0 flex-1 truncate text-left tabular-nums">
-              {formatTrigger(resolution, aspectRatio, quality, customSize)}
+              {triggerText}
             </span>
             <ChevronDown className="opacity-50 transition-transform duration-150 group-data-[state=open]:rotate-180" aria-hidden="true" />
           </Button>

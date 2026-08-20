@@ -36,6 +36,7 @@ import { copyLibraryImage, resolveLibraryImageUrl } from "../../lib/libraryImage
 import {
   NativeCanvasActionsContext,
   readImageDimensions,
+  readImageFileDimensions,
   readImageFileAsDataUrl,
   type CanvasImageCropRect,
   type NativeCanvasActions,
@@ -360,6 +361,8 @@ const HISTORY_REBASED_NODE_DATA_FIELDS: (keyof NativeCanvasNode["data"])[] = [
   "thumbUrl",
   "imageNaturalWidth",
   "imageNaturalHeight",
+  "imageUploadState",
+  "imageUploadError",
 ];
 
 const ACTION_FISSION_SELECTION_FIELDS = [
@@ -833,8 +836,16 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
                     },
                     ...(node.data.generatedImages?.slice(1) || []),
                   ],
+                  imageUploadState: undefined,
+                  imageUploadError: undefined,
                 }
-              : { imageUrl: storedUrl, imageFileName: fileName, thumbUrl: thumbUrl || undefined }),
+              : {
+                  imageUrl: storedUrl,
+                  imageFileName: fileName,
+                  thumbUrl: thumbUrl || undefined,
+                  imageUploadState: undefined,
+                  imageUploadError: undefined,
+                }),
             imageNaturalWidth: dimensions?.width,
             imageNaturalHeight: dimensions?.height,
           },
@@ -1461,33 +1472,74 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
   ) => {
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
     if (!imageFiles.length) return;
-    const images = await Promise.all(imageFiles.map(async (file, index) => {
-      const dataUrl = await readImageFileAsDataUrl(file);
-      const stored = window.easyTool?.saveCanvasAsset
-        ? await window.easyTool.saveCanvasAsset({ dataUrl, defaultName: file.name, kind: "input", type: file.type })
-        : { url: dataUrl, fileName: file.name };
-      return { file, imageUrl: stored.url, thumbUrl: stored.thumbUrl, index };
-    }));
-    const imageNodes = await Promise.all(images.map(async ({ file, imageUrl, thumbUrl, index }) => {
-      const dimensions = await readImageDimensions(imageUrl);
+    // Read only the image header/dimensions first. This avoids waiting for
+    // Base64 conversion, disk I/O, and sharp thumbnail generation before the
+    // user sees anything on the canvas.
+    const images = await Promise.all(imageFiles.map(async (file, index) => ({
+      file,
+      dimensions: await readImageFileDimensions(file),
+      index,
+    })));
+    const imageNodes = images.map(({ file, dimensions, index }) => {
       const size = getImageNodeSize(dimensions.width, dimensions.height);
       const node = createNativeCanvasNode("imageLoader", {
         x: flowPoint.x - size.width / 2 + index * 32,
         y: flowPoint.y - size.height / 2 + index * 32,
       }, {
-        imageUrl,
         imageFileName: file.name,
-        thumbUrl,
         imageNaturalWidth: dimensions.width,
         imageNaturalHeight: dimensions.height,
+        imageUploadState: "processing",
       });
-      return { ...node, style: size, selected: true };
-    }));
+      return { node: { ...node, style: size, selected: true }, file, dimensions };
+    });
     setNodes((current) => [
       ...current.map((node) => node.selected ? { ...node, selected: false } : node),
-      ...imageNodes,
+      ...imageNodes.map((item) => item.node),
     ]);
-  }, [setNodes, t]);
+
+    // Process each image independently. The first completed image is patched
+    // into the canvas immediately instead of waiting for the whole paste/drop
+    // batch to finish.
+    void Promise.all(imageNodes.map(async ({ node, file, dimensions }) => {
+      const version = (imageMutationVersionRef.current.get(node.id) || 0) + 1;
+      imageMutationVersionRef.current.set(node.id, version);
+      try {
+        const dataUrl = await readImageFileAsDataUrl(file);
+        const stored = window.easyTool?.saveCanvasAsset
+          ? await window.easyTool.saveCanvasAsset({ dataUrl, defaultName: file.name, kind: "input", type: file.type })
+          : { url: dataUrl, thumbUrl: "" };
+        if (!imageThumbnailMountedRef.current || imageMutationVersionRef.current.get(node.id) !== version) return;
+        setNodes((current) => current.map((item) => item.id === node.id
+          ? {
+              ...item,
+              data: {
+                ...item.data,
+                imageUrl: stored.url,
+                imageFileName: file.name,
+                thumbUrl: stored.thumbUrl || undefined,
+                imageNaturalWidth: dimensions.width,
+                imageNaturalHeight: dimensions.height,
+                imageUploadState: undefined,
+                imageUploadError: undefined,
+              },
+            }
+          : item));
+      } catch (error) {
+        if (!imageThumbnailMountedRef.current || imageMutationVersionRef.current.get(node.id) !== version) return;
+        setNodes((current) => current.map((item) => item.id === node.id
+          ? {
+              ...item,
+              data: {
+                ...item.data,
+                imageUploadState: "error",
+                imageUploadError: error instanceof Error ? error.message : String(error),
+              },
+            }
+          : item));
+      }
+    }));
+  }, [setNodes]);
 
   const addImageFilesAtClientPoint = useCallback((
     files: File[],

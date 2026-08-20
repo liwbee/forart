@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.use({ viewport: { width: 2048, height: 1152 } });
 
-test("keeps reference and result navigation visible inside their panes", async ({ page }) => {
+test("keeps reference thumbnails and result navigation visible inside their panes", async ({ page }) => {
   await page.goto("http://127.0.0.1:6981/tests/fixtures/action-fission-image-viewer.html");
 
   await expect(page.getByRole("dialog", { name: "Action fission result viewer" })).toBeVisible();
@@ -10,12 +10,11 @@ test("keeps reference and result navigation visible inside their panes", async (
   const panes = page.locator(".rf-reference-comparison-viewer-pane");
   await expect(panes).toHaveCount(2);
 
-  const referenceNavigation = page.locator(".rf-reference-comparison-viewer-reference-nav");
+  const referenceNavigation = page.locator(".rf-reference-comparison-viewer-reference-strip");
   await expect(referenceNavigation).toBeVisible();
-  await expect(referenceNavigation).toContainText("1 / 1");
-  await expect(referenceNavigation.getByRole("button")).toHaveCount(2);
-  await expect(page.getByRole("button", { name: "Previous reference" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Next reference" })).toBeDisabled();
+  const referenceThumbnails = referenceNavigation.locator(".rf-reference-comparison-viewer-reference-thumbnail");
+  await expect(referenceThumbnails).toHaveCount(3);
+  await expect(referenceThumbnails.first()).toHaveAttribute("aria-current", "true");
 
   const leftPaneBounds = await panes.first().boundingBox();
   const referenceNavigationBounds = await referenceNavigation.boundingBox();
@@ -26,7 +25,7 @@ test("keeps reference and result navigation visible inside their panes", async (
   const referenceNavigationTopmost = await page.evaluate(({ x, y }) => {
     const element = document.elementFromPoint(x, y);
     return {
-      isNavigation: Boolean(element?.closest(".rf-reference-comparison-viewer-reference-nav")),
+      isNavigation: Boolean(element?.closest(".rf-reference-comparison-viewer-reference-strip")),
       tagName: element?.tagName,
       className: element?.getAttribute("class"),
     };
@@ -35,6 +34,10 @@ test("keeps reference and result navigation visible inside their panes", async (
     y: referenceNavigationBounds!.y + referenceNavigationBounds!.height / 2,
   });
   expect(referenceNavigationTopmost).toEqual(expect.objectContaining({ isNavigation: true }));
+
+  await referenceThumbnails.nth(1).click();
+  await expect(referenceThumbnails.nth(1)).toHaveAttribute("aria-current", "true");
+  await expect(referenceThumbnails.first()).not.toHaveAttribute("aria-current", "true");
 
   const resultNavigation = page.locator(".rf-reference-comparison-viewer-result-nav");
   await expect(resultNavigation).toHaveCount(2);

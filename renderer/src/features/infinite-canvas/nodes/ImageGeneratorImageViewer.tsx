@@ -34,7 +34,6 @@ export function ImageGeneratorImageViewer({
   ));
   const [referenceIndex, setReferenceIndex] = useState(0);
   const safeReferenceIndex = Math.min(referenceIndex, Math.max(0, references.length - 1));
-  const reference = references[safeReferenceIndex];
 
   return (
     <ReferenceComparisonImageViewer
@@ -44,18 +43,14 @@ export function ImageGeneratorImageViewer({
       onClose={onClose}
       actions={[]}
       navigation={navigation}
-      reference={reference ? {
-        src: reference.imageUrl,
-        alt: reference.title || t("infiniteCanvas:mainReference"),
-        navigation: {
-          index: safeReferenceIndex,
-          total: references.length,
-          previousLabel: t("infiniteCanvas:previousReferenceImage"),
-          nextLabel: t("infiniteCanvas:nextReferenceImage"),
-          onPrevious: () => setReferenceIndex((current) => Math.max(0, current - 1)),
-          onNext: () => setReferenceIndex((current) => Math.min(references.length - 1, current + 1)),
-        },
-      } : undefined}
+      references={references.map((item) => ({
+        id: item.nodeId,
+        src: item.imageUrl,
+        thumbnailSrc: item.previewUrl,
+        alt: item.title || t("infiniteCanvas:mainReference"),
+      }))}
+      referenceIndex={safeReferenceIndex}
+      onReferenceIndexChange={setReferenceIndex}
       comparisonEnabled={viewerSettings.referenceComparisonEnabled}
       comparisonLabel={t("infiniteCanvas:referenceComparison")}
       onComparisonEnabledChange={(referenceComparisonEnabled) => updateSettings((current) => ({
