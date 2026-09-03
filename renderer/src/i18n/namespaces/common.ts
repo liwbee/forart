@@ -13,9 +13,11 @@ export const zhCN = {
     close: "关闭",
     toggleSidebar: "切换侧边栏",
     uploadImage: "上传图片",
+    uploadAsset: "上传素材",
     downloadOriginalImage: "下载原图",
     copyNode: "复制节点",
     copyImage: "复制图片",
+    copyPrompt: "复制提示词",
     copyError: "复制完整报错信息",
     paste: "粘贴"
   },
@@ -149,9 +151,11 @@ export const enUS = {
     close: "Close",
     toggleSidebar: "Toggle sidebar",
     uploadImage: "Upload image",
+    uploadAsset: "Upload asset",
     downloadOriginalImage: "Download original image",
     copyNode: "Copy node",
     copyImage: "Copy image",
+    copyPrompt: "Copy prompt",
     copyError: "Copy full error message",
     paste: "Paste"
   },

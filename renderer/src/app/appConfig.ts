@@ -1,4 +1,6 @@
 export type ForartMode = "local" | "remote";
+export const TASK_HISTORY_RETENTION_DAY_OPTIONS = [1, 3, 7, 15, 30] as const;
+export type TaskHistoryRetentionDays = typeof TASK_HISTORY_RETENTION_DAY_OPTIONS[number];
 
 export interface ForartAppConfig {
   mode: ForartMode;
@@ -8,41 +10,28 @@ export interface ForartAppConfig {
   serverAuthToken: string;
   imageDownloadPath: string;
   photoshopExecutablePath: string;
+  taskHistoryRetentionDays: TaskHistoryRetentionDays;
   language: "zh-CN" | "en-US";
 }
 
-export type ForartApiProviderProtocol = "openai" | "compatible" | "gemini";
+// IPC 边界上的 provider 形状与 features/settings/apiProviders 保持同一份定义；
+// 归一化规则的唯一实现在主进程 config-store.cjs。
+import type { ApiProvider, ApiSettings } from "../features/settings/apiProviders";
+export type ForartApiProviderConfig = ApiProvider;
+export type ForartApiSettingsConfig = ApiSettings;
 
-export interface ForartApiProviderConfig {
-  id: string;
-  name: string;
-  baseUrl: string;
-  apiKey: string;
-  accessKey?: string;
-  secretKey?: string;
-  protocol: ForartApiProviderProtocol;
-  imageRequestMode?: "openai" | "openai-json";
-  imageGenerationEndpoint?: string;
-  imageEditEndpoint?: string;
-  imageModels: string[];
-  chatModels: string[];
-  videoModels: string[];
-  modelAliases?: {
-    image?: Record<string, string>;
-    chat?: Record<string, string>;
-    video?: Record<string, string>;
-  };
-  modelRules?: {
-    image?: Record<string, string>;
-  };
+export type ForartReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ForartAgentReasoningLevel = Exclude<ForartReasoningEffort, "none">;
+
+export interface ForartAgentModelRoute {
+  providerId: string;
+  model: string;
 }
 
-export interface ForartApiSettingsConfig {
-  providers: ForartApiProviderConfig[];
-  defaultImageProviderId: string;
-  providerOrder?: string[];
-  libtvMachineId?: string;
-  libtvActionFissionConcurrency?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+export interface ForartAgentSettings {
+  thinkingMode: boolean;
+  reasoningLevel: ForartAgentReasoningLevel;
+  imageGeneratorPromptOptimization: ForartAgentModelRoute | null;
 }
 
 export interface ForartImageReviewSettings {
@@ -54,6 +43,7 @@ export interface ForartInfiniteCanvasSettings {
   connectionsVisible: boolean;
   minimapOpen: boolean;
   snapToGrid: boolean;
+  promptEditorsExpanded: boolean;
   referenceComparisonViewer: {
     referenceComparisonEnabled: boolean;
     referencePanelPercent: number;
@@ -130,6 +120,48 @@ export interface ForartGenerationTasksApi {
   onChanged: (callback: (task: GenerationTaskDto) => void) => () => void;
 }
 
+export interface ForartCanvasAgentApi {
+  run: (request: { runId: string; task: "smart-reverse" | "optimize-image-generator-prompt"; canvasId?: string; nodeId?: string; context: unknown; language?: "zh-CN" | "en-US"; modelRoute?: { providerId: string; model: string }; reasoning?: ForartReasoningEffort }) => Promise<unknown>;
+  cancel: (runId: string) => Promise<{ ok: true; canceled: boolean }>;
+  listActive: (canvasId?: string) => Promise<Array<{ runId: string; task: "smart-reverse" | "optimize-image-generator-prompt"; operation?: string; canvasId: string; nodeId: string; sourcePrompt?: string; stage: string; status: "running"; startedAt: number }>>;
+  onProgress: (callback: (progress: { runId: string; task: "smart-reverse" | "optimize-image-generator-prompt"; operation?: string; canvasId: string; nodeId: string; sourcePrompt?: string; stage: string; status: "running" | "completed" | "failed" | "canceled"; startedAt: number; result?: unknown; error?: string }) => void) => () => void;
+}
+
+export type CanvasTaskCategory = "image" | "video";
+export interface CanvasTaskDto {
+  id: string;
+  category: CanvasTaskCategory;
+  operation: "image_generate" | "action_fission_generate";
+  canvasId: string;
+  nodeId: string;
+  rowId?: string;
+  providerId?: string;
+  providerName?: string;
+  model?: string;
+  resolution?: string;
+  aspectRatio?: string;
+  quality?: string;
+  executorKind: "api" | "libtv";
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled" | "interrupted" | "superseded";
+  version: number;
+  createdAt: number;
+  startedAt: number;
+  updatedAt: number;
+  completedAt?: number;
+  durationMs?: number;
+  errorCode?: string;
+  errorMessage?: string;
+  resultKind: "image" | "text" | "structured";
+  inputFingerprint?: string;
+  applicationStatus?: "pending" | "applied" | "stale" | "discarded";
+  input?: unknown;
+  result?: unknown;
+}
+
+export interface ForartCanvasTasksApi {
+  listPage: (payload: { category: CanvasTaskCategory; status: "all" | "active" | "succeeded" | "exceptional"; limit: number; offset: number }) => Promise<{ tasks: CanvasTaskDto[]; total: number; counts: { all: number; active: number; succeeded: number; exceptional: number } }>;
+}
+
 export interface ForartAppInfo {
   name: string;
   repoUrl: string;
@@ -198,6 +230,10 @@ export interface ForartConfigApi {
   save: (config: ForartAppConfig) => Promise<{ ok: true; config: ForartAppConfig }>;
   loadApiSettings: () => Promise<ForartApiSettingsConfig>;
   saveApiSettings: (settings: ForartApiSettingsConfig) => Promise<{ ok: true; apiSettings: ForartApiSettingsConfig }>;
+  loadAgentSettings: () => Promise<ForartAgentSettings>;
+  saveAgentSettings: (settings: ForartAgentSettings) => Promise<{ ok: true; agentSettings: ForartAgentSettings }>;
+  requestProviderModels: (payload: { providerId: string }) => Promise<{ models: string[] }>;
+  requestApimartBalance: (payload: { providerId: string }) => Promise<{ status: "idle" | "ready"; remainCredits?: number; usedCredits?: number }>;
   loadImageReviewSettings: () => Promise<ForartImageReviewSettings>;
   saveImageReviewSettings: (settings: ForartImageReviewSettings) => Promise<{ ok: true; imageReview: ForartImageReviewSettings }>;
   loadInfiniteCanvasSettings: () => Promise<ForartInfiniteCanvasSettings>;
@@ -326,6 +362,21 @@ export interface EasyToolApi {
   saveCanvasAsset: (payload: { dataUrl?: string; url?: string; defaultName?: string; kind?: "input" | "output"; type?: string }) => Promise<{ url: string; thumbUrl?: string; fileName: string; filePath?: string; thumbFilePath?: string }>;
   saveCanvasAssetThumbnail: (payload: { url?: string; filePath?: string }) => Promise<{ thumbUrl?: string; thumbFilePath?: string }>;
   ensureCanvasAssetThumbnail: (payload: { url?: string; filePath?: string }) => Promise<{ thumbUrl?: string; thumbFilePath?: string }>;
+  importCanvasAssetFile: (payload: { file?: File; filePath?: string; fileName?: string; mimeType?: string }) => Promise<{
+    url: string;
+    thumbUrl?: string;
+    thumbFilePath?: string;
+    fileName: string;
+    storedFileName?: string;
+    filePath?: string;
+    assetType: "image" | "video";
+    mimeType?: string;
+    width: number;
+    height: number;
+    durationMs?: number;
+    sizeBytes?: number;
+    codec?: string;
+  }>;
   cropCanvasAsset: (payload: { url?: string; filePath?: string; x: number; y: number; width: number; height: number; defaultName?: string }) => Promise<{ url: string; thumbUrl?: string; fileName: string; filePath?: string; thumbFilePath?: string; width: number; height: number }>;
   scanCanvasCache: () => Promise<CanvasCacheScanResult>;
   deleteCanvasCacheAssets: (payload: { ids: string[] }) => Promise<CanvasCacheDeleteResult>;
@@ -523,6 +574,8 @@ declare global {
     forartActionImport?: ForartActionImportApi;
     forartLocalApi?: ForartLocalApi;
     forartGenerationTasks?: ForartGenerationTasksApi;
+    forartCanvasAgent?: ForartCanvasAgentApi;
+    forartCanvasTasks?: ForartCanvasTasksApi;
     libtv?: LibtvApi;
   }
 }
@@ -535,6 +588,7 @@ export const DEFAULT_APP_CONFIG: ForartAppConfig = {
   serverAuthToken: "",
   imageDownloadPath: "",
   photoshopExecutablePath: "",
+  taskHistoryRetentionDays: 15,
   language: "zh-CN",
 };
 
@@ -549,6 +603,9 @@ export function normalizeConfig(input: Partial<ForartAppConfig>): ForartAppConfi
     serverAuthToken: String(input.serverAuthToken || "").trim(),
     imageDownloadPath: String(input.imageDownloadPath || "").trim(),
     photoshopExecutablePath: String(input.photoshopExecutablePath || "").trim(),
+    taskHistoryRetentionDays: TASK_HISTORY_RETENTION_DAY_OPTIONS.includes(Number(input.taskHistoryRetentionDays) as TaskHistoryRetentionDays)
+      ? Number(input.taskHistoryRetentionDays) as TaskHistoryRetentionDays
+      : DEFAULT_APP_CONFIG.taskHistoryRetentionDays,
     language: input.language === "en-US" ? "en-US" : "zh-CN",
   };
 }

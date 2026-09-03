@@ -1,16 +1,17 @@
 import type { Edge, Node, XYPosition } from "@xyflow/react";
-import { Bot, FolderKanban, ImageIcon, ImagePlus, Split, TextCursorInput, Type, type LucideIcon } from "lucide-react";
+import { Bot, FolderKanban, ImageIcon, ImagePlus, ScanSearch, Split, TextCursorInput, Type, type LucideIcon } from "lucide-react";
 import type { ActionFissionState } from "./action-fission/actionFissionTypes";
 import {
   getImageGeneratorNodeSize,
   getImageNodeSize,
   IMAGE_GENERATOR_DEFAULT_SIZE,
-  IMAGE_LOADER_DEFAULT_SIZE,
+  ASSET_LOADER_DEFAULT_SIZE,
 } from "./imageNodeSizing";
 
-export { getImageGeneratorNodeSize, getImageNodeSize } from "./imageNodeSizing";
+export { getImageGeneratorNodeSize, getImageNodeSize, getVideoNodeSize } from "./imageNodeSizing";
 
-export type NativeCanvasNodeKind = "imageGenerator" | "imageLoader" | "prompt" | "annotation" | "llm" | "actionFission" | "group";
+export type NativeCanvasNodeKind = "imageGenerator" | "assetLoader" | "prompt" | "annotation" | "llm" | "smartReverse" | "actionFission" | "group";
+export type NativeCanvasAssetType = "image" | "video" | "audio";
 
 export interface NativeGenerationResult {
   url?: string;
@@ -19,8 +20,16 @@ export interface NativeGenerationResult {
   fileName?: string;
   width?: number;
   height?: number;
+  durationMs?: number;
   downloadState?: "pending" | "downloaded";
   downloadedAt?: number;
+}
+
+/** Generic media descriptor used by assetLoader nodes. Image-specific consumers
+ * should continue using nativeCanvasNodePrimaryImage(). */
+export interface NativeCanvasAsset extends NativeGenerationResult {
+  assetType: NativeCanvasAssetType;
+  mimeType?: string;
 }
 
 export interface NativeCanvasAnnotationStyle {
@@ -54,10 +63,29 @@ export interface NativeCanvasNodeData extends Record<string, unknown> {
   /** Legacy grouping marker. New documents use React Flow parentId/groupNode instead. */
   groupId?: string;
   groupColor?: string;
+  /** Canonical media fields for assetLoader nodes. */
+  assetUrl?: string;
+  assetFileName?: string;
+  assetThumbUrl?: string;
+  assetType?: NativeCanvasAssetType;
+  assetMimeType?: string;
+  assetNaturalWidth?: number;
+  assetNaturalHeight?: number;
+  assetDurationMs?: number;
+  assetSizeBytes?: number;
+  assetLoadState?: "processing" | "error";
+  assetLoadError?: string;
+  /** Legacy image-loader fields accepted only while migrating old documents. */
   imageUrl?: string;
   imageFileName?: string;
   thumbUrl?: string;
   text?: string;
+  smartReverseInstruction?: string;
+  smartReverseInstructionDocument?: NativeImagePromptDocument;
+  smartReverseProviderId?: string;
+  smartReverseModel?: string;
+  smartReverseReasoning?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  smartReverseResult?: NativeSmartReverseResult;
   imagePromptDocument?: NativeImagePromptDocument;
   annotationStyle?: NativeCanvasAnnotationStyle;
   imageProviderId?: string;
@@ -75,7 +103,7 @@ export interface NativeCanvasNodeData extends Record<string, unknown> {
   multiImageCollapsedSize?: { width: number; height: number };
   imageNaturalWidth?: number;
   imageNaturalHeight?: number;
-  /** Runtime-only state while a dropped/pasted image is being persisted. */
+  /** Runtime-only state while a dropped/pasted asset is being persisted. */
   imageUploadState?: "processing" | "error";
   imageUploadError?: string;
   latestGenerationTaskId?: string;
@@ -109,31 +137,63 @@ export function nativeCanvasNodeTaskId(data: NativeCanvasNodeData) {
   return String(data.latestGenerationTaskId || "");
 }
 
+export interface NativeSmartReverseResult {
+  mode: "combined" | "separate";
+  relationshipSummary: string;
+  assetUses: Array<{ nodeId: string; use: string }>;
+  outputs: Array<{
+    id: string;
+    sourceNodeIds: string[];
+    summary: string;
+    detailedPrompt: string;
+    compactPrompt: string;
+    negativePrompt: string;
+    preserved: string[];
+    avoid: string[];
+    uncertainties: string[];
+  }>;
+  warnings: string[];
+}
+
 export function nativeCanvasNodePrimaryImage(data: NativeCanvasNodeData): NativeGenerationResult | null {
   if (data.kind === "imageGenerator") {
     const generated = data.generatedImages?.find((result) => result.localUrl || result.url);
     if (generated) return generated;
   }
-  if (!data.imageUrl) return null;
+  if (data.kind !== "assetLoader" || (data.assetType && data.assetType !== "image") || !data.assetUrl) return null;
   return {
-    localUrl: data.imageUrl,
-    fileName: data.imageFileName,
-    thumbUrl: data.thumbUrl,
-    width: data.imageNaturalWidth,
-    height: data.imageNaturalHeight,
+    localUrl: data.assetUrl,
+    fileName: data.assetFileName,
+    thumbUrl: data.assetThumbUrl,
+    width: data.assetNaturalWidth,
+    height: data.assetNaturalHeight,
+  };
+}
+
+export function nativeCanvasNodePrimaryAsset(data: NativeCanvasNodeData): NativeCanvasAsset | null {
+  if (data.kind !== "assetLoader" || !data.assetUrl) return null;
+  return {
+    assetType: data.assetType || "image",
+    mimeType: data.assetMimeType,
+    localUrl: data.assetUrl,
+    fileName: data.assetFileName,
+    thumbUrl: data.assetThumbUrl,
+    width: data.assetNaturalWidth,
+    height: data.assetNaturalHeight,
+    durationMs: data.assetDurationMs,
   };
 }
 
 export interface NativeCanvasNodeResizeConfig {
   minWidth: number;
   minHeight: number;
-  maxWidth: number;
-  maxHeight: number;
+  maxWidth?: number;
+  maxHeight?: number;
 }
 
 interface NativeCanvasNodeDefinition {
   icon: LucideIcon;
-  labelKey: "imageGenerator" | "imageNode" | "prompt" | "annotation" | "llm" | "actionFission" | "group";
+  labelKey: "imageGenerator" | "assetNode" | "prompt" | "annotation" | "llm" | "smartReverse" | "actionFission" | "group";
   size: { width: number; height: number };
   acceptsInput: boolean;
   providesOutput: boolean;
@@ -148,10 +208,10 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
     acceptsInput: true,
     providesOutput: true,
   },
-  imageLoader: {
+  assetLoader: {
     icon: ImageIcon,
-    labelKey: "imageNode",
-    size: IMAGE_LOADER_DEFAULT_SIZE,
+    labelKey: "assetNode",
+    size: ASSET_LOADER_DEFAULT_SIZE,
     acceptsInput: false,
     providesOutput: true,
   },
@@ -164,8 +224,6 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
     resizable: {
       minWidth: 180,
       minHeight: 100,
-      maxWidth: 640,
-      maxHeight: 520,
     },
   },
   annotation: {
@@ -195,6 +253,14 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
       maxHeight: 1078,
     },
   },
+  smartReverse: {
+    icon: ScanSearch,
+    labelKey: "smartReverse",
+    size: { width: 340, height: 300 },
+    acceptsInput: true,
+    providesOutput: true,
+    resizable: { minWidth: 280, minHeight: 240 },
+  },
   group: {
     icon: FolderKanban,
     labelKey: "group",
@@ -222,7 +288,7 @@ export function createNativeCanvasNode(
     type: "canvasNode",
     position,
     data: nodeData,
-    style: kind === "imageGenerator" && !nodeData.imageUrl
+    style: kind === "imageGenerator" && !nodeData.generatedImages?.some((image) => image.localUrl || image.url)
       ? getImageGeneratorNodeSize(nodeData.imageAspectRatio)
       : definition.size,
   };
@@ -269,5 +335,39 @@ export function cloneNativeCanvasNodeData(data: NativeCanvasNodeData): NativeCan
     };
   }
 
+  return clonedData;
+}
+
+/**
+ * Rebind structured prompt references when a node and its incoming edges are
+ * cloned together. References are intentionally left untouched when an edge
+ * was not part of the copied payload, so a partial copy remains visibly
+ * invalid instead of silently pointing at an unrelated input.
+ */
+export function remapNativeCanvasNodePromptReferences(
+  data: NativeCanvasNodeData,
+  edgeIdMap: ReadonlyMap<string, string>,
+): NativeCanvasNodeData {
+  const clonedData = cloneNativeCanvasNodeData(data);
+  const remapDocument = (document: NativeImagePromptDocument | undefined): NativeImagePromptDocument | undefined => {
+    if (!document?.root) return document;
+    const remapNode = (node: NativeImagePromptSerializedNode): NativeImagePromptSerializedNode => ({
+      ...node,
+      ...(node.type === "image-reference" && node.edgeId
+        ? { edgeId: edgeIdMap.get(node.edgeId) || node.edgeId }
+        : {}),
+      ...(Array.isArray(node.children)
+        ? { children: node.children.map(remapNode) }
+        : {}),
+    });
+    return { ...document, root: remapNode(document.root) };
+  };
+
+  if (clonedData.imagePromptDocument) {
+    clonedData.imagePromptDocument = remapDocument(clonedData.imagePromptDocument);
+  }
+  if (clonedData.smartReverseInstructionDocument) {
+    clonedData.smartReverseInstructionDocument = remapDocument(clonedData.smartReverseInstructionDocument);
+  }
   return clonedData;
 }

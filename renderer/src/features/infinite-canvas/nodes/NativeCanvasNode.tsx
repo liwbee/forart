@@ -12,7 +12,7 @@ import { copyText } from "../../../components/ErrorCopyLine";
 import { ImageViewer } from "../../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import { cn } from "../../../lib/utils";
-import { readImageFileAsDataUrl, readImageFileDimensions, useNativeCanvasActions, type CanvasImageCropRect } from "../canvasActions";
+import { isCanvasAssetFile, readImageFileAsDataUrl, readImageFileDimensions, readMediaFileDimensions, useNativeCanvasActions, type CanvasImageCropRect } from "../canvasActions";
 import { useNativeCanvasInteractionStore } from "../canvasInteractionStore";
 import {
   nativeCanvasNodePrimaryImage,
@@ -35,8 +35,13 @@ import { isGenerationTaskActive, useGenerationTaskCache } from "../generation/ge
 import { ImageNodeCropEditor, type ImageCropAspect } from "./ImageNodeCropEditor";
 import { ImageGeneratorImageViewer } from "./ImageGeneratorImageViewer";
 import { NativeNodeCaption } from "./NativeNodeCaption";
+import { VideoAssetBody } from "./VideoAssetBody";
 import { AnnotationNodeBody } from "./AnnotationNodeBody";
 import { AnnotationNodeToolbarControls } from "./AnnotationNodeToolbarControls";
+import { SmartReverseNodeBody } from "./ImageReverseNodeBody";
+import { SmartReverseParamPanel } from "./ImageReverseParamPanel";
+import { useSmartReverseRuntimeStore } from "../generation/imageReverseRuntimeStore";
+import { useCanvasAgent } from "../../canvas-agent";
 
 function GenerationErrorStatus({ message }: { message: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -89,12 +94,17 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const endNodeEditing = useNativeCanvasInteractionStore((state) => state.endNodeEditing);
   const definition = NATIVE_CANVAS_NODE_DEFINITIONS[data.kind];
   const nodeTypeLabel = t(`infiniteCanvas:${definition.labelKey}`);
-  const displayLabel = data.kind === "imageLoader" && data.imageUrl && data.label
+  const displayLabel = data.kind === "assetLoader" && data.assetUrl && data.label
     ? data.label
     : nodeTypeLabel;
   const Icon = definition.icon;
-  const isImageNode = data.kind === "imageLoader" || data.kind === "imageGenerator";
+  const isImageNode = data.kind === "assetLoader" || data.kind === "imageGenerator";
+  const isVideoAsset = data.kind === "assetLoader" && data.assetType === "video";
   const isPromptNode = data.kind === "prompt";
+  const isSmartReverseNode = data.kind === "smartReverse";
+  const canvasAgent = useCanvasAgent();
+  const smartReverseRunFromAgent = isSmartReverseNode && Object.values(canvasAgent.runs).some((run) => run.nodeId === id && run.task === "smart-reverse" && run.status === "running");
+  const smartReverseRunning = useSmartReverseRuntimeStore((state) => Boolean(state.runningByNode[id])) || smartReverseRunFromAgent;
   const isAnnotationNode = data.kind === "annotation";
   const isActionFissionNode = data.kind === "actionFission";
   const captionTitle = String(data.label || "").trim() || nodeTypeLabel;
@@ -124,13 +134,14 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const [isCropBusy, setIsCropBusy] = useState(false);
   const generationStartedAt = Number(activeGenerationTask?.runningAt || activeGenerationTask?.startedAt || 0);
   const elapsedText = formatGenerationDuration(generationStartedAt ? timerNow - generationStartedAt : 0);
-  const imageWidth = Math.round(Number(data.imageNaturalWidth || 0));
-  const imageHeight = Math.round(Number(data.imageNaturalHeight || 0));
+  const imageWidth = Math.round(Number(data.assetNaturalWidth || data.imageNaturalWidth || 0));
+  const imageHeight = Math.round(Number(data.assetNaturalHeight || data.imageNaturalHeight || 0));
   const imageResolution = imageWidth > 0 && imageHeight > 0 ? `${imageWidth} x ${imageHeight}` : "";
   const generatedImages = data.kind === "imageGenerator"
     ? (data.generatedImages || []).filter((result) => result.localUrl || result.url)
     : [];
   const primaryImage = nativeCanvasNodePrimaryImage(data);
+  const primaryAssetUrl = data.kind === "assetLoader" ? String(data.assetUrl || "") : "";
   const primaryImageUrl = String(primaryImage?.localUrl || primaryImage?.url || "");
   const showImageGeneratorEmptyIcon = data.kind === "imageGenerator"
     && !primaryImageUrl
@@ -147,9 +158,9 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const resolvedImageUrl = primaryImageUrl ? resolveLibraryImageUrl(primaryImageUrl) : "";
   const previewSourceUrl = canvasPreviewSourceUrl(primaryImageUrl, primaryImage?.thumbUrl);
   const resolvedPreviewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
-  const isImageUploading = data.kind === "imageLoader" && data.imageUploadState === "processing";
-  const imageUploadError = data.kind === "imageLoader" && data.imageUploadState === "error"
-    ? String(data.imageUploadError || "")
+  const isAssetLoading = data.kind === "assetLoader" && data.assetLoadState === "processing";
+  const assetLoadError = data.kind === "assetLoader" && data.assetLoadState === "error"
+    ? String(data.assetLoadError || "")
     : "";
   const hasMultipleGeneratedImages = generatedImages.length > 1;
   const isMultiImageExpanded = hasMultipleGeneratedImages
@@ -378,9 +389,9 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 <X aria-hidden="true" />
               </Button>
             </>
-          ) : data.kind === "imageLoader" ? (
+          ) : data.kind === "assetLoader" ? (
             <>
-              <Button type="button" variant="ghost" size="icon-sm" aria-label={t("common:actions.uploadImage")} onClick={() => fileInputRef.current?.click()}>
+              <Button type="button" variant="ghost" size="icon-sm" aria-label={t("common:actions.uploadAsset")} onClick={() => fileInputRef.current?.click()}>
                 <Upload aria-hidden="true" />
               </Button>
               <Button type="button" variant="ghost" size="icon-sm" aria-label={t("infiniteCanvas:importFromLibrary")} onClick={() => actions.openLibraryForNode(id)}>
@@ -407,6 +418,20 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                   : <Play aria-hidden="true" fill="currentColor" />}
             </Button>
           ) : null}
+          {data.kind === "smartReverse" && !isCropping ? (
+            <Button
+              type="button"
+              variant="default"
+              size="icon-sm"
+              aria-label={t(smartReverseRunning ? "infiniteCanvas:stopRun" : "infiniteCanvas:run")}
+              title={t(smartReverseRunning ? "infiniteCanvas:stopRun" : "infiniteCanvas:run")}
+              onClick={() => smartReverseRunning
+                ? useSmartReverseRuntimeStore.getState().stop(id)
+                : useSmartReverseRuntimeStore.getState().run(id)}
+            >
+              {smartReverseRunning ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}
+            </Button>
+          ) : null}
           {!isCropping && canUseImageActions ? (
             <Button
               type="button"
@@ -422,7 +447,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               <Maximize2 aria-hidden="true" />
             </Button>
           ) : null}
-          {data.kind === "imageLoader" && primaryImageUrl && !isCropping ? (
+          {data.kind === "assetLoader" && primaryImageUrl && !isCropping ? (
             <Button
               type="button"
               variant="ghost"
@@ -465,31 +490,45 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
         </NodeToolbar>
       ) : null}
 
-      {data.kind === "imageLoader" ? (
+      {data.kind === "assetLoader" ? (
         <input
           ref={fileInputRef}
           className="rf-native-image-input"
           type="file"
-          accept="image/*"
+          accept="image/*,video/mp4,video/webm,video/quicktime,video/x-m4v,.mp4,.webm,.mov,.m4v"
           tabIndex={-1}
           onChange={(event) => {
             const file = event.currentTarget.files?.[0];
             event.currentTarget.value = "";
             if (!file) return;
-            void readImageFileDimensions(file)
+            if (!isCanvasAssetFile(file)) return;
+            void readMediaFileDimensions(file)
               .then((dimensions) => {
+                const assetType = file.type.startsWith("video/") || /\.(mp4|m4v|mov|webm)$/i.test(file.name) ? "video" as const : "image" as const;
                 actions.patchNodeData(id, {
-                  imageNaturalWidth: dimensions.width,
-                  imageNaturalHeight: dimensions.height,
-                  imageUploadState: "processing",
-                  imageUploadError: undefined,
+                  assetNaturalWidth: dimensions.width,
+                  assetNaturalHeight: dimensions.height,
+                  assetType,
+                  assetLoadState: "processing",
+                  assetLoadError: undefined,
                 });
-                return readImageFileAsDataUrl(file);
+                if (window.easyTool?.importCanvasAssetFile) {
+                  return window.easyTool.importCanvasAssetFile({ file }).then((stored) => {
+                    actions.setNodeAsset(id, stored.url, file.name, stored.assetType, stored.mimeType || file.type, {
+                      width: stored.width,
+                      height: stored.height,
+                      durationMs: stored.durationMs,
+                      sizeBytes: stored.sizeBytes,
+                      thumbUrl: stored.thumbUrl,
+                    });
+                    return null;
+                  });
+                }
+                return readImageFileAsDataUrl(file).then((imageUrl) => actions.setNodeAsset(id, imageUrl, file.name, "image", file.type));
               })
-              .then((imageUrl) => actions.setNodeImage(id, imageUrl, file.name))
               .catch((error) => actions.patchNodeData(id, {
-                imageUploadState: "error",
-                imageUploadError: error instanceof Error ? error.message : String(error),
+                assetLoadState: "error",
+                assetLoadError: error instanceof Error ? error.message : String(error),
               }));
           }}
         />
@@ -526,6 +565,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
           "rf-native-node-content",
           isImageNode && "rf-native-node-content--image",
           isPromptNode && "rf-native-node-content--prompt",
+          isSmartReverseNode && "rf-native-node-content--image-reverse",
           isAnnotationNode && "rf-native-node-content--annotation",
           isActionFissionNode && "rf-native-node-content--action-fission",
           isCropping && "is-cropping",
@@ -536,15 +576,45 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
             <AnnotationNodeBody nodeId={id} text={String(data.text || "")} textStyle={data.annotationStyle} />
           ) : isActionFissionNode ? (
             <ActionFissionNodeBody nodeId={id} data={data} paramPanelVisible={toolbarVisible} />
+          ) : isSmartReverseNode ? (
+            <SmartReverseNodeBody nodeId={id} data={data} running={smartReverseRunning} />
           ) : isPromptNode ? (
             <>
               <Textarea
                 ref={promptInputRef}
-                className="rf-native-prompt-input nodrag nowheel border-0 bg-transparent shadow-none focus-visible:border-0 focus-visible:ring-0"
+                className={cn(
+                  "rf-native-prompt-input nowheel border-0 bg-transparent shadow-none focus-visible:border-0 focus-visible:ring-0",
+                  isPromptEditing && "is-editing nodrag nopan",
+                )}
                 value={data.text || ""}
                 readOnly={!isPromptEditing}
                 placeholder={t("infiniteCanvas:promptPlaceholder")}
                 aria-label={t("infiniteCanvas:prompt")}
+                onPointerDown={(event) => {
+                  if (isPromptEditing || event.button !== 0 || event.detail < 2) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  beginPromptHistoryGesture();
+                  beginNodeEditing(id);
+                }}
+                onDoubleClick={(event) => {
+                  if (isPromptEditing) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  beginNodeEditing(id);
+                }}
+                onPointerMove={(event) => {
+                  if (isPromptEditing || (event.buttons & 1) === 0) return;
+                  const textarea = event.currentTarget;
+                  window.requestAnimationFrame(() => {
+                    textarea.setSelectionRange(textarea.selectionEnd, textarea.selectionEnd);
+                  });
+                }}
+                onPointerUp={(event) => {
+                  if (isPromptEditing) return;
+                  const textarea = event.currentTarget;
+                  textarea.setSelectionRange(textarea.selectionEnd, textarea.selectionEnd);
+                }}
                 onBlur={() => {
                   endNodeEditing(id);
                   endPromptHistoryGesture();
@@ -557,31 +627,16 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 }}
                 onChange={(event) => actions.setNodeText(id, event.currentTarget.value)}
               />
-              {!isPromptEditing ? (
-                <div
-                  className="rf-native-prompt-edit-shield"
-                  onPointerDown={(event) => {
-                    if (event.button !== 0 || event.detail < 2) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    beginPromptHistoryGesture();
-                    beginNodeEditing(id);
-                  }}
-                  onDoubleClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    beginNodeEditing(id);
-                  }}
-                />
-              ) : null}
             </>
-          ) : isImageUploading ? (
+          ) : isAssetLoading ? (
             <div className="rf-native-image-placeholder is-uploading" role="status" aria-live="polite">
               <LoaderCircle className="animate-spin" aria-hidden="true" />
-              <span>{t("infiniteCanvas:imageUploading")}</span>
+              <span>{t("infiniteCanvas:assetLoading")}</span>
             </div>
+          ) : isVideoAsset && primaryAssetUrl ? (
+            <VideoAssetBody sourceUrl={primaryAssetUrl} thumbUrl={data.assetThumbUrl} label={displayLabel} />
           ) : primaryImageUrl ? (
-            data.kind === "imageLoader" && isCropping && resolvedPreviewUrl ? (
+            data.kind === "assetLoader" && isCropping && resolvedPreviewUrl ? (
               <ImageNodeCropEditor
                 src={resolvedPreviewUrl}
                 fallbackSrc={resolvedImageUrl}
@@ -715,16 +770,16 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 <Images aria-hidden="true" />
               </div>
             )
-          ) : data.kind === "imageLoader" && imageUploadError ? (
+          ) : data.kind === "assetLoader" && assetLoadError ? (
             <div className="rf-native-image-placeholder is-error" role="alert">
               <CircleAlert aria-hidden="true" />
-              <span>{imageUploadError}</span>
+              <span>{assetLoadError}</span>
             </div>
-          ) : data.kind === "imageLoader" ? (
+          ) : data.kind === "assetLoader" ? (
             <div className="rf-native-image-empty">
               <Button className="nodrag justify-start" type="button" variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()}>
                 <Upload data-icon="inline-start" aria-hidden="true" />
-                {t("common:actions.uploadImage")}
+                {t("common:actions.uploadAsset")}
               </Button>
               <Button className="nodrag justify-start" type="button" variant="ghost" size="sm" onClick={() => actions.openLibraryForNode(id)}>
                 <Images data-icon="inline-start" aria-hidden="true" />
@@ -737,14 +792,14 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
           {imageResolution && primaryImageUrl && !isCropping && !isGenerating && !hasGenerationError && !isMultiImageExpanded ? (
             <span className="rf-native-image-resolution">{imageResolution}</span>
           ) : null}
-          {data.kind === "imageLoader" && primaryImageUrl && !isCropping ? (
+          {data.kind === "assetLoader" && primaryImageUrl && !isCropping ? (
             <Button
               className="rf-native-image-upload nodrag nopan nowheel"
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label={t("common:actions.uploadImage")}
-              title={t("common:actions.uploadImage")}
+              aria-label={t("common:actions.uploadAsset")}
+              title={t("common:actions.uploadAsset")}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
@@ -829,6 +884,9 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
 
       {data.kind === "imageGenerator" ? (
         <ImageGeneratorParamPanel nodeId={id} data={data} visible={toolbarVisible} />
+      ) : null}
+      {data.kind === "smartReverse" ? (
+        <SmartReverseParamPanel nodeId={id} data={data} visible={toolbarVisible} />
       ) : null}
 
       {definition.providesOutput ? <Handle type="source" position={Position.Right} id="output" /> : null}

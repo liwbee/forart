@@ -3,6 +3,9 @@ const {
   GENERATION_EXECUTION_TIMEOUT_MS,
   createGenerationExecutionTimeout,
 } = require('./generation/generation-execution-timeout.cjs');
+const { generationResultFileName } = require('./generation-naming.cjs');
+
+const LIBTV_RUN_NODE_LAUNCH_INTERVAL_MS = 3000;
 
 function firstString(...values) {
   for (const value of values) {
@@ -171,6 +174,7 @@ function createLibtvGenerationRunner({
   resultCommitter,
   resolveWorkspaceName,
   resolveActionFissionConcurrency,
+  runNodeLaunchIntervalMs = LIBTV_RUN_NODE_LAUNCH_INTERVAL_MS,
   executionTimeoutMs = GENERATION_EXECUTION_TIMEOUT_MS,
 }) {
   if (!resultCommitter?.commit) throw new Error('Generation result committer is required.');
@@ -178,12 +182,12 @@ function createLibtvGenerationRunner({
   const anchoredTaskIds = new Set();
   const queuePools = new Map();
   const queuedTaskPoolKeys = new Map();
-  // LibTV accepts node preparation in parallel, but the remote generation
-  // start endpoint is single-flight for the account/project. Keep that
-  // boundary separate from the action-fission task queue so a concurrency of
-  // 0 still prepares every row concurrently without submitting overlapping
-  // `node --run` requests.
+  // LibTV rejects generation starts issued at the same instant, but accepts
+  // overlapping generations when their CLI processes are launched a few
+  // seconds apart. Pace process launches without waiting for each blocking
+  // `node --run` command to reach its terminal result.
   let runNodeTail = Promise.resolve();
+  const runNodeLaunchDelayMs = Math.max(0, Number(runNodeLaunchIntervalMs) || 0);
 
   function configuredActionFissionConcurrency() {
     const requested = Number(typeof resolveActionFissionConcurrency === 'function'
@@ -271,11 +275,22 @@ function createLibtvGenerationRunner({
     });
     return predecessor
       .then(() => {
-        throwIfAborted(signal);
-        return operation();
-      })
-      .finally(() => {
+        let pending;
+        try {
+          throwIfAborted(signal);
+          // Calling the adapter spawns libtv.exe synchronously. The returned
+          // promise remains pending until remote generation finishes.
+          pending = operation();
+        } catch (error) {
+          release();
+          throw error;
+        }
+        const timer = setTimeout(release, runNodeLaunchDelayMs);
+        timer.unref?.();
+        return pending;
+      }, (error) => {
         release();
+        throw error;
       });
   }
 
@@ -487,8 +502,8 @@ function createLibtvGenerationRunner({
   }
 
   async function saveResult(resultUrl, taskId = '', signal) {
+    const current = taskId ? taskStore?.getTask(taskId) : null;
     if (taskId) {
-      const current = taskStore?.getTask(taskId);
       if (!current || current.status === 'interrupted') throw new Error('Interrupted');
       taskStore.updateTask(taskId, { status: 'running', message: '', messageCode: 'generation.resultProcessing', messageParams: null });
     }
@@ -515,7 +530,8 @@ function createLibtvGenerationRunner({
       url: saved.url,
       localUrl: saved.url,
       thumbUrl: saved.thumbUrl || '',
-      fileName: saved.fileName,
+      // 命名在落库时定死（LibTV-模型-生成时刻），下载时直接使用。
+      fileName: generationResultFileName(current || { executorKind: 'libtv' }, 0),
       filePath: saved.filePath,
       width: Number(saved.width || 0) || undefined,
       height: Number(saved.height || 0) || undefined,
@@ -616,13 +632,15 @@ function createLibtvGenerationRunner({
         taskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'libtv.generating', messageParams: null });
         let startBusy = false;
         try {
-          const currentTask = taskStore.getTask(task.id);
-          if (!Number(currentTask?.remoteExecutionStartedAt || 0)) {
-            taskStore.updateTask(task.id, { remoteExecutionStartedAt: Date.now() });
-          }
-          runAttempted = true;
           run = await enqueueRunNode(
-            () => libtv.runNode(project.projectUuid, remoteNodeId, { signal }),
+            () => {
+              const currentTask = taskStore.getTask(task.id);
+              if (!Number(currentTask?.remoteExecutionStartedAt || 0)) {
+                taskStore.updateTask(task.id, { remoteExecutionStartedAt: Date.now() });
+              }
+              runAttempted = true;
+              return libtv.runNode(project.projectUuid, remoteNodeId, { signal });
+            },
             signal,
           );
         } catch (error) {
@@ -870,4 +888,10 @@ function createLibtvGenerationRunner({
   };
 }
 
-module.exports = { createLibtvGenerationRunner, extractImageUrl, extractNodeId, pollRecoveredImageResult };
+module.exports = {
+  createLibtvGenerationRunner,
+  extractImageUrl,
+  extractNodeId,
+  LIBTV_RUN_NODE_LAUNCH_INTERVAL_MS,
+  pollRecoveredImageResult,
+};

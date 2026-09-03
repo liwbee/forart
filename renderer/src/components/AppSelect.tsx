@@ -26,6 +26,7 @@ interface AppSelectProps {
   menuPlacement?: "top" | "bottom";
   size?: "default" | "sm";
   variant?: "default" | "ghost";
+  triggerTextSize?: "default" | "sm";
 }
 
 const EMPTY_VALUE = "__forart_empty_select_value__";
@@ -51,6 +52,7 @@ export function AppSelect({
   menuPlacement = "top",
   size = "default",
   variant = "default",
+  triggerTextSize = "default",
 }: AppSelectProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const matchedOption = options.find((option) => option.value === value) || null;
@@ -80,6 +82,7 @@ export function AppSelect({
           className={cn(
             "w-full min-w-0 active:translate-y-px",
             variant === "ghost" && "border-transparent bg-transparent shadow-none hover:bg-accent/60 data-[state=open]:bg-accent/60 dark:bg-transparent dark:hover:bg-accent/40",
+            triggerTextSize === "sm" && "*:data-[slot=select-value]:text-sm",
           )}
           aria-label={ariaLabel}
           size={size}

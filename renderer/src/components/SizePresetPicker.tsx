@@ -46,6 +46,7 @@ interface SizePresetPickerProps<R extends string, A extends string> {
   panelSide?: "top" | "bottom";
   triggerSize?: "default" | "sm";
   triggerVariant?: "default" | "ghost";
+  triggerTextSize?: "default" | "sm";
   disabled?: boolean;
   formatTrigger?: (resolution: R, aspectRatio: A, quality?: string, customSize?: string) => string;
   renderResolutionLabel?: (option: SizePresetOption<R>) => ReactNode;
@@ -101,6 +102,7 @@ export function SizePresetPicker<R extends string, A extends string>({
   panelSide = "top",
   triggerSize = "default",
   triggerVariant = "default",
+  triggerTextSize = "default",
   disabled = false,
   formatTrigger,
   renderResolutionLabel,
@@ -145,13 +147,16 @@ export function SizePresetPicker<R extends string, A extends string>({
               "ic-composer-size__trigger w-full min-w-0",
               triggerVariant === "default"
                 ? "bg-card"
-                : "border-transparent bg-transparent shadow-none hover:bg-transparent dark:hover:bg-transparent data-[state=open]:bg-transparent",
+                : "border-transparent bg-transparent shadow-none hover:bg-accent/60 data-[state=open]:bg-accent/60 dark:bg-transparent dark:hover:bg-accent/40",
               triggerClassName,
             )}
             aria-label={labels.trigger}
             disabled={disabled}
           >
-            <span className="min-w-0 flex-1 truncate text-left tabular-nums">
+            <span className={cn(
+              "min-w-0 flex-1 truncate text-left tabular-nums",
+              triggerTextSize === "sm" && "text-sm",
+            )}>
               {triggerText}
             </span>
             <ChevronDown className="opacity-50 transition-transform duration-150 group-data-[state=open]:rotate-180" aria-hidden="true" />

@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('forartWindow', {
   isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
@@ -43,6 +43,15 @@ contextBridge.exposeInMainWorld('easyTool', {
   saveCanvasAsset: (payload) => ipcRenderer.invoke('canvas:save-asset', payload),
   saveCanvasAssetThumbnail: (payload) => ipcRenderer.invoke('canvas:save-asset-thumbnail', payload),
   ensureCanvasAssetThumbnail: (payload) => ipcRenderer.invoke('canvas:ensure-asset-thumbnail', payload),
+  importCanvasAssetFile: (payload) => {
+    const file = payload?.file;
+    const filePath = payload?.filePath || (file ? webUtils.getPathForFile(file) : '');
+    return ipcRenderer.invoke('canvas:import-asset-file', {
+      filePath,
+      fileName: payload?.fileName || file?.name || '',
+      mimeType: payload?.mimeType || file?.type || '',
+    });
+  },
   cropCanvasAsset: (payload) => ipcRenderer.invoke('canvas:crop-asset', payload),
   scanCanvasCache: () => ipcRenderer.invoke('canvas-cache:scan'),
   deleteCanvasCacheAssets: (payload) => ipcRenderer.invoke('canvas-cache:delete', payload),
@@ -69,11 +78,31 @@ contextBridge.exposeInMainWorld('forartGenerationTasks', {
   },
 });
 
+contextBridge.exposeInMainWorld('forartCanvasAgent', {
+  run: (request) => ipcRenderer.invoke('canvas-agent:run', request),
+  cancel: (runId) => ipcRenderer.invoke('canvas-agent:cancel', runId),
+  listActive: (canvasId) => ipcRenderer.invoke('canvas-agent:list-active', canvasId),
+  onProgress: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on('canvas-agent:progress', listener);
+    return () => ipcRenderer.removeListener('canvas-agent:progress', listener);
+  },
+});
+
+contextBridge.exposeInMainWorld('forartCanvasTasks', {
+  listPage: (payload) => ipcRenderer.invoke('canvas-task:list-page', payload),
+});
+
 contextBridge.exposeInMainWorld('forartConfig', {
   load: () => ipcRenderer.invoke('config:load'),
   save: (payload) => ipcRenderer.invoke('config:save', payload),
   loadApiSettings: () => ipcRenderer.invoke('config:load-api-settings'),
   saveApiSettings: (payload) => ipcRenderer.invoke('config:save-api-settings', payload),
+  loadAgentSettings: () => ipcRenderer.invoke('config:load-agent-settings'),
+  saveAgentSettings: (payload) => ipcRenderer.invoke('config:save-agent-settings', payload),
+  requestProviderModels: (payload) => ipcRenderer.invoke('provider:models', payload),
+  requestApimartBalance: (payload) => ipcRenderer.invoke('provider:apimart-balance', payload),
   loadImageReviewSettings: () => ipcRenderer.invoke('config:load-image-review-settings'),
   saveImageReviewSettings: (payload) => ipcRenderer.invoke('config:save-image-review-settings', payload),
   loadInfiniteCanvasSettings: () => ipcRenderer.invoke('config:load-infinite-canvas-settings'),

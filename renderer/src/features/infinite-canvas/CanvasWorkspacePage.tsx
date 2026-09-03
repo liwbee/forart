@@ -10,6 +10,7 @@ import { Skeleton } from "../../components/ui/skeleton";
 import { Tabs, TabsContent } from "../../components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { getActiveForartConfig } from "../../data-source/runtime";
+import { CanvasAgentProvider } from "../canvas-agent";
 import { invalidatePermissions, refreshPermissions, usePermission } from "../permissions";
 import { CanvasDocumentTabs } from "./CanvasDocumentTabs";
 import { createCanvasAutosaveScheduler, type CanvasAutosaveScheduler } from "./canvasAutosaveScheduler";
@@ -868,19 +869,20 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
   const activeValue = showHome ? "home" : activeCanvasId || "home";
 
   return (
-    <Tabs
-      className="infinite-canvas-page rf-workspace rf-workspace__tabs"
-      value={activeValue}
-      aria-label={t("infiniteCanvas:title")}
-      onValueChange={(value) => {
-        if (value === "home") void openHome();
-        else {
-          const tab = tabs.find((item) => item.id === value);
-          if (tab?.readOnly && tab.remoteCanvasId) void openSharedCanvas(tab.remoteCanvasId);
-          else void openCanvas(value);
-        }
-      }}
-    >
+    <CanvasAgentProvider canvasId={activeCanvasId}>
+      <Tabs
+        className="infinite-canvas-page rf-workspace rf-workspace__tabs"
+        value={activeValue}
+        aria-label={t("infiniteCanvas:title")}
+        onValueChange={(value) => {
+          if (value === "home") void openHome();
+          else {
+            const tab = tabs.find((item) => item.id === value);
+            if (tab?.readOnly && tab.remoteCanvasId) void openSharedCanvas(tab.remoteCanvasId);
+            else void openCanvas(value);
+          }
+        }}
+      >
       <CanvasDocumentTabs
         tabs={tabs}
         activeValue={activeValue}
@@ -1001,7 +1003,8 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
         </TooltipTrigger>
         <TooltipContent side="top">{t("infiniteCanvas:taskCenter")}</TooltipContent>
       </Tooltip>
-    </Tabs>
+      </Tabs>
+    </CanvasAgentProvider>
   );
 }
 

@@ -3,9 +3,9 @@ import {
   DragOverlay,
   KeyboardSensor,
   PointerSensor,
+  closestCenter,
   useSensor,
   useSensors,
-  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
   type Modifier,
@@ -13,13 +13,13 @@ import {
 import {
   SortableContext,
   arrayMove,
-  horizontalListSortingStrategy,
+  rectSortingStrategy,
   sortableKeyboardCoordinates,
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Images, TextCursorInput, X } from "lucide-react";
-import { useCallback, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode, type WheelEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
@@ -32,29 +32,6 @@ import type {
   ImageGeneratorPromptInput,
   ImageGeneratorReferenceInput,
 } from "../generation/imageGenerationInputs";
-
-const restrictToHorizontalAxis: Modifier = ({ transform }) => ({ ...transform, y: 0 });
-
-const horizontalCollisionDetection: CollisionDetection = ({
-  droppableContainers,
-  droppableRects,
-  pointerCoordinates,
-}) => {
-  if (!pointerCoordinates) return [];
-  return droppableContainers
-    .flatMap((container) => {
-      const rect = droppableRects.get(container.id);
-      if (!rect) return [];
-      return [{
-        id: container.id,
-        data: {
-          droppableContainer: container,
-          value: Math.abs(pointerCoordinates.x - (rect.left + rect.width / 2)),
-        },
-      }];
-    })
-    .sort((left, right) => left.data.value - right.data.value);
-};
 
 interface ReferenceItemProps {
   item: ImageGeneratorReferenceInput;
@@ -86,9 +63,11 @@ function SortableReferenceItem({ item, index, invalid, onRemove, onView }: Refer
     >
       <HoverCard openDelay={350} closeDelay={80}>
         <HoverCardTrigger asChild>
-          {item.previewUrl || item.imageUrl ? (
-            <ImageWithFallback src={item.previewUrl} fallbackSrc={item.imageUrl} alt={item.title} loading="lazy" decoding="async" draggable={false} />
-          ) : <Images aria-hidden="true" />}
+          <span className="rf-reference-item__preview-trigger">
+            {item.previewUrl || item.imageUrl ? (
+              <ImageWithFallback src={item.previewUrl} fallbackSrc={item.imageUrl} alt={item.title} loading="lazy" decoding="async" draggable={false} />
+            ) : <Images aria-hidden="true" />}
+          </span>
         </HoverCardTrigger>
         <HoverCardContent className="rf-reference-preview" side="top" sideOffset={8}>
           {item.previewUrl || item.imageUrl ? (
@@ -127,24 +106,33 @@ function PromptReferenceItem({
   const label = item.text || item.title;
 
   return (
-    <div className="rf-prompt-reference-item" title={label} role="listitem">
-      <TextCursorInput aria-hidden="true" />
-      <span>{label}</span>
-      <Button
-        className="rf-prompt-reference-item__remove"
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        aria-label={t("infiniteCanvas:removePromptReference")}
-        title={t("infiniteCanvas:removePromptReference")}
-        onClick={(event) => {
-          event.stopPropagation();
-          onRemove(item.edgeId);
-        }}
-      >
-        <X aria-hidden="true" />
-      </Button>
-    </div>
+    <HoverCard openDelay={250} closeDelay={80}>
+      <HoverCardTrigger asChild>
+        <div className="rf-prompt-reference-item" title={label} role="listitem">
+          <TextCursorInput aria-hidden="true" />
+          <span>{label}</span>
+          <Button
+            className="rf-prompt-reference-item__remove"
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t("infiniteCanvas:removePromptReference")}
+            title={t("infiniteCanvas:removePromptReference")}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove(item.edgeId);
+            }}
+          >
+            <X aria-hidden="true" />
+          </Button>
+        </div>
+      </HoverCardTrigger>
+      {label ? (
+        <HoverCardContent className="rf-prompt-reference-preview" side="top" sideOffset={6}>
+          {label}
+        </HoverCardContent>
+      ) : null}
+    </HoverCard>
   );
 }
 
@@ -160,7 +148,7 @@ interface ImageReferenceStripProps {
   actions?: ReactNode;
   prompts: ImageGeneratorPromptInput[];
   items: ImageGeneratorReferenceInput[];
-  maxReferences: number;
+  maxReferences?: number;
   supported: boolean;
   onRemove: (edgeId: string) => void;
   onReorder: (orderedEdgeIds: string[]) => void;
@@ -170,13 +158,14 @@ export function ImageReferenceStrip({
   actions,
   prompts,
   items,
-  maxReferences,
+  maxReferences = Number.POSITIVE_INFINITY,
   supported,
   onRemove,
   onReorder,
 }: ImageReferenceStripProps) {
   const { t } = useTranslation();
   const [draggedId, setDraggedId] = useState("");
+  const [optimisticOrder, setOptimisticOrder] = useState<string[] | null>(null);
   const [viewerItem, setViewerItem] = useState<ImageGeneratorReferenceInput | null>(null);
   const itemsViewportRef = useRef<HTMLDivElement | null>(null);
   const sensors = useSensors(
@@ -184,17 +173,38 @@ export function ImageReferenceStrip({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const invalid = !supported || items.length > maxReferences;
-  const draggedItem = items.find((item) => item.edgeId === draggedId) || null;
+  const renderedItems = useMemo(() => {
+    if (!optimisticOrder) return items;
+    const itemById = new Map(items.map((item) => [item.edgeId, item]));
+    const orderedItems = optimisticOrder.flatMap((edgeId) => {
+      const item = itemById.get(edgeId);
+      return item ? [item] : [];
+    });
+    return orderedItems.length === items.length ? orderedItems : items;
+  }, [items, optimisticOrder]);
+  const draggedItem = renderedItems.find((item) => item.edgeId === draggedId) || null;
+
+  useEffect(() => {
+    if (!optimisticOrder) return;
+    const itemIds = items.map((item) => item.edgeId);
+    const sameMembers = itemIds.length === optimisticOrder.length
+      && itemIds.every((edgeId) => optimisticOrder.includes(edgeId));
+    if (!sameMembers || itemIds.every((edgeId, index) => edgeId === optimisticOrder[index])) {
+      setOptimisticOrder(null);
+    }
+  }, [items, optimisticOrder]);
   const restrictToReferenceViewport = useCallback<Modifier>(({ activeNodeRect, draggingNodeRect, overlayNodeRect, transform }) => {
     const viewport = itemsViewportRef.current?.getBoundingClientRect();
     const draggedRect = overlayNodeRect || draggingNodeRect || activeNodeRect;
-    if (!viewport || !draggedRect) return { ...transform, y: 0 };
+    if (!viewport || !draggedRect) return transform;
     const minX = viewport.left - draggedRect.left;
     const maxX = viewport.right - draggedRect.right;
+    const minY = viewport.top - draggedRect.top;
+    const maxY = viewport.bottom - draggedRect.bottom;
     return {
       ...transform,
       x: Math.max(minX, Math.min(maxX, transform.x)),
-      y: 0,
+      y: Math.max(minY, Math.min(maxY, transform.y)),
     };
   }, []);
 
@@ -203,23 +213,22 @@ export function ImageReferenceStrip({
   const finishDrag = ({ active, over }: DragEndEvent) => {
     setDraggedId("");
     if (!over || active.id === over.id) return;
-    const sourceIndex = items.findIndex((item) => item.edgeId === active.id);
-    const targetIndex = items.findIndex((item) => item.edgeId === over.id);
+    const sourceIndex = renderedItems.findIndex((item) => item.edgeId === active.id);
+    const targetIndex = renderedItems.findIndex((item) => item.edgeId === over.id);
     if (sourceIndex < 0 || targetIndex < 0) return;
-    onReorder(arrayMove(items, sourceIndex, targetIndex).map((item) => item.edgeId));
-  };
-
-  const scrollReferences = (event: WheelEvent<HTMLDivElement>) => {
-    const container = event.currentTarget;
-    if (container.scrollWidth <= container.clientWidth) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-    container.scrollBy({ left: delta, behavior: "smooth" });
+    const nextOrder = arrayMove(renderedItems, sourceIndex, targetIndex).map((item) => item.edgeId);
+    setOptimisticOrder(nextOrder);
+    onReorder(nextOrder);
   };
 
   return (
-    <div className="rf-reference-strip" data-invalid={invalid || undefined}>
+    <div
+      ref={itemsViewportRef}
+      className="rf-reference-strip"
+      data-invalid={invalid || undefined}
+      role="list"
+      aria-label={t("infiniteCanvas:connectedInputs")}
+    >
       {actions ? (
         <div className="rf-reference-actions-tile" aria-label={t("infiniteCanvas:referenceImages")}>
           <span>{items.length}/{supported ? maxReferences : 0}</span>
@@ -231,28 +240,18 @@ export function ImageReferenceStrip({
       ) : null}
       <DndContext
         sensors={sensors}
-        collisionDetection={horizontalCollisionDetection}
-        modifiers={[restrictToHorizontalAxis, restrictToReferenceViewport]}
+        collisionDetection={closestCenter}
+        modifiers={[restrictToReferenceViewport]}
         onDragStart={({ active }: DragStartEvent) => setDraggedId(String(active.id))}
         onDragCancel={() => setDraggedId("")}
         onDragEnd={finishDrag}
       >
-        <div
-          ref={itemsViewportRef}
-          className="rf-reference-strip__items"
-          role="list"
-          aria-label={t("infiniteCanvas:connectedInputs")}
-          onWheel={scrollReferences}
-        >
+        <div className="rf-reference-strip__items">
           {prompts.map((item) => (
             <PromptReferenceItem key={item.edgeId} item={item} onRemove={onRemove} />
           ))}
-          {prompts.length > 0 && items.length > 0 ? (
-            <Separator className="rf-reference-strip__separator" orientation="vertical" />
-          ) : null}
-          <SortableContext items={items.map((item) => item.edgeId)} strategy={horizontalListSortingStrategy}>
-            <div className="rf-reference-strip__sortable">
-            {items.map((item, index) => (
+          <SortableContext items={renderedItems.map((item) => item.edgeId)} strategy={rectSortingStrategy}>
+            {renderedItems.map((item, index) => (
               <SortableReferenceItem
                 key={item.edgeId}
                 item={item}
@@ -262,7 +261,6 @@ export function ImageReferenceStrip({
                 onView={setViewerItem}
               />
             ))}
-            </div>
           </SortableContext>
         </div>
         {typeof document !== "undefined" ? createPortal(

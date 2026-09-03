@@ -825,6 +825,19 @@ body {
   background: var(--input-bg);
 }
 
+.settings-agent-controls {
+  min-width: 0;
+  width: min(100%, 520px);
+  flex: 0 1 520px;
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.settings-agent-reasoning-select {
+  min-width: 120px;
+}
+
 .settings-mode {
   min-height: 82px;
   display: grid;
@@ -1911,6 +1924,11 @@ body {
   }
 
   .settings-download-path-control {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .settings-agent-controls {
     width: 100%;
     flex-basis: auto;
   }

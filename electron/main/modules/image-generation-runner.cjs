@@ -4,6 +4,7 @@ const {
   GENERATION_EXECUTION_TIMEOUT_MS,
   createGenerationExecutionTimeout,
 } = require('./generation/generation-execution-timeout.cjs');
+const { generationResultFileName } = require('./generation-naming.cjs');
 
 const activeControllers = new Map();
 
@@ -583,7 +584,7 @@ async function saveOutputAsset(context, result, taskId) {
     url: saved.url,
     localUrl: saved.url,
     thumbUrl: saved.thumbUrl || '',
-    fileName: saved.fileName || result.fileName || 'generated-image.png',
+    fileName: result.fileName || saved.fileName || 'generated-image.png',
     width: Number(saved.width || result.width || 0) || undefined,
     height: Number(saved.height || result.height || 0) || undefined,
   };
@@ -592,11 +593,14 @@ async function saveOutputAsset(context, result, taskId) {
 async function saveOutputAssets(context, results, taskId) {
   const candidates = Array.isArray(results) ? results.filter(Boolean) : [];
   if (!candidates.length) throw new Error('The image response did not contain a usable result.');
+  // 命名在落库时一次定死（平台-模型-生成时刻，多图追加序号），下载时直接使用。
+  const namingTask = taskId ? context.generationTaskStore.getTask(taskId) : null;
+  const namingDate = new Date();
   const savedResults = [];
   for (let index = 0; index < candidates.length; index += 1) {
     savedResults.push(await saveOutputAsset(context, {
       ...candidates[index],
-      fileName: candidates[index].fileName || `generated-image-${index + 1}.png`,
+      fileName: generationResultFileName(namingTask || {}, index, undefined, namingDate),
     }, taskId));
   }
   return { ...savedResults[0], results: savedResults };
@@ -651,7 +655,8 @@ async function submitOpenAiEditTask(context, provider, headers, model, prompt, r
 }
 
 async function executeImageTask(context, task, payload, signal) {
-  const provider = payload.provider || {};
+  const provider = context.resolveProvider?.(payload.providerId || task.providerId)
+    || {};
   const model = String(payload.model || task.model || '').trim();
   const prompt = String(payload.prompt || task.prompt || '').trim();
   const referenceImages = Array.isArray(payload.referenceImages) ? payload.referenceImages.map(String).filter(Boolean) : [];
@@ -821,10 +826,11 @@ function createImageGenerationRunner({
   canvasStore,
   generationTaskStore,
   resultCommitter,
+  resolveProvider,
   executionTimeoutMs = GENERATION_EXECUTION_TIMEOUT_MS,
 }) {
   if (!resultCommitter?.commit) throw new Error('Generation result committer is required.');
-  const context = { net, assetStore, canvasStore, generationTaskStore, resultCommitter };
+  const context = { net, assetStore, canvasStore, generationTaskStore, resultCommitter, resolveProvider };
 
   function prepareTask(payload = {}) {
     const supersededTaskIds = generationTaskStore.activeTaskIdsForTarget?.(payload.canvasId, payload.target) || [];
@@ -935,7 +941,7 @@ function createImageGenerationRunner({
       task = generationTaskStore.createTask({ ...payload, id: taskId, status: payload.status || 'running' });
     }
     if (!task) throw new Error('Generation task not found.');
-    if (!task.upstreamTaskId && !payload.provider) return task;
+    if (!task.upstreamTaskId && !task.providerId) return task;
     if (['succeeded', 'failed', 'interrupted', 'superseded'].includes(task.status)) return task;
     if (activeControllers.has(task.id)) return task;
     const execution = createGenerationExecutionTimeout({
@@ -985,8 +991,6 @@ function createImageGenerationRunner({
   }
 
   async function recoverPersistedTasks(payload = {}) {
-    const providers = Array.isArray(payload.providers) ? payload.providers : [];
-    const providersById = new Map(providers.map((provider) => [String(provider?.id || ''), provider]));
     const recovered = [];
     const errors = [];
     const activeTasks = (generationTaskStore.listTasks?.() || []).filter((task) => (
@@ -999,9 +1003,9 @@ function createImageGenerationRunner({
         continue;
       }
       try {
-        const provider = providersById.get(task.providerId);
+        const provider = resolveProvider?.(task.providerId);
         if (task.upstreamTaskId && provider) {
-          recovered.push(await resumeTask(task.id, { provider, model: task.model }));
+          recovered.push(await resumeTask(task.id, { providerId: task.providerId, model: task.model }));
           continue;
         }
         const interrupted = generationTaskStore.updateTask(task.id, {

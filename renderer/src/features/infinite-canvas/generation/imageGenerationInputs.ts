@@ -29,8 +29,8 @@ export interface ImageGeneratorPromptInput {
 export type ReferenceValidationError = "unsupported" | "required" | "tooMany" | null;
 
 export function inputKindForSource(kind: NativeCanvasNodeKind): NativeCanvasInputKind | undefined {
-  if (kind === "imageLoader" || kind === "imageGenerator") return "referenceImage";
-  if (kind === "prompt" || kind === "llm") return "prompt";
+  if (kind === "assetLoader" || kind === "imageGenerator") return "referenceImage";
+  if (kind === "prompt" || kind === "llm" || kind === "smartReverse") return "prompt";
   return undefined;
 }
 
@@ -53,9 +53,14 @@ export function edgeDataForConnection(
   edges: NativeCanvasEdge[],
   targetHandle?: string | null,
 ): NativeCanvasEdgeData | undefined {
-  if (targetKind !== "imageGenerator" && targetKind !== "actionFission") return undefined;
+  if (targetKind !== "imageGenerator" && targetKind !== "actionFission" && targetKind !== "smartReverse") return undefined;
   const inputKind = inputKindForSource(sourceKind);
   if (!inputKind) return undefined;
+  if (targetKind === "smartReverse") {
+    return inputKind === "referenceImage"
+      ? { inputKind, referenceOrder: nextReferenceOrder(targetId, edges) }
+      : { inputKind };
+  }
   if (targetHandle === "additional-reference") {
     if (targetKind !== "actionFission") return undefined;
     if (inputKind === "referenceImage") {
@@ -100,6 +105,15 @@ function collectReferenceInputs(
 }
 
 export function collectImageGeneratorReferences(
+  targetId: string,
+  nodes: NativeCanvasNode[],
+  edges: NativeCanvasEdge[],
+  fallbackTitle = "",
+) {
+  return collectReferenceInputs(targetId, nodes, edges, "referenceImage", fallbackTitle);
+}
+
+export function collectSmartReverseReferences(
   targetId: string,
   nodes: NativeCanvasNode[],
   edges: NativeCanvasEdge[],

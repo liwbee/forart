@@ -1,5 +1,5 @@
 import type { NativeCanvasNode } from "./nativeCanvas";
-import { nativeCanvasNodePrimaryImage } from "./nativeCanvas";
+import { nativeCanvasNodePrimaryAsset, nativeCanvasNodePrimaryImage } from "./nativeCanvas";
 
 export interface CanvasThumbnailTarget {
   nodeId: string;
@@ -13,8 +13,8 @@ export function canvasPreviewSourceUrl(originalUrl: unknown, thumbnailUrl: unkno
 
 export function collectMissingCanvasThumbnailTargets(nodes: NativeCanvasNode[]): CanvasThumbnailTarget[] {
   return nodes.flatMap((node) => {
-    const images = node.data.kind === "imageLoader"
-      ? [nativeCanvasNodePrimaryImage(node.data)]
+    const images = node.data.kind === "assetLoader"
+      ? [node.data.assetType === "video" ? nativeCanvasNodePrimaryAsset(node.data) : nativeCanvasNodePrimaryImage(node.data)]
       : node.data.kind === "imageGenerator"
         ? (node.data.generatedImages || [])
         : [];
@@ -33,9 +33,9 @@ export function applyCanvasNodeThumbnail(
 ): NativeCanvasNode[] {
   return nodes.map((node) => {
     if (node.id !== nodeId) return node;
-    if (node.data.kind === "imageLoader") {
-      const currentUrl = String(node.data.imageUrl || "");
-      return currentUrl === sourceUrl ? { ...node, data: { ...node.data, thumbUrl } } : node;
+    if (node.data.kind === "assetLoader") {
+      const currentUrl = String(node.data.assetUrl || "");
+      return currentUrl === sourceUrl ? { ...node, data: { ...node.data, assetThumbUrl: thumbUrl } } : node;
     }
     if (node.data.kind !== "imageGenerator") return node;
     return {

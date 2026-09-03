@@ -46,7 +46,7 @@ export interface NativeCanvasSnapshot {
 }
 
 export interface NativeCanvasDocument extends CanvasRecord, NativeCanvasSnapshot {
-  canvasSchemaVersion: 2;
+  canvasSchemaVersion: 5;
 }
 
 function timestampOf(value: unknown) {
@@ -143,6 +143,26 @@ function normalizeCurrentNodeData(data: Record<string, unknown>, kind: NativeCan
     normalized.label = String(data.title).trim();
   }
   delete normalized.title;
+  if (kind === "assetLoader") {
+    normalized.assetUrl = String(data.assetUrl || data.imageUrl || "") || undefined;
+    normalized.assetFileName = String(data.assetFileName || data.imageFileName || "") || undefined;
+    normalized.assetThumbUrl = String(data.assetThumbUrl || data.thumbUrl || "") || undefined;
+    normalized.assetType = data.assetType === "video" || data.assetType === "audio" ? data.assetType : "image";
+    normalized.assetMimeType = String(data.assetMimeType || "") || undefined;
+    normalized.assetNaturalWidth = Number(data.assetNaturalWidth || data.imageNaturalWidth || 0) || undefined;
+    normalized.assetNaturalHeight = Number(data.assetNaturalHeight || data.imageNaturalHeight || 0) || undefined;
+    normalized.assetDurationMs = Number(data.assetDurationMs || 0) || undefined;
+    normalized.assetSizeBytes = Number(data.assetSizeBytes || 0) || undefined;
+    normalized.assetLoadState = data.assetLoadState === "processing" || data.assetLoadState === "error" ? data.assetLoadState : undefined;
+    normalized.assetLoadError = String(data.assetLoadError || data.imageUploadError || "") || undefined;
+    delete normalized.imageUrl;
+    delete normalized.imageFileName;
+    delete normalized.thumbUrl;
+    delete normalized.imageNaturalWidth;
+    delete normalized.imageNaturalHeight;
+    delete normalized.imageUploadState;
+    delete normalized.imageUploadError;
+  }
   normalized.latestGenerationTaskId = String(data.latestGenerationTaskId || "") || undefined;
   if (kind === "actionFission") {
     normalized.actionFission = normalizeActionFissionState(normalized.actionFission);
@@ -157,7 +177,8 @@ function normalizeCurrentNodeData(data: Record<string, unknown>, kind: NativeCan
 function normalizeNode(input: unknown): NativeCanvasNode | null {
   const value = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const data = value.data && typeof value.data === "object" ? value.data as Record<string, unknown> : {};
-  const kind = data.kind;
+  const rawKind = data.kind === "imageLoader" || data.kind === "image" ? "assetLoader" : data.kind;
+  const kind = rawKind;
   if ((value.type !== "canvasNode" && value.type !== "groupNode") || !value.position || !isNodeKind(kind)) return null;
   const normalized: NativeCanvasNode = {
     ...(value as unknown as NativeCanvasNode),
@@ -263,7 +284,10 @@ export function normalizeCanvasDocument(input: unknown): NativeCanvasDocument | 
   const record = recordOf(input);
   if (!record) return null;
   const value = input as Record<string, unknown>;
-  if (Number(value.canvasSchemaVersion) !== 2) return null;
+  // Older documents remain readable and are normalized into the current
+  // schema-5 in-memory representation on the next save.
+  const schemaVersion = Number(value.canvasSchemaVersion);
+  if (schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5) return null;
   const rawViewport = value.viewport && typeof value.viewport === "object"
     ? value.viewport as Record<string, unknown>
     : {};
@@ -273,7 +297,7 @@ export function normalizeCanvasDocument(input: unknown): NativeCanvasDocument | 
     .filter((edge): edge is NativeCanvasEdge => Boolean(edge));
   return {
     ...record,
-    canvasSchemaVersion: 2,
+    canvasSchemaVersion: 5,
     nodeCount: nodes.length,
     nodes,
     edges,

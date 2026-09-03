@@ -1,0 +1,280 @@
+import { Maximize2, Minimize2, Play, Scissors, Volume2, VolumeX } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { toast } from "sonner";
+import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
+import { cn } from "../../../lib/utils";
+
+type CaptureMode = "first" | "last" | "current";
+const CHROMIUM_MEDIA_CONTROLS_HIDE_DELAY_MS = 2500;
+
+function VideoSlider({ value, max, className, onChange, ariaLabel }: { value: number; max: number; className: string; onChange: (value: number) => void; ariaLabel: string }) {
+  const percent = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
+  return (
+    <div className={cn("rf-native-video-slider", className)} style={{ "--slider-fill": `${percent}%` } as CSSProperties}>
+      <div className="rf-native-video-slider-track" aria-hidden="true">
+        <span className="rf-native-video-slider-fill" />
+        <span className="rf-native-video-slider-thumb" />
+      </div>
+      <input
+        className="rf-native-video-slider-input"
+        type="range"
+        min={0}
+        max={max}
+        step={0.01}
+        value={Math.min(value, max || value)}
+        onChange={(event) => onChange(Number(event.currentTarget.value))}
+        aria-label={ariaLabel}
+      />
+    </div>
+  );
+}
+
+function formatTime(value: number) {
+  if (!Number.isFinite(value) || value < 0) return "00:00";
+  const seconds = Math.floor(value);
+  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+export function VideoAssetBody({ sourceUrl, thumbUrl, label }: { sourceUrl: string; thumbUrl?: string; label: string }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const captureRef = useRef<HTMLDivElement | null>(null);
+  const hideControlsTimerRef = useRef<number | null>(null);
+  const playingRef = useRef(false);
+  const captureOpenRef = useRef(false);
+  const controlsHoveredRef = useRef(false);
+  const [activated, setActivated] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const resolvedSource = resolveLibraryImageUrl(sourceUrl);
+  const resolvedThumb = thumbUrl ? resolveLibraryImageUrl(thumbUrl) : "";
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.volume = volume;
+  }, [volume]);
+
+  useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
+
+  useEffect(() => {
+    captureOpenRef.current = captureOpen;
+  }, [captureOpen]);
+
+  useEffect(() => {
+    if (!activated) return;
+    void videoRef.current?.play().catch(() => undefined);
+  }, [activated]);
+
+  const clearHideControlsTimer = useCallback(() => {
+    if (hideControlsTimerRef.current !== null) {
+      window.clearTimeout(hideControlsTimerRef.current);
+      hideControlsTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleHideControls = useCallback(() => {
+    clearHideControlsTimer();
+    if (!playingRef.current || captureOpenRef.current) return;
+    hideControlsTimerRef.current = window.setTimeout(() => {
+      hideControlsTimerRef.current = null;
+      if (playingRef.current && !captureOpenRef.current && !controlsHoveredRef.current) setControlsVisible(false);
+    }, CHROMIUM_MEDIA_CONTROLS_HIDE_DELAY_MS);
+  }, [clearHideControlsTimer]);
+
+  const revealControls = useCallback(() => {
+    setControlsVisible(true);
+    scheduleHideControls();
+  }, [scheduleHideControls]);
+
+  const hideControlsOnPointerLeave = useCallback(() => {
+    clearHideControlsTimer();
+    if (playingRef.current && !captureOpenRef.current) setControlsVisible(false);
+  }, [clearHideControlsTimer]);
+
+  useEffect(() => {
+    if (playing && !captureOpen) scheduleHideControls();
+    else {
+      clearHideControlsTimer();
+      setControlsVisible(true);
+    }
+    return clearHideControlsTimer;
+  }, [captureOpen, clearHideControlsTimer, playing, scheduleHideControls]);
+
+  useEffect(() => {
+    if (!captureOpen) return;
+    const onDocumentPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !captureRef.current?.contains(target)) setCaptureOpen(false);
+    };
+    const onDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCaptureOpen(false);
+    };
+    document.addEventListener("pointerdown", onDocumentPointerDown, true);
+    document.addEventListener("keydown", onDocumentKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onDocumentPointerDown, true);
+      document.removeEventListener("keydown", onDocumentKeyDown, true);
+    };
+  }, [captureOpen]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => setFullscreen(document.fullscreenElement === shellRef.current);
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  const togglePlayback = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) void video.play().catch(() => undefined);
+    else video.pause();
+  }, []);
+
+  const seek = useCallback((value: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = Math.max(0, Math.min(value, video.duration || value));
+    setCurrentTime(video.currentTime);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+    } else {
+      void shell.requestFullscreen?.().catch(() => undefined);
+    }
+  }, []);
+
+  const captureFrame = useCallback(async (mode: CaptureMode) => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      toast.error("视频画面尚未准备好");
+      return;
+    }
+    setCaptureOpen(false);
+    const wasPlaying = !video.paused;
+    const beforeTime = video.currentTime;
+    const targetTime = mode === "first" ? 0 : mode === "last" ? Math.max(0, (video.duration || duration) - 0.05) : beforeTime;
+    try {
+      if (mode !== "current") {
+        video.pause();
+        await new Promise<void>((resolve) => {
+          if (Math.abs(video.currentTime - targetTime) < 0.001) {
+            resolve();
+            return;
+          }
+          const onSeeked = () => resolve();
+          video.addEventListener("seeked", onSeeked, { once: true });
+          video.currentTime = targetTime;
+        });
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("无法创建截图画布");
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL("image/png");
+      if (window.easyTool?.saveCanvasAsset) {
+        await window.easyTool.saveCanvasAsset({ dataUrl, defaultName: `${label || "video"}-${mode}-frame.png`, kind: "output", type: "image/png" });
+      } else {
+        const link = document.createElement("a");
+        link.href = dataUrl;
+        link.download = `${label || "video"}-${mode}-frame.png`;
+        link.click();
+      }
+      toast.success("视频帧已保存到画布素材");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "视频帧截取失败");
+    } finally {
+      if (mode !== "current") {
+        video.currentTime = beforeTime;
+        if (wasPlaying) void video.play().catch(() => undefined);
+      }
+    }
+  }, [duration, label]);
+
+  if (!activated) {
+    return (
+      <button
+        type="button"
+        className={cn("rf-native-video-poster", !resolvedThumb && "is-empty")}
+        onClick={(event) => {
+          event.stopPropagation();
+          setActivated(true);
+        }}
+        aria-label={label}
+      >
+        {resolvedThumb ? <img src={resolvedThumb} alt={label} draggable={false} /> : null}
+        <span className="rf-native-video-play"><Play fill="currentColor" aria-hidden="true" /></span>
+      </button>
+    );
+  }
+
+  return (
+    <div ref={shellRef} className={cn("rf-native-video-shell nodrag nopan nowheel", fullscreen && "is-fullscreen", !controlsVisible && "is-controls-hidden")} onPointerMove={revealControls} onPointerEnter={revealControls} onPointerLeave={hideControlsOnPointerLeave} onFocusCapture={revealControls}>
+      <video
+        ref={videoRef}
+        className="rf-native-video"
+        src={resolvedSource}
+        poster={resolvedThumb || undefined}
+        playsInline
+        preload="metadata"
+        aria-label={label}
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+        onClick={togglePlayback}
+      />
+      <div
+        className={cn("rf-native-video-controls", !controlsVisible && "is-hidden")}
+        onPointerEnter={() => {
+          controlsHoveredRef.current = true;
+          revealControls();
+        }}
+        onPointerLeave={() => {
+          controlsHoveredRef.current = false;
+          scheduleHideControls();
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <VideoSlider className="rf-native-video-progress" value={currentTime} max={duration} onChange={seek} ariaLabel="播放进度" />
+        <div className="rf-native-video-controls-row">
+          <button type="button" className="rf-native-video-control" onClick={togglePlayback} aria-label={playing ? "暂停" : "播放"}>
+            {playing ? <span className="rf-native-video-pause-glyph" aria-hidden="true"><i /><i /></span> : <Play fill="currentColor" aria-hidden="true" />}
+          </button>
+          <div className="rf-native-video-volume-group">
+            <button type="button" className="rf-native-video-control" onClick={() => setVolume((value) => value > 0 ? 0 : 1)} aria-label={volume > 0 ? "静音" : "取消静音"}>
+              {volume > 0 ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
+            </button>
+            <VideoSlider className="rf-native-video-volume" value={volume} max={1} onChange={setVolume} ariaLabel="音量" />
+          </div>
+          <span className="rf-native-video-time rf-native-video-time-total">{formatTime(currentTime)} / {formatTime(duration)}</span>
+          <div ref={captureRef} className="rf-native-video-capture">
+            <button type="button" className={cn("rf-native-video-control", captureOpen && "is-active")} onClick={() => setCaptureOpen((open) => !open)} aria-label="截取视频帧" aria-expanded={captureOpen}>
+              <Scissors aria-hidden="true" />
+            </button>
+            {captureOpen ? <div className="rf-native-video-capture-menu" role="menu">
+              <button type="button" role="menuitem" onClick={() => void captureFrame("first")}>截取首帧</button>
+              <button type="button" role="menuitem" onClick={() => void captureFrame("last")}>截取尾帧</button>
+              <button type="button" role="menuitem" onClick={() => void captureFrame("current")}>截取当前帧</button>
+            </div> : null}
+          </div>
+          <button type="button" className="rf-native-video-control" onClick={toggleFullscreen} aria-label={fullscreen ? "退出全屏" : "全屏"}>
+            {fullscreen ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,7 +1,13 @@
 import { create } from "zustand";
 import { temporal } from "zundo";
 import type { ActionFissionRow } from "./action-fission/actionFissionTypes";
-import type { NativeCanvasEdge, NativeCanvasNode, NativeCanvasNodeData } from "./nativeCanvas";
+import type {
+  NativeCanvasEdge,
+  NativeCanvasNode,
+  NativeCanvasNodeData,
+  NativeImagePromptDocument,
+  NativeImagePromptSerializedNode,
+} from "./nativeCanvas";
 
 export interface NativeCanvasHistorySnapshot {
   nodes: NativeCanvasNode[];
@@ -30,6 +36,7 @@ function snapshotNode(node: NativeCanvasNode): NativeCanvasNode {
     resizing: _resizing,
     width: nodeWidth,
     height: nodeHeight,
+    hidden,
     ...durableNode
   } = node;
   const width = positiveDimension(nodeWidth);
@@ -44,6 +51,7 @@ function snapshotNode(node: NativeCanvasNode): NativeCanvasNode {
   return {
     ...durableNode,
     style,
+    ...(hidden ? { hidden: true } : {}),
     data: cloneValue(node.data),
     position: { ...node.position },
     selected: false,
@@ -52,8 +60,11 @@ function snapshotNode(node: NativeCanvasNode): NativeCanvasNode {
 }
 
 function snapshotEdge(edge: NativeCanvasEdge): NativeCanvasEdge {
+  const { hidden, animated, ...durableEdge } = edge;
   return {
-    ...edge,
+    ...durableEdge,
+    ...(hidden ? { hidden: true } : {}),
+    ...(animated ? { animated: true } : {}),
     data: edge.data ? cloneValue(edge.data) : undefined,
     selected: false,
   };
@@ -78,6 +89,42 @@ const ACTION_FISSION_RUNTIME_FIELDS: (keyof ActionFissionRow)[] = [
   "selectedActionThumbUrl",
 ];
 
+function canonicalPromptNode(value: unknown): NativeImagePromptSerializedNode | null {
+  if (!value || typeof value !== "object") return null;
+  const source = value as NativeImagePromptSerializedNode;
+  if (typeof source.type !== "string") return null;
+  const node: NativeImagePromptSerializedNode = { type: source.type, version: 1 };
+  if (source.type === "text") node.text = String(source.text || "");
+  if (source.type === "image-reference") node.edgeId = String(source.edgeId || "");
+  if (Array.isArray(source.children)) {
+    node.children = source.children
+      .map(canonicalPromptNode)
+      .filter((child): child is NativeImagePromptSerializedNode => Boolean(child));
+  }
+  return node;
+}
+
+function canonicalPromptDocument(value: unknown): NativeImagePromptDocument | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const root = canonicalPromptNode((value as { root?: unknown }).root);
+  return root?.type === "root" ? { root } : undefined;
+}
+
+function plainPromptDocumentText(document: NativeImagePromptDocument) {
+  let hasReference = false;
+  const serialize = (node: NativeImagePromptSerializedNode): string => {
+    if (node.type === "text") return String(node.text || "");
+    if (node.type === "linebreak") return "\n";
+    if (node.type === "image-reference") {
+      hasReference = true;
+      return "";
+    }
+    const children = Array.isArray(node.children) ? node.children : [];
+    return children.map(serialize).join(node.type === "root" ? "\n" : "");
+  };
+  return { text: serialize(document.root), hasReference };
+}
+
 function undoableNodeData(data: NativeCanvasNodeData): NativeCanvasNodeData {
   const undoable = cloneValue(data);
   delete undoable.latestGenerationTaskId;
@@ -85,11 +132,25 @@ function undoableNodeData(data: NativeCanvasNodeData): NativeCanvasNodeData {
   delete undoable.multiImageExpanded;
   delete undoable.multiImageCollapsedSize;
   delete undoable.thumbUrl;
+  delete undoable.assetThumbUrl;
+  delete undoable.assetLoadState;
+  delete undoable.assetLoadError;
   delete undoable.imageUploadState;
   delete undoable.imageUploadError;
-  if (undoable.kind === "imageGenerator" || undoable.kind === "imageLoader") {
+  const promptDocument = canonicalPromptDocument(undoable.imagePromptDocument);
+  if (promptDocument) {
+    const semanticPrompt = plainPromptDocumentText(promptDocument);
+    if (!semanticPrompt.hasReference && semanticPrompt.text === String(undoable.text || "")) {
+      delete undoable.imagePromptDocument;
+    } else {
+      undoable.imagePromptDocument = promptDocument;
+    }
+  }
+  if (undoable.kind === "imageGenerator" || undoable.kind === "assetLoader") {
     delete undoable.imageNaturalWidth;
     delete undoable.imageNaturalHeight;
+    delete undoable.assetNaturalWidth;
+    delete undoable.assetNaturalHeight;
   }
   if (undoable.libtvImageGeneration) {
     delete (undoable.libtvImageGeneration as Record<string, unknown>).error;
@@ -122,7 +183,7 @@ function undoableNode(node: NativeCanvasNode): NativeCanvasNode {
   projected.data = undoableNodeData(projected.data);
   if (
     node.data.kind === "annotation"
-    || node.data.kind === "imageLoader"
+    || node.data.kind === "assetLoader"
     || node.data.kind === "imageGenerator"
   ) {
     projected.style = styleWithoutDimensions(projected.style);
@@ -256,8 +317,8 @@ function restoreNodeData(historyData: NativeCanvasNodeData, currentData: NativeC
     ["thumbUrl", "imageNaturalWidth", "imageNaturalHeight"].forEach((field) => (
       overlayProperty(restored, current, field)
     ));
-  } else if (historyData.kind === "imageLoader" && historyData.imageUrl === currentData.imageUrl) {
-    ["thumbUrl", "imageNaturalWidth", "imageNaturalHeight"].forEach((field) => (
+  } else if (historyData.kind === "assetLoader" && historyData.assetUrl === currentData.assetUrl) {
+    ["assetThumbUrl", "assetNaturalWidth", "assetNaturalHeight", "assetDurationMs", "assetSizeBytes"].forEach((field) => (
       overlayProperty(restored, current, field)
     ));
   }
@@ -299,11 +360,15 @@ function generatorCanonicalCenter(node: NativeCanvasNode) {
 export function restoreInfiniteCanvasHistorySnapshot(
   snapshot: NativeCanvasHistorySnapshot,
   currentNodes: NativeCanvasNode[],
-  _currentEdges: NativeCanvasEdge[],
+  currentEdges: NativeCanvasEdge[],
 ): NativeCanvasHistorySnapshot {
   const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+  const currentEdgeById = new Map(currentEdges.map((edge) => [edge.id, edge]));
   return {
-    edges: snapshot.edges.map(snapshotEdge),
+    edges: snapshot.edges.map((historyEdge) => ({
+      ...snapshotEdge(historyEdge),
+      selected: Boolean(currentEdgeById.get(historyEdge.id)?.selected),
+    })),
     nodes: snapshot.nodes.map((historyNode) => {
       const current = currentById.get(historyNode.id);
       if (!current) return snapshotNode(historyNode);
@@ -332,7 +397,7 @@ export function restoreInfiniteCanvasHistorySnapshot(
         position,
         style,
         data,
-        selected: false,
+        selected: Boolean(current.selected),
         dragging: false,
       };
     }),

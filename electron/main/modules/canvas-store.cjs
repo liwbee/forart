@@ -511,7 +511,11 @@ function createCanvasStore({ rootDir }) {
     const nodeCount = Number(payload.nodeCount);
     if (!safeId || !jsonText) throw new Error('Canvas save payload is incomplete.');
     if (!Number.isInteger(nodeCount) || nodeCount < 0) throw new Error('Canvas save payload has an invalid node count.');
-    if (!jsonText.includes('"canvasSchemaVersion":2') || !jsonText.includes(`"id":"${safeId}"`)) {
+    const schemaVersionMatch = jsonText.match(/"canvasSchemaVersion"\s*:\s*(\d+)/);
+    const schemaVersion = Number(schemaVersionMatch?.[1] || 0);
+    // Accept schema 2 for older renderer/remote clients, but all current
+    // renderer saves use schema 3. The normal read path upgrades v2 files.
+    if (![2, CURRENT_CANVAS_SCHEMA_VERSION].includes(schemaVersion) || !jsonText.includes(`"id":"${safeId}"`)) {
       throw new Error('Canvas save payload does not match the target canvas.');
     }
 
@@ -730,6 +734,15 @@ function createCanvasStore({ rootDir }) {
         delete next.multiImageCollapsedSize;
         delete next.imageUrl;
         delete next.thumbUrl;
+        delete next.assetUrl;
+        delete next.assetFileName;
+        delete next.assetThumbUrl;
+        delete next.assetType;
+        delete next.assetMimeType;
+        delete next.assetNaturalWidth;
+        delete next.assetNaturalHeight;
+        delete next.assetLoadState;
+        delete next.assetLoadError;
         delete next.outputDownloadState;
         delete next.outputDownloadedAt;
 
@@ -867,6 +880,7 @@ function createCanvasStore({ rootDir }) {
     setActionFissionRowTaskAnchors,
     completeActionFissionRow,
     completeGenerationNode,
+    updateGenerationNode,
     updateCanvasMeta,
     updateProject,
   };

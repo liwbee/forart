@@ -497,6 +497,30 @@
   outline-offset: 2px;
 }
 
+.rf-native-canvas .react-flow__node.rf-native-node--connection-valid .rf-native-node-frame {
+  border-color: var(--status-success-border);
+  box-shadow:
+    0 0 0 2px var(--status-success-bg),
+    var(--shadow-ui);
+}
+
+.rf-native-canvas .react-flow__node.rf-native-node--connection-invalid .rf-native-node-frame {
+  border-color: color-mix(in srgb, var(--destructive) 48%, var(--border-subtle));
+  box-shadow:
+    0 0 0 2px var(--danger-soft),
+    var(--shadow-ui);
+}
+
+.rf-native-canvas .react-flow__node.rf-native-node--connection-valid .rf-native-group-node {
+  border-color: var(--status-success-border);
+  box-shadow: 0 0 0 2px var(--status-success-bg);
+}
+
+.rf-native-canvas .react-flow__node.rf-native-node--connection-invalid .rf-native-group-node {
+  border-color: color-mix(in srgb, var(--destructive) 48%, var(--border-subtle));
+  box-shadow: 0 0 0 2px var(--danger-soft);
+}
+
 .rf-native-node-caption {
   position: absolute;
   left: 0;
@@ -1863,6 +1887,249 @@
   visibility: hidden;
 }
 
+.rf-native-video-poster {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+  color: var(--text-primary);
+  background: var(--surface-control);
+  cursor: pointer;
+}
+
+.rf-native-video-poster img,
+.rf-native-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.rf-native-video-poster img { object-fit: cover; }
+
+.rf-native-video-play {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  color: #fff;
+  background: rgb(0 0 0 / 68%);
+  box-shadow: var(--shadow-card);
+}
+
+.rf-native-video-play svg { width: 18px; height: 18px; margin-left: 2px; }
+
+.rf-native-video-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #080a0d;
+}
+
+.rf-native-video-shell .rf-native-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.rf-native-video-shell.is-controls-hidden { cursor: none; }
+
+.rf-native-video-controls {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  display: block;
+  min-height: 42px;
+  padding: 0 5px 3px;
+  color: #f8fafc;
+  background: linear-gradient(transparent, rgb(0 0 0 / 82%));
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 160ms ease, visibility 160ms ease;
+}
+
+.rf-native-video-controls.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.rf-native-video-controls > .rf-native-video-progress {
+  width: 100%;
+  height: 8px;
+  display: block;
+  margin: 0;
+}
+
+.rf-native-video-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+}
+
+.rf-native-video-control {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.rf-native-video-control:hover,
+.rf-native-video-control:focus-visible,
+.rf-native-video-control.is-active { background: rgb(255 255 255 / 18%); }
+.rf-native-video-control svg { width: 12px; height: 12px; }
+.rf-native-video-pause-glyph { display: inline-flex; gap: 2px; align-items: center; height: 12px; }
+.rf-native-video-pause-glyph i { width: 2px; height: 10px; display: block; border-radius: 1px; background: currentColor; }
+.rf-native-video-time { min-width: 29px; color: rgb(255 255 255 / 78%); font-size: 8px; font-variant-numeric: tabular-nums; text-align: center; }
+.rf-native-video-time-total { min-width: 69px; white-space: nowrap; }
+.rf-native-video-slider { position: relative; display: flex; align-items: center; min-width: 0; height: 14px; cursor: pointer; }
+.rf-native-video-progress { flex: 1 1 auto; }
+.rf-native-video-slider-track { position: absolute; right: 0; left: 0; top: 50%; height: 2px; border-radius: 999px; transform: translateY(-50%); background: rgb(255 255 255 / 34%); pointer-events: none; }
+.rf-native-video-slider-fill { position: absolute; inset: 0 auto 0 0; width: var(--slider-fill, 0%); border-radius: inherit; background: #fff; }
+.rf-native-video-slider-thumb { position: absolute; top: 50%; left: var(--slider-fill, 0%); width: 6px; height: 6px; border-radius: 50%; transform: translate(-50%, -50%); background: #fff; }
+.rf-native-video-slider-input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.rf-native-video-slider:focus-within .rf-native-video-slider-track { box-shadow: 0 0 0 2px rgb(255 255 255 / 28%); }
+.rf-native-video-volume-group { display: flex; align-items: center; flex: 0 0 auto; }
+.rf-native-video-volume { width: 0; opacity: 0; pointer-events: none; transition: width 150ms ease, opacity 150ms ease; }
+.rf-native-video-volume-group:hover .rf-native-video-volume,
+.rf-native-video-volume-group:focus-within .rf-native-video-volume { width: 38px; margin-right: 2px; opacity: 1; pointer-events: auto; }
+.rf-native-video-capture { position: relative; flex: 0 0 auto; }
+.rf-native-video-capture { margin-left: auto; }
+.rf-native-video-capture-chevron { width: 8px !important; height: 8px !important; margin-left: -2px; }
+.rf-native-video-capture-menu {
+  position: absolute;
+  right: 0;
+  bottom: 26px;
+  display: grid;
+  gap: 2px;
+  min-width: 92px;
+  padding: 4px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 6px;
+  background: rgb(18 20 24 / 96%);
+  box-shadow: 0 8px 22px rgb(0 0 0 / 35%);
+}
+.rf-native-video-capture-menu button {
+  border: 0;
+  border-radius: 4px;
+  padding: 5px 7px;
+  color: #e5e7eb;
+  background: transparent;
+  font-size: 10px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.rf-native-video-capture-menu button:hover,
+.rf-native-video-capture-menu button:focus-visible { background: rgb(255 255 255 / 12%); }
+
+.rf-native-video-shell:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background: #080a0d;
+}
+
+/* Chromium's native player keeps a compact bar in the node, but gives the
+   controls a larger hit area when the media surface enters fullscreen. */
+.rf-native-video-shell:fullscreen .rf-native-video-controls,
+.rf-native-video-shell.is-fullscreen .rf-native-video-controls {
+  min-height: 78px;
+  padding: 0 18px 12px;
+}
+
+.rf-native-video-shell:fullscreen .rf-native-video-controls-row,
+.rf-native-video-shell.is-fullscreen .rf-native-video-controls-row {
+  height: 42px;
+  gap: 8px;
+}
+
+.rf-native-video-shell:fullscreen .rf-native-video-control,
+.rf-native-video-shell.is-fullscreen .rf-native-video-control {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+}
+
+.rf-native-video-shell:fullscreen .rf-native-video-control svg,
+.rf-native-video-shell.is-fullscreen .rf-native-video-control svg {
+  width: 20px;
+  height: 20px;
+}
+
+.rf-native-video-shell:fullscreen .rf-native-video-pause-glyph,
+.rf-native-video-shell.is-fullscreen .rf-native-video-pause-glyph {
+  height: 18px;
+  gap: 3px;
+}
+
+.rf-native-video-shell:fullscreen .rf-native-video-pause-glyph i,
+.rf-native-video-shell.is-fullscreen .rf-native-video-pause-glyph i {
+  width: 3px;
+  height: 16px;
+}
+
+.rf-native-video-shell:fullscreen .rf-native-video-time,
+.rf-native-video-shell.is-fullscreen .rf-native-video-time {
+  min-width: 92px;
+  font-size: 12px;
+}
+
+.rf-native-video-shell:fullscreen .rf-native-video-slider,
+.rf-native-video-shell.is-fullscreen .rf-native-video-slider {
+  height: 22px;
+}
+
+.rf-native-video-shell:fullscreen .rf-native-video-progress,
+.rf-native-video-shell.is-fullscreen .rf-native-video-progress {
+  height: 16px;
+}
+
+.rf-native-video-shell:fullscreen .rf-native-video-slider-thumb,
+.rf-native-video-shell.is-fullscreen .rf-native-video-slider-thumb {
+  width: 10px;
+  height: 10px;
+}
+
+.rf-native-video-shell:fullscreen .rf-native-video-volume-group:hover .rf-native-video-volume,
+.rf-native-video-shell:fullscreen .rf-native-video-volume-group:focus-within .rf-native-video-volume,
+.rf-native-video-shell.is-fullscreen .rf-native-video-volume-group:hover .rf-native-video-volume,
+.rf-native-video-shell.is-fullscreen .rf-native-video-volume-group:focus-within .rf-native-video-volume {
+  width: 92px;
+}
+
+.rf-native-video-shell:fullscreen .rf-native-video-capture-menu,
+.rf-native-video-shell.is-fullscreen .rf-native-video-capture-menu {
+  bottom: 44px;
+  min-width: 116px;
+  padding: 6px;
+}
+
+.rf-native-video-shell:fullscreen .rf-native-video-capture-menu button,
+.rf-native-video-shell.is-fullscreen .rf-native-video-capture-menu button {
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
 .rf-native-image-resolution {
   position: absolute;
   top: 7px;
@@ -2084,6 +2351,70 @@
   padding: 6px;
 }
 
+.rf-native-node-content--image-reverse,
+.rf-native-image-reverse-body {
+  width: 100%;
+  height: 100%;
+}
+
+.rf-native-node-content--image-reverse {
+  padding: 6px;
+}
+
+.rf-native-image-reverse-body {
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.rf-native-image-reverse-skeleton {
+  width: min(86%, 16rem);
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rf-native-image-reverse-skeleton--static {
+  align-items: center;
+  gap: 6px;
+}
+
+.rf-native-canvas .rf-native-image-reverse-output {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  resize: none;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 8px 12px;
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: default;
+  user-select: none;
+}
+
+.rf-native-canvas .rf-native-image-reverse-output.is-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rf-native-canvas .rf-native-image-reverse-output.is-placeholder.is-running {
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.rf-native-canvas .rf-native-image-reverse-output.is-selectable {
+  cursor: text;
+  user-select: text;
+}
+
 .rf-native-node-frame--annotation {
   overflow: hidden;
   border: 0;
@@ -2280,6 +2611,13 @@
   border-radius: calc(var(--radius) - 2px);
   background: transparent;
   box-shadow: none;
+  cursor: default;
+  user-select: none;
+}
+
+.rf-native-prompt-input.is-editing {
+  cursor: text;
+  user-select: text;
 }
 
 .rf-native-prompt-input:focus,
@@ -2287,18 +2625,6 @@
   border: 0;
   outline: 0;
   box-shadow: none;
-}
-
-.rf-native-prompt-edit-shield {
-  position: absolute;
-  inset: 6px;
-  z-index: 1;
-  cursor: default;
-  background: transparent;
-}
-
-.rf-native-prompt-edit-shield:active {
-  cursor: default;
 }
 
 .rf-native-canvas .react-flow__resize-control.handle.rf-native-node-resize-control {
@@ -2381,6 +2707,11 @@
   max-height: 120px;
 }
 
+.rf-native-canvas .rf-image-generator-prompt-shell.is-expanded {
+  height: auto;
+  max-height: none;
+}
+
 .rf-native-image-placeholder {
   width: 100%;
   height: 100%;
@@ -2429,7 +2760,7 @@
   height: 100%;
   box-sizing: border-box;
   overflow-y: auto;
-  padding: 8px 12px;
+  padding: 8px 12px 8px 8px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -2439,6 +2770,12 @@
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.rf-native-canvas .rf-image-generator-prompt-shell.is-expanded .rf-image-generator-prompt {
+  height: auto;
+  min-height: 120px;
+  overflow-y: visible;
 }
 
 .rf-native-canvas .rf-image-generator-prompt:focus,
@@ -2452,7 +2789,7 @@
 .rf-image-generator-prompt-placeholder {
   position: absolute;
   top: 8px;
-  left: 12px;
+  left: 8px;
   right: 12px;
   pointer-events: none;
   color: var(--text-muted);
@@ -2510,8 +2847,11 @@
   min-width: 0;
   min-height: 60px;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 8px;
+  box-sizing: border-box;
+  padding-left: 8px;
 }
 
 .rf-action-fission-group-bar {
@@ -2616,9 +2956,9 @@
 
 .rf-action-fission-reference-groups {
   min-width: 0;
-  display: flex;
-  align-items: stretch;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
 }
 
 .rf-action-fission-reference-group {
@@ -2629,12 +2969,11 @@
 }
 
 .rf-action-fission-reference-group--primary {
-  flex: 1 1 auto;
+  width: 100%;
 }
 
 .rf-action-fission-reference-group--additional {
-  width: 188px;
-  flex: 0 0 188px;
+  width: 100%;
 }
 
 .rf-action-fission-reference-title {
@@ -2642,16 +2981,13 @@
   font-size: 9px;
   font-weight: var(--font-weight-medium);
   line-height: 1;
+  padding-left: 8px;
 }
 
 .rf-action-fission-reference-divider {
-  height: 60px;
-  align-self: flex-end;
+  width: 100%;
+  height: 1px;
   background: var(--border-subtle);
-}
-
-.rf-reference-strip > .rf-reference-actions-tile {
-  margin-top: 2px;
 }
 
 .rf-reference-strip > .rf-reference-strip__separator {
@@ -2659,20 +2995,7 @@
 }
 
 .rf-reference-strip__items {
-  min-width: 0;
-  flex: 1 1 auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 2px;
-  scroll-behavior: smooth;
-}
-
-.rf-reference-strip__sortable {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: contents;
 }
 
 .rf-reference-strip__separator {
@@ -2844,6 +3167,20 @@
   opacity: 1;
 }
 
+.rf-prompt-reference-preview {
+  width: auto;
+  max-width: min(360px, calc(100vw - 24px));
+  max-height: min(280px, calc(100vh - 24px));
+  overflow: auto;
+  border-color: var(--border-subtle);
+  padding: 8px 10px;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .rf-reference-preview {
   width: auto;
   max-width: min(280px, calc(100vw - 24px));
@@ -2863,6 +3200,9 @@
 .rf-native-prompt-input::-webkit-scrollbar,
 .rf-native-prompt-input::-webkit-scrollbar-track,
 .rf-native-prompt-input::-webkit-scrollbar-thumb,
+.rf-native-image-reverse-output::-webkit-scrollbar,
+.rf-native-image-reverse-output::-webkit-scrollbar-track,
+.rf-native-image-reverse-output::-webkit-scrollbar-thumb,
 .rf-image-generator-prompt::-webkit-scrollbar,
 .rf-image-generator-prompt::-webkit-scrollbar-track,
 .rf-image-generator-prompt::-webkit-scrollbar-thumb {
@@ -2923,6 +3263,7 @@
 }
 
 .rf-reference-item > svg,
+.rf-reference-item__preview-trigger > svg,
 .rf-reference-preview > svg {
   width: 20px;
   height: 20px;
@@ -3068,6 +3409,14 @@
   cursor: pointer;
   pointer-events: auto;
   user-select: none;
+}
+
+.rf-reference-item__preview-trigger {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
 }
 
 .rf-canvas-save-status:hover:not(:disabled),

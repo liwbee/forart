@@ -1,7 +1,10 @@
 const fs = require('fs');
 const path = require('path');
+const { isInsideOrEqual } = require('./path-guard.cjs');
 
 const IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.heic', '.heif', '.jpg', '.jpeg', '.png', '.svg', '.webp']);
+const VIDEO_EXTENSIONS = new Set(['.m4v', '.mov', '.mp4', '.webm']);
+const ASSET_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS]);
 
 function isRecord(value) {
   return value && typeof value === 'object' && !Array.isArray(value);
@@ -9,11 +12,6 @@ function isRecord(value) {
 
 function safeString(value) {
   return String(value || '').trim();
-}
-
-function isInsideOrEqual(parent, target) {
-  const relative = path.relative(path.resolve(parent), path.resolve(target));
-  return !relative || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function fileNameFromUrl(url) {
@@ -112,6 +110,7 @@ function createCanvasCacheStore({ assetStore, canvasStore, generationTaskReposit
         });
         addReference(referenceMap, node.url, nodeReference('node.url'));
         addReference(referenceMap, node.filePath, nodeReference('node.filePath'));
+        addReference(referenceMap, data.assetUrl, nodeReference('node.data.assetUrl'));
         addReference(referenceMap, data.imageUrl, nodeReference('node.data.imageUrl'));
         for (const image of Array.isArray(data.generatedImages) ? data.generatedImages : []) {
           addReference(referenceMap, image?.localUrl, nodeReference('node.data.generatedImages.localUrl'));
@@ -154,7 +153,7 @@ function createCanvasCacheStore({ assetStore, canvasStore, generationTaskReposit
       const filePath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
         files.push(...enumerateAssetFiles(filePath));
-      } else if (entry.isFile() && !isThumbPath(filePath) && IMAGE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+      } else if (entry.isFile() && !isThumbPath(filePath) && ASSET_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
         files.push(filePath);
       }
     }

@@ -2,6 +2,32 @@ const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
 const { createCanvasAssetThumbnailStore } = require('./canvas-asset-thumbnails.cjs');
+const { isInside } = require('./path-guard.cjs');
+const { probeVideo } = require('./media/video-probe.cjs');
+
+const IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.heic', '.heif', '.jpg', '.jpeg', '.png', '.svg', '.webp']);
+const VIDEO_MIME_BY_EXTENSION = new Map([
+  ['.mp4', 'video/mp4'],
+  ['.m4v', 'video/x-m4v'],
+  ['.mov', 'video/quicktime'],
+  ['.webm', 'video/webm'],
+]);
+
+function importedAssetType(filePath, mimeType = '') {
+  const normalizedMime = String(mimeType || '').trim().toLowerCase();
+  const extension = path.extname(String(filePath || '')).toLowerCase();
+  if (normalizedMime.startsWith('video/') || VIDEO_MIME_BY_EXTENSION.has(extension)) return 'video';
+  if (normalizedMime.startsWith('image/') || IMAGE_EXTENSIONS.has(extension)) return 'image';
+  return '';
+}
+
+function importedAssetMimeType(filePath, mimeType = '', assetType = importedAssetType(filePath, mimeType)) {
+  const normalizedMime = String(mimeType || '').trim().toLowerCase();
+  if (normalizedMime.startsWith(`${assetType}/`)) return normalizedMime;
+  const extension = path.extname(String(filePath || '')).toLowerCase();
+  if (assetType === 'video') return VIDEO_MIME_BY_EXTENSION.get(extension) || 'video/mp4';
+  return normalizedMime || '';
+}
 
 function uniqueFilePath(directory, fileName) {
   const parsed = path.parse(fileName || 'generated-image.png');
@@ -32,11 +58,6 @@ function internalAssetFilePath(directory, extension) {
     candidate = path.join(directory, `asset_${randomUUID()}${safeExtension}`);
   } while (fs.existsSync(candidate));
   return candidate;
-}
-
-function isInside(parent, target) {
-  const relative = path.relative(path.resolve(parent), path.resolve(target));
-  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
 function extensionFromMime(mimeType) {
@@ -214,6 +235,52 @@ function createAssetStore({ rootDir, net }) {
     };
   }
 
+  async function importUserAssetFile(payload = {}) {
+    const sourceValue = String(payload.filePath || '').trim();
+    if (!sourceValue) throw new Error('Imported asset not found.');
+    const sourcePath = path.resolve(sourceValue);
+    const sourceStats = await fs.promises.stat(sourcePath).catch(() => null);
+    if (!sourceStats?.isFile()) throw new Error('Imported asset not found.');
+
+    const assetType = importedAssetType(payload.fileName || sourcePath, payload.mimeType);
+    if (!assetType) throw new Error('Only image, MP4, WebM, MOV, and M4V assets are supported.');
+    const mimeType = importedAssetMimeType(payload.fileName || sourcePath, payload.mimeType, assetType);
+    const directory = assetDirectory('input');
+    const extension = path.extname(payload.fileName || sourcePath).toLowerCase()
+      || extensionFromMime(mimeType)
+      || (assetType === 'video' ? '.mp4' : '.png');
+    const filePath = internalAssetFilePath(directory, extension);
+    await fs.promises.copyFile(sourcePath, filePath);
+
+    try {
+      const metadata = assetType === 'video'
+        ? await probeVideo(filePath)
+        : await readImageDimensions(await fs.promises.readFile(filePath));
+      const thumb = await thumbnailStore.ensureCanvasAssetThumbnail({
+        filePath,
+        mimeType,
+        durationMs: metadata.durationMs,
+      });
+      return {
+        url: assetUrl(filePath),
+        ...thumb,
+        fileName: String(payload.fileName || path.basename(sourcePath)),
+        storedFileName: path.basename(filePath),
+        filePath,
+        assetType,
+        mimeType,
+        width: metadata.width,
+        height: metadata.height,
+        durationMs: Number(metadata.durationMs || 0),
+        sizeBytes: sourceStats.size,
+        ...(assetType === 'video' ? { codec: metadata.codec || '' } : {}),
+      };
+    } catch (error) {
+      await fs.promises.rm(filePath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  }
+
   async function saveAssetThumbnail(payload = {}) {
     const sourcePath = payload.filePath && fs.existsSync(payload.filePath)
       ? payload.filePath
@@ -283,6 +350,7 @@ function createAssetStore({ rootDir, net }) {
     assetUrl,
     canvasAssetsRoot,
     importAssetFile,
+    importUserAssetFile,
     readImageSource,
     resolveAssetUrl,
     saveAsset,
@@ -294,4 +362,14 @@ function createAssetStore({ rootDir, net }) {
   };
 }
 
-module.exports = { createAssetStore, extensionFromMime, internalAssetFilePath, isInside, uniqueFilePath };
+module.exports = {
+  IMAGE_EXTENSIONS,
+  VIDEO_MIME_BY_EXTENSION,
+  createAssetStore,
+  extensionFromMime,
+  importedAssetMimeType,
+  importedAssetType,
+  internalAssetFilePath,
+  isInside,
+  uniqueFilePath,
+};

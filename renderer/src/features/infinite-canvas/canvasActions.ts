@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 import { i18n } from "../../i18n";
-import type { ImageGenerationRunOptions, NativeCanvasNodeData } from "./nativeCanvas";
+import type { ImageGenerationRunOptions, NativeCanvasAssetType, NativeCanvasNodeData } from "./nativeCanvas";
 import type {
   ImageGeneratorPromptInput,
   ImageGeneratorReferenceInput,
@@ -10,6 +10,8 @@ export interface NativeCanvasActions {
   readOnly: boolean;
   beginHistoryGesture: () => void;
   endHistoryGesture: () => void;
+  undoCanvasHistory: () => void;
+  redoCanvasHistory: () => void;
   addImageReferenceFiles: (nodeId: string, files: File[]) => Promise<void>;
   cropNodeImage: (nodeId: string, crop: CanvasImageCropRect) => Promise<void>;
   downloadActionFissionResult: (nodeId: string, rowId: string) => Promise<void>;
@@ -27,7 +29,7 @@ export interface NativeCanvasActions {
   runActionFission: (nodeId: string, rowId?: string) => Promise<void>;
   removeCanvasEdge: (edgeId: string) => void;
   reorderImageGeneratorReferences: (nodeId: string, orderedEdgeIds: string[]) => void;
-  setNodeImage: (nodeId: string, imageUrl: string, fileName: string) => void;
+  setNodeAsset: (nodeId: string, assetUrl: string, fileName: string, assetType?: NativeCanvasAssetType, assetMimeType?: string, metadata?: { width?: number; height?: number; durationMs?: number; sizeBytes?: number; thumbUrl?: string }) => void;
   setNodeText: (nodeId: string, text: string) => void;
   stopImageGeneration: (nodeId: string) => Promise<void>;
   stopActionFission: (nodeId: string, rowId?: string) => Promise<void>;
@@ -91,5 +93,40 @@ export function readImageFileDimensions(file: File) {
       reject(new Error(i18n.t("infiniteCanvas:imageDimensionsReadFailed")));
     };
     image.src = objectUrl;
+  });
+}
+
+export function isCanvasAssetFile(file: File) {
+  return file.type.startsWith("image/") || file.type.startsWith("video/")
+    || /\.(mp4|m4v|mov|webm)$/i.test(file.name);
+}
+
+export function readMediaFileDimensions(file: File) {
+  if (file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|avif|bmp|svg)$/i.test(file.name)) {
+    return readImageFileDimensions(file);
+  }
+  return new Promise<{ width: number; height: number }>((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    const cleanup = () => {
+      URL.revokeObjectURL(objectUrl);
+      video.onloadedmetadata = null;
+      video.onerror = null;
+      video.removeAttribute("src");
+      video.load();
+    };
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      const dimensions = { width: video.videoWidth, height: video.videoHeight };
+      cleanup();
+      dimensions.width > 0 && dimensions.height > 0
+        ? resolve(dimensions)
+        : reject(new Error(i18n.t("infiniteCanvas:imageDimensionsReadFailed")));
+    };
+    video.onerror = () => {
+      cleanup();
+      reject(new Error(i18n.t("infiniteCanvas:imageDimensionsReadFailed")));
+    };
+    video.src = objectUrl;
   });
 }

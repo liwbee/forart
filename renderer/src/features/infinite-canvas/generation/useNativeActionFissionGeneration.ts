@@ -50,6 +50,24 @@ interface UseNativeActionFissionGenerationOptions {
   t: TFunction;
 }
 
+async function prepareActionFissionReferences(
+  primaryReferences: string[],
+  additionalReferences: string[],
+  signal: AbortSignal,
+) {
+  const allReferences = [...primaryReferences, ...additionalReferences];
+  // Warm local canvas assets while the Agent request is in flight. Provider
+  // specific Base64/Multipart/LibTV uploads still happen in the existing
+  // Electron generation runner after this snapshot is handed off.
+  if (window.easyTool?.ensureCanvasAssetThumbnail) {
+    await Promise.all(allReferences.map(async (url) => {
+      if (signal.aborted) return;
+      try { await window.easyTool!.ensureCanvasAssetThumbnail({ url }); } catch { /* runner reports upload errors */ }
+    }));
+  }
+  return { frozenPrimaryReferences: [...primaryReferences], frozenAdditionalReferences: [...additionalReferences] };
+}
+
 export function useNativeActionFissionGeneration({
   canvasId,
   edges,
@@ -209,7 +227,6 @@ export function useNativeActionFissionGeneration({
         target: { type: "actionFissionRow", nodeId: node.id, rowId: row.id },
         kind: "image",
         providerId: provider.id,
-        provider,
         model,
         modelRule: rule,
         prompt,
@@ -353,29 +370,40 @@ export function useNativeActionFissionGeneration({
     activeNodeRunsRef.current.add(runKey);
     nodeQueueControllersRef.current.set(runKey, queueController);
     try {
+      // Freeze the current inputs before handing them to the generation runner.
+      const frozenPrimaryReferences = references.map((item) => item.imageUrl);
+      const frozenAdditionalReferences = additionalReferences.map((item) => item.imageUrl);
+      const frozenAdditionalPrompts = additionalPrompts.map((item) => item.text);
+      const referencePreparation = prepareActionFissionReferences(
+        frozenPrimaryReferences,
+        frozenAdditionalReferences,
+        queueController.signal,
+      );
+      const prepared = await referencePreparation;
+      if (queueController.signal.aborted) return;
       if (node.data.imageGenerationBackend === "libtv") {
         await runLibtvRows(
           node,
           targetRows,
-          references.map((item) => item.imageUrl),
-          additionalReferences.map((item) => item.imageUrl),
+          prepared.frozenPrimaryReferences,
+          prepared.frozenAdditionalReferences,
           connectedPrompt,
-          additionalPrompts.map((item) => item.text),
+          frozenAdditionalPrompts,
           queueController.signal,
         );
       } else {
         await runApiRows(
           node,
           targetRows,
-          references.map((item) => item.imageUrl),
-          additionalReferences.map((item) => item.imageUrl),
+          prepared.frozenPrimaryReferences,
+          prepared.frozenAdditionalReferences,
           connectedPrompt,
-          additionalPrompts.map((item) => item.text),
+          frozenAdditionalPrompts,
           queueController.signal,
         );
       }
     } catch (error) {
-      if (mountedRef.current) {
+      if (mountedRef.current && !queueController.signal.aborted) {
         const message = error instanceof Error ? error.message : String(error);
         runtimeKeys.forEach((key) => setGenerationRuntimeError(key, message));
       }

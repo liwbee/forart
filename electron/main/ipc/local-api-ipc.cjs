@@ -1,5 +1,6 @@
 const fs = require('fs');
 const nodePath = require('path');
+const { isInside } = require('../modules/path-guard.cjs');
 
 function normalizeMethod(value) {
   return String(value || 'GET').trim().toUpperCase() || 'GET';
@@ -513,11 +514,6 @@ async function dispatchActionLibraryRoute({ method, url, body, runtime }) {
   } catch (error) {
     return failure(400, error instanceof Error ? error.message : String(error));
   }
-}
-
-function isInside(parent, target) {
-  const relative = nodePath.relative(nodePath.resolve(parent), nodePath.resolve(target));
-  return Boolean(relative) && !relative.startsWith('..') && !nodePath.isAbsolute(relative);
 }
 
 function registerLocalApiIpc({ ipcMain, configStore, app, dataRoot }) {

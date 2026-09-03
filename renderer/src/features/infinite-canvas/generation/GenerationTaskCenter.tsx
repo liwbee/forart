@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
-import type { GenerationTaskDto, GenerationTaskStatus } from "../../../app/appConfig";
+import type { CanvasTaskDto, GenerationTaskDto, GenerationTaskStatus } from "../../../app/appConfig";
 import { NativeTabs, type NativeTabItem } from "../../../components/NativeTabs";
 import { ImageWithFallback } from "../../../components/ImageWithFallback";
 import { copyText } from "../../../components/ErrorCopyLine";
@@ -26,7 +26,7 @@ import {
 import { ImageViewer } from "../../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import { formatGenerationDuration } from "./generationStatus";
-import { buildTaskDownloadName } from "./generationDownloadName";
+import { FALLBACK_DOWNLOAD_NAME, saveGenerationImageFile } from "./generationDownload";
 import { generationTaskImageAt } from "./generationDownloadTarget";
 import {
   isGenerationTaskActive,
@@ -38,6 +38,31 @@ type TaskTone = "queued" | "running" | "succeeded" | "failed" | "neutral";
 const TASK_PAGE_SIZE = 30;
 const TASK_ROW_HEIGHT = 69;
 const EMPTY_TASK_COUNTS = { all: 0, active: 0, succeeded: 0, exceptional: 0 };
+
+function canvasImageTaskToGenerationTask(task: CanvasTaskDto): GenerationTaskDto {
+  return {
+    id: task.id,
+    target: { canvasId: task.canvasId, kind: task.operation === "action_fission_generate" ? "actionFissionRow" : "imageGenerator", nodeId: task.nodeId, ...(task.rowId ? { rowId: task.rowId } : {}) },
+    executorKind: task.executorKind === "libtv" ? "libtv" : "api",
+    providerId: task.providerId,
+    providerName: task.providerName,
+    model: task.model,
+    resolution: task.resolution,
+    aspectRatio: task.aspectRatio,
+    quality: task.quality,
+    status: task.status as GenerationTaskStatus,
+    version: task.version,
+    startedAt: task.startedAt,
+    updatedAt: task.updatedAt,
+    completedAt: task.completedAt,
+    durationMs: task.durationMs,
+    errorCode: task.errorCode,
+    errorMessage: task.errorMessage,
+    result: task.result && typeof task.result === "object" && Array.isArray((task.result as { images?: unknown[] }).images)
+      ? task.result as GenerationTaskDto["result"]
+      : undefined,
+  };
+}
 
 function taskTone(status: GenerationTaskStatus): TaskTone {
   if (status === "queued" || status === "preparing" || status === "submitting") return "queued";
@@ -63,7 +88,7 @@ interface GenerationTaskCenterProps {
   onClose: () => void;
 }
 
-export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProps) {
+function ImageTaskCenter({ open, onClose }: GenerationTaskCenterProps) {
   const { t, i18n } = useTranslation();
   const [filter, setFilter] = useState<TaskFilter>("all");
   const [page, setPage] = useState(0);
@@ -101,16 +126,17 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
   ], [counts, t]);
 
   const refresh = useCallback(async (showRefreshing = true) => {
-    const taskApi = window.forartGenerationTasks;
+    const taskApi = window.forartCanvasTasks;
     if (!taskApi?.listPage) return;
     const requestSequence = ++requestSequenceRef.current;
     if (showRefreshing) setRefreshing(true);
     setLoadError("");
     try {
       const result = await taskApi.listPage({
+        category: "image",
         limit: TASK_PAGE_SIZE,
         offset: page * TASK_PAGE_SIZE,
-        filter,
+        status: filter,
       });
       if (requestSequence !== requestSequenceRef.current) return;
       const nextTotal = Math.max(0, Number(result.total || 0));
@@ -119,7 +145,7 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
         setPage(nextPageCount - 1);
         return;
       }
-      setPageTasks(result.tasks);
+      setPageTasks(result.tasks.map(canvasImageTaskToGenerationTask));
       setTotal(nextTotal);
       setCounts(result.counts);
     } catch (error) {
@@ -178,28 +204,11 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
     if (!image || downloadingTaskId) return;
     setDownloadingTaskId(task.id);
     try {
-      const imageUrl = resolveLibraryImageUrl(image.assetUrl);
-      if (window.easyTool?.saveResult) {
-        const result = await window.easyTool.saveResult({
-          url: imageUrl,
-          dataUrl: imageUrl,
-          defaultName: buildTaskDownloadName(task, image.fileName, image.assetUrl),
-          convertToPng: true,
-        });
-        toast.success(result.filePath
-          ? t("infiniteCanvas:downloadSaved", { path: result.filePath })
-          : t("infiniteCanvas:downloadComplete"));
-      } else {
-        const link = document.createElement("a");
-        link.href = imageUrl;
-        link.download = buildTaskDownloadName(task, image.fileName, image.assetUrl);
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        toast.success(t("infiniteCanvas:downloadComplete"));
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      await saveGenerationImageFile({
+        imageUrl: image.assetUrl,
+        defaultName: image.fileName || FALLBACK_DOWNLOAD_NAME,
+        t,
+      });
     } finally {
       setDownloadingTaskId("");
     }
@@ -404,4 +413,8 @@ export function GenerationTaskCenter({ open, onClose }: GenerationTaskCenterProp
       ) : null}
     </section>
   );
+}
+
+export function GenerationTaskCenter(props: GenerationTaskCenterProps) {
+  return <ImageTaskCenter {...props} />;
 }

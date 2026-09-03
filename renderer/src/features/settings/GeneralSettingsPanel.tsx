@@ -1,9 +1,17 @@
 import { ChevronDown, FolderOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ForartAppConfig, ForartMode, normalizeConfig } from "../../app/appConfig";
+import {
+  ForartAppConfig,
+  ForartMode,
+  normalizeConfig,
+  TASK_HISTORY_RETENTION_DAY_OPTIONS,
+  type TaskHistoryRetentionDays,
+} from "../../app/appConfig";
 import { NativeTabs, type NativeTabItem } from "../../components/NativeTabs";
 import { Button } from "../../components/ui/button";
+import { Field, FieldGroup } from "../../components/ui/field";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { openServerLoginDialog } from "../server-auth/serverLoginDialogStore";
 
 interface GeneralSettingsPanelProps {
@@ -22,6 +30,7 @@ function sameAppConfig(left: ForartAppConfig, right: ForartAppConfig) {
     && left.localLibraryPath === right.localLibraryPath
     && left.imageDownloadPath === right.imageDownloadPath
     && left.photoshopExecutablePath === right.photoshopExecutablePath
+    && left.taskHistoryRetentionDays === right.taskHistoryRetentionDays
     && left.serverUrl === right.serverUrl
     && left.serverAuthUsername === right.serverAuthUsername
     && left.serverAuthToken === right.serverAuthToken
@@ -35,6 +44,7 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
   const [localLibraryPath, setLocalLibraryPath] = useState(config.localLibraryPath);
   const [imageDownloadPath, setImageDownloadPath] = useState(config.imageDownloadPath);
   const [photoshopExecutablePath, setPhotoshopExecutablePath] = useState(config.photoshopExecutablePath);
+  const [taskHistoryRetentionDays, setTaskHistoryRetentionDays] = useState(config.taskHistoryRetentionDays);
   const [defaultImageDownloadPath, setDefaultImageDownloadPath] = useState("");
   const [serverUrl, setServerUrl] = useState(config.serverUrl);
   const [serverAuthUsername, setServerAuthUsername] = useState(config.serverAuthUsername);
@@ -57,6 +67,7 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
     setLocalLibraryPath(config.localLibraryPath);
     setImageDownloadPath(config.imageDownloadPath);
     setPhotoshopExecutablePath(config.photoshopExecutablePath);
+    setTaskHistoryRetentionDays(config.taskHistoryRetentionDays);
     setServerUrl(config.serverUrl);
     setServerAuthUsername(config.serverAuthUsername);
     setServerAuthToken(config.serverAuthToken);
@@ -223,6 +234,7 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
         localLibraryPath,
         imageDownloadPath,
         photoshopExecutablePath,
+        taskHistoryRetentionDays,
         serverUrl,
         serverAuthUsername,
         serverAuthToken,
@@ -231,7 +243,7 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
     }, 450);
 
     return () => window.clearTimeout(timeout);
-  }, [config.mode, config.serverUrl, imageDownloadPath, i18n.language, localLibraryPath, mode, photoshopExecutablePath, refreshConnectionStatus, saveGeneralSettings, serverAuthToken, serverAuthUsername, serverUrl]);
+  }, [config.mode, config.serverUrl, imageDownloadPath, i18n.language, localLibraryPath, mode, photoshopExecutablePath, refreshConnectionStatus, saveGeneralSettings, serverAuthToken, serverAuthUsername, serverUrl, taskHistoryRetentionDays]);
 
   return (
     <div hidden={hidden}>
@@ -347,6 +359,32 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
             </Button>
           </div>
         </div>
+
+        <FieldGroup className="settings-subsection">
+          <Field orientation="horizontal" className="settings-download-path-row">
+            <h3>{t("settings:taskHistoryRetention")}</h3>
+            <Select
+              value={String(taskHistoryRetentionDays)}
+              onValueChange={(value) => {
+                const days = Number(value) as TaskHistoryRetentionDays;
+                if (TASK_HISTORY_RETENTION_DAY_OPTIONS.includes(days)) setTaskHistoryRetentionDays(days);
+              }}
+            >
+              <SelectTrigger className="w-32" aria-label={t("settings:taskHistoryRetention")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {TASK_HISTORY_RETENTION_DAY_OPTIONS.map((days) => (
+                    <SelectItem key={days} value={String(days)}>
+                      {t(days === 1 ? "settings:taskHistoryRetentionDay" : "settings:taskHistoryRetentionDays", { count: days })}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+        </FieldGroup>
         </section>
       </div>
     </div>

@@ -5,6 +5,18 @@ const { normalizeLibtvMachineId } = require('./libtv-workspace.cjs');
 const APIMART_PROVIDER_ID = 'apimart';
 const TUDOU_PROVIDER_ID = 'tudou-api';
 const TUDOU_BASE_URL = 'https://api.ai-tudou.net/v1';
+const TUDOU_IMAGE_MODELS = [
+  'gpt-image-2-1k',
+  'gpt-image-2-2k',
+  'gpt-image-2-4k',
+  'gemini-3.1-flash-image-preview',
+  'gemini-3-pro-image-preview',
+  'grok-imagine-image',
+  'grok-imagine-image-pro',
+  'grok-imagine-image-edit',
+];
+const TASK_HISTORY_RETENTION_DAY_OPTIONS = Object.freeze([1, 3, 7, 15, 30]);
+const DEFAULT_TASK_HISTORY_RETENTION_DAYS = 15;
 const APIMART_BASE_URLS = [
   'https://api.apimart.ai/v1',
   'https://api.apib.ai/v1',
@@ -15,6 +27,7 @@ const APIMART_HOST_TO_BASE_URL = new Map(APIMART_BASE_URLS.map((baseUrl) => [new
 
 function normalizeConfig(payload = {}) {
   const mode = payload.mode === 'remote' ? 'remote' : 'local';
+  const requestedTaskHistoryRetentionDays = Number(payload.taskHistoryRetentionDays);
   return {
     mode,
     localLibraryPath: String(payload.localLibraryPath || '').trim(),
@@ -23,6 +36,9 @@ function normalizeConfig(payload = {}) {
     serverAuthToken: String(payload.serverAuthToken || '').trim(),
     imageDownloadPath: String(payload.imageDownloadPath || '').trim(),
     photoshopExecutablePath: String(payload.photoshopExecutablePath || '').trim(),
+    taskHistoryRetentionDays: TASK_HISTORY_RETENTION_DAY_OPTIONS.includes(requestedTaskHistoryRetentionDays)
+      ? requestedTaskHistoryRetentionDays
+      : DEFAULT_TASK_HISTORY_RETENTION_DAYS,
     language: payload.language === 'en-US' ? 'en-US' : 'zh-CN',
   };
 }
@@ -48,12 +64,34 @@ function normalizeInfiniteCanvasSettings(payload = {}) {
     connectionsVisible: source.connectionsVisible !== false,
     minimapOpen: source.minimapOpen === true,
     snapToGrid: source.snapToGrid === true,
+    promptEditorsExpanded: source.promptEditorsExpanded === true,
     referenceComparisonViewer: {
       referenceComparisonEnabled: viewerSource.referenceComparisonEnabled === true,
       referencePanelPercent: Number.isFinite(requestedPercent)
         ? Math.max(20, Math.min(80, Math.round(requestedPercent)))
         : 50,
     },
+  };
+}
+
+function normalizeAgentModelRoute(value) {
+  if (!value || typeof value !== 'object') return null;
+  const providerId = String(value.providerId || '').trim();
+  const model = String(value.model || '').trim();
+  return providerId && model ? { providerId, model } : null;
+}
+
+function normalizeAgentSettings(payload = {}) {
+  const source = payload && typeof payload === 'object' ? payload : {};
+  const reasoningLevel = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(source.reasoningLevel)
+    ? source.reasoningLevel
+    : 'medium';
+  return {
+    thinkingMode: source.thinkingMode === true || source.thinkingEnabled === true,
+    reasoningLevel,
+    imageGeneratorPromptOptimization: normalizeAgentModelRoute(
+      source.imageGeneratorPromptOptimization || source.promptOptimization || source.optimizationModel,
+    ),
   };
 }
 
@@ -83,11 +121,12 @@ function normalizeApiProvider(input = {}, providers = []) {
     imageRequestMode: input.imageRequestMode === 'openai-json' ? 'openai-json' : 'openai',
     imageGenerationEndpoint: String(input.imageGenerationEndpoint || '').trim(),
     imageEditEndpoint: String(input.imageEditEndpoint || '').trim(),
-    imageModels: Array.isArray(input.imageModels) ? input.imageModels.map(String).filter(Boolean) : [],
-    chatModels: Array.isArray(input.chatModels) ? input.chatModels.map(String).filter(Boolean) : [],
-    videoModels: Array.isArray(input.videoModels) ? input.videoModels.map(String).filter(Boolean) : [],
+    imageModels: Array.isArray(input.imageModels) ? uniqueStrings(input.imageModels) : [],
+    chatModels: Array.isArray(input.chatModels) ? uniqueStrings(input.chatModels) : [],
+    videoModels: Array.isArray(input.videoModels) ? uniqueStrings(input.videoModels) : [],
     modelAliases: normalizeModelAliases(input.modelAliases),
     modelRules: normalizeModelRules(input.modelRules),
+    hasApiKey: Boolean(input.hasApiKey || String(input.apiKey || '').trim()),
   };
 }
 
@@ -118,8 +157,9 @@ function uniqueStrings(values = []) {
 }
 
 function normalizeModelCatalogOrder(input = {}) {
+  const requested = input && Array.isArray(input.image) ? uniqueStrings(input.image) : [];
   return {
-    image: Array.isArray(input.image) ? uniqueStrings(input.image) : [],
+    image: [...requested, ...TUDOU_IMAGE_MODELS.filter((model) => !requested.includes(model))],
   };
 }
 
@@ -140,6 +180,7 @@ function createApimartProvider(input = {}) {
     videoModels: Array.isArray(input.videoModels) ? uniqueStrings(input.videoModels) : [],
     modelAliases: normalizeModelAliases(input.modelAliases),
     modelRules: normalizeModelRules(input.modelRules),
+    hasApiKey: Boolean(input.hasApiKey || String(input.apiKey || '').trim()),
   };
 }
 
@@ -150,6 +191,7 @@ function mergeApimartProviders(inputs = []) {
       ...result,
       baseUrl: getApimartBaseUrl(input.baseUrl) || result.baseUrl,
       apiKey: next.apiKey || result.apiKey,
+      hasApiKey: result.hasApiKey || next.hasApiKey,
       imageModels: uniqueStrings([...result.imageModels, ...next.imageModels]),
       chatModels: uniqueStrings([...result.chatModels, ...next.chatModels]),
       videoModels: uniqueStrings([...result.videoModels, ...next.videoModels]),
@@ -169,6 +211,7 @@ function mergeTudouProviders(inputs = []) {
     return createTudouProvider({
       ...result,
       apiKey: next.apiKey || result.apiKey,
+      hasApiKey: result.hasApiKey || next.hasApiKey,
       imageModels: uniqueStrings([...result.imageModels, ...next.imageModels]),
       chatModels: uniqueStrings([...result.chatModels, ...next.chatModels]),
       videoModels: uniqueStrings([...result.videoModels, ...next.videoModels]),
@@ -187,8 +230,7 @@ function normalizeAliasBucket(input = {}) {
   if (!input || typeof input !== 'object') return {};
   return Object.entries(input).reduce((result, [model, alias]) => {
     const modelId = String(model || '').trim();
-    const label = String(alias || '').trim();
-    if (modelId && label) result[modelId] = label;
+    if (modelId && typeof alias === 'string') result[modelId] = alias;
     return result;
   }, {});
 }
@@ -264,6 +306,13 @@ function normalizeApiSettings(payload = {}) {
 }
 
 function createTudouProvider(input = {}) {
+  const catalogOrder = normalizeModelCatalogOrder({
+    image: [
+      ...(input.modelCatalogOrder && Array.isArray(input.modelCatalogOrder.image) ? input.modelCatalogOrder.image : []),
+      ...(Array.isArray(input.imageModels) ? input.imageModels : []),
+    ],
+  });
+  const enabledImageModels = new Set(Array.isArray(input.imageModels) ? input.imageModels.map(String) : []);
   return {
     id: TUDOU_PROVIDER_ID,
     name: '土豆API',
@@ -275,12 +324,13 @@ function createTudouProvider(input = {}) {
     imageRequestMode: 'openai',
     imageGenerationEndpoint: '',
     imageEditEndpoint: '',
-    imageModels: Array.isArray(input.imageModels) ? uniqueStrings(input.imageModels) : [],
+    imageModels: catalogOrder.image.filter((model) => enabledImageModels.has(model)),
     chatModels: Array.isArray(input.chatModels) ? uniqueStrings(input.chatModels) : [],
     videoModels: Array.isArray(input.videoModels) ? uniqueStrings(input.videoModels) : [],
     modelAliases: normalizeModelAliases(input.modelAliases),
     modelRules: normalizeModelRules(input.modelRules),
-    modelCatalogOrder: normalizeModelCatalogOrder(input.modelCatalogOrder),
+    modelCatalogOrder: catalogOrder,
+    hasApiKey: Boolean(input.hasApiKey || String(input.apiKey || '').trim()),
   };
 }
 
@@ -376,28 +426,203 @@ function createConfigStore({ app, rootDir, safeStorage }) {
     return infiniteCanvas;
   }
 
+  function loadAgentSettings() {
+    return normalizeAgentSettings(readRaw().agentSettings || {});
+  }
+
+  function saveAgentSettings(payload) {
+    const agentSettings = normalizeAgentSettings(payload);
+    writeRaw({ ...readRaw(), agentSettings });
+    return agentSettings;
+  }
+
+  function encryptionAvailable() {
+    return Boolean(safeStorage?.isEncryptionAvailable?.());
+  }
+
+  function decryptApiSecrets(raw = {}) {
+    const encrypted = raw && raw.apiSecrets && typeof raw.apiSecrets === 'object'
+      ? raw.apiSecrets
+      : {};
+    return Object.entries(encrypted).reduce((result, [providerId, value]) => {
+      const id = String(providerId || '').trim();
+      const encoded = String(value || '').trim();
+      if (!id || !encoded || !encryptionAvailable()) return result;
+      try {
+        const decrypted = safeStorage.decryptString(Buffer.from(encoded, 'base64'));
+        try {
+          const parsed = JSON.parse(decrypted);
+          result[id] = parsed && typeof parsed === 'object' ? parsed : { apiKey: decrypted };
+        } catch {
+          // Support the first migration format, which encrypted only the API key string.
+          result[id] = { apiKey: decrypted };
+        }
+      } catch {
+        // An unreadable secret is treated as missing; it is never exposed to Renderer.
+      }
+      return result;
+    }, {});
+  }
+
+  function encryptApiSecrets(secrets = {}) {
+    if (!encryptionAvailable()) throw new Error('Secure API key storage is unavailable.');
+    return Object.entries(secrets).reduce((result, [providerId, value]) => {
+      const id = String(providerId || '').trim();
+      const secret = value && typeof value === 'object' ? value : { apiKey: String(value || '') };
+      if (id && Object.values(secret).some((item) => String(item || ''))) {
+        result[id] = safeStorage.encryptString(JSON.stringify(secret)).toString('base64');
+      }
+      return result;
+    }, {});
+  }
+
+  function migrateLegacyApiSecrets(raw = {}) {
+    const legacyProviders = Array.isArray(raw?.apiSettings?.providers)
+      ? raw.apiSettings.providers
+      : [];
+    const legacy = legacyProviders.reduce((result, provider) => {
+      const id = String(provider?.id || '').trim();
+      const apiKey = String(provider?.apiKey || '');
+      if (id && (apiKey || provider?.accessKey || provider?.secretKey)) {
+        result[id] = {
+          apiKey,
+          accessKey: String(provider?.accessKey || ''),
+          secretKey: String(provider?.secretKey || ''),
+        };
+      }
+      return result;
+    }, {});
+    if (!Object.keys(legacy).length) return { raw, secrets: decryptApiSecrets(raw) };
+    if (!encryptionAvailable()) return { raw, secrets: { ...decryptApiSecrets(raw), ...legacy } };
+
+    const secrets = { ...decryptApiSecrets(raw), ...legacy };
+    const providers = legacyProviders.map((provider) => {
+      const next = { ...provider };
+      delete next.apiKey;
+      delete next.accessKey;
+      delete next.secretKey;
+      return next;
+    });
+    const nextRaw = {
+      ...raw,
+      apiSettings: { ...(raw.apiSettings || {}), providers },
+      apiSecrets: encryptApiSecrets(secrets),
+    };
+    writeRaw(nextRaw);
+    return { raw: nextRaw, secrets };
+  }
+
+  function loadApiSecretState() {
+    return migrateLegacyApiSecrets(readRaw());
+  }
+
+  function withApiSecrets(apiSettings, secrets) {
+    return {
+      ...apiSettings,
+      providers: apiSettings.providers.map((provider) => {
+        const secret = secrets[provider.id] && typeof secrets[provider.id] === 'object' ? secrets[provider.id] : {};
+        const apiKey = String(secret.apiKey || provider.apiKey || '');
+        return { ...provider, apiKey, hasApiKey: Boolean(apiKey) };
+      }),
+    };
+  }
+
+  function publicApiSettings(apiSettings) {
+    return {
+      ...apiSettings,
+      providers: apiSettings.providers.map((provider) => ({
+        ...provider,
+        apiKey: '',
+        accessKey: '',
+        secretKey: '',
+        hasApiKey: Boolean(provider.hasApiKey || String(provider.apiKey || '').trim()),
+      })),
+    };
+  }
+
   function loadApiSettings() {
-    return normalizeApiSettings(readRaw().apiSettings || {});
+    const { raw, secrets } = loadApiSecretState();
+    return withApiSecrets(normalizeApiSettings(raw.apiSettings || {}), secrets);
+  }
+
+  function loadPublicApiSettings() {
+    return publicApiSettings(loadApiSettings());
+  }
+
+  function getApiProvider(providerId) {
+    const id = String(providerId || '').trim();
+    if (!id) return null;
+    return loadApiSettings().providers.find((provider) => provider.id === id) || null;
   }
 
   function saveApiSettings(payload) {
+    const currentState = loadApiSecretState();
+    const currentSettings = normalizeApiSettings(currentState.raw.apiSettings || {});
+    const currentSecrets = { ...currentState.secrets };
+    const inputProviders = Array.isArray(payload?.providers) ? payload.providers : [];
     const apiSettings = normalizeApiSettings(payload);
-    writeRaw({ ...readRaw(), apiSettings });
-    return apiSettings;
+    const inputById = new Map(inputProviders.map((provider) => [String(provider?.id || '').trim(), provider]));
+    apiSettings.providers.forEach((provider) => {
+      const input = inputById.get(provider.id) || {};
+      const nextApiKey = String(input.apiKey || '').trim();
+      const existingSecret = currentSecrets[provider.id] && typeof currentSecrets[provider.id] === 'object'
+        ? currentSecrets[provider.id]
+        : {};
+      if (nextApiKey) currentSecrets[provider.id] = { ...existingSecret, apiKey: nextApiKey };
+      if (input.clearApiKey === true) delete currentSecrets[provider.id];
+    });
+    const validProviderIds = new Set(apiSettings.providers.map((provider) => provider.id));
+    Object.keys(currentSecrets).forEach((providerId) => {
+      if (!validProviderIds.has(providerId)) delete currentSecrets[providerId];
+    });
+
+    const hasSecretChanges = apiSettings.providers.some((provider) => {
+      const previous = currentSettings.providers.find((item) => item.id === provider.id);
+      const input = inputById.get(provider.id) || {};
+      return Boolean(String(input.apiKey || '').trim() || input.clearApiKey === true)
+        || Boolean(previous?.apiKey && !currentSecrets[provider.id]);
+    });
+    if (hasSecretChanges && !encryptionAvailable()) {
+      throw new Error('Secure API key storage is unavailable.');
+    }
+
+    const persistedProviders = apiSettings.providers.map((provider) => ({
+      ...provider,
+      apiKey: '',
+      accessKey: '',
+      secretKey: '',
+      hasApiKey: Boolean(String(currentSecrets[provider.id]?.apiKey || '').trim()),
+    }));
+    const encryptedSecrets = encryptionAvailable()
+      ? encryptApiSecrets(currentSecrets)
+      : (currentState.raw.apiSecrets && typeof currentState.raw.apiSecrets === 'object' ? currentState.raw.apiSecrets : {});
+    writeRaw({
+      ...currentState.raw,
+      apiSettings: { ...apiSettings, providers: persistedProviders },
+      apiSecrets: encryptedSecrets,
+    });
+    return publicApiSettings(withApiSecrets(apiSettings, currentSecrets));
   }
 
   return {
     load,
     loadApiSettings,
+    loadPublicApiSettings,
+    getApiProvider,
+    loadAgentSettings,
     loadImageReviewSettings,
     loadInfiniteCanvasSettings,
     save,
     saveApiSettings,
+    saveAgentSettings,
     saveImageReviewSettings,
     saveInfiniteCanvasSettings,
   };
 }
 
 module.exports = {
+  DEFAULT_TASK_HISTORY_RETENTION_DAYS,
+  TASK_HISTORY_RETENTION_DAY_OPTIONS,
   createConfigStore,
+  TUDOU_IMAGE_MODELS,
 };

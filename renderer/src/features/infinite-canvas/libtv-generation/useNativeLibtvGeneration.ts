@@ -39,7 +39,7 @@ function collectConnectedPrompt(nodeId: string, nodes: NativeCanvasNode[], edges
     visited.add(currentId);
     const current = nodeMap.get(currentId);
     if (!current) return [];
-    const ownText = current.data.kind === "prompt" || current.data.kind === "llm"
+    const ownText = current.data.kind === "prompt" || current.data.kind === "llm" || current.data.kind === "smartReverse"
       ? String(current.data.text || "").trim()
       : "";
     return [ownText, ...(incoming.get(currentId) || []).flatMap(visit)].filter(Boolean);

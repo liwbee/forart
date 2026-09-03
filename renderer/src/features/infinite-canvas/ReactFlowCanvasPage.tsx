@@ -18,14 +18,17 @@ import {
   useViewport,
   type Connection,
   type EdgeMouseHandler,
+  type IsValidConnection,
   type NodeTypes,
   type OnConnectEnd,
+  type OnConnectStart,
   type OnNodeDrag,
 } from "@xyflow/react";
 import { ClipboardPaste, Copy, Crosshair, Download, Eye, EyeOff, Grid3X3, Group as GroupIcon, Image, Images, Map as MapIcon, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { cn } from "../../lib/utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../../components/ui/alert-dialog";
 import { Button } from "../../components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuGroup, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "../../components/ui/context-menu";
@@ -38,6 +41,8 @@ import {
   readImageDimensions,
   readImageFileDimensions,
   readImageFileAsDataUrl,
+  isCanvasAssetFile,
+  readMediaFileDimensions,
   type CanvasImageCropRect,
   type NativeCanvasActions,
 } from "./canvasActions";
@@ -51,9 +56,11 @@ import {
   createNativeCanvasNode,
   createNativeCanvasGroupNode,
   getImageNodeSize,
+  getVideoNodeSize,
   nativeCanvasNodePrimaryImage,
   nativeCanvasNodeTaskId,
   NATIVE_CANVAS_NODE_DEFINITIONS,
+  remapNativeCanvasNodePromptReferences,
   type ImageGenerationRunOptions,
   type NativeCanvasEdge,
   type NativeCanvasNode,
@@ -80,9 +87,8 @@ import {
   partitionGenerationStopTasks,
   requiresGenerationStopConfirmation,
 } from "./generation/generationTaskCache";
-import { buildGenerationDownloadName, buildTaskDownloadName } from "./generation/generationDownloadName";
+import { downloadGenerationResult, FALLBACK_DOWNLOAD_NAME, saveGenerationImageFile } from "./generation/generationDownload";
 import { actionFissionDownloadTarget } from "./generation/generationDownloadTarget";
-import { loadApiSettings } from "../settings/apiProviders";
 import {
   beginInfiniteCanvasHistoryGesture,
   commitInfiniteCanvasHistoryGesture,
@@ -108,13 +114,17 @@ import {
   projectAltDragOntoClones,
   type AltDragCloneGestureState,
 } from "./canvasAltDragClone";
+import {
+  isNativeCanvasConnectionValid,
+  type NativeCanvasConnectionCandidate,
+} from "./canvasConnectionValidation";
 
 const NODE_TYPES: NodeTypes = { canvasNode: NativeCanvasNodeComponent, groupNode: NativeCanvasGroupNode };
 const MULTI_SELECTION_SCREEN_GAP = 24;
 
 const CONTEXT_CANVAS_NODE_GROUPS: NativeCanvasNodeKind[][] = [
-  ["imageLoader", "prompt"],
-  ["imageGenerator", "llm", "actionFission"],
+  ["assetLoader", "prompt"],
+  ["imageGenerator", "smartReverse", "actionFission"],
   ["annotation"],
 ];
 
@@ -145,6 +155,17 @@ interface PendingGenerationStop {
   taskIds: string[];
 }
 
+interface ActiveConnectionStart {
+  handleId: string | null;
+  handleType: "source" | "target";
+  nodeId: string;
+}
+
+interface ConnectionTargetFeedback {
+  nodeId: string;
+  status: "valid" | "invalid";
+}
+
 const CANVAS_CLIPBOARD_KIND = "forart.reactflow.nodes";
 const CANVAS_CLIPBOARD_MIME = "application/x-forart-canvas-nodes";
 interface CanvasClipboardPayload {
@@ -171,6 +192,7 @@ const NODE_POINTER_GESTURE_THRESHOLD = 3;
 function isEditingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   if (target.closest("input, textarea, select")) return true;
+  if (target.closest("[data-canvas-text-copy]")) return true;
   return Boolean(target.closest<HTMLElement>("[contenteditable]")?.isContentEditable);
 }
 
@@ -358,11 +380,11 @@ const HISTORY_REBASED_NODE_DATA_FIELDS: (keyof NativeCanvasNode["data"])[] = [
   "generatedImages",
   "multiImageExpanded",
   "multiImageCollapsedSize",
-  "thumbUrl",
+  "assetThumbUrl",
   "imageNaturalWidth",
   "imageNaturalHeight",
-  "imageUploadState",
-  "imageUploadError",
+  "assetLoadState",
+  "assetLoadError",
 ];
 
 const ACTION_FISSION_SELECTION_FIELDS = [
@@ -457,6 +479,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
   const [pendingGenerationStop, setPendingGenerationStop] = useState<PendingGenerationStop | null>(null);
   const [generationStopPending, setGenerationStopPending] = useState(false);
   const [canvasClipboardAvailable, setCanvasClipboardAvailable] = useState(false);
+  const [connectionTargetFeedback, setConnectionTargetFeedback] = useState<ConnectionTargetFeedback | null>(null);
   const pasteSequenceRef = useRef<PasteSequence | null>(null);
   const pendingContextPastePointRef = useRef<{ x: number; y: number } | null>(null);
   const altDragCloneGestureRef = useRef<AltDragCloneGesture | null>(null);
@@ -464,9 +487,22 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
   const historyGestureDepthRef = useRef(0);
   const activeCanvasInteractionsRef = useRef(new Set<string>());
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const activeConnectionStartRef = useRef<ActiveConnectionStart | null>(null);
   const edgeToolbarFrameRef = useRef<number | null>(null);
   const edgeToolbarHideTimerRef = useRef<number | null>(null);
   const pendingEdgePointerRef = useRef<{ edgeId: string; clientX: number; clientY: number } | null>(null);
+  const flowNodes = useMemo(() => {
+    if (!connectionTargetFeedback) return nodes;
+    return nodes.map((node) => node.id === connectionTargetFeedback.nodeId
+      ? {
+          ...node,
+          className: cn(
+            node.className,
+            `rf-native-node--connection-${connectionTargetFeedback.status}`,
+          ),
+        }
+      : node);
+  }, [connectionTargetFeedback, nodes]);
   const { deleteElements, getEdges, getIntersectingNodes, getNodes, getNodesBounds: getFlowNodesBounds, screenToFlowPosition, setViewport } = useReactFlow<NativeCanvasNode, NativeCanvasEdge>();
   const syncSelection = useNativeCanvasInteractionStore((state) => state.syncSelection);
   const beginSelectionGesture = useNativeCanvasInteractionStore((state) => state.beginSelectionGesture);
@@ -487,7 +523,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     [nodeContextTarget, nodes],
   );
   const contextNodeImage = useMemo(() => {
-    if (contextNode?.data.kind !== "imageLoader" && contextNode?.data.kind !== "imageGenerator") return null;
+    if (contextNode?.data.kind !== "assetLoader" && contextNode?.data.kind !== "imageGenerator") return null;
     return nativeCanvasNodePrimaryImage(contextNode.data);
   }, [contextNode]);
   const selectedNodes = useMemo(() => nodes.filter((node) => node.selected && !isNativeCanvasGroupNode(node)), [nodes]);
@@ -618,10 +654,13 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     imageMutationVersionRef.current.clear();
     const restored = restoreInfiniteCanvasHistorySnapshot(snapshot, nodesRef.current, edgesRef.current);
     const restoredIds = new Set(restored.nodes.map((node) => node.id));
+    const retainedNodeIds = restored.nodes.filter((node) => node.selected).map((node) => node.id);
+    const retainedEdgeIds = new Set(restored.edges.filter((edge) => edge.selected).map((edge) => edge.id));
     stopCanvasNodeGenerationTasks(nodesRef.current.filter((node) => !restoredIds.has(node.id)));
     setNodes(restored.nodes);
     setEdges(restored.edges);
-    syncSelection([]);
+    syncSelection(retainedNodeIds);
+    setEdgeToolbarPoint((current) => current && retainedEdgeIds.has(current.edgeId) ? current : null);
   }, [setEdges, setNodes, syncSelection]);
 
   const undoHistory = useCallback(() => restoreHistory(undoInfiniteCanvasHistory()), [restoreHistory]);
@@ -787,34 +826,42 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     stopCanvasNodeGenerationTasks(deletedNodes);
   }, []);
 
-  const setNodeImage = useCallback((nodeId: string, imageUrl: string, fileName: string) => {
+  const setNodeAsset = useCallback((nodeId: string, assetUrl: string, fileName: string, assetType: "image" | "video" | "audio" = "image", assetMimeType = "", metadata: { width?: number; height?: number; durationMs?: number; sizeBytes?: number; thumbUrl?: string } = {}) => {
     const version = (imageMutationVersionRef.current.get(nodeId) || 0) + 1;
     imageMutationVersionRef.current.set(nodeId, version);
     void (async () => {
-      let storedUrl = imageUrl;
-      let thumbUrl = "";
+      let storedUrl = assetUrl;
+      let thumbUrl = metadata.thumbUrl || "";
       try {
-        if (/^data:image\//i.test(imageUrl) && window.easyTool?.saveCanvasAsset) {
-          const stored = await window.easyTool.saveCanvasAsset({ dataUrl: imageUrl, defaultName: fileName, kind: "input" });
+        if (/^data:image\//i.test(assetUrl) && window.easyTool?.saveCanvasAsset) {
+          const stored = await window.easyTool.saveCanvasAsset({ dataUrl: assetUrl, defaultName: fileName, kind: "input" });
           storedUrl = stored.url;
           thumbUrl = stored.thumbUrl || "";
-        } else if (window.easyTool?.ensureCanvasAssetThumbnail) {
-          const thumbnail = await window.easyTool.ensureCanvasAssetThumbnail({ url: imageUrl });
+        } else if (!thumbUrl && window.easyTool?.ensureCanvasAssetThumbnail) {
+          const thumbnail = await window.easyTool.ensureCanvasAssetThumbnail({ url: assetUrl });
           thumbUrl = thumbnail.thumbUrl || "";
         }
       } catch {
-        storedUrl = imageUrl;
+        storedUrl = assetUrl;
         thumbUrl = "";
       }
       if (!imageThumbnailMountedRef.current || imageMutationVersionRef.current.get(nodeId) !== version) return;
-      let dimensions: { width: number; height: number } | null = null;
-      try {
-        dimensions = await readImageDimensions(resolveLibraryImageUrl(storedUrl));
-      } catch {
-        // Keep the selected image even when its metadata cannot be read.
+      let dimensions: { width: number; height: number } | null = metadata.width && metadata.height
+        ? { width: metadata.width, height: metadata.height }
+        : null;
+      if (!dimensions && assetType === "image") {
+        try {
+          dimensions = await readImageDimensions(resolveLibraryImageUrl(storedUrl));
+        } catch {
+          // Keep the selected image even when its metadata cannot be read.
+        }
       }
       if (!imageThumbnailMountedRef.current || imageMutationVersionRef.current.get(nodeId) !== version) return;
-      const size = dimensions ? getImageNodeSize(dimensions.width, dimensions.height) : null;
+      const size = assetType === "video"
+        ? getVideoNodeSize(dimensions?.width || 0, dimensions?.height || 0)
+        : dimensions
+          ? getImageNodeSize(dimensions.width, dimensions.height)
+          : null;
       setNodes((current) => current.map((node) => node.id === nodeId
         ? {
           ...node,
@@ -822,8 +869,13 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
             ...node.data,
             ...(node.data.kind === "imageGenerator"
               ? {
-                  imageUrl: undefined,
-                  thumbUrl: undefined,
+                  assetUrl: undefined,
+                  assetFileName: undefined,
+                  assetThumbUrl: undefined,
+                  assetType: undefined,
+                  assetMimeType: undefined,
+                  assetNaturalWidth: undefined,
+                  assetNaturalHeight: undefined,
                   generatedImages: [
                     {
                       ...(node.data.generatedImages?.[0] || {}),
@@ -836,18 +888,27 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
                     },
                     ...(node.data.generatedImages?.slice(1) || []),
                   ],
-                  imageUploadState: undefined,
-                  imageUploadError: undefined,
+                    assetLoadState: undefined,
+                    assetLoadError: undefined,
                 }
               : {
-                  imageUrl: storedUrl,
-                  imageFileName: fileName,
-                  thumbUrl: thumbUrl || undefined,
-                  imageUploadState: undefined,
-                  imageUploadError: undefined,
+                  assetUrl: storedUrl,
+                  assetFileName: fileName,
+                  assetThumbUrl: thumbUrl || undefined,
+                  assetType,
+                  assetMimeType: assetMimeType || undefined,
+                  assetLoadState: undefined,
+                  assetLoadError: undefined,
                 }),
-            imageNaturalWidth: dimensions?.width,
-            imageNaturalHeight: dimensions?.height,
+             ...(node.data.kind === "imageGenerator" ? {
+               imageNaturalWidth: dimensions?.width,
+               imageNaturalHeight: dimensions?.height,
+             } : {
+               assetNaturalWidth: dimensions?.width,
+               assetNaturalHeight: dimensions?.height,
+               assetDurationMs: metadata.durationMs || undefined,
+               assetSizeBytes: metadata.sizeBytes || undefined,
+             }),
           },
           style: size ? { ...node.style, ...size } : node.style,
         }
@@ -859,7 +920,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     const version = (imageMutationVersionRef.current.get(nodeId) || 0) + 1;
     imageMutationVersionRef.current.set(nodeId, version);
     const node = getNodes().find((item) => item.id === nodeId);
-    const sourceUrl = node?.data.kind === "imageLoader" ? String(node.data.imageUrl || "") : "";
+    const sourceUrl = node?.data.kind === "assetLoader" ? String(node.data.assetUrl || "") : "";
     if (!node || !sourceUrl) throw new Error(t("infiniteCanvas:imageCropSourceMissing"));
     if (!window.easyTool?.cropCanvasAsset) throw new Error(t("infiniteCanvas:imageCropUnavailable"));
 
@@ -881,16 +942,18 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     });
     if (!imageThumbnailMountedRef.current || imageMutationVersionRef.current.get(nodeId) !== version) return;
     const size = getImageNodeSize(result.width, result.height);
-    setNodes((current) => current.map((item) => item.id === nodeId && item.data.kind === "imageLoader"
+    setNodes((current) => current.map((item) => item.id === nodeId && item.data.kind === "assetLoader"
       ? {
           ...item,
           data: {
             ...item.data,
-            imageUrl: result.url,
-            imageFileName: result.fileName,
-            thumbUrl: result.thumbUrl || undefined,
-            imageNaturalWidth: result.width,
-            imageNaturalHeight: result.height,
+            assetUrl: result.url,
+            assetFileName: result.fileName,
+            assetType: "image",
+            assetMimeType: "image/*",
+            assetThumbUrl: result.thumbUrl || undefined,
+            assetNaturalWidth: result.width,
+            assetNaturalHeight: result.height,
           },
           style: { ...item.style, ...size },
         }
@@ -1129,51 +1192,20 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     }
   }, [generationStopPending, pendingGenerationStop, stopActionFissionImmediately, stopImageGenerationTaskImmediately]);
 
-  const saveGeneratedImage = useCallback(async (
-    imageUrl: string,
-    defaultName: string,
-    { convertToPng = true }: { convertToPng?: boolean } = {},
-  ) => {
-    try {
-      if (window.easyTool?.saveResult) {
-        const result = await window.easyTool.saveResult({
-          url: resolveLibraryImageUrl(imageUrl),
-          dataUrl: resolveLibraryImageUrl(imageUrl),
-          defaultName,
-          directory: imageDownloadPath,
-          convertToPng,
-        });
-        toast.success(result.filePath
-          ? t("infiniteCanvas:downloadSaved", { path: result.filePath })
-          : t("infiniteCanvas:downloadComplete"));
-        return;
-      }
-      const link = document.createElement("a");
-      link.href = resolveLibraryImageUrl(imageUrl);
-      link.download = defaultName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      toast.success(t("infiniteCanvas:downloadComplete"));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-      throw error;
-    }
-  }, [imageDownloadPath, t]);
-
   const downloadNodeImage = useCallback(async (nodeId: string, imageIndex: number) => {
     const node = nodes.find((item) => item.id === nodeId);
     if (!node) return;
-    if (node.data.kind === "imageLoader") {
+    if (node.data.kind === "assetLoader") {
       const image = nativeCanvasNodePrimaryImage(node.data);
       const imageUrl = String(image?.localUrl || image?.url || "");
       if (!image || !imageUrl) return;
-      await saveGeneratedImage(imageUrl, buildGenerationDownloadName({
-        platform: "Forart",
-        model: "Local",
-        sourceFileName: image.fileName,
-        sourceUrl: imageUrl,
-      }), { convertToPng: false });
+      await saveGenerationImageFile({
+        imageUrl,
+        defaultName: image.fileName || FALLBACK_DOWNLOAD_NAME,
+        convertToPng: false,
+        directory: imageDownloadPath,
+        t,
+      });
       return;
     }
 
@@ -1181,22 +1213,11 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     const image = images[imageIndex];
     const imageUrl = String(image?.localUrl || image?.url || "");
     if (!image || !imageUrl) return;
-    const taskId = nativeCanvasNodeTaskId(node.data);
-    const [task] = taskId ? await loadGenerationTasks([taskId]) : [];
-    const apiSettings = task?.executorKind === "libtv" || node.data.imageGenerationBackend === "libtv"
-      ? null
-      : await loadApiSettings();
-    const provider = apiSettings?.providers.find((item) => item.id === (task?.providerId || node.data.imageProviderId));
-    await saveGeneratedImage(imageUrl, task
-      ? buildTaskDownloadName(task, image.fileName, imageUrl)
-      : buildGenerationDownloadName({
-        platform: node.data.imageGenerationBackend === "libtv" ? "LibTV" : provider?.name || node.data.imageProviderId,
-        model: node.data.imageGenerationBackend === "libtv"
-          ? node.data.libtvImageGeneration?.modelName
-          : node.data.imageModel,
-        sourceFileName: image.fileName,
-        sourceUrl: imageUrl,
-      }));
+    const { saved } = await downloadGenerationResult({
+      resolveTarget: () => ({ imageUrl, fileName: image.fileName }),
+      directory: imageDownloadPath,
+    }, t);
+    if (!saved) return;
     const latestNode = nodesRef.current.find((item) => item.id === nodeId && item.data.kind === "imageGenerator");
     const latestImages = latestNode?.data.generatedImages || [];
     const latestIndex = latestImages.findIndex((item) => String(item.localUrl || item.url || "") === imageUrl);
@@ -1206,7 +1227,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
         ? { ...item, downloadState: "downloaded", downloadedAt: Date.now() }
         : item),
     });
-  }, [nodes, patchNodeDataSilently, saveGeneratedImage]);
+  }, [nodes, patchNodeDataSilently, t, imageDownloadPath]);
 
   const downloadContextNodeImage = useCallback(async () => {
     if (!contextNodeImage || !contextNode) return;
@@ -1218,29 +1239,21 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     const actionFission = node?.data.actionFission;
     const row = actionFission?.rows.find((item) => item.id === rowId);
     if (!row) return;
-    const taskId = actionFissionRowTaskId(row);
-    const [task] = taskId ? await loadGenerationTasks([taskId]) : [];
+    const { task, saved } = await downloadGenerationResult({
+      taskId: actionFissionRowTaskId(row) || undefined,
+      resolveTarget: (loadedTask) => actionFissionDownloadTarget(row, loadedTask),
+      directory: imageDownloadPath,
+    }, t);
+    if (!saved) return;
     const target = actionFissionDownloadTarget(row, task);
     if (!target) return;
-    const apiSettings = task?.executorKind === "libtv" || actionFission?.apiType === "libtv-api"
-      ? null
-      : await loadApiSettings();
-    const provider = apiSettings?.providers.find((item) => item.id === (task?.providerId || actionFission?.providerId));
-    await saveGeneratedImage(target.imageUrl, task
-      ? buildTaskDownloadName(task, target.fileName, target.imageUrl)
-      : buildGenerationDownloadName({
-        platform: actionFission?.apiType === "libtv-api" ? "LibTV" : provider?.name || actionFission?.providerId,
-        model: actionFission?.apiType === "libtv-api" ? actionFission?.libtvModelName : actionFission?.model,
-        sourceFileName: target.fileName,
-        sourceUrl: target.imageUrl,
-      }));
     const latestRow = nodesRef.current
       .find((item) => item.id === nodeId && item.data.kind === "actionFission")
       ?.data.actionFission?.rows.find((item) => item.id === rowId);
     const latestTarget = latestRow ? actionFissionDownloadTarget(latestRow, task) : null;
     if (!latestTarget || latestTarget.imageUrl !== target.imageUrl) return;
     patchActionFissionRow(nodeId, rowId, { resultDownloadState: "downloaded", resultDownloadedAt: Date.now() });
-  }, [nodes, patchActionFissionRow, saveGeneratedImage]);
+  }, [nodes, patchActionFissionRow, t, imageDownloadPath]);
 
   const addReferenceImage = useCallback(async (targetNodeId: string, source: {
     imageUrl: string;
@@ -1251,7 +1264,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
   }) => {
     const target = getNodes().find((node) => (
       node.id === targetNodeId
-      && (node.data.kind === "imageGenerator" || node.data.kind === "actionFission")
+      && (node.data.kind === "imageGenerator" || node.data.kind === "actionFission" || node.data.kind === "smartReverse")
     ));
     if (!target) return;
     let imageUrl = source.imageUrl;
@@ -1269,19 +1282,20 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     const dimensions = await readImageDimensions(resolveLibraryImageUrl(imageUrl));
     const latestTarget = getNodes().find((node) => (
       node.id === targetNodeId
-      && (node.data.kind === "imageGenerator" || node.data.kind === "actionFission")
+      && (node.data.kind === "imageGenerator" || node.data.kind === "actionFission" || node.data.kind === "smartReverse")
     ));
     if (!latestTarget) return;
     const size = getImageNodeSize(dimensions.width, dimensions.height);
-    const referenceNode = createNativeCanvasNode("imageLoader", {
+    const referenceNode = createNativeCanvasNode("assetLoader", {
       x: latestTarget.position.x - size.width - 64,
       y: latestTarget.position.y + Number(source.verticalOffset || 0),
     }, {
-      imageUrl,
-      imageFileName: source.label,
-      thumbUrl: thumbUrl || undefined,
-      imageNaturalWidth: dimensions.width,
-      imageNaturalHeight: dimensions.height,
+      assetUrl: imageUrl,
+      assetFileName: source.label,
+      assetThumbUrl: thumbUrl || undefined,
+      assetType: "image",
+      assetNaturalWidth: dimensions.width,
+      assetNaturalHeight: dimensions.height,
     });
     referenceNode.style = size;
     referenceNode.selected = false;
@@ -1293,7 +1307,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       sourceHandle: "output",
       target: targetNodeId,
       targetHandle: "input",
-      data: edgeDataForConnection("imageLoader", latestTarget.data.kind, targetNodeId, current),
+      data: edgeDataForConnection("assetLoader", latestTarget.data.kind, targetNodeId, current),
     }, current));
   }, [getNodes, setEdges, setNodes]);
 
@@ -1321,14 +1335,14 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       void addReferenceImage(libraryReferenceTargetNodeId, {
         imageUrl: selection.url,
         thumbUrl: selection.thumbnailUrl,
-        label: selection.name || t("infiniteCanvas:imageNode"),
+        label: selection.name || t("infiniteCanvas:assetNode"),
       });
       setLibraryReferenceTargetNodeId(null);
       setLibraryOpen(false);
       return;
     }
     if (libraryTargetNodeId) {
-      setNodeImage(libraryTargetNodeId, selection.url, selection.name || t("infiniteCanvas:imageNode"));
+      setNodeAsset(libraryTargetNodeId, selection.url, selection.name || t("infiniteCanvas:assetNode"));
       setLibraryTargetNodeId(null);
       setLibraryOpen(false);
       return;
@@ -1337,11 +1351,12 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     const point = rect
       ? screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
       : { x: 0, y: 0 };
-    const node = addNode("imageLoader", point.x, point.y, {
-      imageUrl: selection.url,
+    const node = addNode("assetLoader", point.x, point.y, {
+      assetUrl: selection.url,
+      assetType: "image",
     });
-    setNodeImage(node.id, selection.url, selection.name || t("infiniteCanvas:imageNode"));
-  }, [addNode, addReferenceImage, libraryReferenceTargetNodeId, libraryTargetNodeId, screenToFlowPosition, setNodeImage, t]);
+    setNodeAsset(node.id, selection.url, selection.name || t("infiniteCanvas:assetNode"));
+  }, [addNode, addReferenceImage, libraryReferenceTargetNodeId, libraryTargetNodeId, screenToFlowPosition, setNodeAsset, t]);
 
   const canvasActionHandlersRef = useRef({
     addImageReferenceFiles,
@@ -1368,6 +1383,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     readOnly,
     beginHistoryGesture,
     endHistoryGesture,
+    undoCanvasHistory: undoHistory,
+    redoCanvasHistory: redoHistory,
     addImageReferenceFiles: (nodeId, files) => canvasActionHandlersRef.current.addImageReferenceFiles(nodeId, files),
     cropNodeImage,
     downloadActionFissionResult: (nodeId, rowId) => canvasActionHandlersRef.current.downloadActionFissionResult(nodeId, rowId),
@@ -1402,24 +1419,86 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     },
     runImageGeneration: (nodeId, options) => canvasActionHandlersRef.current.runImageGeneration(nodeId, options),
     runActionFission: (nodeId, rowId) => canvasActionHandlersRef.current.runActionFission(nodeId, rowId),
-    setNodeImage,
+    setNodeAsset,
     setNodeText: (nodeId: string, text: string) => patchNodeData(nodeId, { text }),
     stopImageGeneration: (nodeId) => canvasActionHandlersRef.current.stopImageGeneration(nodeId),
     stopActionFission: (nodeId, rowId) => canvasActionHandlersRef.current.stopActionFission(nodeId, rowId),
-  }), [beginHistoryGesture, cropNodeImage, endHistoryGesture, patchActionFissionSelectionSilently, patchNodeData, patchNodeDataSilently, readOnly, setEdges, setNodeImage, t]);
+  }), [beginHistoryGesture, cropNodeImage, endHistoryGesture, patchActionFissionSelectionSilently, patchNodeData, patchNodeDataSilently, readOnly, setEdges, setNodeAsset, t]);
+
+  const validateConnection = useCallback<IsValidConnection<NativeCanvasEdge>>((connection) => (
+    isNativeCanvasConnectionValid(connection, nodesRef.current, edgesRef.current)
+  ), []);
+
+  const beginConnectionFeedback = useCallback<OnConnectStart>((_event, params) => {
+    if (!params.nodeId || !params.handleType) return;
+    activeConnectionStartRef.current = {
+      nodeId: params.nodeId,
+      handleId: params.handleId,
+      handleType: params.handleType,
+    };
+    setConnectionTargetFeedback(null);
+  }, []);
+
+  const clearConnectionFeedback = useCallback(() => {
+    activeConnectionStartRef.current = null;
+    setConnectionTargetFeedback(null);
+  }, []);
+
+  const updateConnectionTargetFeedback = useCallback((clientX: number, clientY: number) => {
+    const activeConnection = activeConnectionStartRef.current;
+    if (!activeConnection) return;
+
+    const hoveredElement = document.elementFromPoint(clientX, clientY);
+    const nodeElement = hoveredElement?.closest<HTMLElement>(".react-flow__node");
+    const nodeId = nodeElement?.dataset.id;
+    if (!nodeId || !wrapperRef.current?.contains(nodeElement)) {
+      setConnectionTargetFeedback(null);
+      return;
+    }
+
+    const handleElement = hoveredElement?.closest<HTMLElement>(".react-flow__handle");
+    const hoveredHandleType = handleElement?.classList.contains("source")
+      ? "source"
+      : handleElement?.classList.contains("target")
+        ? "target"
+        : null;
+    const expectedHandleType = activeConnection.handleType === "source" ? "target" : "source";
+    const candidate: NativeCanvasConnectionCandidate = activeConnection.handleType === "source"
+      ? {
+          source: activeConnection.nodeId,
+          sourceHandle: activeConnection.handleId,
+          target: nodeId,
+          targetHandle: handleElement?.dataset.handleid || "input",
+        }
+      : {
+          source: nodeId,
+          sourceHandle: handleElement?.dataset.handleid || "output",
+          target: activeConnection.nodeId,
+          targetHandle: activeConnection.handleId,
+        };
+    const canConnectFromPointer = activeConnection.handleType === "source"
+      ? hoveredHandleType !== "source"
+      : hoveredHandleType === expectedHandleType;
+    const status = canConnectFromPointer
+      && isNativeCanvasConnectionValid(candidate, nodesRef.current, edgesRef.current)
+      ? "valid"
+      : "invalid";
+
+    setConnectionTargetFeedback((current) => (
+      current?.nodeId === nodeId && current.status === status
+        ? current
+        : { nodeId, status }
+    ));
+  }, []);
 
   const connectNodes = useCallback((connection: Connection) => {
     setEdges((current) => {
-      const nodeMap = new Map(getNodes().map((node) => [node.id, node]));
+      const currentNodes = getNodes();
+      if (!isNativeCanvasConnectionValid(connection, currentNodes, current)) return current;
+      const nodeMap = new Map(currentNodes.map((node) => [node.id, node]));
       const source = connection.source ? nodeMap.get(connection.source) : undefined;
       const target = connection.target ? nodeMap.get(connection.target) : undefined;
       if (!source || !target) return current;
-      if (current.some((edge) => (
-        edge.source === source.id
-        && edge.target === target.id
-        && edge.sourceHandle === (connection.sourceHandle || null)
-        && edge.targetHandle === (connection.targetHandle || null)
-      ))) return current;
       const data = edgeDataForConnection(
         source.data.kind,
         target.data.kind,
@@ -1427,7 +1506,6 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
         current,
         connection.targetHandle,
       );
-      if ((target.data.kind === "imageGenerator" || target.data.kind === "actionFission") && !data) return current;
       return addEdge({
         ...connection,
         type: "default",
@@ -1437,6 +1515,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
   }, [getNodes, setEdges]);
 
   const connectToNodeBody = useCallback<OnConnectEnd>((event, connectionState) => {
+    clearConnectionFeedback();
     if (connectionState.isValid || !connectionState.fromNode || !connectionState.fromHandle) return;
 
     const pointer = "changedTouches" in event
@@ -1464,34 +1543,38 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       target: targetNode.id,
       targetHandle: "input",
     });
-  }, [connectNodes, getIntersectingNodes, screenToFlowPosition]);
+  }, [clearConnectionFeedback, connectNodes, getIntersectingNodes, screenToFlowPosition]);
 
   const addImageFilesAtFlowPoint = useCallback(async (
     files: File[],
     flowPoint: { x: number; y: number },
   ) => {
-    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-    if (!imageFiles.length) return;
+    const assetFiles = files.filter(isCanvasAssetFile);
+    if (!assetFiles.length) return;
     // Read only the image header/dimensions first. This avoids waiting for
     // Base64 conversion, disk I/O, and sharp thumbnail generation before the
     // user sees anything on the canvas.
-    const images = await Promise.all(imageFiles.map(async (file, index) => ({
+    const images = await Promise.all(assetFiles.map(async (file, index) => ({
       file,
-      dimensions: await readImageFileDimensions(file),
+      dimensions: await readMediaFileDimensions(file),
+      assetType: file.type.startsWith("video/") || /\.(mp4|m4v|mov|webm)$/i.test(file.name) ? "video" as const : "image" as const,
       index,
     })));
-    const imageNodes = images.map(({ file, dimensions, index }) => {
-      const size = getImageNodeSize(dimensions.width, dimensions.height);
-      const node = createNativeCanvasNode("imageLoader", {
+    const imageNodes = images.map(({ file, dimensions, assetType, index }) => {
+      const size = assetType === "video"
+        ? getVideoNodeSize(dimensions.width, dimensions.height)
+        : getImageNodeSize(dimensions.width, dimensions.height);
+      const node = createNativeCanvasNode("assetLoader", {
         x: flowPoint.x - size.width / 2 + index * 32,
         y: flowPoint.y - size.height / 2 + index * 32,
       }, {
-        imageFileName: file.name,
-        imageNaturalWidth: dimensions.width,
-        imageNaturalHeight: dimensions.height,
-        imageUploadState: "processing",
+        assetFileName: file.name,
+        assetType,
+        assetNaturalWidth: dimensions.width,
+        assetNaturalHeight: dimensions.height,
+        assetLoadState: "processing",
       });
-      return { node: { ...node, style: size, selected: true }, file, dimensions };
+      return { node: { ...node, style: size, selected: true }, file, dimensions, assetType };
     });
     setNodes((current) => [
       ...current.map((node) => node.selected ? { ...node, selected: false } : node),
@@ -1501,27 +1584,31 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     // Process each image independently. The first completed image is patched
     // into the canvas immediately instead of waiting for the whole paste/drop
     // batch to finish.
-    void Promise.all(imageNodes.map(async ({ node, file, dimensions }) => {
+    void Promise.all(imageNodes.map(async ({ node, file, dimensions, assetType }) => {
       const version = (imageMutationVersionRef.current.get(node.id) || 0) + 1;
       imageMutationVersionRef.current.set(node.id, version);
       try {
-        const dataUrl = await readImageFileAsDataUrl(file);
-        const stored = window.easyTool?.saveCanvasAsset
-          ? await window.easyTool.saveCanvasAsset({ dataUrl, defaultName: file.name, kind: "input", type: file.type })
-          : { url: dataUrl, thumbUrl: "" };
+        const stored = window.easyTool?.importCanvasAssetFile
+          ? await window.easyTool.importCanvasAssetFile({ file })
+          : assetType === "image" && window.easyTool?.saveCanvasAsset
+            ? await readImageFileAsDataUrl(file).then((dataUrl) => window.easyTool!.saveCanvasAsset({ dataUrl, defaultName: file.name, kind: "input", type: file.type }))
+            : { url: URL.createObjectURL(file), thumbUrl: "" };
         if (!imageThumbnailMountedRef.current || imageMutationVersionRef.current.get(node.id) !== version) return;
         setNodes((current) => current.map((item) => item.id === node.id
           ? {
               ...item,
               data: {
                 ...item.data,
-                imageUrl: stored.url,
-                imageFileName: file.name,
-                thumbUrl: stored.thumbUrl || undefined,
-                imageNaturalWidth: dimensions.width,
-                imageNaturalHeight: dimensions.height,
-                imageUploadState: undefined,
-                imageUploadError: undefined,
+                assetUrl: stored.url,
+                assetFileName: file.name,
+                assetType,
+                assetThumbUrl: stored.thumbUrl || undefined,
+                assetNaturalWidth: dimensions.width,
+                assetNaturalHeight: dimensions.height,
+                assetDurationMs: Number((stored as { durationMs?: number }).durationMs || 0) || undefined,
+                assetSizeBytes: Number((stored as { sizeBytes?: number }).sizeBytes || file.size) || undefined,
+                assetLoadState: undefined,
+                assetLoadError: undefined,
               },
             }
           : item));
@@ -1532,8 +1619,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
               ...item,
               data: {
                 ...item.data,
-                imageUploadState: "error",
-                imageUploadError: error instanceof Error ? error.message : String(error),
+                assetLoadState: "error",
+                assetLoadError: error instanceof Error ? error.message : String(error),
               },
             }
           : item));
@@ -1553,7 +1640,16 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     }
 
     function handleCopy(event: ClipboardEvent) {
-      if (readOnly || !isCanvasAvailable() || isEditingTarget(event.target)) return;
+      const selectionAnchor = window.getSelection()?.anchorNode;
+      const selectionElement = selectionAnchor instanceof HTMLElement
+        ? selectionAnchor
+        : selectionAnchor?.parentElement;
+      if (
+        readOnly
+        || !isCanvasAvailable()
+        || isEditingTarget(event.target)
+        || Boolean(selectionElement?.closest("[data-canvas-text-copy]"))
+      ) return;
       const allNodes = getNodes();
       const selectedNodes = allNodes.filter((node) => node.selected);
       if (!selectedNodes.length) return;
@@ -1629,10 +1725,10 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       }
 
       const itemImageFiles = Array.from(event.clipboardData?.items || [])
-        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+        .filter((item) => item.kind === "file" && (item.type.startsWith("image/") || item.type.startsWith("video/")))
         .flatMap((item) => item.getAsFile() || []);
       const imageFiles = itemImageFiles.length ? itemImageFiles : Array.from(event.clipboardData?.files || [])
-        .filter((file) => file.type.startsWith("image/"));
+        .filter(isCanvasAssetFile);
       if (!imageFiles.length) return;
       event.preventDefault();
       const rect = wrapperRef.current?.getBoundingClientRect();
@@ -1794,11 +1890,12 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
             onPointerDown={stopViewportMomentum}
             onPointerMove={(event) => {
               lastPointerRef.current = { x: event.clientX, y: event.clientY };
+              updateConnectionTargetFeedback(event.clientX, event.clientY);
             }}
             onDragOver={(event) => {
               if (readOnly) return;
               const hasImage = Array.from(event.dataTransfer.items || [])
-                .some((item) => item.kind === "file" && item.type.startsWith("image/"));
+                .some((item) => item.kind === "file" && (item.type.startsWith("image/") || item.type.startsWith("video/") || /\.(mp4|m4v|mov|webm)$/i.test(item.getAsFile?.()?.name || "")));
               if (!hasImage) return;
               event.preventDefault();
               event.dataTransfer.dropEffect = "copy";
@@ -1806,7 +1903,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
             onDrop={(event) => {
               if (readOnly) return;
               const imageFiles = Array.from(event.dataTransfer.files || [])
-                .filter((file) => file.type.startsWith("image/"));
+                .filter(isCanvasAssetFile);
               if (!imageFiles.length) return;
               event.preventDefault();
               event.stopPropagation();
@@ -1821,7 +1918,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
             }}
           >
             <ReactFlow<NativeCanvasNode, NativeCanvasEdge>
-              nodes={nodes}
+              nodes={flowNodes}
               edges={flowEdges}
               nodeTypes={NODE_TYPES}
               onNodesChange={onNodesChange}
@@ -1833,7 +1930,9 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
               }}
               onEdgeMouseMove={trackSelectedEdge}
               onEdgeMouseLeave={leaveSelectedEdge}
+              isValidConnection={validateConnection}
               onConnect={readOnly ? undefined : connectNodes}
+              onConnectStart={readOnly ? undefined : beginConnectionFeedback}
               onConnectEnd={readOnly ? undefined : connectToNodeBody}
               onSelectionStart={beginCanvasSelection}
               onSelectionEnd={finishCanvasSelection}
@@ -1968,7 +2067,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
                 <Copy aria-hidden="true" />
                 <span>{t("common:actions.copyNode")}</span>
               </ContextMenuItem>
-              {contextNode.data.kind === "imageLoader" || contextNode.data.kind === "imageGenerator" ? (
+              {contextNode.data.kind === "assetLoader" || contextNode.data.kind === "imageGenerator" ? (
                 <>
                   <ContextMenuItem disabled={!contextNodeImage} onSelect={() => void copyContextNodeImage()}>
                     <Image aria-hidden="true" />
@@ -2139,11 +2238,12 @@ function instantiateCanvasClipboardPayload(
   selected: boolean,
 ) {
   const idMap = new Map(payload.nodes.map((node) => [node.id, `${node.data.kind}_${crypto.randomUUID()}`]));
+  const edgeIdMap = new Map(payload.edges.map((edge) => [edge.id, `edge_${crypto.randomUUID()}`]));
   return {
     idMap,
     nodes: payload.nodes.map((node) => {
       const clonedParentId = node.parentId ? idMap.get(node.parentId) : undefined;
-      const data = cloneNativeCanvasNodeData(node.data);
+      const data = remapNativeCanvasNodePromptReferences(node.data, edgeIdMap);
       delete data.groupId;
       return {
         ...node,
@@ -2161,7 +2261,7 @@ function instantiateCanvasClipboardPayload(
     }),
     edges: payload.edges.map((edge) => ({
       ...edge,
-      id: `edge_${crypto.randomUUID()}`,
+      id: edgeIdMap.get(edge.id)!,
       source: idMap.get(edge.source)!,
       target: idMap.get(edge.target)!,
       data: edge.data ? { ...edge.data } : undefined,

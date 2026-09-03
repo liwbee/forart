@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { Worker } = require('node:worker_threads');
 const { upgradeCanvasDocument } = require('./canvas-schema.cjs');
+const { isInsideOrEqual } = require('./path-guard.cjs');
 
 const PACKAGE_FORMAT = 'forart.canvas.package';
 const PACKAGE_VERSION = 1;
@@ -99,11 +100,6 @@ function uniqueFilePath(directory, fileName) {
     index += 1;
   }
   return candidate;
-}
-
-function isInsideOrEqual(parent, target) {
-  const relative = path.relative(path.resolve(parent), path.resolve(target));
-  return !relative || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function extensionFromPath(value) {
@@ -216,6 +212,7 @@ function sanitizeCanvasForJsonOnly(canvas) {
     const cleanNode = cleanGenerationTask({ ...node });
     if (isLocalUrlLike(cleanNode.url) && !isRemoteResourceUrl(cleanNode.url)) delete cleanNode.url;
     delete cleanNode.thumbUrl;
+    delete cleanNode.assetThumbUrl;
     delete cleanNode.filePath;
     delete cleanNode.thumbFilePath;
     delete cleanNode.fileName;
@@ -227,6 +224,7 @@ function sanitizeCanvasForJsonOnly(canvas) {
     if (isRecord(cleanNode.data)) {
       const cleanData = cleanGenerationTask({ ...cleanNode.data });
       delete cleanData.thumbUrl;
+      delete cleanData.assetThumbUrl;
       cleanData.actionFission = cleanActionFissionForJsonOnly(cleanData.actionFission);
       cleanNode.data = cleanData;
     }
@@ -248,12 +246,14 @@ function sanitizeCanvasForPackage(canvas, options = {}) {
   next.nodes = Array.isArray(next.nodes) ? next.nodes.map((node) => {
     const cleanNode = cleanGenerationTask({ ...node });
     delete cleanNode.thumbUrl;
+    delete cleanNode.assetThumbUrl;
     delete cleanNode.filePath;
     delete cleanNode.thumbFilePath;
     cleanNode.actionFission = cleanActionFissionForPackage(cleanNode.actionFission);
     if (isRecord(cleanNode.data)) {
       const cleanData = cleanGenerationTask({ ...cleanNode.data });
       delete cleanData.thumbUrl;
+      delete cleanData.assetThumbUrl;
       cleanData.actionFission = cleanActionFissionForPackage(cleanData.actionFission);
       cleanNode.data = cleanData;
     }
@@ -310,7 +310,7 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, ne
     const text = String(source || '').trim();
     if (!text) return;
     if (/^blob:/i.test(text)) {
-      warnings.push({ source: sourceLabel, message: 'Blob image URLs are not persisted and were not exported.' });
+      warnings.push({ source: sourceLabel, message: 'Blob asset URLs are not persisted and were not exported.' });
       return;
     }
     const asset = resolveLocalAsset(text);
@@ -362,6 +362,7 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, ne
       collectActionFissionAssets(node.actionFission, add, `${prefix}.actionFission`);
 
       const data = isRecord(node.data) ? node.data : {};
+      add(data.assetUrl, `${prefix}.data.assetUrl`);
       add(data.imageUrl, `${prefix}.data.imageUrl`);
       if (Array.isArray(data.generatedImages)) {
         data.generatedImages.forEach((result, index) => {
@@ -378,7 +379,7 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, ne
     const manifestAssets = assets.map((asset, index) => {
       const assetId = `asset_${String(index + 1).padStart(3, '0')}`;
       const ext = extensionFromPath(asset.filePath);
-      const fileName = `image_${String(index + 1).padStart(3, '0')}${ext}`;
+      const fileName = `asset_${String(index + 1).padStart(3, '0')}${ext}`;
       const packagePath = `assets/${asset.kind}/${fileName}`;
       const placeholderUrl = packageAssetUrl(assetId);
       byResolvedSource.set(asset.url, placeholderUrl);

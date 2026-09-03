@@ -5,6 +5,7 @@ export const DEFAULT_INFINITE_CANVAS_SETTINGS: ForartInfiniteCanvasSettings = {
   connectionsVisible: true,
   minimapOpen: false,
   snapToGrid: false,
+  promptEditorsExpanded: false,
   referenceComparisonViewer: {
     referenceComparisonEnabled: false,
     referencePanelPercent: 50,
@@ -28,6 +29,7 @@ export function normalizeInfiniteCanvasSettings(input: unknown): ForartInfiniteC
     connectionsVisible: source.connectionsVisible !== false,
     minimapOpen: source.minimapOpen === true,
     snapToGrid: source.snapToGrid === true,
+    promptEditorsExpanded: source.promptEditorsExpanded === true,
     referenceComparisonViewer: {
       referenceComparisonEnabled: viewerSource.referenceComparisonEnabled === true,
       referencePanelPercent: Number.isFinite(requestedPercent)

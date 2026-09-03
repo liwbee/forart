@@ -245,6 +245,7 @@ function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackag
   ipcMain.handle('canvas:save-asset', async (_event, payload) => assetStore.saveAsset(payload));
   ipcMain.handle('canvas:save-asset-thumbnail', async (_event, payload) => assetStore.saveAssetThumbnail(payload));
   ipcMain.handle('canvas:ensure-asset-thumbnail', async (_event, payload) => assetStore.ensureAssetThumbnail(payload));
+  ipcMain.handle('canvas:import-asset-file', async (_event, payload) => assetStore.importUserAssetFile(payload));
   ipcMain.handle('canvas:crop-asset', async (_event, payload) => assetStore.cropAsset(payload));
 }
 

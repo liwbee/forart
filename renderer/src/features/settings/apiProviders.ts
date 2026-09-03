@@ -1,7 +1,7 @@
 type ApiProviderProtocol = "openai" | "compatible" | "gemini";
 type ApiProviderImageRequestMode = "openai" | "openai-json";
 export type ApiModelKind = "image" | "chat" | "video";
-type ApiProviderOrderItem =
+export type ApiProviderOrderItem =
   | { type: "provider"; id: string; provider: ApiProvider }
   | { type: "apimart"; id: "apimart"; provider: ApiProvider }
   | { type: "tudou"; id: "tudou-api"; provider: ApiProvider }
@@ -26,6 +26,7 @@ export interface ApiProvider {
   name: string;
   baseUrl: string;
   apiKey: string;
+  hasApiKey: boolean;
   accessKey: string;
   secretKey: string;
   protocol: ApiProviderProtocol;
@@ -62,8 +63,6 @@ export const APIMART_BASE_URLS = [
 ] as const;
 
 export type LibtvActionFissionConcurrency = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
-
-const APIMART_HOST_TO_BASE_URL = new Map(APIMART_BASE_URLS.map((baseUrl) => [new URL(baseUrl).host, baseUrl]));
 
 export interface ApiSettings {
   providers: ApiProvider[];
@@ -102,46 +101,6 @@ function emptyModelRules(): ApiModelRules {
   return { image: {} };
 }
 
-function normalizeTudouImageModelOrder(values: unknown) {
-  const requested = Array.isArray(values) ? uniqueModels(values.map(String)) : [];
-  return [...requested, ...TUDOU_IMAGE_MODELS.filter((model) => !requested.includes(model))];
-}
-
-function normalizeAliasBucket(input: unknown) {
-  if (!input || typeof input !== "object") return {};
-  return Object.entries(input as Record<string, unknown>).reduce<Record<string, string>>((result, [model, alias]) => {
-    const modelId = String(model || "").trim();
-    if (modelId && typeof alias === "string") result[modelId] = alias;
-    return result;
-  }, {});
-}
-
-function normalizeModelAliases(input: unknown): ApiModelAliases {
-  const record = input && typeof input === "object" ? input as Partial<ApiModelAliases> : {};
-  return {
-    image: normalizeAliasBucket(record.image),
-    chat: normalizeAliasBucket(record.chat),
-    video: normalizeAliasBucket(record.video),
-  };
-}
-
-function normalizeRuleBucket(input: unknown) {
-  if (!input || typeof input !== "object") return {};
-  return Object.entries(input as Record<string, unknown>).reduce<Record<string, string>>((result, [model, ruleId]) => {
-    const modelId = String(model || "").trim();
-    const value = String(ruleId || "").trim();
-    if (modelId && value) result[modelId] = value;
-    return result;
-  }, {});
-}
-
-function normalizeModelRules(input: unknown): ApiModelRules {
-  const record = input && typeof input === "object" ? input as Partial<ApiModelRules> : {};
-  return {
-    image: normalizeRuleBucket(record.image),
-  };
-}
-
 export function getModelDisplayName(provider: ApiProvider | null | undefined, kind: ApiModelKind, model: string) {
   const alias = provider?.modelAliases?.[kind]?.[model]?.trim();
   return alias || model;
@@ -169,6 +128,7 @@ export function createApiProvider(providers: ApiProvider[]): ApiProvider {
     name: "API",
     baseUrl: "",
     apiKey: "",
+    hasApiKey: false,
     accessKey: "",
     secretKey: "",
     protocol: "openai",
@@ -183,177 +143,74 @@ export function createApiProvider(providers: ApiProvider[]): ApiProvider {
   };
 }
 
-function getApimartBaseUrl(value: unknown) {
-  try {
-    return APIMART_HOST_TO_BASE_URL.get(new URL(String(value || "").trim()).host.toLowerCase()) || "";
-  } catch {
-    return "";
-  }
-}
-
-function isApimartProvider(input: Partial<ApiProvider>) {
-  return String(input.id || "").trim().toLowerCase() === APIMART_PROVIDER_ID
-    || String(input.name || "").trim().toLowerCase() === APIMART_PROVIDER_ID
-    || Boolean(getApimartBaseUrl(input.baseUrl));
-}
-
-export function createApimartProvider(input: Partial<ApiProvider> = {}): ApiProvider {
+// 固定 provider 的默认草稿模板。schema 规则的唯一实现位于主进程
+// config-store.cjs，保存后由它统一归一化并回传最终结果。
+export function createApimartProvider(): ApiProvider {
   return {
     id: APIMART_PROVIDER_ID,
     name: "APImart",
-    baseUrl: getApimartBaseUrl(input.baseUrl) || APIMART_BASE_URLS[0],
-    apiKey: String(input.apiKey || ""),
+    baseUrl: APIMART_BASE_URLS[0],
+    apiKey: "",
+    hasApiKey: false,
     accessKey: "",
     secretKey: "",
     protocol: "compatible",
     imageRequestMode: "openai",
     imageGenerationEndpoint: "",
     imageEditEndpoint: "",
-    imageModels: Array.isArray(input.imageModels) ? uniqueModels(input.imageModels.map(String)) : [],
-    chatModels: Array.isArray(input.chatModels) ? uniqueModels(input.chatModels.map(String)) : [],
-    videoModels: Array.isArray(input.videoModels) ? uniqueModels(input.videoModels.map(String)) : [],
-    modelAliases: normalizeModelAliases(input.modelAliases),
-    modelRules: normalizeModelRules(input.modelRules),
+    imageModels: [],
+    chatModels: [],
+    videoModels: [],
+    modelAliases: emptyModelAliases(),
+    modelRules: emptyModelRules(),
   };
 }
 
-function mergeApimartProviders(inputs: Partial<ApiProvider>[]) {
-  return inputs.reduce<ApiProvider>((result, input) => {
-    const next = createApimartProvider(input);
-    return createApimartProvider({
-      ...result,
-      baseUrl: getApimartBaseUrl(input.baseUrl) || result.baseUrl,
-      apiKey: next.apiKey || result.apiKey,
-      imageModels: uniqueModels([...result.imageModels, ...next.imageModels]),
-      chatModels: uniqueModels([...result.chatModels, ...next.chatModels]),
-      videoModels: uniqueModels([...result.videoModels, ...next.videoModels]),
-      modelAliases: {
-        image: { ...result.modelAliases.image, ...next.modelAliases.image },
-        chat: { ...result.modelAliases.chat, ...next.modelAliases.chat },
-        video: { ...result.modelAliases.video, ...next.modelAliases.video },
-      },
-      modelRules: { image: { ...result.modelRules.image, ...next.modelRules.image } },
-    });
-  }, createApimartProvider());
-}
-
-function isTudouProvider(input: Partial<ApiProvider>) {
-  let host = "";
-  try { host = new URL(String(input.baseUrl || "").trim()).host.toLowerCase(); } catch { /* invalid custom URL */ }
-  return String(input.id || "").trim().toLowerCase() === TUDOU_PROVIDER_ID
-    || String(input.name || "").trim().toLowerCase() === "土豆api"
-    || host === new URL(TUDOU_BASE_URL).host;
-}
-
-export function createTudouProvider(input: Partial<ApiProvider> = {}): ApiProvider {
-  const imageModelOrder = normalizeTudouImageModelOrder([
-    ...(input.modelCatalogOrder?.image || []),
-    ...(input.imageModels || []),
-  ]);
-  const enabledImageModels = new Set(Array.isArray(input.imageModels) ? input.imageModels.map(String) : []);
+export function createTudouProvider(): ApiProvider {
   return {
     id: TUDOU_PROVIDER_ID,
     name: "土豆API",
     baseUrl: TUDOU_BASE_URL,
-    apiKey: String(input.apiKey || ""),
+    apiKey: "",
+    hasApiKey: false,
     accessKey: "",
     secretKey: "",
     protocol: "gemini",
     imageRequestMode: "openai",
     imageGenerationEndpoint: "",
     imageEditEndpoint: "",
-    imageModels: imageModelOrder.filter((model) => enabledImageModels.has(model)),
-    chatModels: Array.isArray(input.chatModels) ? uniqueModels(input.chatModels.map(String)) : [],
-    videoModels: Array.isArray(input.videoModels) ? uniqueModels(input.videoModels.map(String)) : [],
-    modelAliases: normalizeModelAliases(input.modelAliases),
-    modelRules: normalizeModelRules(input.modelRules),
-    modelCatalogOrder: { image: imageModelOrder },
+    imageModels: [],
+    chatModels: [],
+    videoModels: [],
+    modelAliases: emptyModelAliases(),
+    modelRules: emptyModelRules(),
+    modelCatalogOrder: { image: [...TUDOU_IMAGE_MODELS] },
   };
 }
 
-function mergeTudouProviders(inputs: Partial<ApiProvider>[]) {
-  return inputs.reduce<ApiProvider>((result, input) => {
-    const next = createTudouProvider(input);
-    return createTudouProvider({
-      ...result,
-      apiKey: next.apiKey || result.apiKey,
-      imageModels: uniqueModels([...result.imageModels, ...next.imageModels]),
-      chatModels: uniqueModels([...result.chatModels, ...next.chatModels]),
-      videoModels: uniqueModels([...result.videoModels, ...next.videoModels]),
-      modelAliases: {
-        image: { ...result.modelAliases.image, ...next.modelAliases.image },
-        chat: { ...result.modelAliases.chat, ...next.modelAliases.chat },
-        video: { ...result.modelAliases.video, ...next.modelAliases.video },
-      },
-      modelRules: { image: { ...result.modelRules.image, ...next.modelRules.image } },
-      modelCatalogOrder: next.modelCatalogOrder,
-    });
-  }, createTudouProvider());
-}
-
-export function normalizeApiProvider(input: Partial<ApiProvider>, providers: ApiProvider[]): ApiProvider {
-  if (isApimartProvider(input)) return createApimartProvider(input);
-  if (isTudouProvider(input)) return createTudouProvider(input);
-  const name = String(input.name || "API").trim() || "API";
+// 编辑草稿的 UI 层输入整形：只做 trim/枚举回退/列表去重。
+// 不做类型探测与合并——那是主进程 normalizeApiSettings 的职责。
+export function coerceApiProviderDraft(input: ApiProvider): ApiProvider {
   return {
-    id: String(input.id || createProviderId(name, providers)).trim(),
-    name,
-    baseUrl: String(input.baseUrl || "").trim(),
+    ...input,
+    name: input.name.trim() || "API",
+    baseUrl: input.baseUrl.trim(),
     apiKey: String(input.apiKey || ""),
     accessKey: String(input.accessKey || ""),
     secretKey: String(input.secretKey || ""),
     protocol: input.protocol === "compatible" || input.protocol === "gemini" ? input.protocol : "openai",
     imageRequestMode: input.imageRequestMode === "openai-json" ? "openai-json" : "openai",
-    imageGenerationEndpoint: String(input.imageGenerationEndpoint || "").trim(),
-    imageEditEndpoint: String(input.imageEditEndpoint || "").trim(),
-    imageModels: Array.isArray(input.imageModels) ? uniqueModels(input.imageModels.map(String)) : [],
-    chatModels: Array.isArray(input.chatModels) ? uniqueModels(input.chatModels.map(String)) : [],
-    videoModels: Array.isArray(input.videoModels) ? uniqueModels(input.videoModels.map(String)) : [],
-    modelAliases: normalizeModelAliases(input.modelAliases),
-    modelRules: normalizeModelRules(input.modelRules),
+    imageGenerationEndpoint: input.imageGenerationEndpoint.trim(),
+    imageEditEndpoint: input.imageEditEndpoint.trim(),
+    imageModels: uniqueModels(input.imageModels),
+    chatModels: uniqueModels(input.chatModels),
+    videoModels: uniqueModels(input.videoModels),
+    hasApiKey: Boolean(input.hasApiKey || String(input.apiKey || "").trim()),
   };
 }
 
-export function normalizeApiSettings(input: Partial<ApiSettings>): ApiSettings {
-  const rawProviders = Array.isArray(input.providers) ? input.providers : [];
-  const apimartInputs = rawProviders.filter(isApimartProvider);
-  const tudouInputs = rawProviders.filter(isTudouProvider);
-  const apimartSourceIds = new Set(apimartInputs.map((provider) => String(provider.id || "").trim()).filter(Boolean));
-  const tudouSourceIds = new Set(tudouInputs.map((provider) => String(provider.id || "").trim()).filter(Boolean));
-  const customProviders = rawProviders.filter((provider) => !isApimartProvider(provider) && !isTudouProvider(provider)).reduce<ApiProvider[]>((result, item) => {
-    const next = normalizeApiProvider(item, result);
-    return result.some((provider) => provider.id === next.id) ? result : [...result, next];
-  }, []);
-  const providers = [
-    ...(apimartInputs.length ? [mergeApimartProviders(apimartInputs)] : []),
-    ...(tudouInputs.length ? [mergeTudouProviders(tudouInputs)] : []),
-    ...customProviders,
-  ];
-  const rawDefaultProviderId = String(input.defaultImageProviderId || "");
-  const requestedDefaultProviderId = apimartSourceIds.has(rawDefaultProviderId)
-    ? APIMART_PROVIDER_ID
-    : tudouSourceIds.has(rawDefaultProviderId) ? TUDOU_PROVIDER_ID : rawDefaultProviderId;
-  const defaultImageProviderId = providers.some((provider) => provider.id === requestedDefaultProviderId) ? requestedDefaultProviderId : "";
-  const requestedOrder = Array.isArray(input.providerOrder)
-    ? input.providerOrder.map((id) => {
-      const value = String(id);
-      return apimartSourceIds.has(value) ? APIMART_PROVIDER_ID : tudouSourceIds.has(value) ? TUDOU_PROVIDER_ID : value;
-    })
-    : [];
-  const providerOrder = normalizeApiProviderOrder(requestedOrder, providers);
-  return {
-    providers,
-    defaultImageProviderId,
-    providerOrder,
-    libtvMachineId: String(input.libtvMachineId || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 32),
-    libtvActionFissionConcurrency: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(Number(input.libtvActionFissionConcurrency))
-      ? Number(input.libtvActionFissionConcurrency) as LibtvActionFissionConcurrency
-      : 1,
-  };
-}
-
-function setApiSettingsCache(settings: Partial<ApiSettings>) {
-  apiSettingsCache = normalizeApiSettings(settings);
+function setApiSettingsCache(settings: ApiSettings) {
+  apiSettingsCache = settings;
   apiSettingsCacheLoaded = true;
   notifyApiProvidersChanged();
   return apiSettingsCache;
@@ -361,6 +218,10 @@ function setApiSettingsCache(settings: Partial<ApiSettings>) {
 
 export function readApiSettings(): ApiSettings {
   return apiSettingsCache;
+}
+
+export function hasLoadedApiSettings() {
+  return apiSettingsCacheLoaded;
 }
 
 export function normalizeApiProviderOrder(order: string[] | undefined, providers: ApiProvider[]) {
@@ -375,8 +236,8 @@ export function normalizeApiProviderOrder(order: string[] | undefined, providers
 export function isImageProviderConfigured(provider: ApiProvider) {
   return Boolean(
     provider.baseUrl.trim()
-    && provider.apiKey.trim()
-    && provider.imageModels.length,
+      && (provider.hasApiKey || provider.apiKey.trim())
+      && provider.imageModels.length,
   );
 }
 
@@ -415,23 +276,34 @@ export function orderedApiProviderItems(providers: ApiProvider[], providerOrder:
   return result;
 }
 
+export function isChatProviderConfigured(provider: ApiProvider) {
+  return Boolean(provider.baseUrl.trim() && (provider.hasApiKey || provider.apiKey.trim()) && provider.chatModels.length);
+}
+
 export async function loadApiSettings(): Promise<ApiSettings> {
   if (!window.forartConfig?.loadApiSettings) {
-    return apiSettingsCacheLoaded ? apiSettingsCache : setApiSettingsCache({});
+    return apiSettingsCacheLoaded
+      ? apiSettingsCache
+      : setApiSettingsCache({
+        providers: [],
+        defaultImageProviderId: "",
+        providerOrder: [],
+        libtvMachineId: "",
+        libtvActionFissionConcurrency: 1,
+      });
   }
-  const loaded: ApiSettings = normalizeApiSettings(await window.forartConfig.loadApiSettings() as Partial<ApiSettings>);
+  const loaded = await window.forartConfig.loadApiSettings() as ApiSettings;
   return setApiSettingsCache(loaded);
 }
 
 export async function saveApiSettings(settings: ApiSettings): Promise<ApiSettings> {
-  const normalized = normalizeApiSettings(settings);
   if (window.forartConfig?.saveApiSettings) {
     const result = await window.forartConfig.saveApiSettings({
-      ...normalized,
-      defaultImageProviderId: normalized.defaultImageProviderId || "",
-      providerOrder: normalized.providerOrder || [],
+      ...settings,
+      defaultImageProviderId: settings.defaultImageProviderId || "",
+      providerOrder: settings.providerOrder || [],
     });
-    return setApiSettingsCache(normalizeApiSettings(result.apiSettings as Partial<ApiSettings>));
+    return setApiSettingsCache(result.apiSettings as ApiSettings);
   }
-  return setApiSettingsCache(normalized);
+  return setApiSettingsCache(settings);
 }

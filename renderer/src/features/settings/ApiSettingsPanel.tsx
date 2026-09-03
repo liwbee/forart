@@ -22,7 +22,7 @@ import {
 } from "../../components/ui/card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { ApimartLogo, ApimartSettingsPane, type ApiPanelStatus } from "./ApimartSettingsPane";
-import { APIMART_PROVIDER_ID, createApiProvider, createApimartProvider, createTudouProvider, loadApiSettings, normalizeApiProvider, normalizeApiProviderOrder, readApiSettings, saveApiSettings, TUDOU_IMAGE_MODELS, TUDOU_PROVIDER_ID, uniqueModels, type ApiModelKind, type ApiProvider } from "./apiProviders";
+import { APIMART_PROVIDER_ID, coerceApiProviderDraft, createApiProvider, createApimartProvider, createTudouProvider, loadApiSettings, normalizeApiProviderOrder, readApiSettings, saveApiSettings, TUDOU_IMAGE_MODELS, TUDOU_PROVIDER_ID, uniqueModels, type ApiModelKind, type ApiProvider } from "./apiProviders";
 import { detectImageModelRuleId, IMAGE_MODEL_RULES, normalizeImageModelRuleId } from "./imageModelRules";
 import { LibtvLogo, LibtvSettingsPane } from "./LibtvSettingsPane";
 import { TudouLogo, TudouSettingsPane } from "./TudouSettingsPane";
@@ -46,34 +46,6 @@ type ApiSidebarItem =
 type FetchedModelEntry = { id: string; kind: ApiModelKind; selected: boolean };
 
 const TUDOU_IMAGE_MODEL_SET = new Set<string>(TUDOU_IMAGE_MODELS);
-
-function formatModelsUrl(provider: ApiProvider) {
-  const rawBaseUrl = provider.baseUrl.trim();
-  if (!rawBaseUrl) throw new Error("base-url-required");
-  if (!/^https?:\/\//i.test(rawBaseUrl)) throw new Error("base-url-invalid");
-  const baseUrl = rawBaseUrl.replace(/\/+$/, "");
-  if (/\/models(?:\?.*)?$/i.test(baseUrl)) return baseUrl;
-  if (provider.protocol === "gemini") {
-    const geminiRoot = baseUrl.replace(/\/(?:api\/)?v\d+(?:beta)?$/i, "");
-    return baseUrl.endsWith("/v1beta") ? `${baseUrl}/models` : `${geminiRoot}/v1beta/models`;
-  }
-  return /\/(?:api\/)?v\d+(?:beta)?$/i.test(baseUrl) ? `${baseUrl}/models` : `${baseUrl}/v1/models`;
-}
-
-function extractModelIds(payload: unknown) {
-  const record = payload && typeof payload === "object" ? payload as Record<string, unknown> : null;
-  const source = Array.isArray(payload) ? payload
-    : Array.isArray(record?.data) ? record.data
-      : Array.isArray(record?.models) ? record.models
-        : Array.isArray(record?.list) ? record.list
-          : Array.isArray(record?.model_list) ? record.model_list : [];
-  return uniqueModels(source.map((item) => {
-    if (typeof item === "string") return item;
-    if (!item || typeof item !== "object") return "";
-    const value = (item as Record<string, unknown>).id || (item as Record<string, unknown>).name || (item as Record<string, unknown>).model || (item as Record<string, unknown>).model_id || (item as Record<string, unknown>).modelId;
-    return typeof value === "string" ? value.replace(/^models\//, "") : "";
-  }));
-}
 
 function classifyModel(id: string): ApiModelKind {
   const text = id.toLowerCase();
@@ -277,31 +249,36 @@ export function ApiSettingsPanel() {
 
   function patchSelectedProvider(patch: Partial<ApiProvider>) {
     if (!selectedProvider) return;
-    setProviders((current) => current.map((provider) => provider.id === selectedProvider.id ? normalizeApiProvider({ ...provider, ...patch }, current.filter((item) => item.id !== provider.id)) : provider));
+    setProviders((current) => current.map((provider) => provider.id === selectedProvider.id ? coerceApiProviderDraft({ ...provider, ...patch }) : provider));
   }
 
   async function requestModels(provider: ApiProvider) {
-    const headers: HeadersInit = { Accept: "application/json" };
-    if (provider.apiKey.trim()) headers.Authorization = `Bearer ${provider.apiKey.trim()}`;
-    const response = await fetch(formatModelsUrl(provider), { method: "GET", headers });
-    const text = await response.text();
-    let payload: unknown = null;
-    if (text) { try { payload = JSON.parse(text); } catch { payload = text; } }
-    if (!response.ok) {
-      const message = payload && typeof payload === "object" ? String((payload as Record<string, unknown>).error || (payload as Record<string, unknown>).message || "") : String(payload || "");
-      throw new Error(`${response.status}${message ? ` ${message}` : ""}`);
+    if (window.forartConfig?.requestProviderModels) {
+      // Persist the current draft first so the main process can resolve its
+      // encrypted secret without receiving an API key in the request payload.
+      await saveApiSettings({
+        providers,
+        defaultImageProviderId,
+        providerOrder,
+        libtvMachineId,
+        libtvActionFissionConcurrency,
+      });
+      const result = await window.forartConfig.requestProviderModels({ providerId: provider.id });
+      return uniqueModels(result.models || []);
     }
-    return extractModelIds(payload);
+    throw new Error("desktop-required");
   }
 
   const protocolLabel = (provider: ApiProvider) => provider.protocol === "gemini" ? t("settings:protocolGemini") : provider.protocol === "compatible" ? t("settings:protocolCompatible") : t("settings:protocolOpenAI");
 
   function setRequestError(error: unknown, mode: "verify" | "fetch", protocol: string) {
+    // 主进程抛出的错误码经 ipcRenderer.invoke 会被包装成
+    // "Error invoking remote method 'provider:models': Error: <code>"，需子串匹配。
     const message = error instanceof Error ? error.message : String(error);
     setStatus({
       tone: "error",
-      text: message === "base-url-required" ? t("settings:apiBaseUrlRequired")
-        : message === "base-url-invalid" ? t("settings:apiBaseUrlInvalid")
+      text: message.includes("base-url-required") ? t("settings:apiBaseUrlRequired")
+        : message.includes("base-url-invalid") ? t("settings:apiBaseUrlInvalid")
           : t(mode === "verify" ? "settings:apiVerifyFailedWithProtocol" : "settings:apiFetchFailedWithProtocol", { protocol, message }),
     });
   }
@@ -800,7 +777,7 @@ export function ApiSettingsPanel() {
                 <div className="settings-api-form">
                   <label className="settings-field"><span>{t("settings:providerName")}</span><input value={selectedProvider.name} onChange={(event) => patchSelectedProvider({ name: event.target.value })} placeholder={t("settings:providerNamePlaceholder")} /></label>
                   <label className="settings-field"><span>{t("settings:baseUrl")}</span><input value={selectedProvider.baseUrl} onChange={(event) => patchSelectedProvider({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" /></label>
-                  <label className="settings-field"><span>{t("settings:apiKey")}</span><input type="password" value={selectedProvider.apiKey} onChange={(event) => patchSelectedProvider({ apiKey: event.target.value })} placeholder={t("settings:apiKeyPlaceholder")} /></label>
+                  <label className="settings-field"><span>{t("settings:apiKey")}</span><input type="password" value={selectedProvider.apiKey} onChange={(event) => patchSelectedProvider({ apiKey: event.target.value })} placeholder={selectedProvider.hasApiKey ? "已配置，输入以替换" : t("settings:apiKeyPlaceholder")} /></label>
                   <div className="settings-api-control-row" data-has-request-mode={selectedProvider.protocol === "openai" ? "true" : "false"}>
                     <label className="settings-field"><span>{t("settings:protocol")}</span><Select value={selectedProvider.protocol} options={[{ value: "compatible", label: t("settings:protocolCompatible") }, { value: "openai", label: t("settings:protocolOpenAI") }, { value: "gemini", label: t("settings:protocolGemini") }]} onChange={(protocol) => patchSelectedProvider({ protocol: protocol as ApiProvider["protocol"] })} ariaLabel={t("settings:protocol")} menuPlacement="bottom" /></label>
                     {selectedProvider.protocol === "openai" ? <label className="settings-field"><span>{t("settings:imageRequestMode")}</span><Select value={selectedProvider.imageRequestMode} options={[{ value: "openai", label: t("settings:imageRequestModeOpenAI") }, { value: "openai-json", label: t("settings:imageRequestModeOpenAIJson") }]} onChange={(imageRequestMode) => patchSelectedProvider({ imageRequestMode: imageRequestMode as ApiProvider["imageRequestMode"] })} ariaLabel={t("settings:imageRequestMode")} menuPlacement="bottom" /></label> : null}

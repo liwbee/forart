@@ -83,7 +83,7 @@ export function ApimartSettingsPane({ provider, fetchingModels, status, onProvid
   }
 
   const refreshBalance = useCallback(async (nextProvider: ApiProvider) => {
-    if (nextProvider.id !== APIMART_PROVIDER_ID || !nextProvider.apiKey.trim()) {
+    if (nextProvider.id !== APIMART_PROVIDER_ID || (!nextProvider.hasApiKey && !nextProvider.apiKey.trim())) {
       setBalance({ status: "idle" });
       return;
     }
@@ -91,34 +91,17 @@ export function ApimartSettingsPane({ provider, fetchingModels, status, onProvid
     balanceRequestRef.current = requestId;
     setBalance((current) => ({ ...current, status: "loading" }));
     try {
-      const requestOptions: RequestInit = {
-        method: "GET",
-        headers: { Accept: "application/json", Authorization: `Bearer ${nextProvider.apiKey.trim()}` },
-        cache: "no-store",
-      };
-      const [userResponse, tokenResponse] = await Promise.all([
-        fetch(`${nextProvider.baseUrl}/user/balance`, requestOptions),
-        fetch(`${nextProvider.baseUrl}/balance`, requestOptions),
-      ]);
-      const [userPayload, tokenPayload] = await Promise.all([
-        userResponse.json() as Promise<Record<string, unknown>>,
-        tokenResponse.json() as Promise<Record<string, unknown>>,
-      ]);
-      if (!userResponse.ok || userPayload.success !== true) throw new Error(String(userPayload.message || userResponse.status));
-      if (!tokenResponse.ok || tokenPayload.success !== true) throw new Error(String(tokenPayload.message || tokenResponse.status));
+      if (!window.forartConfig?.requestApimartBalance) throw new Error("desktop-required");
+      const result = await window.forartConfig.requestApimartBalance({ providerId: nextProvider.id });
       if (balanceRequestRef.current !== requestId) return;
-      const toNumber = (value: unknown) => {
-        const number = Number(value);
-        return Number.isFinite(number) ? number : 0;
-      };
-      setBalance({ status: "ready", remainCredits: toNumber(userPayload.remain_credits), usedCredits: toNumber(tokenPayload.used_credits) });
+      setBalance({ status: result.status, remainCredits: result.remainCredits, usedCredits: result.usedCredits });
     } catch {
       if (balanceRequestRef.current === requestId) setBalance({ status: "error" });
     }
   }, []);
 
   useEffect(() => {
-    if (!provider.apiKey.trim()) {
+    if (!provider.hasApiKey && !provider.apiKey.trim()) {
       balanceRequestRef.current += 1;
       setBalance({ status: "idle" });
       return;
@@ -145,7 +128,7 @@ export function ApimartSettingsPane({ provider, fetchingModels, status, onProvid
         </div>
         <div className="settings-api-content-actions settings-apimart-header-actions">
           <div className="settings-apimart-balance-actions">
-            <Button type="button" variant="ghost" size="icon-sm" disabled={!provider.apiKey.trim() || balance.status === "loading"} aria-label={t("settings:apimartRefreshBalance")} title={t("settings:apimartRefreshBalance")} onClick={() => void refreshBalance(provider)}>
+            <Button type="button" variant="ghost" size="icon-sm" disabled={(!provider.hasApiKey && !provider.apiKey.trim()) || balance.status === "loading"} aria-label={t("settings:apimartRefreshBalance")} title={t("settings:apimartRefreshBalance")} onClick={() => void refreshBalance(provider)}>
               <RefreshCw aria-hidden="true" />
             </Button>
             <div className="settings-apimart-balance" data-state={balance.status}>
@@ -198,7 +181,7 @@ export function ApimartSettingsPane({ provider, fetchingModels, status, onProvid
           <div className="settings-field">
             <span>{t("settings:apiKey")}</span>
             <div className="settings-apimart-api-key-row">
-              <Input type="password" value={provider.apiKey} onChange={(event) => onProviderChange({ apiKey: event.target.value })} placeholder={t("settings:apiKeyPlaceholder")} />
+            <Input type="password" value={provider.apiKey} onChange={(event) => onProviderChange({ apiKey: event.target.value })} placeholder={provider.hasApiKey ? "已配置，输入以替换" : t("settings:apiKeyPlaceholder")} />
               <Button type="button" className="settings-api-control-button" disabled={fetchingModels || testingEndpoints} onClick={onFetchModels}>
                 <RefreshCw data-icon="inline-start" aria-hidden="true" />
                 <span>{fetchingModels ? t("settings:apiFetching") : t("settings:fetchModels")}</span>

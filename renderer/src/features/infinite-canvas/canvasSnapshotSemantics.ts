@@ -73,8 +73,8 @@ function compactActionFissionRow(value: unknown) {
 function durableNodeData(value: unknown) {
   const data = { ...recordOf(value) };
   delete data.groupId;
-  delete data.imageUploadState;
-  delete data.imageUploadError;
+  delete data.assetLoadState;
+  delete data.assetLoadError;
   if (data.actionFission && typeof data.actionFission === "object") {
     const actionFission = { ...recordOf(data.actionFission) };
     if (Array.isArray(actionFission.rows)) {
@@ -152,7 +152,7 @@ export function canvasSnapshotForStorage(snapshot: CanvasSnapshotLike): StoredCa
     nodes: snapshot.nodes
       .filter((node) => {
         const data = recordOf(recordOf(node).data);
-        return data.imageUploadState !== "processing" && data.imageUploadState !== "error";
+        return data.assetLoadState !== "processing" && data.assetLoadState !== "error";
       })
       .map(durableNode),
     connections: snapshot.edges.map(durableEdge),
@@ -174,7 +174,7 @@ export function storedCanvasContentSignature(stored: StoredCanvasSnapshot) {
 }
 
 /**
- * Build the final schema-v2 file in the renderer so Electron IPC transfers one
+ * Build the final schema-4 file in the renderer so Electron IPC transfers one
  * string instead of cloning the complete React Flow object graph. The main
  * process replaces the two metadata placeholders immediately before writing.
  */
@@ -183,7 +183,7 @@ export function serializeCanvasDocument(
   stored: StoredCanvasSnapshot,
 ) {
   return JSON.stringify({
-    canvasSchemaVersion: 2,
+    canvasSchemaVersion: 5,
     id: document.id,
     title: document.title,
     // The current canvas type is always Forart and is restored by the schema

@@ -1,10 +1,10 @@
 const fs = require('fs');
 const path = require('path');
+const { isInside } = require('./path-guard.cjs');
+const { probeVideo } = require('./media/video-probe.cjs');
+const { generateVideoThumbnail } = require('./media/video-thumbnail.cjs');
 
-function isInside(parent, target) {
-  const relative = path.relative(path.resolve(parent), path.resolve(target));
-  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
-}
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.m4v', '.mov', '.webm']);
 
 function canvasAssetKind(filePath) {
   const parent = path.basename(path.dirname(filePath));
@@ -23,10 +23,26 @@ function createCanvasAssetThumbnailStore({ assetRoot, assetUrl }) {
     return target;
   }
 
-  async function ensureCanvasAssetThumbnail({ filePath = '', mimeType = '' } = {}) {
+  async function ensureCanvasAssetThumbnail({ filePath = '', mimeType = '', durationMs = 0 } = {}) {
     const sourcePath = resolveCanvasAssetPath(filePath);
     if (!sourcePath || !fs.existsSync(sourcePath)) return {};
     const targetPath = canvasAssetThumbPath(sourcePath);
+    const isVideo = String(mimeType).toLowerCase().startsWith('video/')
+      || VIDEO_EXTENSIONS.has(path.extname(sourcePath).toLowerCase());
+    if (isVideo) {
+      if (!fs.existsSync(targetPath)) {
+        let resolvedDurationMs = Math.max(0, Number(durationMs || 0));
+        if (!resolvedDurationMs) {
+          const metadata = await probeVideo(sourcePath);
+          resolvedDurationMs = metadata.durationMs;
+        }
+        await generateVideoThumbnail({ sourcePath, targetPath, durationMs: resolvedDurationMs });
+      }
+      return {
+        thumbUrl: assetUrl(targetPath),
+        thumbFilePath: targetPath,
+      };
+    }
     const { generateSharpImageThumbnail } = await import('../../../server/src/shared/image-thumbnail-sharp.mjs');
     const result = await generateSharpImageThumbnail({
       key: `canvas:${sourcePath}`,
@@ -50,4 +66,4 @@ function createCanvasAssetThumbnailStore({ assetRoot, assetUrl }) {
   };
 }
 
-module.exports = { createCanvasAssetThumbnailStore };
+module.exports = { VIDEO_EXTENSIONS, createCanvasAssetThumbnailStore };

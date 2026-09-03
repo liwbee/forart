@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { createHash } = require('crypto');
 const { spawn } = require('child_process');
 
 const REPO_URL = 'https://github.com/liwbee/forart';
@@ -20,7 +21,7 @@ function readPackageInfo(rootDir) {
 }
 
 async function fetchJson(net, url) {
-  const response = await net.fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, {
+  const response = await net.fetch(url, {
     headers: {
       Accept: 'application/vnd.github+json',
       'User-Agent': 'Forart-Updater',
@@ -30,8 +31,13 @@ async function fetchJson(net, url) {
   return response.json();
 }
 
-async function downloadFileWithProgress(net, url, filePath, onProgress) {
-  const response = await net.fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, {
+function normalizeSha256Digest(value) {
+  const match = String(value || '').trim().match(/^sha256:([a-f0-9]{64})$/i);
+  return match ? match[1].toLowerCase() : '';
+}
+
+async function downloadFileWithProgress(net, url, filePath, onProgress, expectedDigest = '') {
+  const response = await net.fetch(url, {
     headers: {
       Accept: 'application/octet-stream, */*',
       'User-Agent': 'Forart-Updater',
@@ -43,6 +49,7 @@ async function downloadFileWithProgress(net, url, filePath, onProgress) {
   const totalBytes = Number(response.headers.get('content-length') || 0) || 0;
   const reader = response.body?.getReader?.();
   const stream = fs.createWriteStream(filePath);
+  const hash = createHash('sha256');
   let receivedBytes = 0;
 
   function writeChunk(chunk) {
@@ -57,6 +64,7 @@ async function downloadFileWithProgress(net, url, filePath, onProgress) {
   try {
     if (!reader) {
       const bytes = Buffer.from(await response.arrayBuffer());
+      hash.update(bytes);
       await writeChunk(bytes);
       receivedBytes = bytes.length;
       onProgress?.({ receivedBytes, totalBytes, done: true });
@@ -66,6 +74,7 @@ async function downloadFileWithProgress(net, url, filePath, onProgress) {
         if (done) break;
         if (!value) continue;
         const chunk = Buffer.from(value);
+        hash.update(chunk);
         await writeChunk(chunk);
         receivedBytes += chunk.length;
         onProgress?.({ receivedBytes, totalBytes, done: false });
@@ -84,6 +93,19 @@ async function downloadFileWithProgress(net, url, filePath, onProgress) {
       else resolve();
     });
   });
+
+  const expected = normalizeSha256Digest(expectedDigest);
+  if (expectedDigest && !expected) {
+    fs.rmSync(filePath, { force: true });
+    throw new Error('Expected update digest must use the sha256:<64 hex characters> format.');
+  }
+  if (expected) {
+    const actual = hash.digest('hex');
+    if (actual !== expected) {
+      fs.rmSync(filePath, { force: true });
+      throw new Error(`Downloaded update digest mismatch. Expected sha256:${expected}, got sha256:${actual}.`);
+    }
+  }
 
   return { receivedBytes, totalBytes };
 }
@@ -171,12 +193,6 @@ function portableDataRoot(rootDir) {
 
 function updateStagingRoot(rootDir) {
   const directory = path.join(portableDataRoot(rootDir), 'update_staging');
-  fs.mkdirSync(directory, { recursive: true });
-  return directory;
-}
-
-function updateApplyRoot(rootDir) {
-  const directory = path.join(portableDataRoot(rootDir), 'update_apply');
   fs.mkdirSync(directory, { recursive: true });
   return directory;
 }
@@ -318,21 +334,6 @@ function Remove-TreeWithRetry {
   }
 }
 
-function Copy-TreeWithRetry {
-  param([string]$Source, [string]$Destination)
-  for ($attempt = 1; $attempt -le 10; $attempt += 1) {
-    try {
-      Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
-      return
-    } catch {
-      if ($attempt -eq 10) {
-        throw
-      }
-      Start-Sleep -Milliseconds (300 * $attempt)
-    }
-  }
-}
-
 function Wait-ForForartToExit {
   param([string]$ExePath, [int]$MainPid)
   if ($MainPid -gt 0) {
@@ -368,6 +369,7 @@ $plan = Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8 | ConvertFrom-Jso
 $script:InstallRoot = [string]$plan.installRoot
 $script:ZipPath = [string]$plan.zipPath
 $script:ExtractRoot = [string]$plan.extractRoot
+$script:BackupRoot = [string]$plan.backupRoot
 $script:LogPath = [string]$plan.logPath
 $script:StatusPath = [string]$plan.statusPath
 $exePath = [string]$plan.exePath
@@ -388,22 +390,35 @@ try {
   $sourceRoot = Resolve-ExtractedRoot -ExtractRoot $script:ExtractRoot
   Write-Log ("Using extracted root: {0}" -f $sourceRoot)
 
-  foreach ($item in Get-ChildItem -LiteralPath $script:InstallRoot -Force) {
-    if ($preserveNames -contains $item.Name) {
-      Write-Log ("Preserved user data: {0}" -f $item.Name)
-      continue
-    }
-    Write-Log ("Removing old app item: {0}" -f $item.FullName)
-    Remove-TreeWithRetry -Target $item.FullName
-  }
+  # Build the new tree completely before switching the install directory. The
+  # helper itself lives outside InstallRoot so the directory can be renamed.
+  $sourceNames = @(Get-ChildItem -LiteralPath $sourceRoot -Force | ForEach-Object { $_.Name })
+  Remove-TreeWithRetry -Target $script:BackupRoot
+  Write-Log ("Moving current install to backup: {0}" -f $script:BackupRoot)
+  Move-Item -LiteralPath $script:InstallRoot -Destination $script:BackupRoot
+  try {
+    Write-Log ("Switching staged install into place: {0}" -f $script:InstallRoot)
+    Move-Item -LiteralPath $sourceRoot -Destination $script:InstallRoot
 
-  foreach ($item in Get-ChildItem -LiteralPath $sourceRoot -Force) {
-    if ($preserveNames -contains $item.Name) {
-      continue
+    # Preserve the same user data as the old updater, plus unknown top-level
+    # files that are not part of the new package.
+    foreach ($item in Get-ChildItem -LiteralPath $script:BackupRoot -Force) {
+      $keep = ($preserveNames -contains $item.Name) -or ($sourceNames -notcontains $item.Name)
+      if (-not $keep) { continue }
+      $target = Join-Path $script:InstallRoot $item.Name
+      if (Test-Path -LiteralPath $target) { Remove-TreeWithRetry -Target $target }
+      Write-Log ("Preserving user item: {0}" -f $item.Name)
+      Move-Item -LiteralPath $item.FullName -Destination $target
     }
-    $target = Join-Path $script:InstallRoot $item.Name
-    Write-Log ("Installing app item: {0}" -f $item.Name)
-    Copy-TreeWithRetry -Source $item.FullName -Destination $target
+  } catch {
+    Write-Log "Atomic switch failed; restoring previous install."
+    if (Test-Path -LiteralPath $script:InstallRoot) {
+      Remove-TreeWithRetry -Target $script:InstallRoot
+    }
+    if (Test-Path -LiteralPath $script:BackupRoot) {
+      Move-Item -LiteralPath $script:BackupRoot -Destination $script:InstallRoot
+    }
+    throw
   }
 
   Write-Status -State "success"
@@ -411,12 +426,31 @@ try {
   $nextExePath = Join-Path $script:InstallRoot "Forart.exe"
   Write-Log ("Restarting Forart: {0}" -f $nextExePath)
   Start-Process -FilePath $nextExePath -WorkingDirectory $script:InstallRoot
-  Start-Sleep -Seconds 1
+  $started = $false
+  for ($attempt = 1; $attempt -le 20; $attempt += 1) {
+    Start-Sleep -Milliseconds 500
+    $started = @(Get-CimInstance Win32_Process -Filter "name = 'Forart.exe'" -ErrorAction SilentlyContinue |
+      Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq [System.IO.Path]::GetFullPath($nextExePath)) }).Count -gt 0
+    if ($started) { break }
+  }
+  if (-not $started) { throw "Updated Forart process did not start." }
+  Remove-TreeWithRetry -Target $script:BackupRoot
   Remove-TreeWithRetry -Target $script:ExtractRoot
   Write-Log "Update finished. Closing updater window."
   exit 0
 } catch {
   $message = $_.Exception.Message
+  if (Test-Path -LiteralPath $script:BackupRoot) {
+    try {
+      Write-Log "Update did not complete; restoring previous install."
+      if (Test-Path -LiteralPath $script:InstallRoot) {
+        Remove-TreeWithRetry -Target $script:InstallRoot
+      }
+      Move-Item -LiteralPath $script:BackupRoot -Destination $script:InstallRoot
+    } catch {
+      $message = "$message Restore failed: $($_.Exception.Message)"
+    }
+  }
   Write-Log ("Update failed: {0}" -f $message)
   Write-Status -State "failed" -ErrorMessage $message
   Write-Host ""
@@ -489,7 +523,9 @@ try {
 async function schedulePortableUpdateApply({ installRoot, zipPath, version }) {
   if (process.platform !== 'win32') throw new Error('Automatic portable update is currently supported on Windows only.');
 
-  const applyRoot = path.join(updateApplyRoot(installRoot), `${timestampName()}-${process.pid}`);
+  // Keep the helper outside InstallRoot but on the same volume. This lets the
+  // apply script atomically rename the complete portable directory.
+  const applyRoot = path.join(path.dirname(installRoot), `.${path.basename(installRoot)}.update-work`, `${timestampName()}-${process.pid}`);
   fs.mkdirSync(applyRoot, { recursive: true });
   const scriptPath = path.join(applyRoot, 'apply-portable-update.ps1');
   const launcherPath = path.join(applyRoot, 'portable-update-launcher.ps1');
@@ -498,11 +534,13 @@ async function schedulePortableUpdateApply({ installRoot, zipPath, version }) {
   const statusPath = path.join(applyRoot, 'apply-status.json');
   const launcherStatusPath = path.join(applyRoot, 'launcher-status.json');
   const extractRoot = path.join(applyRoot, 'extracted');
+  const backupRoot = path.join(path.dirname(installRoot), `.${path.basename(installRoot)}.update-backup-${timestampName()}-${process.pid}`);
 
   const plan = {
     installRoot,
     zipPath,
     extractRoot,
+    backupRoot,
     version,
     exePath: process.execPath,
     electronPid: process.pid,
@@ -526,11 +564,11 @@ async function schedulePortableUpdateApply({ installRoot, zipPath, version }) {
     '-PlanPath',
     planPath,
     '-WorkingDirectory',
-    installRoot,
+    applyRoot,
     '-StatusPath',
     launcherStatusPath,
   ], {
-    cwd: installRoot,
+    cwd: applyRoot,
     stdio: 'ignore',
     windowsHide: true,
   });
@@ -554,8 +592,10 @@ async function schedulePortableUpdateApply({ installRoot, zipPath, version }) {
 async function probeNet(name, net, url, required = true) {
   const startedAt = Date.now();
   try {
-    const response = await net.fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, {
-      headers: { 'User-Agent': 'Forart-Updater' },
+    const response = await net.fetch(url, {
+      headers: {
+        'User-Agent': 'Forart-Updater',
+      },
     });
     return {
       name,
@@ -694,6 +734,11 @@ function createPortableUpdater({ app, rootDir, dataRoot = rootDir, net }) {
         };
       }
 
+      const expectedDigest = normalizeSha256Digest(latestRelease.asset.digest);
+      if (!expectedDigest) {
+        throw new Error('Latest portable release does not contain a valid sha256 asset digest.');
+      }
+
       const zipName = safeFileName(latestRelease.asset.name, `Forart-${latestRelease.version}-windows-portable.zip`);
       const zipPath = path.join(stagingRoot, zipName);
       const startedAt = Date.now();
@@ -724,7 +769,7 @@ function createPortableUpdater({ app, rootDir, dataRoot = rootDir, net }) {
           fileBytes: receivedBytes,
           fileTotalBytes: knownTotal,
         });
-      });
+      }, `sha256:${expectedDigest}`);
 
       emitProgress(onProgress, {
         phase: 'scheduling',
@@ -735,7 +780,7 @@ function createPortableUpdater({ app, rootDir, dataRoot = rootDir, net }) {
         fileCount: 1,
       });
       await schedulePortableUpdateApply({
-        installRoot: dataRoot,
+        installRoot: path.dirname(process.execPath),
         zipPath,
         version: latestRelease.version,
       });
@@ -777,4 +822,8 @@ function createPortableUpdater({ app, rootDir, dataRoot = rootDir, net }) {
   return { appInfo, check, checkConnectivity, run };
 }
 
-module.exports = { createPortableUpdater };
+module.exports = {
+  createPortableUpdater,
+  downloadFileWithProgress,
+  normalizeSha256Digest,
+};

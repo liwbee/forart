@@ -14,7 +14,11 @@ import {
   $insertNodes,
   $isRangeSelection,
   $isTextNode,
+  CAN_REDO_COMMAND,
+  CAN_UNDO_COMMAND,
+  CLEAR_HISTORY_COMMAND,
   COMMAND_PRIORITY_HIGH,
+  COMMAND_PRIORITY_LOW,
   DecoratorNode,
   KEY_ARROW_DOWN_COMMAND,
   KEY_ARROW_UP_COMMAND,
@@ -38,6 +42,7 @@ import {
   type JSX,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { cn } from "../../../lib/utils";
 import { Button } from "../../../components/ui/button";
 import { ImageWithFallback } from "../../../components/ImageWithFallback";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTitle } from "../../../components/ui/popover";
@@ -78,10 +83,15 @@ interface ImagePromptEditorProps {
   references: ImageGeneratorReferenceInput[];
   placeholder: string;
   ariaLabel: string;
+  expanded?: boolean;
   onChange: (value: string, document: NativeImagePromptDocument) => void;
+  onDerivedValueChange?: (value: string) => void;
   onCommit: () => void;
   onFocusChange: (focused: boolean) => void;
   onCompositionChange: (composing: boolean) => void;
+  onUndoFallback?: () => void;
+  onRedoFallback?: () => void;
+  externalSyncToken?: number;
 }
 
 const ImagePromptReferenceContext = createContext<ReferenceContextValue | null>(null);
@@ -297,33 +307,111 @@ function MentionPickerPlugin({ references }: { references: ImageGeneratorReferen
   );
 }
 
+// 编辑器内撤销级联：Lexical 自身历史撤无可撤时，把 Ctrl+Z / Ctrl+Shift+Z
+// 转发给画布级历史（例如智能优化这类编程写入的变更只存在于画布历史中）。
+function UndoCascadePlugin({
+  onUndoFallback,
+  onRedoFallback,
+}: {
+  onUndoFallback?: () => void;
+  onRedoFallback?: () => void;
+}) {
+  const [editor] = useLexicalComposerContext();
+  const canUndoRef = useRef(false);
+  const canRedoRef = useRef(false);
+  const undoFallbackRef = useRef(onUndoFallback);
+  const redoFallbackRef = useRef(onRedoFallback);
+  undoFallbackRef.current = onUndoFallback;
+  redoFallbackRef.current = onRedoFallback;
+
+  useEffect(() => {
+    const unregisterUndo = editor.registerCommand(
+      CAN_UNDO_COMMAND,
+      (payload) => {
+        canUndoRef.current = payload;
+        return false;
+      },
+      COMMAND_PRIORITY_LOW,
+    );
+    const unregisterRedo = editor.registerCommand(
+      CAN_REDO_COMMAND,
+      (payload) => {
+        canRedoRef.current = payload;
+        return false;
+      },
+      COMMAND_PRIORITY_LOW,
+    );
+    return () => {
+      unregisterUndo();
+      unregisterRedo();
+    };
+  }, [editor]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      const fallback = key === "z" && !event.shiftKey && !canUndoRef.current && undoFallbackRef.current
+        ? undoFallbackRef.current
+        : (key === "z" && event.shiftKey || key === "y") && !canRedoRef.current && redoFallbackRef.current
+          ? redoFallbackRef.current
+          : null;
+      if (!fallback) return;
+      event.preventDefault();
+      event.stopPropagation();
+      fallback();
+    };
+    // 捕获阶段先于 Lexical 的按键处理，避免空历史时按键被吞。
+    return editor.registerRootListener((root, previousRoot) => {
+      previousRoot?.removeEventListener("keydown", handleKeyDown, true);
+      root?.addEventListener("keydown", handleKeyDown, true);
+    });
+  }, [editor]);
+
+  return null;
+}
+
 function ExternalStateSyncPlugin({
   document,
   fallbackText,
   focused,
+  syncToken,
 }: {
   document?: NativeImagePromptDocument;
   fallbackText: string;
   focused: boolean;
+  syncToken: number;
 }) {
   const [editor] = useLexicalComposerContext();
   const externalSignature = useMemo(() => JSON.stringify(document || null), [document]);
+  const lastSyncTokenRef = useRef(syncToken);
 
   useEffect(() => {
-    if (focused) return;
+    const clearLocalHistory = () => queueMicrotask(() => {
+      editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined);
+    });
+    const tokenChanged = syncToken !== lastSyncTokenRef.current;
+    lastSyncTokenRef.current = syncToken;
+    // 焦点在编辑器内时跳过外部同步以保护正在输入的内容；
+    // 但级联撤销/重做（token 变化）必须强制应用外部状态。
+    if (focused && !tokenChanged) return;
     const current = JSON.stringify(editor.getEditorState().toJSON());
     if (document) {
       if (current === externalSignature) return;
       editor.setEditorState(editor.parseEditorState(JSON.stringify(document)), { tag: "external-sync" });
+      clearLocalHistory();
       return;
     }
+    let synchronized = false;
     editor.update(() => {
       const root = $getRoot();
       if (root.getTextContent() === fallbackText) return;
       root.clear();
       root.append($createParagraphNode().append($createTextNode(fallbackText)));
+      synchronized = true;
     }, { tag: "external-sync" });
-  }, [document, editor, externalSignature, fallbackText, focused]);
+    if (synchronized) clearLocalHistory();
+  }, [document, editor, externalSignature, fallbackText, focused, syncToken]);
   return null;
 }
 
@@ -334,10 +422,15 @@ export function ImagePromptEditor({
   references,
   placeholder,
   ariaLabel,
+  expanded = false,
   onChange,
+  onDerivedValueChange,
   onCommit,
   onFocusChange,
   onCompositionChange,
+  onUndoFallback,
+  onRedoFallback,
+  externalSyncToken = 0,
 }: ImagePromptEditorProps) {
   const { t, i18n } = useTranslation();
   const [focused, setFocused] = useState(false);
@@ -363,8 +456,11 @@ export function ImagePromptEditor({
       referenceLabel,
       missingReferenceLabel: t("infiniteCanvas:invalidImageReference"),
     });
-    if (nextValue !== value) onChange(nextValue, currentDocument);
-  }, [onChange, referenceLabel, references, t, value]);
+    if (nextValue !== value) {
+      if (onDerivedValueChange) onDerivedValueChange(nextValue);
+      else onChange(nextValue, currentDocument);
+    }
+  }, [onChange, onDerivedValueChange, referenceLabel, references, t, value]);
   const initialDocument = normalizeImagePromptDocument(document);
   const initialConfig = useMemo(() => ({
     namespace: `image-prompt-${id}`,
@@ -387,7 +483,7 @@ export function ImagePromptEditor({
       <Popover open={focused}>
         <LexicalComposer initialConfig={initialConfig}>
           <PopoverAnchor asChild>
-            <div className="rf-image-generator-prompt-shell">
+            <div className={cn("rf-image-generator-prompt-shell", expanded && "is-expanded")}>
               <PlainTextPlugin
                 contentEditable={(
                   <ContentEditable
@@ -414,11 +510,23 @@ export function ImagePromptEditor({
             </div>
           </PopoverAnchor>
           <HistoryPlugin />
+          <UndoCascadePlugin onUndoFallback={onUndoFallback} onRedoFallback={onRedoFallback} />
           <OnChangePlugin
             onChange={(editorState, _editor, tags) => {
               if (tags.has("external-sync")) return;
               const nextDocument = normalizeImagePromptDocument(editorState.toJSON());
               if (!nextDocument) return;
+              // 受控状态回声（编辑器重挂/结构归一化）不向上冒泡：与当前 document
+              // 属性等价、或展示文本与受控 value 一致（如无参考图时 panel 侧以
+              // null document + 纯文本提交）时跳过，避免等价内容再次写入撤销历史。
+              if (JSON.stringify(nextDocument) === JSON.stringify(normalizeImagePromptDocument(document))) return;
+              const echoText = serializeImagePromptForDisplay({
+                document: nextDocument,
+                references,
+                referenceLabel,
+                missingReferenceLabel: t("infiniteCanvas:invalidImageReference"),
+              });
+              if (echoText === value) return;
               latestDocumentRef.current = nextDocument;
               const plainText = serializeImagePromptForDisplay({
                 document: nextDocument,
@@ -429,7 +537,7 @@ export function ImagePromptEditor({
               onChange(plainText, nextDocument);
             }}
           />
-          <ExternalStateSyncPlugin document={document} fallbackText={value} focused={focused} />
+          <ExternalStateSyncPlugin document={document} fallbackText={value} focused={focused} syncToken={externalSyncToken} />
           <MentionPickerPlugin references={references} />
         </LexicalComposer>
       </Popover>

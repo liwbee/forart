@@ -868,7 +868,10 @@ function createGenerationTaskRepository({ rootDir, databasePath, Database } = {}
   function cleanupTerminalHistory({ now = Date.now(), retentionMs = {}, orphanedTaskIds = [] } = {}) {
     assertOpen();
     const timestamp = Number(now) || Date.now();
-    const retention = { ...DEFAULT_RETENTION_MS, ...(retentionMs || {}) };
+    const uniformRetentionMs = Number(retentionMs);
+    const retention = Number.isFinite(uniformRetentionMs)
+      ? Object.fromEntries(Object.keys(DEFAULT_RETENTION_MS).map((status) => [status, Math.max(0, uniformRetentionMs)]))
+      : { ...DEFAULT_RETENTION_MS, ...(retentionMs || {}) };
     const orphaned = [...new Set((Array.isArray(orphanedTaskIds) ? orphanedTaskIds : [])
       .map(safeString)
       .filter(Boolean))];
@@ -892,12 +895,7 @@ function createGenerationTaskRepository({ rootDir, databasePath, Database } = {}
               ${remoteAnchor('remoteNodeId')}
             ) IS NULL AS is_unsubmitted
         FROM generation_tasks task
-        WHERE NOT EXISTS (
-          SELECT 1 FROM generation_target_heads head WHERE head.latest_task_id = task.id
-        )
-          AND task.status IN ('succeeded', 'failed', 'canceled', 'interrupted', 'superseded')
-          AND task.result_commit_state NOT IN ('pending', 'committing')
-          AND (task.status <> 'succeeded' OR task.result_commit_state IN ('committed', 'discarded'))
+        WHERE task.status IN ('succeeded', 'failed', 'canceled', 'interrupted', 'superseded')
       )
       DELETE FROM generation_tasks
       WHERE id IN (

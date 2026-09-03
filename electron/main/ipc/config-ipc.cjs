@@ -1,4 +1,5 @@
 const fs = require('fs');
+const { requestApimartBalance, requestProviderModels } = require('../modules/provider-runtime/provider-request.cjs');
 
 async function checkServerHealth(net, baseUrl) {
   try {
@@ -10,7 +11,7 @@ async function checkServerHealth(net, baseUrl) {
   }
 }
 
-function registerConfigIpc({ ipcMain, dialog, configStore, app, net }) {
+function registerConfigIpc({ ipcMain, dialog, configStore, app, net, onConfigSaved }) {
   let activeAppConfig = null;
 
   ipcMain.handle('config:load', async () => {
@@ -25,16 +26,37 @@ function registerConfigIpc({ ipcMain, dialog, configStore, app, net }) {
   });
 
   ipcMain.handle('config:save', async (_event, payload) => {
+    const previousConfig = configStore.load();
     const config = configStore.save(payload);
     activeAppConfig = config;
+    await onConfigSaved?.(config, previousConfig);
     return { ok: true, config };
   });
 
-  ipcMain.handle('config:load-api-settings', async () => configStore.loadApiSettings());
+  ipcMain.handle('config:load-api-settings', async () => configStore.loadPublicApiSettings());
 
   ipcMain.handle('config:save-api-settings', async (_event, payload) => {
     const apiSettings = configStore.saveApiSettings(payload);
     return { ok: true, apiSettings };
+  });
+
+  ipcMain.handle('config:load-agent-settings', async () => configStore.loadAgentSettings());
+
+  ipcMain.handle('config:save-agent-settings', async (_event, payload) => {
+    const agentSettings = configStore.saveAgentSettings(payload);
+    return { ok: true, agentSettings };
+  });
+
+  ipcMain.handle('provider:models', async (_event, payload = {}) => {
+    const provider = configStore.getApiProvider(payload.providerId);
+    if (!provider) throw new Error('API provider not found.');
+    return requestProviderModels({ net, provider });
+  });
+
+  ipcMain.handle('provider:apimart-balance', async (_event, payload = {}) => {
+    const provider = configStore.getApiProvider(payload.providerId);
+    if (!provider) throw new Error('API provider not found.');
+    return requestApimartBalance({ net, provider });
   });
 
   ipcMain.handle('config:load-image-review-settings', async () => configStore.loadImageReviewSettings());

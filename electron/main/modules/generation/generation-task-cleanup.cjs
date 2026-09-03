@@ -5,6 +5,7 @@ function createGenerationTaskCleanup({
   findMissingTargets,
   onOrphanedHeads,
   targetExists,
+  resolveRetentionMs,
   intervalMs = CLEANUP_INTERVAL_MS,
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
@@ -42,7 +43,10 @@ function createGenerationTaskCleanup({
     const { orphanedTaskIds } = reconcile
       ? reconcileTargets({ now: timestamp })
       : { orphanedTaskIds: [] };
-    const result = repository.cleanupTerminalHistory({ now: timestamp, retentionMs, orphanedTaskIds });
+    const resolvedRetentionMs = retentionMs === undefined
+      ? resolveRetentionMs?.()
+      : retentionMs;
+    const result = repository.cleanupTerminalHistory({ now: timestamp, retentionMs: resolvedRetentionMs, orphanedTaskIds });
     return { ...result, orphanedTaskIds, skipped: false };
   }
 

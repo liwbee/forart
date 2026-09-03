@@ -47,9 +47,13 @@ export function createDefaultActionFissionState(): ActionFissionState {
 
 export function normalizeActionFissionState(state: ActionFissionState | undefined): ActionFissionState {
   const fallback = createDefaultActionFissionState();
+  // Drop the removed per-node Agent optimization flag when loading older
+  // canvases so it is not carried forward by the generic state spread.
+  const storedState = (state || {}) as ActionFissionState & { promptOptimizationEnabled?: unknown };
+  const { promptOptimizationEnabled: _legacyPromptOptimizationEnabled, ...stateWithoutRemovedFeature } = storedState;
   return {
     ...fallback,
-    ...state,
+    ...stateWithoutRemovedFeature,
     rows: state?.rows?.length
       ? state.rows.slice(0, MAX_ACTION_FISSION_ROWS).map(normalizeActionFissionRow)
       : fallback.rows,

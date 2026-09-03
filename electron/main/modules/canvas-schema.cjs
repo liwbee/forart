@@ -1,12 +1,13 @@
-const CURRENT_CANVAS_SCHEMA_VERSION = 2;
+const CURRENT_CANVAS_SCHEMA_VERSION = 5;
 
-const NODE_KINDS = new Set(['imageGenerator', 'imageLoader', 'prompt', 'annotation', 'llm', 'actionFission', 'group']);
+const NODE_KINDS = new Set(['imageGenerator', 'assetLoader', 'prompt', 'annotation', 'llm', 'smartReverse', 'actionFission', 'group']);
 const NODE_DEFAULT_SIZES = Object.freeze({
   imageGenerator: { width: 280, height: 280 },
-  imageLoader: { width: 240, height: 320 },
+  assetLoader: { width: 240, height: 320 },
   prompt: { width: 260, height: 160 },
   annotation: { width: 64, height: 40 },
   llm: { width: 280, height: 190 },
+  smartReverse: { width: 340, height: 300 },
   actionFission: { width: 820, height: 620 },
   group: { width: 640, height: 420 },
 });
@@ -156,7 +157,7 @@ function normalizeActionFission(value) {
 
 function currentNodeKind(node, data) {
   const value = safeString(data.kind || node.type);
-  const kind = value === 'image' ? 'imageLoader' : value;
+  const kind = value === 'image' || value === 'imageLoader' ? 'assetLoader' : value;
   if (NODE_KINDS.has(kind)) return kind;
   if (isRecord(data.actionFission) || isRecord(node.actionFission)) return 'actionFission';
   if (
@@ -168,7 +169,7 @@ function currentNodeKind(node, data) {
     || data.generationTaskId
     || data.latestGenerationTaskId
   ) return 'imageGenerator';
-  if (data.imageUrl || node.url) return 'imageLoader';
+  if (data.assetUrl || data.imageUrl || node.url) return 'assetLoader';
   if (data.text !== undefined || node.text !== undefined) return 'prompt';
   return '';
 }
@@ -190,11 +191,33 @@ function normalizeNodeData(node, kind) {
   ]);
 
   if (!safeString(data.latestGenerationTaskId)) delete data.latestGenerationTaskId;
-  if (kind === 'imageLoader') {
-    const imageUrl = safeString(data.imageUrl || node.url);
-    if (imageUrl) data.imageUrl = imageUrl;
-    const thumbUrl = safeString(data.thumbUrl || node.thumbUrl);
-    if (thumbUrl) data.thumbUrl = thumbUrl;
+  if (kind === 'assetLoader') {
+    const assetUrl = safeString(data.assetUrl || data.imageUrl || node.url);
+    const assetThumbUrl = safeString(data.assetThumbUrl || data.thumbUrl || node.thumbUrl);
+    const assetFileName = safeString(data.assetFileName || data.imageFileName || node.fileName);
+    const requestedAssetType = safeString(data.assetType);
+    const assetType = ['image', 'video', 'audio'].includes(requestedAssetType) ? requestedAssetType : 'image';
+    if (assetUrl) data.assetUrl = assetUrl;
+    if (assetThumbUrl) data.assetThumbUrl = assetThumbUrl;
+    if (assetFileName) data.assetFileName = assetFileName;
+    data.assetType = assetType;
+    const width = Number(data.assetNaturalWidth || data.imageNaturalWidth);
+    const height = Number(data.assetNaturalHeight || data.imageNaturalHeight);
+    if (width > 0) data.assetNaturalWidth = width;
+    if (height > 0) data.assetNaturalHeight = height;
+    const durationMs = Number(data.assetDurationMs);
+    const sizeBytes = Number(data.assetSizeBytes);
+    if (durationMs > 0) data.assetDurationMs = durationMs;
+    if (sizeBytes > 0) data.assetSizeBytes = sizeBytes;
+    removeKeys(data, [
+      'imageUrl',
+      'imageFileName',
+      'thumbUrl',
+      'imageNaturalWidth',
+      'imageNaturalHeight',
+      'imageUploadState',
+      'imageUploadError',
+    ]);
   }
   if (kind === 'imageGenerator') {
     const generatedImages = normalizeGeneratedImages(data, node.url);
@@ -214,7 +237,8 @@ function normalizeNodeData(node, kind) {
 function normalizeNode(value, index) {
   if (!isRecord(value)) return null;
   const sourceData = isRecord(value.data) ? value.data : {};
-  const kind = currentNodeKind(value, sourceData);
+  const legacyKind = currentNodeKind(value, sourceData);
+  const kind = legacyKind === 'llm' ? 'prompt' : legacyKind;
   if (!kind) return null;
   const current = (value.type === 'canvasNode' || value.type === 'groupNode') && isRecord(value.position) && safeString(sourceData.kind);
   const position = isRecord(value.position) ? value.position : {};

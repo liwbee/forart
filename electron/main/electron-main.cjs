@@ -2,10 +2,13 @@ const { app, ipcMain, dialog, protocol, net, shell, clipboard, safeStorage } = r
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
+const { createLocalFileResponse } = require('./modules/local-file-response.cjs');
 
 const { createAppTray, registerCloseToTray, showAppWindow } = require('./app-tray.cjs');
 const { createWindow, registerAppWindowIpc } = require('./app-window.cjs');
 const { registerCanvasIpc } = require('./ipc/canvas-ipc.cjs');
+const { registerCanvasAgentIpc } = require('./ipc/canvas-agent-ipc.cjs');
+const { registerCanvasTaskIpc } = require('./ipc/canvas-task-ipc.cjs');
 const { registerConfigIpc } = require('./ipc/config-ipc.cjs');
 const { registerGenerationTaskIpc } = require('./ipc/generation-task-ipc.cjs');
 const { registerImageReviewIpc } = require('./ipc/image-review-ipc.cjs');
@@ -18,7 +21,10 @@ const { createCanvasCacheStore } = require('./modules/canvas-cache-store.cjs');
 const { createCanvasPackageStore } = require('./modules/canvas-package-store.cjs');
 const { registerCanvasClipboardIpc } = require('./modules/canvas-clipboard.cjs');
 const { createCanvasStore } = require('./modules/canvas-store.cjs');
-const { createConfigStore } = require('./modules/config-store.cjs');
+const { createConfigStore, DEFAULT_TASK_HISTORY_RETENTION_DAYS } = require('./modules/config-store.cjs');
+const { createCanvasAgentService } = require('./modules/canvas-agent/canvas-agent-service.cjs');
+const { createCanvasAgentRuntime } = require('./modules/canvas-agent/canvas-agent-runtime.cjs');
+const { createCanvasTaskRepository } = require('./modules/tasks/canvas-task-repository.cjs');
 const { createGenerationTaskRepository } = require('./modules/generation/generation-task-repository.cjs');
 const { createGenerationResultCommitter } = require('./modules/generation/generation-result-committer.cjs');
 const { createGenerationTaskCleanup } = require('./modules/generation/generation-task-cleanup.cjs');
@@ -59,12 +65,27 @@ const generationTaskRepository = createGenerationTaskRepository({ rootDir: porta
 const canvasCacheStore = createCanvasCacheStore({ assetStore, canvasStore, generationTaskRepository, shell });
 const canvasPackageStore = createCanvasPackageStore({ rootDir: appRootDir, dialog, canvasStore, assetStore, net });
 const configStore = createConfigStore({ app, rootDir: portableRootDir, safeStorage });
+const canvasAgent = createCanvasAgentService({ net, assetStore, configStore });
+const canvasTaskRepository = createCanvasTaskRepository({ rootDir: portableRootDir });
+canvasTaskRepository.migrateLegacyImageTasks();
+const resolveTaskHistoryRetentionMs = (config = configStore.load()) => (
+  Number(config?.taskHistoryRetentionDays || DEFAULT_TASK_HISTORY_RETENTION_DAYS) * 24 * 60 * 60 * 1000
+);
+const cleanupCanvasTaskHistory = (config) => canvasTaskRepository.cleanup({
+  retentionMs: resolveTaskHistoryRetentionMs(config),
+});
+const imageTaskHistoryCleanupTimer = setInterval(() => {
+  try { cleanupCanvasTaskHistory(); } catch (error) { console.error('Image task history cleanup failed:', error); }
+}, 12 * 60 * 60 * 1000);
+imageTaskHistoryCleanupTimer.unref?.();
+const canvasAgentRuntime = createCanvasAgentRuntime({ canvasAgent, canvasStore });
 const generationResultCommitter = createGenerationResultCommitter({ repository: generationTaskRepository, canvasStore });
 const generationTaskService = createGenerationTaskService({ repository: generationTaskRepository });
 const generationTaskStore = generationTaskService.createStoreAdapter('api');
 const libtvGenerationTaskStore = generationTaskService.createStoreAdapter('libtv');
 const generationTaskCleanup = createGenerationTaskCleanup({
   repository: generationTaskRepository,
+  resolveRetentionMs: resolveTaskHistoryRetentionMs,
   findMissingTargets: (heads) => canvasStore.findMissingGenerationTargets(heads),
   onOrphanedHeads: (heads) => {
     for (const head of heads) {
@@ -74,7 +95,14 @@ const generationTaskCleanup = createGenerationTaskCleanup({
   },
 });
 const actionFolderImportStore = createActionFolderImportStore();
-const imageGenerationRunner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore, resultCommitter: generationResultCommitter });
+const imageGenerationRunner = createImageGenerationRunner({
+  net,
+  assetStore,
+  canvasStore,
+  generationTaskStore,
+  resultCommitter: generationResultCommitter,
+  resolveProvider: (providerId) => configStore.loadApiSettings().providers.find((provider) => provider.id === String(providerId || '').trim()),
+});
 const imageReviewStore = createImageReviewStore();
 const imageReviewScaledImageStore = createImageReviewScaledImageStore();
 const libtv = createLibtvAdapter({ rootDir: appRootDir });
@@ -112,6 +140,7 @@ const disposeGenerationTaskIpc = registerGenerationTaskIpc({
   generationTaskService,
   getWebContents: () => mainWindow?.webContents,
 });
+generationTaskService.subscribe((task) => canvasTaskRepository.mirrorImageTask(task));
 
 function registerCanvasAssetProtocol() {
   protocol.handle('forart-asset', async (request) => {
@@ -122,7 +151,9 @@ function registerCanvasAssetProtocol() {
     if (!target || !fs.existsSync(target)) {
       return new Response('Asset not found', { status: 404 });
     }
-    return net.fetch(pathToFileURL(target).toString());
+    // Native video playback issues byte-range requests. Returning a streamed
+    // 206 response keeps seeking functional without loading the whole file.
+    return createLocalFileResponse(request, target);
   });
 }
 
@@ -157,6 +188,8 @@ function registerImageReviewProtocol() {
 }
 
 registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskService });
+registerCanvasAgentIpc({ ipcMain, canvasAgentRuntime });
+registerCanvasTaskIpc({ ipcMain, repository: canvasTaskRepository });
 ipcMain.handle('canvas-cache:scan', async () => canvasCacheStore.scan());
 ipcMain.handle('canvas-cache:delete', async (_event, payload) => {
   const result = await canvasCacheStore.deleteAssets(payload);
@@ -179,7 +212,22 @@ registerImageReviewIpc({
 });
 registerLibtvIpc({ ipcMain, libtv });
 localApi = registerLocalApiIpc({ ipcMain, configStore, app, dataRoot: portableRootDir });
-registerConfigIpc({ ipcMain, dialog, configStore, app, net });
+registerConfigIpc({
+  ipcMain,
+  dialog,
+  configStore,
+  app,
+  net,
+  onConfigSaved: (config, previousConfig) => {
+    if (resolveTaskHistoryRetentionMs(config) === resolveTaskHistoryRetentionMs(previousConfig)) return;
+    try {
+      generationTaskCleanup.run({ force: true, retentionMs: resolveTaskHistoryRetentionMs(config) });
+      cleanupCanvasTaskHistory(config);
+    } catch (error) {
+      console.error('Task history cleanup after retention change failed:', error);
+    }
+  },
+});
 registerUpdaterIpc({ ipcMain, updater: portableUpdater });
 registerAppWindowIpc({ ipcMain, shell });
 registerCanvasClipboardIpc({ clipboard, ipcMain });
@@ -211,9 +259,7 @@ app.whenReady().then(async () => {
     console.error('Generation target startup reconciliation failed:', error);
   }
   try {
-    await generationTaskService.recoverActiveTasks({
-      api: { providers: configStore.loadApiSettings().providers },
-    });
+    await generationTaskService.recoverActiveTasks({ api: {} });
   } catch (error) {
     console.error('Generation active task recovery failed:', error);
   }
@@ -221,6 +267,11 @@ app.whenReady().then(async () => {
     generationTaskCleanup.run();
   } catch (error) {
     console.error('Generation task startup cleanup failed:', error);
+  }
+  try {
+    cleanupCanvasTaskHistory();
+  } catch (error) {
+    console.error('Image task history startup cleanup failed:', error);
   }
   generationTaskCleanup.start();
   mainWindow = await createWindow({ rootDir: appRootDir, isDev });
@@ -254,7 +305,9 @@ app.on('will-quit', () => {
   disposeCloseToTray?.();
   appTray?.destroy();
   generationTaskCleanup.stop();
+  clearInterval(imageTaskHistoryCleanupTimer);
   disposeGenerationTaskIpc();
+  canvasTaskRepository.close();
   generationTaskRepository.close();
 });
 
