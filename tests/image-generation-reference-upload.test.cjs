@@ -69,6 +69,7 @@ test('API references are re-uploaded, verified, and submitted with the returned 
       setGenerationTaskAnchor() {},
     },
     generationTaskStore,
+    resolveProvider: () => ({ id: 'apimart', baseUrl: 'https://api.apib.ai/v1', apiKey: 'test', protocol: 'compatible' }),
     resultCommitter: { commit() {} },
   });
 

@@ -47,9 +47,23 @@ function headerValue(request, name) {
 async function createLocalFileResponse(request, filePath) {
   const stats = await fs.promises.stat(filePath);
   const size = stats.size;
+  if (String(request?.method || 'GET').toUpperCase() === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'Access-Control-Allow-Headers': 'Range, Content-Type',
+      'Access-Control-Max-Age': '86400',
+    } });
+  }
   const range = parseSingleByteRange(headerValue(request, 'range'), size);
   const commonHeaders = {
     'Accept-Ranges': 'bytes',
+    // Canvas video captures use CORS-enabled media elements.  The custom
+    // privileged scheme still needs an explicit response header for Chromium
+    // to keep the decoded frames origin-clean.
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+    'Access-Control-Allow-Headers': 'Range, Content-Type',
     'Cache-Control': 'private, max-age=31536000, immutable',
     'Content-Type': mimeTypeForFile(filePath),
   };

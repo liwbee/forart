@@ -187,7 +187,7 @@ function registerImageReviewProtocol() {
   protocol.handle('forart-review-preview', handleScaledImageRequest);
 }
 
-registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskService });
+registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskService, net });
 registerCanvasAgentIpc({ ipcMain, canvasAgentRuntime });
 registerCanvasTaskIpc({ ipcMain, repository: canvasTaskRepository });
 ipcMain.handle('canvas-cache:scan', async () => canvasCacheStore.scan());

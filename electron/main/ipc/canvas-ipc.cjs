@@ -6,6 +6,7 @@ const ACTIVE_GENERATION_STATUSES = new Set([
   'running',
   'result_processing',
 ]);
+const { captureVideoFrame } = require('../modules/media/video-frame.cjs');
 
 async function stopGenerationTasks(tasks, generationTaskService) {
   const taskIds = [...new Set((Array.isArray(tasks) ? tasks : [])
@@ -45,7 +46,7 @@ async function stopMissingGenerationTargets(canvasId, canvasStore, generationTas
   return stopResults;
 }
 
-function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskService }) {
+function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskService, net }) {
   const canvasSaveSessions = new Map();
   const canvasSaveQueues = new Map();
   const pendingTargetReconciliations = new Map();
@@ -243,6 +244,23 @@ function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackag
     return { ok: true, canceled: Boolean(controller) };
   });
   ipcMain.handle('canvas:save-asset', async (_event, payload) => assetStore.saveAsset(payload));
+  ipcMain.handle('canvas:capture-video-frame', async (_event, payload = {}) => {
+    const sourceUrl = String(payload.sourceUrl || '').trim();
+    const localPath = sourceUrl ? assetStore.resolveAssetUrl(sourceUrl) : '';
+    const frame = await captureVideoFrame({
+      sourceUrl,
+      sourcePath: localPath,
+      timeSeconds: payload.timeSeconds,
+      mode: payload.mode,
+      net,
+    });
+    return assetStore.saveBufferAsset({
+      buffer: frame.buffer,
+      mimeType: frame.mimeType,
+      defaultName: payload.defaultName || 'video-frame.png',
+      kind: payload.kind || 'output',
+    });
+  });
   ipcMain.handle('canvas:save-asset-thumbnail', async (_event, payload) => assetStore.saveAssetThumbnail(payload));
   ipcMain.handle('canvas:ensure-asset-thumbnail', async (_event, payload) => assetStore.ensureAssetThumbnail(payload));
   ipcMain.handle('canvas:import-asset-file', async (_event, payload) => assetStore.importUserAssetFile(payload));

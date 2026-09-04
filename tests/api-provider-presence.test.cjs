@@ -27,56 +27,75 @@ function loadApiProviders() {
   return loaded.exports;
 }
 
-test('recommended API providers remain absent until explicitly added', () => {
+test('fixed provider templates expose documented defaults without schema logic', () => {
   const providers = loadApiProviders();
-  const empty = providers.normalizeApiSettings({});
-
-  assert.deepEqual(empty.providers, []);
-  assert.deepEqual(empty.providerOrder, []);
-  assert.deepEqual(providers.orderedApiProviderItems([], []), []);
 
   const apimart = providers.createApimartProvider();
-  const apimartOnly = providers.normalizeApiSettings({ providers: [apimart] });
-  assert.deepEqual(apimartOnly.providers.map((provider) => provider.id), ['apimart']);
-  assert.deepEqual(apimartOnly.providerOrder, ['apimart']);
-  assert.deepEqual(
-    providers.orderedApiProviderItems(apimartOnly.providers, apimartOnly.providerOrder).map((item) => item.id),
-    ['apimart'],
-  );
+  assert.equal(apimart.id, 'apimart');
+  assert.equal(apimart.name, 'APImart');
+  assert.equal(apimart.baseUrl, providers.APIMART_BASE_URLS[0]);
+  assert.equal(apimart.protocol, 'compatible');
+  assert.deepEqual(apimart.imageModels, []);
+  assert.equal(apimart.hasApiKey, false);
 
-  const tudou = providers.createTudouProvider({ baseUrl: 'https://example.invalid/v1', protocol: 'openai', apiKey: 'secret' });
+  const tudou = providers.createTudouProvider();
   assert.equal(tudou.id, 'tudou-api');
   assert.equal(tudou.name, '土豆API');
-  assert.equal(tudou.baseUrl, 'https://api.ai-tudou.net/v1');
+  assert.equal(tudou.baseUrl, providers.TUDOU_BASE_URL);
   assert.equal(tudou.protocol, 'gemini');
   assert.deepEqual(tudou.imageModels, []);
   assert.deepEqual(tudou.modelCatalogOrder.image, [...providers.TUDOU_IMAGE_MODELS]);
-  const reorderedTudou = providers.createTudouProvider({
-    imageModels: ['grok-imagine-image'],
-    modelCatalogOrder: { image: ['grok-imagine-image', 'gpt-image-2-1k'] },
-  });
-  assert.deepEqual(reorderedTudou.imageModels, ['grok-imagine-image']);
-  assert.deepEqual(reorderedTudou.modelCatalogOrder.image.slice(0, 2), ['grok-imagine-image', 'gpt-image-2-1k']);
-  const tudouWithCustomModel = providers.createTudouProvider({
-    imageModels: ['custom-image-model'],
-    modelCatalogOrder: { image: ['custom-image-model'] },
-  });
-  assert.equal(tudouWithCustomModel.modelCatalogOrder.image[0], 'custom-image-model');
-  assert.deepEqual(tudouWithCustomModel.imageModels, ['custom-image-model']);
-  const tudouOnly = providers.normalizeApiSettings({ providers: [tudou] });
-  assert.deepEqual(tudouOnly.providerOrder, ['tudou-api']);
+  assert.equal(tudou.hasApiKey, false);
+
+  // 归一化规则已收敛到主进程，renderer 模块不再导出这些实现。
+  assert.equal(providers.normalizeApiSettings, undefined);
+  assert.equal(providers.normalizeApiProvider, undefined);
+});
+
+test('provider ordering helpers drive the settings sidebar and generation pickers', () => {
+  const providers = loadApiProviders();
+  const apimart = providers.createApimartProvider();
+  const tudou = providers.createTudouProvider();
+  const custom = providers.createApiProvider([apimart, tudou]);
+  const all = [apimart, tudou, custom];
+
   assert.deepEqual(
-    providers.orderedApiProviderItems(tudouOnly.providers, tudouOnly.providerOrder).map((item) => item.type),
-    ['tudou'],
+    providers.orderedApiProviderItems(all, ['custom-api', 'libtv', 'tudou-api', 'apimart']).map((item) => item.type),
+    ['provider', 'libtv', 'tudou', 'apimart'],
+  );
+  assert.deepEqual(
+    providers.orderedApiProviders(all, [custom.id, tudou.id]).map((provider) => provider.id),
+    ['custom-api', 'tudou-api', 'apimart'],
+  );
+  assert.deepEqual(
+    providers.normalizeApiProviderOrder(['custom-api', 'libtv', 'ghost', 'libtv'], all),
+    ['custom-api', 'libtv', 'apimart', 'tudou-api'],
   );
 
-  const withLibtv = providers.normalizeApiSettings({
-    providers: apimartOnly.providers,
-    providerOrder: ['apimart', 'libtv'],
+  assert.equal(providers.isImageProviderConfigured({ ...custom, baseUrl: '', imageModels: ['m'] }), false);
+  assert.equal(providers.isImageProviderConfigured({
+    ...custom, baseUrl: 'https://example.com/v1', apiKey: 'k', imageModels: ['m'],
+  }), true);
+});
+
+test('coerceApiProviderDraft only cleans user input and defers schema rules to main', () => {
+  const providers = loadApiProviders();
+  const base = providers.createApiProvider([]);
+
+  const coerced = providers.coerceApiProviderDraft({
+    ...base,
+    name: '  My Relay  ',
+    baseUrl: ' https://example.com/v1 ',
+    protocol: 'weird',
+    imageRequestMode: 'openai-json',
+    imageModels: [' model-a ', 'model-a', 'model-b'],
+    hasApiKey: true,
   });
-  assert.deepEqual(withLibtv.providerOrder, ['apimart', 'libtv']);
-  assert.deepEqual(
-    providers.orderedApiProviderItems(withLibtv.providers, withLibtv.providerOrder).map((item) => item.id),
-    ['apimart', 'libtv'],
-  );
+  assert.equal(coerced.name, 'My Relay');
+  assert.equal(coerced.baseUrl, 'https://example.com/v1');
+  assert.equal(coerced.protocol, 'openai');
+  assert.equal(coerced.imageRequestMode, 'openai-json');
+  assert.deepEqual(coerced.imageModels, ['model-a', 'model-b']);
+  assert.equal(coerced.hasApiKey, true);
+  assert.equal(coerced.id, base.id);
 });

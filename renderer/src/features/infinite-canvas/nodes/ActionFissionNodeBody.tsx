@@ -21,12 +21,14 @@ import { ImageWithFallback } from "../../../components/ImageWithFallback";
 import { RemoteDataState } from "../../../components/RemoteDataState";
 import { Button } from "../../../components/ui/button";
 import { ButtonGroup } from "../../../components/ui/button-group";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "../../../components/ui/hover-card";
 import { Switch } from "../../../components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "../../../components/ui/toggle-group";
 import { ImageViewer } from "../../../lib/ImageViewer";
 import { cn } from "../../../lib/utils";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import { canvasPreviewSourceUrl } from "../canvasThumbnails";
+import { useCanvasOriginalImagePreference } from "../canvasZoomImagePreference";
 import type { ActionEntry, ActionProject, ActionTag } from "../../action-library/types";
 import {
   addActionFissionRow,
@@ -225,30 +227,50 @@ function AdditionalReferenceToggle({
 function ActionPreview({
   row,
   onOpen,
+  preferOriginalImages,
 }: {
   row: ActionFissionRow;
   onOpen: (image: ViewerImage) => void;
+  preferOriginalImages: boolean;
 }) {
   const { t } = useTranslation();
   const originalUrl = row.selectedActionAssetUrl ? resolveLibraryImageUrl(row.selectedActionAssetUrl) : "";
-  const previewSourceUrl = canvasPreviewSourceUrl(row.selectedActionAssetUrl, row.selectedActionThumbUrl);
+  const hoverPreviewSourceUrl = canvasPreviewSourceUrl(row.selectedActionAssetUrl, row.selectedActionThumbUrl);
+  const hoverPreviewUrl = hoverPreviewSourceUrl ? resolveLibraryImageUrl(hoverPreviewSourceUrl) : "";
+  const previewSourceUrl = canvasPreviewSourceUrl(row.selectedActionAssetUrl, row.selectedActionThumbUrl, preferOriginalImages);
   const previewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
+  const previewFallbackUrl = preferOriginalImages ? (hoverPreviewUrl || originalUrl) : originalUrl;
   const alt = t("infiniteCanvas:actionFissionActionPreview");
   return (
     <div className={cn("rf-action-fission-action-preview nodrag nopan", originalUrl && "is-viewable")}>
-      <div
-        className="rf-action-fission-action-preview__trigger"
-        role={originalUrl ? "button" : undefined}
-        tabIndex={originalUrl ? 0 : undefined}
-        aria-label={originalUrl ? t("infiniteCanvas:viewLargeImage") : undefined}
-        onKeyDown={originalUrl ? (event) => openPreviewFromKeyboard(event, () => onOpen({ id: row.id, kind: "action", src: originalUrl, alt })) : undefined}
-        onClick={originalUrl ? (event) => {
-          event.stopPropagation();
-          onOpen({ id: row.id, kind: "action", src: originalUrl, alt });
-        } : undefined}
-      >
-        {previewUrl ? <ImageWithFallback src={previewUrl} fallbackSrc={originalUrl} alt={alt} loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
-      </div>
+      <HoverCard openDelay={250} closeDelay={80}>
+        <HoverCardTrigger asChild>
+          <div
+            className="rf-action-fission-action-preview__trigger"
+            role={originalUrl ? "button" : undefined}
+            tabIndex={originalUrl ? 0 : undefined}
+            aria-label={originalUrl ? t("infiniteCanvas:viewLargeImage") : undefined}
+            onKeyDown={originalUrl ? (event) => openPreviewFromKeyboard(event, () => onOpen({ id: row.id, kind: "action", src: originalUrl, alt })) : undefined}
+            onClick={originalUrl ? (event) => {
+              event.stopPropagation();
+              onOpen({ id: row.id, kind: "action", src: originalUrl, alt });
+            } : undefined}
+          >
+            {previewUrl ? <ImageWithFallback src={previewUrl} fallbackSrc={previewFallbackUrl} deferSourceChange alt={alt} loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
+          </div>
+        </HoverCardTrigger>
+        {hoverPreviewUrl || originalUrl || row.selectedActionName || row.selectedActionPrompt ? (
+          <HoverCardContent className="rf-action-fission-action-hover-preview" side="top" sideOffset={8}>
+            {hoverPreviewUrl || originalUrl ? <div className="rf-action-fission-action-hover-preview__image">
+              <ImageWithFallback src={hoverPreviewUrl} fallbackSrc={originalUrl} alt={alt} loading="lazy" decoding="async" draggable={false} />
+            </div> : null}
+            <div className="rf-action-fission-action-hover-preview__text">
+              {row.selectedActionName ? <strong title={row.selectedActionName}>{row.selectedActionName}</strong> : null}
+              {row.selectedActionPrompt ? <p>{row.selectedActionPrompt}</p> : null}
+            </div>
+          </HoverCardContent>
+        ) : null}
+      </HoverCard>
     </div>
   );
 }
@@ -260,6 +282,7 @@ function ResultPreview({
   isDownloadBusy,
   onDownload,
   onOpen,
+  preferOriginalImages,
   showStatusOverlay = false,
   launching,
   now,
@@ -270,6 +293,7 @@ function ResultPreview({
   isDownloadBusy: boolean;
   onDownload: () => void;
   onOpen: (image: ViewerImage) => void;
+  preferOriginalImages: boolean;
   showStatusOverlay?: boolean;
   launching: boolean;
   now: number;
@@ -279,8 +303,11 @@ function ResultPreview({
   const originalUrl = row.resultUrl || taskImage?.assetUrl || "";
   const previewUrl = row.resultThumbUrl || taskImage?.thumbUrl || "";
   const resolvedOriginalUrl = originalUrl ? resolveLibraryImageUrl(originalUrl) : "";
-  const previewSourceUrl = canvasPreviewSourceUrl(originalUrl, previewUrl);
+  const previewSourceUrl = canvasPreviewSourceUrl(originalUrl, previewUrl, preferOriginalImages);
   const resolvedPreviewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
+  const resolvedPreviewFallbackUrl = preferOriginalImages
+    ? (previewUrl ? resolveLibraryImageUrl(previewUrl) : resolvedOriginalUrl)
+    : resolvedOriginalUrl;
   const alt = t("infiniteCanvas:actionFissionResultPreview");
   const canDownload = Boolean(resolvedOriginalUrl) && !launching && !isRowRunning(task) && toneForRow(row, task, false, runtimeError) !== "error";
   const isPendingDownload = canDownload && row.resultDownloadState !== "downloaded";
@@ -308,7 +335,7 @@ function ResultPreview({
           }}
         >
           {resolvedPreviewUrl
-            ? <ImageWithFallback src={resolvedPreviewUrl} fallbackSrc={resolvedOriginalUrl} alt={alt} loading="lazy" decoding="async" draggable={false} />
+            ? <ImageWithFallback src={resolvedPreviewUrl} fallbackSrc={resolvedPreviewFallbackUrl} deferSourceChange alt={alt} loading="lazy" decoding="async" draggable={false} />
             : !hasGenerationMessage ? <Images aria-hidden="true" /> : null}
         </div>
       ) : !hasGenerationMessage ? <Images aria-hidden="true" /> : null}
@@ -426,6 +453,8 @@ function ActionFissionNodeToolbar({
 
 export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: ActionFissionNodeBodyProps) {
   const { t } = useTranslation();
+  const zoom = useStore((canvas) => canvas.transform[2]);
+  const preferOriginalImages = useCanvasOriginalImagePreference(zoom);
   const actions = useNativeCanvasActions();
   const { settings, updateSettings } = useInfiniteCanvasSettings();
   const viewerSettings = settings.referenceComparisonViewer;
@@ -767,7 +796,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           <div className="rf-action-fission-grid">
             {rowData.map(({ row, tags, categoryGroups }, index) => (
               <article key={row.id} className="rf-action-fission-grid-card" data-index={String(index + 1).padStart(2, "0")}>
-                <ResultPreview row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} showStatusOverlay isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} />
+                <ResultPreview row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} showStatusOverlay isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} preferOriginalImages={preferOriginalImages} />
                 <RowStatus row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} hasReference={referenceCount > 0} hideTransient />
                 <div className="rf-action-fission-action-stack">
                   {hasAdditionalReferences ? (
@@ -777,7 +806,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
                       onCheckedChange={(checked) => setRowAdditionalReferences(row.id, checked)}
                     />
                   ) : null}
-                  <ActionPreview row={row} onOpen={setViewerImage} />
+                  <ActionPreview row={row} onOpen={setViewerImage} preferOriginalImages={preferOriginalImages} />
                 </div>
                 <ActionRowSummary row={row} projects={projects} tags={tags} />
                 <ButtonGroup className="rf-action-fission-row-actions nodrag">
@@ -793,7 +822,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           <div className="rf-action-fission-list">
             {rowData.map(({ row, tags, categoryGroups }, index) => (
               <article key={row.id} className="rf-action-fission-list-card" data-index={String(index + 1).padStart(2, "0")}>
-                <ResultPreview row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} />
+                <ResultPreview row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} preferOriginalImages={preferOriginalImages} />
                 <ActionRowSummary row={row} projects={projects} tags={tags} />
                 <RowStatus row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} hasReference={referenceCount > 0} />
                 {hasAdditionalReferences ? (
@@ -803,7 +832,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
                     onCheckedChange={(checked) => setRowAdditionalReferences(row.id, checked)}
                   />
                 ) : null}
-                <ActionPreview row={row} onOpen={setViewerImage} />
+                <ActionPreview row={row} onOpen={setViewerImage} preferOriginalImages={preferOriginalImages} />
                 <ButtonGroup className="rf-action-fission-row-actions nodrag">
                   <Button type="button" variant="ghost" size="icon-sm" disabled={Boolean(libraryFailure)} aria-label={t("infiniteCanvas:actionFissionRowSettings")} title={t("infiniteCanvas:actionFissionRowSettings")} onClick={() => actions.openActionFissionRowSettings(nodeId, row.id)}><Settings2 aria-hidden="true" /></Button>
                   <Button type="button" variant="ghost" size="icon-sm" disabled={Boolean(libraryFailure) || !hasCategoryCandidates(categoryGroups)} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>

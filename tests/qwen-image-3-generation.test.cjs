@@ -38,6 +38,7 @@ function createRunner(onRequest) {
       },
       canvasStore: { setGenerationTaskAnchor() {} },
       generationTaskStore,
+      resolveProvider: () => ({ id: 'apimart', baseUrl: 'https://api.apimart.ai/v1', apiKey: 'test', protocol: 'compatible' }),
       resultCommitter: { commit() {} },
     }),
   };

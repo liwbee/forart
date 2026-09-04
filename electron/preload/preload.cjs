@@ -41,13 +41,18 @@ contextBridge.exposeInMainWorld('easyTool', {
     return () => ipcRenderer.removeListener('canvas:transfer-progress', listener);
   },
   saveCanvasAsset: (payload) => ipcRenderer.invoke('canvas:save-asset', payload),
+  captureVideoFrame: (payload) => ipcRenderer.invoke('canvas:capture-video-frame', payload),
   saveCanvasAssetThumbnail: (payload) => ipcRenderer.invoke('canvas:save-asset-thumbnail', payload),
   ensureCanvasAssetThumbnail: (payload) => ipcRenderer.invoke('canvas:ensure-asset-thumbnail', payload),
-  importCanvasAssetFile: (payload) => {
+  importCanvasAssetFile: async (payload) => {
     const file = payload?.file;
     const filePath = payload?.filePath || (file ? webUtils.getPathForFile(file) : '');
+    const bytes = !filePath && file && typeof file.arrayBuffer === 'function'
+      ? new Uint8Array(await file.arrayBuffer())
+      : undefined;
     return ipcRenderer.invoke('canvas:import-asset-file', {
       filePath,
+      bytes,
       fileName: payload?.fileName || file?.name || '',
       mimeType: payload?.mimeType || file?.type || '',
     });

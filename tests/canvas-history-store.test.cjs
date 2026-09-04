@@ -80,6 +80,18 @@ test('generation runtime changes neither add history nor clear redo', () => {
   assert.equal(temporal.futureStates.length, 1);
 });
 
+test('React Flow default visibility flags do not create an undo step', () => {
+  const history = loadHistoryStore();
+  const nodes = [node('source'), node('target')];
+  history.resetInfiniteCanvasHistory(nodes, [edge()]);
+  history.recordInfiniteCanvasHistory(
+    nodes.map((item) => ({ ...item, hidden: false })),
+    [{ ...edge(), hidden: false, animated: false }],
+  );
+
+  assert.equal(history.useInfiniteCanvasHistoryStore.temporal.getState().pastStates.length, 0);
+});
+
 test('multi-image expansion is view state and does not add history', () => {
   const history = loadHistoryStore();
   const collapsed = node('generator', {
@@ -304,6 +316,32 @@ test('multiple prompt changes inside one gesture create one undo entry', () => {
   assert.equal(undone.nodes[0].data.text, '');
 });
 
+test('a redundant lexical document for the same plain prompt does not create a second undo step', () => {
+  const history = loadHistoryStore();
+  const optimizedText = 'Cinematic optimized prompt with rim light';
+  history.resetInfiniteCanvasHistory([node('generator', { text: 'Generate a test image' })], []);
+  history.recordInfiniteCanvasHistory([node('generator', { text: optimizedText })], []);
+  history.recordInfiniteCanvasHistory([node('generator', {
+    text: optimizedText,
+    imagePromptDocument: {
+      root: {
+        type: 'root', version: 1, direction: null, format: '', indent: 0,
+        children: [{
+          type: 'paragraph', version: 1, direction: null, format: '', indent: 0,
+          children: [{
+            type: 'text', version: 1, text: optimizedText,
+            detail: 0, format: 0, mode: 'normal', style: '',
+          }],
+        }],
+      },
+    },
+  })], []);
+
+  assert.equal(history.useInfiniteCanvasHistoryStore.temporal.getState().pastStates.length, 1);
+  const undone = history.undoInfiniteCanvasHistory();
+  assert.equal(undone.nodes[0].data.text, 'Generate a test image');
+});
+
 test('undo overlays current generation state while restoring authored data', () => {
   const history = loadHistoryStore();
   const before = node('generator', {
@@ -336,6 +374,25 @@ test('undo overlays current generation state while restoring authored data', () 
   assert.equal(restored.nodes[0].data.libtvImageGeneration.error, 'latest runtime error');
   assert.deepEqual(restored.nodes[0].style, { width: 640, height: 320 });
   assert.deepEqual(restored.nodes[0].position, { x: -160, y: 0 });
+});
+
+test('history restore preserves current selection only for surviving nodes and edges', () => {
+  const history = loadHistoryStore();
+  const restored = history.restoreInfiniteCanvasHistorySnapshot(
+    {
+      nodes: [node('kept'), node('restored')],
+      edges: [edge('kept-edge'), edge('restored-edge')],
+    },
+    [node('kept', {}, { selected: true }), node('removed', {}, { selected: true })],
+    [{ ...edge('kept-edge'), selected: true }, { ...edge('removed-edge'), selected: true }],
+  );
+
+  assert.equal(restored.nodes.find((item) => item.id === 'kept').selected, true);
+  assert.equal(restored.nodes.find((item) => item.id === 'restored').selected, false);
+  assert.equal(restored.nodes.some((item) => item.id === 'removed'), false);
+  assert.equal(restored.edges.find((item) => item.id === 'kept-edge').selected, true);
+  assert.equal(restored.edges.find((item) => item.id === 'restored-edge').selected, false);
+  assert.equal(restored.edges.some((item) => item.id === 'removed-edge'), false);
 });
 
 test('edge creation and deletion restore the exact historical edge set', () => {

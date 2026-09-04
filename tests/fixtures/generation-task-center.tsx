@@ -2,21 +2,24 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "../../renderer/src/i18n";
 import "../../renderer/src/styles/global.css";
-import type { GenerationTaskDto } from "../../renderer/src/app/appConfig";
+import type { CanvasTaskDto } from "../../renderer/src/app/appConfig";
 import { GenerationTaskCenter } from "../../renderer/src/features/infinite-canvas/generation/GenerationTaskCenter";
 
-const tasks: GenerationTaskDto[] = Array.from({ length: 65 }, (_, index) => ({
+const tasks: CanvasTaskDto[] = Array.from({ length: 65 }, (_, index) => ({
   id: `task-${index}`,
-  target: { canvasId: "canvas", kind: "imageGenerator", nodeId: `node-${index}` },
-  executorKind: "api",
+  category: "image",
+  operation: "image_generate",
+  canvasId: "canvas",
+  nodeId: `node-${index}`,
   providerName: "API Mart",
   model: "gpt-image-2",
-  resolution: "1K",
-  aspectRatio: "3:4",
+  executorKind: "api",
   status: "succeeded",
   version: 1,
+  createdAt: index + 1,
   startedAt: index + 1,
   updatedAt: 10_000 - index,
+  resultKind: "image",
   result: {
     images: [{
       assetUrl: `/task-original-${index}.png`,
@@ -26,11 +29,8 @@ const tasks: GenerationTaskDto[] = Array.from({ length: 65 }, (_, index) => ({
   },
 }));
 
-window.forartGenerationTasks = {
-  async get() { return null; },
-  async getMany() { return []; },
-  async listForCanvas() { return []; },
-  async listRecent() { return []; },
+// 任务中心从画布任务仓库桥读取分页数据（与主进程 canvas-task-repository 同构）。
+window.forartCanvasTasks = {
   async listPage({ limit, offset }) {
     document.documentElement.dataset.taskOffset = String(offset);
     return {
@@ -39,10 +39,6 @@ window.forartGenerationTasks = {
       counts: { all: tasks.length, active: 0, succeeded: tasks.length, exceptional: 0 },
     };
   },
-  async start() { return null; },
-  async startMany() { return []; },
-  async stop() { return null; },
-  onChanged() { return () => undefined; },
 };
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

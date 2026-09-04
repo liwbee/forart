@@ -135,7 +135,7 @@ function github0134Canvas() {
   };
 }
 
-test('GitHub 0.1.34 canvas upgrades to the canonical v2 document', () => {
+test('GitHub 0.1.34 canvas upgrades to the current canonical document', () => {
   const result = upgradeCanvasDocument(github0134Canvas());
   assert.equal(result.migrated, true);
   assert.equal(result.fromVersion, 1);
@@ -235,9 +235,46 @@ test('canvas schema v2 reads idempotently and rejects future schemas', () => {
   assert.deepEqual(current.canvas.nodes.at(-1), v2.nodes.at(-1));
   assert.deepEqual(current.canvas.connections[1].data, { inputKind: 'additionalReferencePrompt' });
   assert.throws(
-    () => upgradeCanvasDocument({ ...v2, canvasSchemaVersion: 3 }),
+    () => upgradeCanvasDocument({ ...v2, canvasSchemaVersion: CURRENT_CANVAS_SCHEMA_VERSION + 1 }),
     /unsupported canvas schema version/i,
   );
+});
+
+test('legacy image loader nodes migrate to the generic asset loader contract', () => {
+  const result = upgradeCanvasDocument({
+    canvasSchemaVersion: 3,
+    id: 'legacy-image-loader',
+    title: 'Legacy image loader',
+    nodes: [{
+      id: 'image-loader',
+      type: 'canvasNode',
+      position: { x: 10, y: 20 },
+      data: {
+        kind: 'imageLoader',
+        label: 'Reference',
+        imageUrl: 'forart-asset://canvas/input/reference.png',
+        imageFileName: 'reference.png',
+        thumbUrl: 'forart-asset://canvas/input/reference.thumb.webp',
+        imageNaturalWidth: 1024,
+        imageNaturalHeight: 768,
+        imageUploadState: 'processing',
+      },
+    }],
+    connections: [],
+    viewport: { x: 0, y: 0, scale: 1 },
+  });
+  const data = result.canvas.nodes[0].data;
+  assert.equal(result.migrated, true);
+  assert.equal(result.canvas.canvasSchemaVersion, CURRENT_CANVAS_SCHEMA_VERSION);
+  assert.equal(data.kind, 'assetLoader');
+  assert.equal(data.assetType, 'image');
+  assert.equal(data.assetUrl, 'forart-asset://canvas/input/reference.png');
+  assert.equal(data.assetFileName, 'reference.png');
+  assert.equal(data.assetThumbUrl, 'forart-asset://canvas/input/reference.thumb.webp');
+  assert.equal(data.assetNaturalWidth, 1024);
+  assert.equal(data.assetNaturalHeight, 768);
+  assert.equal('imageUrl' in data, false);
+  assert.equal('imageUploadState' in data, false);
 });
 
 test('canvas schema migration preserves React Flow native parent groups', () => {

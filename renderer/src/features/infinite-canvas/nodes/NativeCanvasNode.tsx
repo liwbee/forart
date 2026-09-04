@@ -25,6 +25,7 @@ import { NativeNodeResizeControl } from "./NativeNodeResizeControl";
 import { ImageGeneratorParamPanel } from "./ImageGeneratorParamPanel";
 import { ActionFissionNodeBody } from "./ActionFissionNodeBody";
 import { canvasPreviewSourceUrl } from "../canvasThumbnails";
+import { useCanvasOriginalImagePreference } from "../canvasZoomImagePreference";
 import { formatGenerationDuration, generationStatusMessage } from "../generation/generationStatus";
 import {
   clearNodeGenerationRuntimeErrors,
@@ -155,9 +156,12 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const annotationFrameStyle = isAnnotationNode
     ? { "--rf-annotation-outline-width": `${(1 / Math.max(zoom, 0.01)).toFixed(2)}px` } as CSSProperties
     : undefined;
+  const preferOriginalImages = useCanvasOriginalImagePreference(zoom);
   const resolvedImageUrl = primaryImageUrl ? resolveLibraryImageUrl(primaryImageUrl) : "";
-  const previewSourceUrl = canvasPreviewSourceUrl(primaryImageUrl, primaryImage?.thumbUrl);
+  const resolvedThumbnailUrl = primaryImage?.thumbUrl ? resolveLibraryImageUrl(primaryImage.thumbUrl) : "";
+  const previewSourceUrl = canvasPreviewSourceUrl(primaryImageUrl, primaryImage?.thumbUrl, preferOriginalImages);
   const resolvedPreviewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
+  const resolvedPreviewFallbackUrl = preferOriginalImages ? (resolvedThumbnailUrl || resolvedImageUrl) : resolvedImageUrl;
   const isAssetLoading = data.kind === "assetLoader" && data.assetLoadState === "processing";
   const assetLoadError = data.kind === "assetLoader" && data.assetLoadState === "error"
     ? String(data.assetLoadError || "")
@@ -639,7 +643,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
             data.kind === "assetLoader" && isCropping && resolvedPreviewUrl ? (
               <ImageNodeCropEditor
                 src={resolvedPreviewUrl}
-                fallbackSrc={resolvedImageUrl}
+                fallbackSrc={resolvedPreviewFallbackUrl}
                 alt={displayLabel}
                 aspect={cropAspect}
                 sourceWidth={data.imageNaturalWidth}
@@ -655,8 +659,10 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               >
                 {generatedImages.map((result, index) => {
                   const resultUrl = String(result.localUrl || result.url || "");
-                  const previewSourceUrl = canvasPreviewSourceUrl(resultUrl, result.thumbUrl);
+                  const resultThumbUrl = result.thumbUrl ? resolveLibraryImageUrl(result.thumbUrl) : "";
+                  const previewSourceUrl = canvasPreviewSourceUrl(resultUrl, result.thumbUrl, preferOriginalImages);
                   const previewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
+                  const previewFallbackUrl = preferOriginalImages ? (resultThumbUrl || resolveLibraryImageUrl(resultUrl)) : resolveLibraryImageUrl(resultUrl);
                   const isPending = result.downloadState !== "downloaded";
                   return (
                     <div
@@ -671,7 +677,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                         setViewerOpen(true);
                       }}
                     >
-                      {previewUrl ? <ImageWithFallback src={previewUrl} fallbackSrc={resolveLibraryImageUrl(resultUrl)} alt={displayLabel} loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
+                      {previewUrl ? <ImageWithFallback src={previewUrl} fallbackSrc={previewFallbackUrl} deferSourceChange alt={displayLabel} loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
                       <div className="rf-native-generated-tile-actions nodrag nopan nowheel">
                         <Button
                           type="button"
@@ -712,7 +718,8 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               <>
                 <ImageWithFallback
                   src={resolvedPreviewUrl}
-                  fallbackSrc={resolvedImageUrl}
+                  fallbackSrc={resolvedPreviewFallbackUrl}
+                  deferSourceChange
                   alt={displayLabel}
                   loading="lazy"
                   decoding="async"
@@ -743,7 +750,8 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
             ) : (
               <ImageWithFallback
                 src={resolvedPreviewUrl}
-                fallbackSrc={resolvedImageUrl}
+                fallbackSrc={resolvedPreviewFallbackUrl}
+                deferSourceChange
                 alt={displayLabel}
                 loading="lazy"
                 decoding="async"

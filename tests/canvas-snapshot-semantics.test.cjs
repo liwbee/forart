@@ -328,7 +328,7 @@ test('persistence state ignores viewport changes and detects durable edits', () 
   assert.notEqual(edited.document, saved.document);
 });
 
-test('canvas document serializer emits the final schema-v2 JSON with one stringify', () => {
+test('canvas document serializer emits the final schema-v3 JSON with one stringify', () => {
   const {
     CANVAS_SAVE_REVISION_PLACEHOLDER,
     CANVAS_SAVE_UPDATED_AT_PLACEHOLDER,
@@ -356,7 +356,7 @@ test('canvas document serializer emits the final schema-v2 JSON with one stringi
     const jsonText = serializeCanvasDocument(document, stored);
     const parsed = JSON.parse(jsonText);
     assert.equal(stringifyCalls, 1);
-    assert.equal(parsed.canvasSchemaVersion, 2);
+    assert.equal(parsed.canvasSchemaVersion, 5);
     assert.equal(parsed.id, 'canvas-1');
     assert.equal('icon' in parsed, false);
     assert.equal('canvasType' in parsed, false);

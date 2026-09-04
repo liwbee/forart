@@ -9,6 +9,7 @@ const { createImageGenerationRunner: createImageGenerationRunnerModule } = requi
 const {
   createLibtvGenerationRunner: createLibtvGenerationRunnerModule,
   extractImageUrl,
+  LIBTV_RUN_NODE_LAUNCH_INTERVAL_MS,
   pollRecoveredImageResult,
 } = require('../electron/main/modules/libtv-generation-runner.cjs');
 const {
@@ -19,6 +20,16 @@ const { GENERATION_EXECUTION_TIMEOUT_MS } = require('../electron/main/modules/ge
 
 const createGenerationTaskStore = () => createMemoryGenerationTaskStore('api');
 const createLibtvGenerationTaskStore = () => createMemoryGenerationTaskStore('libtv');
+
+// 生产环境中 resolveProvider 由 configStore 提供（密钥不跨进程）；
+// 测试里用替身按 providerId 返回测试 provider。
+function testResolveProvider(providerId) {
+  const id = String(providerId || '').trim();
+  if (id === 'gemini-provider') {
+    return { id, baseUrl: 'https://example.test', apiKey: 'test', protocol: 'gemini' };
+  }
+  return { id: id || 'provider', baseUrl: 'https://example.test/v1', apiKey: 'test', protocol: 'compatible' };
+}
 
 function createTestResultCommitter(canvasStore) {
   return {
@@ -48,6 +59,7 @@ function createImageGenerationRunner(options) {
 function createLibtvGenerationRunner(options) {
   return createLibtvGenerationRunnerModule({
     ...options,
+    runNodeLaunchIntervalMs: options.runNodeLaunchIntervalMs ?? 0,
     resultCommitter: options.resultCommitter || createTestResultCommitter(options.canvasStore),
   });
 }
@@ -135,7 +147,7 @@ test('API action rows write terminal results without renderer polling', async ()
       return { url: 'forart-asset://output/api-result.png', fileName: 'api-result.png' };
     },
   };
-  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore });
+  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore, resolveProvider: testResolveProvider });
   const target = { type: 'actionFissionRow', nodeId: 'node-api', rowId: 'row-2' };
   const task = await runner.startTask({
     canvasId: 'canvas-api',
@@ -185,7 +197,7 @@ test('API image results materialize provider base64 before task and canvas persi
       };
     },
   };
-  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore });
+  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore, resolveProvider: testResolveProvider });
   const task = await runner.startTask({
     canvasId: 'canvas-materialized',
     target: { type: 'imageGenerator', nodeId: 'node-materialized' },
@@ -210,6 +222,7 @@ test('API keeps a terminal task successful when canvas result commit is deferred
   const generationTaskStore = createGenerationTaskStore();
   const deferredErrors = [];
   const runner = createImageGenerationRunner({
+    resolveProvider: testResolveProvider,
     net: {
       async fetch() {
         return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from('result').toString('base64') }] }), {
@@ -300,7 +313,7 @@ test('API multi-image results preserve order while replacing every provider payl
       };
     },
   };
-  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore });
+  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore, resolveProvider: testResolveProvider });
   const task = await runner.startTask({
     canvasId: 'canvas-materialized-multi',
     target: { type: 'imageGenerator', nodeId: 'node-materialized-multi' },
@@ -347,6 +360,7 @@ test('API execution timeout fails a stalled Gemini request instead of marking it
   const canvasStore = createCanvasRecorder();
   const generationTaskStore = createGenerationTaskStore();
   const runner = createImageGenerationRunner({
+    resolveProvider: testResolveProvider,
     net: {
       fetch(_url, init = {}) {
         return new Promise((_resolve, reject) => {
@@ -362,8 +376,8 @@ test('API execution timeout fails a stalled Gemini request instead of marking it
   const task = await runner.startTask({
     canvasId: 'canvas-timeout-api',
     target: { type: 'imageGenerator', nodeId: 'node-timeout-api' },
-    providerId: 'provider',
-    provider: { id: 'provider', baseUrl: 'https://example.test', apiKey: 'test', protocol: 'gemini' },
+    providerId: 'gemini-provider',
+    provider: { id: 'gemini-provider', baseUrl: 'https://example.test', apiKey: 'test', protocol: 'gemini' },
     model: 'gemini-3-pro-image',
     prompt: 'test timeout',
   });
@@ -421,7 +435,7 @@ test('API image nodes keep a local task anchor while preparation is still runnin
       return { url: 'forart-asset://output/api-node.png', fileName: 'api-node.png' };
     },
   };
-  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore });
+  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore, resolveProvider: testResolveProvider });
   const task = await runner.startTask({
     canvasId: 'canvas-api-node',
     nodeId: 'node-api',
@@ -458,7 +472,7 @@ test('stopping an API action group prevents late responses from writing results'
       return { url: 'forart-asset://output/late.png', fileName: 'late.png' };
     },
   };
-  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore });
+  const runner = createImageGenerationRunner({ net, assetStore, canvasStore, generationTaskStore, resolveProvider: testResolveProvider });
   const tasks = await runner.startTasks([1, 2, 3].map((row) => ({
     canvasId: 'canvas-stop',
     nodeId: 'node-stop',
@@ -578,7 +592,7 @@ test('LibTV action group persists all row task anchors in one canvas batch befor
   await waitFor(() => tasks.every((task) => taskStore.getTask(task.id)?.status === 'succeeded'));
 });
 
-test('LibTV serializes remote runNode submissions across action-fission nodes', async () => {
+test('LibTV rate-limits remote runNode launches while action-fission generations overlap', async () => {
   const canvasStore = createCanvasRecorder();
   const taskStore = createLibtvGenerationTaskStore();
   const activeByQueue = new Map();
@@ -614,7 +628,7 @@ test('LibTV serializes remote runNode submissions across action-fission nodes', 
       maxByQueue.set(key, Math.max(maxByQueue.get(key) || 0, active));
       globalActive += 1;
       maxGlobalActive = Math.max(maxGlobalActive, globalActive);
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await new Promise((resolve) => setTimeout(resolve, 60));
       activeByQueue.set(key, active - 1);
       globalActive -= 1;
       return { payload: { url: `https://example.test/${remoteNodeId}.png` }, stdout: '' };
@@ -635,6 +649,7 @@ test('LibTV serializes remote runNode submissions across action-fission nodes', 
     taskStore,
     resolveWorkspaceName: () => 'LibtvImage-PC01',
     resolveActionFissionConcurrency: () => 2,
+    runNodeLaunchIntervalMs: 10,
   });
   const payloads = ['node-a', 'node-b'].flatMap((nodeId) => [1, 2, 3].map((row) => ({
     canvasId: `canvas-${nodeId}`,
@@ -651,9 +666,9 @@ test('LibTV serializes remote runNode submissions across action-fission nodes', 
   const tasks = runner.startImageTasks(payloads);
 
   await waitFor(() => tasks.every((task) => taskStore.getTask(task.id)?.status === 'succeeded'), 5000);
-  assert.equal(maxByQueue.get('node-a'), 1);
-  assert.equal(maxByQueue.get('node-b'), 1);
-  assert.equal(maxGlobalActive, 1);
+  assert.equal(maxByQueue.get('node-a'), 2);
+  assert.equal(maxByQueue.get('node-b'), 2);
+  assert.ok(maxGlobalActive > 1);
   assert.equal(runAttempts, 7);
   assert.deepEqual(new Set(workspaceNames), new Set(['LibtvImage-PC01']));
   assert.equal(canvasStore.terminals.filter((item) => item.backend === 'libtv' && item.status === 'succeeded').length, 6);
@@ -666,6 +681,7 @@ test('API action group persists all row task anchors in one canvas batch before 
   let releaseResponses;
   const responseGate = new Promise((resolve) => { releaseResponses = resolve; });
   const runner = createImageGenerationRunner({
+    resolveProvider: testResolveProvider,
     net: {
       async fetch() {
         await responseGate;
@@ -742,7 +758,11 @@ test('canvas store writes a batch of action-row task anchors in one revision', (
   }
 });
 
-test('LibTV unlimited task concurrency serializes remote runNode submissions', async () => {
+test('LibTV defaults to a three-second runNode launch interval', () => {
+  assert.equal(LIBTV_RUN_NODE_LAUNCH_INTERVAL_MS, 3000);
+});
+
+test('LibTV unlimited action-fission concurrency staggers launches without serializing completion', async () => {
   const canvasStore = createCanvasRecorder();
   const taskStore = createLibtvGenerationTaskStore();
   const runs = [];
@@ -776,6 +796,7 @@ test('LibTV unlimited task concurrency serializes remote runNode submissions', a
     canvasStore,
     taskStore,
     resolveActionFissionConcurrency: () => 0,
+    runNodeLaunchIntervalMs: 15,
   });
   const tasks = runner.startImageTasks([1, 2, 3, 4].map((row) => ({
     canvasId: 'canvas',
@@ -787,12 +808,73 @@ test('LibTV unlimited task concurrency serializes remote runNode submissions', a
     aspectRatio: '3:4',
   })));
 
-  await waitFor(() => runs.length === 1);
+  await waitFor(() => runs.length === 4);
   assert.equal(tasks.every((task) => taskStore.getTask(task.id)?.status === 'running'), true);
+  assert.equal(maxActiveRuns, 4);
   releaseRuns();
   await waitFor(() => tasks.every((task) => taskStore.getTask(task.id)?.status === 'succeeded'));
   assert.equal(runs.length, 4);
-  assert.equal(maxActiveRuns, 1);
+});
+
+test('LibTV ordinary image nodes and action-fission rows share the same launch pacing while running together', async () => {
+  const canvasStore = createCanvasRecorder();
+  const taskStore = createLibtvGenerationTaskStore();
+  const runs = [];
+  let releaseRuns;
+  const runGate = new Promise((resolve) => { releaseRuns = resolve; });
+  const libtv = {
+    async ensureNamedWorkspace() { return { workspace: { id: 'workspace' } }; },
+    async ensureDailyProject() { return { project: { uuid: 'project', name: 'today' } }; },
+    async createImageNode(_project, payload) { return { payload: { id: payload.prompt }, stdout: '' }; },
+    async connectLeft() {},
+    async runNode(_project, remoteNodeId) {
+      runs.push({ remoteNodeId, startedAt: Date.now() });
+      await runGate;
+      return { payload: { url: `https://example.test/${encodeURIComponent(remoteNodeId)}.png` }, stdout: '' };
+    },
+    async queryNode() { return { payload: {}, stdout: '' }; },
+    async deleteNode() {},
+  };
+  const assetStore = {
+    resolveAssetUrl() { return ''; },
+    async saveAsset(payload) { return { url: `forart-asset://output/${encodeURIComponent(payload.url)}.png`, fileName: 'result.png' }; },
+  };
+  const runner = createLibtvGenerationRunner({
+    libtv,
+    assetStore,
+    canvasStore,
+    taskStore,
+    resolveActionFissionConcurrency: () => 0,
+    runNodeLaunchIntervalMs: 20,
+  });
+  const ordinaryPayload = (id) => ({
+    canvasId: 'canvas',
+    nodeId: id,
+    target: { type: 'imageGenerator', nodeId: id },
+    prompt: id,
+    modelName: 'Qwen Image',
+    aspectRatio: '1:1',
+  });
+  const ordinaryA = runner.startImageTask(ordinaryPayload('ordinary-a'));
+  const [actionRow] = runner.startImageTasks([{
+    canvasId: 'canvas',
+    nodeId: 'action-node',
+    target: { type: 'actionFissionRow', nodeId: 'action-node', rowId: 'row-1' },
+    queueKey: 'canvas:action-node',
+    prompt: 'action-row',
+    modelName: 'Qwen Edit',
+    aspectRatio: '3:4',
+  }]);
+  const ordinaryB = runner.startImageTask(ordinaryPayload('ordinary-b'));
+
+  await waitFor(() => runs.length === 3);
+  assert.deepEqual(new Set(runs.map((item) => item.remoteNodeId)), new Set(['ordinary-a', 'action-row', 'ordinary-b']));
+  for (let index = 1; index < runs.length; index += 1) {
+    assert.ok(runs[index].startedAt - runs[index - 1].startedAt >= 12);
+  }
+  assert.equal([ordinaryA, actionRow, ordinaryB].every((task) => taskStore.getTask(task.id)?.status === 'running'), true);
+  releaseRuns();
+  await waitFor(() => [ordinaryA, actionRow, ordinaryB].every((task) => taskStore.getTask(task.id)?.status === 'succeeded'));
 });
 
 test('LibTV accepts intermediate action-fission concurrency values', async () => {
@@ -824,6 +906,7 @@ test('LibTV accepts intermediate action-fission concurrency values', async () =>
     canvasStore,
     taskStore,
     resolveActionFissionConcurrency: () => 3,
+    runNodeLaunchIntervalMs: 10,
   });
   const tasks = runner.startImageTasks([1, 2, 3, 4].map((row) => ({
     canvasId: 'canvas',
@@ -835,14 +918,14 @@ test('LibTV accepts intermediate action-fission concurrency values', async () =>
     aspectRatio: '3:4',
   })));
 
-  await waitFor(() => runs.length === 1);
-  assert.equal(runs.length, 1);
+  await waitFor(() => runs.length === 3);
+  assert.equal(runs.length, 3);
   releaseRuns();
   await waitFor(() => tasks.every((task) => taskStore.getTask(task.id)?.status === 'succeeded'));
   assert.equal(runs.length, 4);
 });
 
-test('a failed LibTV row can re-enter the serialized runNode queue', async () => {
+test('a failed LibTV row can re-enter the paced runNode launch queue', async () => {
   const canvasStore = createCanvasRecorder();
   const taskStore = createLibtvGenerationTaskStore();
   let releaseHold;
@@ -871,6 +954,7 @@ test('a failed LibTV row can re-enter the serialized runNode queue', async () =>
     canvasStore,
     taskStore,
     resolveActionFissionConcurrency: () => 2,
+    runNodeLaunchIntervalMs: 10,
   });
   const payload = (prompt, rowId) => ({
     canvasId: 'canvas',
@@ -885,13 +969,13 @@ test('a failed LibTV row can re-enter the serialized runNode queue', async () =>
     payload('hold', 'row-hold'),
     payload('retry', 'row-retry'),
   ]);
-  await waitFor(() => taskStore.getTask(holding.id)?.status === 'running');
-  assert.notEqual(taskStore.getTask(failed.id)?.status, 'failed');
-  releaseHold();
   await waitFor(() => taskStore.getTask(failed.id)?.status === 'failed');
+  assert.equal(taskStore.getTask(holding.id)?.status, 'running');
 
   const [retried] = runner.startImageTasks([payload('retry', 'row-retry')]);
   await waitFor(() => taskStore.getTask(retried.id)?.status === 'succeeded');
+  assert.equal(taskStore.getTask(holding.id)?.status, 'running');
+  releaseHold();
   await waitFor(() => taskStore.getTask(holding.id)?.status === 'succeeded');
 });
 
@@ -1421,6 +1505,7 @@ test('API startup recovery uses persisted tasks without scanning canvas anchors'
   });
   const requests = [];
   const runner = createImageGenerationRunner({
+    resolveProvider: testResolveProvider,
     net: {
       async fetch(url, init = {}) {
         requests.push({ url: String(url), method: init.method || 'GET' });

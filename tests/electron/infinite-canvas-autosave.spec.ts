@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { CURRENT_CANVAS_SCHEMA_VERSION } from "../../electron/main/modules/canvas-schema.cjs";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -135,7 +136,7 @@ test("does not autosave while dragging and saves once after the interaction sett
   expect(typeof savePayload.jsonText).toBe("string");
   expect(savePayload).not.toHaveProperty("nodes");
   expect(JSON.parse(String(savePayload.jsonText))).toMatchObject({
-    canvasSchemaVersion: 2,
+    canvasSchemaVersion: CURRENT_CANVAS_SCHEMA_VERSION,
     id: "canvas-1",
   });
   await expect(page.locator(".rf-canvas-save-status")).toContainText("Saved");

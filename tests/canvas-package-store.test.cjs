@@ -80,7 +80,7 @@ test('canvas upload packages include resources stored in React Flow node data', 
     nodes: [
       {
         id: 'image-loader',
-        data: { kind: 'imageLoader', imageUrl: inputUrl, thumbUrl: thumbnailUrl },
+        data: { kind: 'assetLoader', assetType: 'image', assetUrl: inputUrl, assetThumbUrl: thumbnailUrl },
       },
       {
         id: 'image-generator',
@@ -112,7 +112,7 @@ test('canvas upload packages include resources stored in React Flow node data', 
       },
       {
         id: 'missing-image',
-        data: { kind: 'imageLoader', imageUrl: missingUrl },
+        data: { kind: 'assetLoader', assetType: 'image', assetUrl: missingUrl },
       },
     ],
     connections: [],
@@ -135,11 +135,11 @@ test('canvas upload packages include resources stored in React Flow node data', 
   assert.equal(packagedCanvas.canvasSchemaVersion, 2);
   assert.equal(manifest.assets.length, 4);
   assert.equal(manifest.warnings.length, 1);
-  assert.match(manifest.warnings[0].source, /missing-image.*data\.imageUrl/);
+  assert.match(manifest.warnings[0].source, /missing-image.*data\.assetUrl/);
   for (const asset of manifest.assets) assert.ok(entries.has(asset.packagePath));
 
-  assert.match(packagedCanvas.nodes[0].data.imageUrl, /^forart-package:\/\/asset\//);
-  assert.equal('thumbUrl' in packagedCanvas.nodes[0].data, false);
+  assert.match(packagedCanvas.nodes[0].data.assetUrl, /^forart-package:\/\/asset\//);
+  assert.equal('assetThumbUrl' in packagedCanvas.nodes[0].data, false);
   assert.match(packagedCanvas.nodes[1].data.generatedImages[0].localUrl, /^forart-package:\/\/asset\//);
   assert.equal('thumbUrl' in packagedCanvas.nodes[1].data.generatedImages[0], false);
   assert.equal('latestGenerationTaskId' in packagedCanvas.nodes[1].data, false);
@@ -150,7 +150,7 @@ test('canvas upload packages include resources stored in React Flow node data', 
   assert.equal('resultThumbUrl' in packagedCanvas.nodes[2].data.actionFission.rows[0], false);
   assert.equal('latestGenerationTaskId' in packagedCanvas.nodes[2].data.actionFission.rows[0], false);
   assert.equal(packagedCanvas.nodes[2].data.actionFission.rows[1].selectedActionAssetUrl, '/api/assets/action-preview/file');
-  assert.equal('imageUrl' in packagedCanvas.nodes[3].data, false);
+  assert.equal('assetUrl' in packagedCanvas.nodes[3].data, false);
 
   let importedPayload = null;
   const importProgress = [];
@@ -172,7 +172,7 @@ test('canvas upload packages include resources stored in React Flow node data', 
   assert.equal(imported.canvas.id, 'canvas-imported');
   assert.equal(importedPayload.nodes.length, canvas.nodes.length);
   const importedAssetUrlPattern = /^forart-asset:\/\/canvas\/(?:input|output)\/asset_[0-9a-f-]{36}\.[a-z0-9]+(?:\?v=\d+)?$/;
-  assert.match(importedPayload.nodes[0].data.imageUrl, importedAssetUrlPattern);
+  assert.match(importedPayload.nodes[0].data.assetUrl, importedAssetUrlPattern);
   assert.match(importedPayload.nodes[1].data.generatedImages[0].localUrl, importedAssetUrlPattern);
   assert.match(importedPayload.nodes[2].data.actionFission.rows[0].resultUrl, importedAssetUrlPattern);
   assert.match(importedPayload.nodes[2].data.actionFission.rows[0].selectedActionAssetUrl, importedAssetUrlPattern);
@@ -267,7 +267,7 @@ test('direct canvas upload streams declared resources without creating a package
     id: 'canvas-direct',
     title: 'Direct upload',
     canvasSchemaVersion: 2,
-    nodes: [{ id: 'image', data: { kind: 'imageLoader', imageUrl: assetStore.assetUrl(sourcePath) } }],
+    nodes: [{ id: 'image', data: { kind: 'assetLoader', assetType: 'image', assetUrl: assetStore.assetUrl(sourcePath) } }],
     connections: [],
     groups: [],
     viewport: { x: 0, y: 0, scale: 1 },
@@ -308,7 +308,7 @@ test('direct canvas upload streams declared resources without creating a package
   assert.deepEqual(requests.map(({ method }) => method), ['POST', 'PUT', 'POST']);
   assert.deepEqual(requests[1].body, sourceBytes);
   const createPayload = JSON.parse(requests[0].body.toString('utf8'));
-  assert.match(createPayload.canvas.nodes[0].data.imageUrl, /^forart-package:\/\/asset\//);
+  assert.match(createPayload.canvas.nodes[0].data.assetUrl, /^forart-package:\/\/asset\//);
   assert.equal(createPayload.manifest.assets.length, 1);
   assert.equal(progress.at(-1).percent, 100);
   const tempRoot = path.join(rootDir, 'CanvasAssests', 'tmp');
@@ -376,7 +376,7 @@ test('copying a remote canvas rewrites server resource URLs to local canvas asse
             id: remoteCanvasId,
             title: 'Remote canvas',
             canvasSchemaVersion: 2,
-            nodes: [{ id: 'image', data: { kind: 'imageLoader', imageUrl: remoteAssetPath } }],
+    nodes: [{ id: 'image', data: { kind: 'assetLoader', assetType: 'image', assetUrl: remoteAssetPath } }],
             connections: [],
             groups: [],
             viewport: { x: 0, y: 0, scale: 1 },
@@ -412,9 +412,9 @@ test('copying a remote canvas rewrites server resource URLs to local canvas asse
   });
 
   assert.equal(result.canvas.id, 'local-copy');
-  assert.match(createdPayload.nodes[0].data.imageUrl, /^forart-asset:\/\/canvas\/input\/asset_/);
-  assert.equal(createdPayload.nodes[0].data.imageUrl.includes('/api/canvas-exchange/'), false);
-  assert.deepEqual(fs.readFileSync(assetStore.resolveAssetUrl(createdPayload.nodes[0].data.imageUrl)), remoteBytes);
+  assert.match(createdPayload.nodes[0].data.assetUrl, /^forart-asset:\/\/canvas\/input\/asset_/);
+  assert.equal(createdPayload.nodes[0].data.assetUrl.includes('/api/canvas-exchange/'), false);
+  assert.deepEqual(fs.readFileSync(assetStore.resolveAssetUrl(createdPayload.nodes[0].data.assetUrl)), remoteBytes);
 });
 
 test('failed remote canvas copy removes resources imported before the failure', async (t) => {

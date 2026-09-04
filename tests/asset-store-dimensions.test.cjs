@@ -36,6 +36,41 @@ test('saved canvas assets include original image dimensions', async () => {
   }
 });
 
+test('clipboard image bytes can be imported without a source file path', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-clipboard-asset-'));
+  try {
+    const { default: sharp } = await import('sharp');
+    const pngBuffer = await sharp({
+      create: {
+        width: 11,
+        height: 13,
+        channels: 4,
+        background: { r: 30, g: 60, b: 90, alpha: 1 },
+      },
+    }).png().toBuffer();
+    const store = createAssetStore({
+      rootDir,
+      net: { fetch: async () => { throw new Error('Unexpected network request.'); } },
+    });
+
+    const imported = await store.importUserAssetFile({
+      bytes: new Uint8Array(pngBuffer),
+      fileName: 'clipboard.png',
+      mimeType: 'image/png',
+    });
+
+    assert.equal(imported.assetType, 'image');
+    assert.equal(imported.mimeType, 'image/png');
+    assert.equal(imported.width, 11);
+    assert.equal(imported.height, 13);
+    assert.equal(imported.sizeBytes, pngBuffer.length);
+    assert.ok(fs.existsSync(imported.filePath));
+    assert.deepEqual(fs.readFileSync(imported.filePath), pngBuffer);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('internal canvas assets use unique UUID names and isolated thumbnail stems', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-asset-identity-'));
   try {

@@ -41,6 +41,7 @@ test("adds recommended providers on demand from an initially empty list", async 
   await expect(page.locator("html")).toHaveAttribute("data-provider-order", "apimart,libtv,tudou-api");
 
   await page.locator('[data-sidebar-item-id="tudou-api"]').click();
+  await page.getByRole("tab", { name: /图像|Image/ }).click();
   const tudouModelRows = page.locator(".settings-api-model-row--catalog");
   const tudouModelToggles = tudouModelRows.locator('[data-slot="checkbox"]');
   await expect(tudouModelRows).toHaveCount(8);

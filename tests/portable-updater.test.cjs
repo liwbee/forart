@@ -3,8 +3,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 
-const { createPortableUpdater } = require('../electron/main/modules/portable-updater.cjs');
+const {
+  createPortableUpdater,
+  downloadFileWithProgress,
+  normalizeSha256Digest,
+} = require('../electron/main/modules/portable-updater.cjs');
 
 function createRoot() {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-updater-test-'));
@@ -77,4 +82,71 @@ test('development builds reject portable apply before staging files are created'
   assert.equal(result.ok, false);
   assert.match(result.error, /Development builds/);
   assert.equal(fs.existsSync(dataRoot), false);
+});
+
+test('GitHub metadata requests keep a stable cacheable URL', async () => {
+  const rootDir = createRoot();
+  try {
+    const requests = [];
+    const updater = createPortableUpdater({
+      app: { isPackaged: false, quit() {} },
+      rootDir,
+      net: {
+        fetch: async (url, init) => {
+          requests.push({ url, init });
+          return releaseResponse();
+        },
+      },
+    });
+
+    await updater.check();
+    assert.equal(requests[0].url, 'https://api.github.com/repos/liwbee/forart/releases/latest');
+    assert.equal(requests[0].init.headers['User-Agent'], 'Forart-Updater');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('portable update downloads verify the GitHub sha256 digest and remove corrupt files', async (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-updater-digest-'));
+  const filePath = path.join(rootDir, 'update.zip');
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+  const payload = Buffer.from('portable update payload');
+  const digest = createHash('sha256').update(payload).digest('hex');
+  const response = {
+    ok: true,
+    status: 200,
+    headers: new Headers({ 'content-length': String(payload.length) }),
+    arrayBuffer: async () => payload,
+  };
+  const net = { fetch: async () => response };
+
+  assert.equal(normalizeSha256Digest(`sha256:${digest.toUpperCase()}`), digest);
+  await downloadFileWithProgress(net, 'https://example.test/update.zip', filePath, null, `sha256:${digest}`);
+  assert.deepEqual(fs.readFileSync(filePath), payload);
+
+  await assert.rejects(
+    downloadFileWithProgress(net, 'https://example.test/update.zip', filePath, null, `sha256:${'0'.repeat(64)}`),
+    /digest mismatch/,
+  );
+  assert.equal(fs.existsSync(filePath), false);
+});
+
+test('packaged updates refuse releases without a sha256 digest', async (t) => {
+  const rootDir = createRoot();
+  const dataRoot = path.join(rootDir, 'portable-data');
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+  const updater = createPortableUpdater({
+    app: { isPackaged: true, quit() {} },
+    rootDir,
+    dataRoot,
+    net: { fetch: async () => releaseResponse() },
+  });
+
+  const result = await updater.run();
+  assert.equal(result.ok, false);
+  assert.match(result.error, /sha256 asset digest/);
+  const stagingRoot = path.join(dataRoot, '.forart-data', 'update_staging');
+  assert.equal(fs.existsSync(stagingRoot), true);
+  assert.deepEqual(fs.readdirSync(stagingRoot), []);
 });

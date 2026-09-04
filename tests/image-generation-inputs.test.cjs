@@ -64,6 +64,17 @@ function imageNode(id, imageUrl, thumbUrl) {
   };
 }
 
+function promptNode(id, text) {
+  return {
+    id,
+    data: {
+      kind: 'prompt',
+      label: id,
+      text,
+    },
+  };
+}
+
 function edge(id, source, target, inputKind, referenceOrder) {
   return { id, source, target, data: { inputKind, referenceOrder } };
 }
@@ -90,5 +101,26 @@ test('reference toolbar prefers thumbnails and falls back to original images', (
   assert.deepEqual(
     collectActionFissionAdditionalReferences('action', nodes, edges).map((item) => item.previewUrl),
     ['original-b.png'],
+  );
+});
+
+test('smart reverse accepts and collects connected prompt inputs', () => {
+  const {
+    collectImageGeneratorPrompts,
+    edgeDataForConnection,
+  } = loadModule();
+  const nodes = [promptNode('prompt-a', 'Describe the clothing and accessories')];
+  const edges = [];
+  assert.deepEqual(
+    edgeDataForConnection('prompt', 'smartReverse', 'reverse', edges),
+    { inputKind: 'prompt' },
+  );
+  assert.deepEqual(
+    collectImageGeneratorPrompts(
+      'reverse',
+      nodes,
+      [{ id: 'prompt-edge', source: 'prompt-a', target: 'reverse', data: { inputKind: 'prompt' } }],
+    ),
+    [{ edgeId: 'prompt-edge', nodeId: 'prompt-a', title: '', text: 'Describe the clothing and accessories' }],
   );
 });

@@ -29,6 +29,16 @@ function importedAssetMimeType(filePath, mimeType = '', assetType = importedAsse
   return normalizedMime || '';
 }
 
+function importedAssetBuffer(value) {
+  if (Buffer.isBuffer(value)) return value;
+  if (ArrayBuffer.isView(value)) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  if (value?.type === 'Buffer' && Array.isArray(value.data)) return Buffer.from(value.data);
+  return null;
+}
+
 function uniqueFilePath(directory, fileName) {
   const parsed = path.parse(fileName || 'generated-image.png');
   const safeBase = (parsed.name || 'generated-image').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
@@ -237,10 +247,14 @@ function createAssetStore({ rootDir, net }) {
 
   async function importUserAssetFile(payload = {}) {
     const sourceValue = String(payload.filePath || '').trim();
-    if (!sourceValue) throw new Error('Imported asset not found.');
-    const sourcePath = path.resolve(sourceValue);
-    const sourceStats = await fs.promises.stat(sourcePath).catch(() => null);
-    if (!sourceStats?.isFile()) throw new Error('Imported asset not found.');
+    const sourcePath = sourceValue ? path.resolve(sourceValue) : '';
+    const sourceStats = sourcePath
+      ? await fs.promises.stat(sourcePath).catch(() => null)
+      : null;
+    const sourceBuffer = importedAssetBuffer(payload.bytes);
+    if (!sourceStats?.isFile() && !sourceBuffer?.length) {
+      throw new Error('Imported asset not found.');
+    }
 
     const assetType = importedAssetType(payload.fileName || sourcePath, payload.mimeType);
     if (!assetType) throw new Error('Only image, MP4, WebM, MOV, and M4V assets are supported.');
@@ -250,7 +264,11 @@ function createAssetStore({ rootDir, net }) {
       || extensionFromMime(mimeType)
       || (assetType === 'video' ? '.mp4' : '.png');
     const filePath = internalAssetFilePath(directory, extension);
-    await fs.promises.copyFile(sourcePath, filePath);
+    if (sourceStats?.isFile()) {
+      await fs.promises.copyFile(sourcePath, filePath);
+    } else {
+      await fs.promises.writeFile(filePath, sourceBuffer);
+    }
 
     try {
       const metadata = assetType === 'video'
@@ -264,7 +282,7 @@ function createAssetStore({ rootDir, net }) {
       return {
         url: assetUrl(filePath),
         ...thumb,
-        fileName: String(payload.fileName || path.basename(sourcePath)),
+        fileName: String(payload.fileName || path.basename(sourcePath || filePath)),
         storedFileName: path.basename(filePath),
         filePath,
         assetType,
@@ -272,7 +290,7 @@ function createAssetStore({ rootDir, net }) {
         width: metadata.width,
         height: metadata.height,
         durationMs: Number(metadata.durationMs || 0),
-        sizeBytes: sourceStats.size,
+        sizeBytes: sourceStats?.size ?? sourceBuffer.length,
         ...(assetType === 'video' ? { codec: metadata.codec || '' } : {}),
       };
     } catch (error) {
@@ -368,6 +386,7 @@ module.exports = {
   createAssetStore,
   extensionFromMime,
   importedAssetMimeType,
+  importedAssetBuffer,
   importedAssetType,
   internalAssetFilePath,
   isInside,

@@ -51,12 +51,13 @@ test.beforeEach(async ({ page }) => {
       },
     });
 
+    const scrollText = Array.from({ length: 40 }, (_, index) => `Scrollable line ${index + 1}`).join("\n");
     const node = (id: string, x: number, label: string) => ({
       id,
       type: "canvasNode",
       position: { x, y: 140 },
       style: { width: 260, height: 160 },
-      data: { kind: "prompt", label },
+      data: { kind: "prompt", label, text: scrollText },
     });
     Object.defineProperty(window, "easyTool", {
       configurable: true,
@@ -70,7 +71,7 @@ test.beforeEach(async ({ page }) => {
             createdAt: 1,
             updatedAt: 1,
             revision: 1,
-            nodeCount: 2,
+            nodeCount: 3,
           }],
         }),
         loadCanvas: async () => ({
@@ -81,7 +82,17 @@ test.beforeEach(async ({ page }) => {
           updatedAt: 1,
           revision: 1,
           canvasSchemaVersion: 2,
-          nodes: [node("node-a", 100, "A"), node("node-b", 520, "B")],
+          nodes: [
+            node("node-a", 100, "A"),
+            node("node-b", 520, "B"),
+            {
+              id: "smart-reverse",
+              type: "canvasNode",
+              position: { x: 100, y: 420 },
+              style: { width: 300, height: 180 },
+              data: { kind: "smartReverse", label: "Reverse", text: scrollText },
+            },
+          ],
           edges: [],
           viewport: { x: 0, y: 0, zoom: 1 },
         }),
@@ -267,11 +278,108 @@ test("still starts dragging after the pointer passes the click tolerance", async
   await page.mouse.move(initialBox!.x + 20, initialBox!.y + 60);
   await page.mouse.down();
   await page.mouse.move(initialBox!.x + 60, initialBox!.y + 60, { steps: 5 });
+  await expect.poll(() => node.locator(".rf-native-prompt-input").evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    return textarea.selectionEnd - textarea.selectionStart;
+  })).toBe(0);
   await page.mouse.up();
 
   const draggedBox = await node.boundingBox();
   expect(draggedBox).not.toBeNull();
   expect(draggedBox!.x).toBeGreaterThan(initialBox!.x + 20);
+  const promptSelection = await node.locator(".rf-native-prompt-input").evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    return { start: textarea.selectionStart, end: textarea.selectionEnd };
+  });
+  expect(promptSelection.end).toBe(promptSelection.start);
   await expect(node).toHaveClass(/selected/);
   await expect(page.locator(".rf-native-node-toolbar")).toHaveCount(1);
+});
+
+test("scrolls prompt and smart reverse text before entering text mode", async ({ page }) => {
+  const cases = [
+    {
+      nodeId: "node-a",
+      contentSelector: ".rf-native-prompt-input",
+      editingClass: null,
+    },
+    {
+      nodeId: "smart-reverse",
+      contentSelector: ".rf-native-image-reverse-output",
+      editingClass: "is-selectable",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const node = page.locator(`.react-flow__node[data-id="${testCase.nodeId}"]`);
+    const content = node.locator(testCase.contentSelector);
+    await expect(content).toBeVisible();
+
+    const geometry = await content.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight);
+
+    const contentBox = await content.boundingBox();
+    expect(contentBox).not.toBeNull();
+    await expect(content).toHaveCSS("user-select", "none");
+
+    await page.mouse.move(contentBox!.x + contentBox!.width / 2, contentBox!.y + contentBox!.height / 2);
+    await page.mouse.wheel(0, 240);
+    await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+    const scrollbarHitTarget = await page.evaluate(({ x, y, selector }) => {
+      const target = document.elementFromPoint(x, y);
+      return Boolean(target?.matches(selector));
+    }, {
+      x: contentBox!.x + contentBox!.width - 8,
+      y: contentBox!.y + 30,
+      selector: testCase.contentSelector,
+    });
+    expect(scrollbarHitTarget).toBe(true);
+
+    await content.dblclick({ position: { x: 40, y: 40 } });
+    if (testCase.editingClass) {
+      await expect(content).toHaveClass(new RegExp(testCase.editingClass));
+      await expect(content).toHaveCSS("user-select", "text");
+      const scrollbarCursor = await content.evaluate((element) => getComputedStyle(element, "::-webkit-scrollbar-thumb").cursor);
+      expect(scrollbarCursor).toBe("default");
+    } else {
+      await expect(content).not.toHaveAttribute("readonly", "");
+      await expect(content).toHaveClass(/is-editing/);
+    }
+
+    await page.locator(".react-flow__pane").click({ position: { x: 20, y: 20 } });
+  }
+});
+
+test("allows prompt and smart reverse nodes to grow beyond the previous size caps", async ({ page }) => {
+  const cases = [
+    { nodeId: "node-a", minWidth: 640, dragDistance: 700 },
+    { nodeId: "smart-reverse", minWidth: 720, dragDistance: 760 },
+  ];
+
+  for (const testCase of cases) {
+    const node = page.locator(`.react-flow__node[data-id="${testCase.nodeId}"]`);
+    const handle = node.locator(".rf-native-node-resize-control");
+    await expect(handle).toBeVisible();
+    const before = await node.boundingBox();
+    const handleBox = await handle.boundingBox();
+    expect(before).not.toBeNull();
+    expect(handleBox).not.toBeNull();
+
+    const startX = handleBox!.x + handleBox!.width / 2;
+    const startY = handleBox!.y + handleBox!.height / 2;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + testCase.dragDistance, startY + 160, { steps: 12 });
+    await page.mouse.up();
+
+    const after = await expect.poll(() => node.boundingBox()).toBeTruthy();
+    void after;
+    const resized = await node.boundingBox();
+    expect(resized!.width).toBeGreaterThan(testCase.minWidth);
+    expect(resized!.height).toBeGreaterThan(before!.height);
+  }
 });

@@ -95,3 +95,23 @@ test('generation target reconciliation stops orphaned active tasks before removi
   assert.deepEqual(calls, ['stop:task-active', 'remove:orphan-active']);
   assert.deepEqual(result.orphanedTaskIds, ['task-active']);
 });
+
+test('generation task cleanup resolves one retention period for every terminal status', () => {
+  const retentionMs = 15 * 24 * 60 * 60 * 1000;
+  let cleanupOptions = null;
+  const cleanup = createGenerationTaskCleanup({
+    repository: {
+      getMeta: () => '0',
+      listTargetHeads: () => [],
+      cleanupTerminalHistory(options) {
+        cleanupOptions = options;
+        return { compactedCount: 0, deletedCount: 0, deletedTaskIds: [] };
+      },
+    },
+    resolveRetentionMs: () => retentionMs,
+  });
+
+  cleanup.run({ force: true, now: 5_000 });
+
+  assert.equal(cleanupOptions.retentionMs, retentionMs);
+});

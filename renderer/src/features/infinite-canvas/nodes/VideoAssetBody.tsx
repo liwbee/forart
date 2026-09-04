@@ -163,6 +163,7 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label }: { sourceUrl: stri
     const wasPlaying = !video.paused;
     const beforeTime = video.currentTime;
     const targetTime = mode === "first" ? 0 : mode === "last" ? Math.max(0, (video.duration || duration) - 0.05) : beforeTime;
+    const defaultName = `${label || "video"}-${mode}-frame.png`;
     try {
       if (mode !== "current") {
         video.pause();
@@ -182,14 +183,31 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label }: { sourceUrl: stri
       const context = canvas.getContext("2d");
       if (!context) throw new Error("无法创建截图画布");
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL("image/png");
-      if (window.easyTool?.saveCanvasAsset) {
-        await window.easyTool.saveCanvasAsset({ dataUrl, defaultName: `${label || "video"}-${mode}-frame.png`, kind: "output", type: "image/png" });
-      } else {
-        const link = document.createElement("a");
-        link.href = dataUrl;
-        link.download = `${label || "video"}-${mode}-frame.png`;
-        link.click();
+      let dataUrl = "";
+      try {
+        dataUrl = canvas.toDataURL("image/png");
+      } catch (error) {
+        const isTaintedCanvas = error instanceof DOMException
+          ? error.name === "SecurityError"
+          : /tainted canvas|tainted canvases|securityerror/i.test(error instanceof Error ? error.message : String(error));
+        if (!isTaintedCanvas || !window.easyTool?.captureVideoFrame) throw error;
+        await window.easyTool.captureVideoFrame({
+          sourceUrl: resolvedSource,
+          timeSeconds: targetTime,
+          mode,
+          defaultName,
+          kind: "output",
+        });
+      }
+      if (dataUrl) {
+        if (window.easyTool?.saveCanvasAsset) {
+          await window.easyTool.saveCanvasAsset({ dataUrl, defaultName, kind: "output", type: "image/png" });
+        } else {
+          const link = document.createElement("a");
+          link.href = dataUrl;
+          link.download = defaultName;
+          link.click();
+        }
       }
       toast.success("视频帧已保存到画布素材");
     } catch (error) {
@@ -200,7 +218,7 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label }: { sourceUrl: stri
         if (wasPlaying) void video.play().catch(() => undefined);
       }
     }
-  }, [duration, label]);
+  }, [duration, label, resolvedSource]);
 
   if (!activated) {
     return (
@@ -224,6 +242,7 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label }: { sourceUrl: stri
       <video
         ref={videoRef}
         className="rf-native-video"
+        crossOrigin={/^forart-asset:/i.test(resolvedSource) ? "anonymous" : undefined}
         src={resolvedSource}
         poster={resolvedThumb || undefined}
         playsInline

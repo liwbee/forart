@@ -42,6 +42,10 @@ function createRunner(fetch, savedAssets) {
       },
       canvasStore: { setGenerationTaskAnchor() {} },
       generationTaskStore,
+      // 生产环境由 configStore 解析 provider（密钥不跨进程）；测试用替身返回固定配置。
+      resolveProvider: (providerId) => String(providerId) === 'ai-tudou'
+        ? { id: 'ai-tudou', baseUrl: 'https://api.ai-tudou.net', apiKey: 'secret-key', protocol: 'gemini' }
+        : {},
       resultCommitter: { commit() {} },
     }),
   };

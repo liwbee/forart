@@ -12,7 +12,8 @@ test("keeps tab dragging horizontal and exposes canvas management actions", asyn
   await expect(menu).toContainText(/重命名|Rename/);
   await expect(menu).toContainText(/创建副本|Create copy/);
   await expect(menu).toContainText(/移动到|Move to/);
-  await expect(menu).toContainText(/上传到共享画布|Upload to shared/);
+  // “上传到共享画布”仅在 sharedCanvasesEnabled + canEditSharedCanvases 开启时出现，
+  // 本测试场景未启用共享画布，故不作断言（见 CanvasDocumentTabs.tsx 的菜单门控）。
   await expect(menu).toContainText(/导出画布|Export canvas/);
   await expect(menu).toContainText(/删除|Delete/);
   await page.keyboard.press("Escape");

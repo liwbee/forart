@@ -304,6 +304,17 @@ thirdRepository.saveTask({
   startedAt: cleanupNow - 20_000,
   updatedAt: cleanupNow - 10_000,
 }, { executorKind: 'api' });
+for (const status of ['failed', 'canceled', 'interrupted', 'superseded']) {
+  thirdRepository.saveTask({
+    id: `cleanup-old-${status}`,
+    canvasId: 'cleanup-canvas',
+    target: { type: 'imageGenerator', nodeId: `cleanup-${status}-node` },
+    status,
+    startedAt: cleanupNow - 20_000,
+    updatedAt: cleanupNow - 10_000,
+    completedAt: cleanupNow - 10_000,
+  }, { executorKind: 'api', setAsLatest: true });
+}
 thirdRepository.saveTask({
   id: 'cleanup-interrupted-commit',
   canvasId: 'cleanup-canvas',
@@ -347,34 +358,25 @@ const cleanupExecutionNow = cleanupNow + (24 * 60 * 60 * 1000) + 1;
 const cleanupResult = thirdRepository.cleanupTerminalHistory({
   now: cleanupExecutionNow,
   orphanedTaskIds,
-  retentionMs: {
-    succeeded: 0,
-    failed: 0,
-    canceled: 0,
-    interrupted: 0,
-    superseded: 0,
-    unsubmitted: 0,
-  },
+  retentionMs: 0,
 });
 assert.equal(cleanupResult.deletedTaskIds.includes('cleanup-old-success'), true);
 assert.equal(cleanupResult.deletedTaskIds.includes('cleanup-orphan-head'), true);
+assert.equal(cleanupResult.deletedTaskIds.includes('cleanup-current-head'), true);
+for (const status of ['failed', 'canceled', 'interrupted', 'superseded']) {
+  assert.equal(cleanupResult.deletedTaskIds.includes(`cleanup-old-${status}`), true);
+}
 assert.equal(thirdRepository.getTask('cleanup-old-success'), null);
-assert.notEqual(thirdRepository.getTask('cleanup-pending-result'), null);
+assert.equal(thirdRepository.getTask('cleanup-current-head'), null);
+assert.equal(thirdRepository.getTask('cleanup-pending-result'), null);
+assert.equal(thirdRepository.getTask('cleanup-interrupted-commit'), null);
 assert.notEqual(thirdRepository.getTask('cleanup-active'), null);
 const countsAfterCleanup = thirdRepository.listTaskPage({ filter: 'all', limit: 1 }).counts;
 assert.equal(countsAfterCleanup.all, thirdRepository.listTaskPage({ filter: 'all', limit: 500 }).total);
-const compactedHead = thirdRepository.getTask('cleanup-current-head').task;
-assert.equal(compactedHead.status, 'succeeded');
-assert.equal(compactedHead.prompt, undefined);
-assert.equal(compactedHead.referenceImages, undefined);
-assert.equal(compactedHead.providerName, 'API Mart');
-assert.equal(compactedHead.resolution, '1K');
-assert.equal(compactedHead.aspectRatio, '3:4');
-assert.equal(compactedHead.result.localUrl, 'forart-asset://output/current.png');
 assert.equal(thirdRepository.getMeta('last_cleanup_at'), String(cleanupExecutionNow));
 const taskAssetReferences = thirdRepository.listTaskAssetReferences();
 assert.equal(taskAssetReferences.some((reference) => reference.url === 'forart-asset://input/active-reference.png'), true);
-assert.equal(taskAssetReferences.some((reference) => reference.url === 'forart-asset://output/current.png'), true);
+assert.equal(taskAssetReferences.some((reference) => reference.url === 'forart-asset://output/current.png'), false);
 
 const normalizedDatabase = new Database(path.join(rootDir, 'CanvasAssests', 'tasks', 'generation-tasks.sqlite'));
 assert.equal(
@@ -389,16 +391,7 @@ const normalizedActiveRow = normalizedDatabase.prepare(`
 `).get();
 assert.equal(JSON.parse(normalizedActiveRow.summary_json).prompt, undefined);
 assert.equal(JSON.parse(normalizedActiveRow.runtime_json).prompt, 'active prompt kept in runtime');
-const normalizedResultRow = normalizedDatabase.prepare(`
-  SELECT task.summary_json, runtime.runtime_json, result.result_json
-  FROM generation_tasks task
-  LEFT JOIN generation_task_runtime runtime ON runtime.task_id = task.id
-  LEFT JOIN generation_task_results result ON result.task_id = task.id
-  WHERE task.id = 'cleanup-current-head'
-`).get();
-assert.equal(JSON.parse(normalizedResultRow.summary_json).result, undefined);
-assert.equal(normalizedResultRow.runtime_json, null);
-assert.equal(JSON.parse(normalizedResultRow.result_json).localUrl, 'forart-asset://output/current.png');
+assert.equal(normalizedDatabase.prepare(`SELECT id FROM generation_tasks WHERE id = 'cleanup-current-head'`).get(), undefined);
 normalizedDatabase.close();
 thirdRepository.close();
 

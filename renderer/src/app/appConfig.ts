@@ -360,6 +360,7 @@ export interface EasyToolApi {
   cancelCanvasTransfer: (operationId: string) => Promise<{ ok: true; canceled: boolean }>;
   onCanvasTransferProgress: (callback: (progress: CanvasTransferProgress) => void) => () => void;
   saveCanvasAsset: (payload: { dataUrl?: string; url?: string; defaultName?: string; kind?: "input" | "output"; type?: string }) => Promise<{ url: string; thumbUrl?: string; fileName: string; filePath?: string; thumbFilePath?: string }>;
+  captureVideoFrame: (payload: { sourceUrl: string; timeSeconds?: number; mode?: "first" | "last" | "current"; defaultName?: string; kind?: "input" | "output" }) => Promise<{ url: string; thumbUrl?: string; fileName: string; filePath?: string; thumbFilePath?: string; width?: number; height?: number }>;
   saveCanvasAssetThumbnail: (payload: { url?: string; filePath?: string }) => Promise<{ thumbUrl?: string; thumbFilePath?: string }>;
   ensureCanvasAssetThumbnail: (payload: { url?: string; filePath?: string }) => Promise<{ thumbUrl?: string; thumbFilePath?: string }>;
   importCanvasAssetFile: (payload: { file?: File; filePath?: string; fileName?: string; mimeType?: string }) => Promise<{

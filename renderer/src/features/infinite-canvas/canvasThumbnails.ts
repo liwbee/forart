@@ -6,9 +6,11 @@ export interface CanvasThumbnailTarget {
   sourceUrl: string;
 }
 
-/** Prefer the derived thumbnail, but keep small/SVG/failed thumbnails visible. */
-export function canvasPreviewSourceUrl(originalUrl: unknown, thumbnailUrl: unknown): string {
-  return String(thumbnailUrl || originalUrl || "").trim();
+/** Prefer the derived thumbnail, but allow high-zoom canvas views to request the original. */
+export function canvasPreviewSourceUrl(originalUrl: unknown, thumbnailUrl: unknown, preferOriginal = false): string {
+  const original = String(originalUrl || "").trim();
+  const thumbnail = String(thumbnailUrl || "").trim();
+  return preferOriginal ? (original || thumbnail) : (thumbnail || original);
 }
 
 export function collectMissingCanvasThumbnailTargets(nodes: NativeCanvasNode[]): CanvasThumbnailTarget[] {

@@ -117,6 +117,69 @@ test('reference reorder dynamically changes display and remote numbering', () =>
   }), 'References: image1、image2.\n\nRequest:\nmake image2 wear image1');
 });
 
+test('agent reference tokens become durable image-reference nodes', () => {
+  const { imagePromptDocumentFromReferenceText, serializeImagePromptForDisplay } = loadModule();
+  const generated = imagePromptDocumentFromReferenceText('人物佩戴@图一的帽子，并借鉴@图二的眼镜', references);
+  assert.ok(generated);
+  assert.deepEqual(
+    {
+      direction: generated.root.direction,
+      format: generated.root.format,
+      indent: generated.root.indent,
+    },
+    { direction: null, format: '', indent: 0 },
+  );
+  assert.deepEqual(
+    {
+      direction: generated.root.children[0].direction,
+      format: generated.root.children[0].format,
+      indent: generated.root.children[0].indent,
+      textFormat: generated.root.children[0].textFormat,
+      textStyle: generated.root.children[0].textStyle,
+    },
+    { direction: null, format: '', indent: 0, textFormat: 0, textStyle: '' },
+  );
+  assert.deepEqual(
+    {
+      detail: generated.root.children[0].children[0].detail,
+      format: generated.root.children[0].children[0].format,
+      mode: generated.root.children[0].children[0].mode,
+      style: generated.root.children[0].children[0].style,
+    },
+    { detail: 0, format: 0, mode: 'normal', style: '' },
+  );
+  assert.equal(serializeImagePromptForDisplay({
+    document: generated,
+    references,
+    referenceLabel: (index) => `图${index + 1}`,
+  }), '人物佩戴@图1的帽子，并借鉴@图2的眼镜');
+  assert.equal(imagePromptDocumentFromReferenceText('没有引用', references), undefined);
+});
+
+test('minimal prompt documents are hydrated before Lexical imports them', () => {
+  const { normalizeImagePromptDocument } = loadModule();
+  const normalized = normalizeImagePromptDocument(document);
+  assert.ok(normalized);
+  assert.deepEqual(
+    {
+      direction: normalized.root.direction,
+      format: normalized.root.format,
+      indent: normalized.root.indent,
+    },
+    { direction: null, format: '', indent: 0 },
+  );
+  assert.deepEqual(
+    {
+      direction: normalized.root.children[0].direction,
+      format: normalized.root.children[0].format,
+      indent: normalized.root.children[0].indent,
+      textFormat: normalized.root.children[0].textFormat,
+      textStyle: normalized.root.children[0].textStyle,
+    },
+    { direction: null, format: '', indent: 0, textFormat: 0, textStyle: '' },
+  );
+});
+
 test('removed references are omitted without changing stable tokens', () => {
   const { buildPromptWithImageReferenceDocument, serializeImagePromptForDisplay } = loadModule();
   assert.equal(serializeImagePromptForDisplay({

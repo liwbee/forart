@@ -28,7 +28,7 @@ function loadTypeScriptModule(filePath) {
 
 const featureRoot = path.join(__dirname, '..', 'renderer', 'src', 'features', 'infinite-canvas');
 const { applyNativeNodeDataPatch } = loadTypeScriptModule(path.join(featureRoot, 'applyNativeNodeDataPatch.ts'));
-const { getImageGeneratorNodeSize, getImageNodeSize } = loadTypeScriptModule(path.join(featureRoot, 'imageNodeSizing.ts'));
+const { getImageGeneratorNodeSize, getImageNodeSize, getVideoNodeSize, VIDEO_NODE_DEFAULT_SIZE } = loadTypeScriptModule(path.join(featureRoot, 'imageNodeSizing.ts'));
 
 function generatorNode(overrides = {}) {
   return {
@@ -44,6 +44,15 @@ function generatorNode(overrides = {}) {
 test('empty image generator follows the selected parameter aspect ratio', () => {
   const node = applyNativeNodeDataPatch(generatorNode(), { imageAspectRatio: '3:4' });
   assert.deepEqual(node.style, getImageGeneratorNodeSize('3:4'));
+});
+
+test('video assets use a larger aspect-preserving canvas surface', () => {
+  const imageSize = getImageNodeSize(1920, 1080);
+  const videoSize = getVideoNodeSize(1920, 1080);
+  assert.ok(videoSize.width > imageSize.width);
+  assert.ok(videoSize.height > imageSize.height);
+  assert.ok(Math.abs((videoSize.width / videoSize.height) - (16 / 9)) < 0.01);
+  assert.deepEqual(getVideoNodeSize(0, 0), VIDEO_NODE_DEFAULT_SIZE);
 });
 
 test('generated image dimensions resize the generator and preserve its center', () => {
