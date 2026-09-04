@@ -300,8 +300,10 @@ function ResultPreview({
 }) {
   const { t } = useTranslation();
   const taskImage = task?.result?.images[0];
-  const originalUrl = row.resultUrl || taskImage?.assetUrl || "";
-  const previewUrl = row.resultThumbUrl || taskImage?.thumbUrl || "";
+  // Prefer the terminal task result while row persistence catches up. This
+  // prevents a stale row URL from keeping the old image visible/downloadable.
+  const originalUrl = taskImage?.assetUrl || row.resultUrl || "";
+  const previewUrl = taskImage?.thumbUrl || row.resultThumbUrl || "";
   const resolvedOriginalUrl = originalUrl ? resolveLibraryImageUrl(originalUrl) : "";
   const previewSourceUrl = canvasPreviewSourceUrl(originalUrl, previewUrl, preferOriginalImages);
   const resolvedPreviewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
@@ -480,7 +482,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   const { projects, rowData, isLoading, failure: libraryFailure, retry: retryLibrary } = useActionFissionLibraryData(state);
   const viewerImages = useMemo(() => ({
     result: state.rows.flatMap((row) => {
-      const url = row.resultUrl || tasksByRowId[row.id]?.result?.images[0]?.assetUrl || "";
+      const url = tasksByRowId[row.id]?.result?.images[0]?.assetUrl || row.resultUrl || "";
       return url ? [{
         id: row.id,
         kind: "result" as const,

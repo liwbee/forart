@@ -11,10 +11,13 @@ export function actionFissionDownloadTarget(
   task: Pick<GenerationTaskDto, "result"> | undefined,
 ) {
   const taskImage = generationTaskImageAt(task, 0);
-  const imageUrl = String(row.resultUrl || taskImage?.assetUrl || "").trim();
+  // The terminal task result is authoritative while the canvas row writeback
+  // is catching up. A stale row.resultUrl must not mask a newly generated
+  // image that is already visible in the task center.
+  const imageUrl = String(taskImage?.assetUrl || row.resultUrl || "").trim();
   if (!imageUrl) return null;
   return {
     imageUrl,
-    fileName: String(row.resultFileName || taskImage?.fileName || "").trim(),
+    fileName: String(taskImage?.fileName || row.resultFileName || "").trim(),
   };
 }

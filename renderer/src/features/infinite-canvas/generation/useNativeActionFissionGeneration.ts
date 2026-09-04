@@ -154,7 +154,7 @@ export function useNativeActionFissionGeneration({
         handledTerminalVersionsRef.current.set(dto.id, dto.version);
         if (dto.status !== "succeeded" || !dto.result?.images.length) return;
         const image = dto.result.images[0];
-        const currentRow = nodes
+        const currentRow = nodesRef.current
           .find((node) => node.id === nodeId && node.data.kind === "actionFission")
           ?.data.actionFission?.rows.find((row) => row.id === rowId);
         const downloadMarker = downloadMarkerForTaskResult(
@@ -182,7 +182,7 @@ export function useNativeActionFissionGeneration({
     } finally {
       taskControllersRef.current.delete(taskId);
     }
-  }, [canvasId, nodes, patchRow]);
+  }, [canvasId, patchRow]);
 
   const runApiRows = useCallback(async (
     node: NativeCanvasNode,
