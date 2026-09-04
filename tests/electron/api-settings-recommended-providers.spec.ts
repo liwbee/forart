@@ -23,21 +23,21 @@ test("adds recommended providers on demand from an initially empty list", async 
   await expect(page.locator("html")).toHaveAttribute("data-opened-provider-website", "apimart");
   await apimartCard.getByRole("button", { name: /添加|Add/ }).click();
   await expect(page.locator('[data-sidebar-item-id="apimart"]')).toBeVisible();
-  await expect(apimartCard.getByRole("button", { name: /已添加|Added/ })).toBeDisabled();
+  await expect(apimartCard.getByRole("button", { name: /添加|Add/ })).toBeEnabled();
 
   const libtvCard = page.locator('[data-recommended-provider-id="libtv"]');
   await libtvCard.getByRole("button", { name: /打开 LibTV 官网|Open the LibTV website/ }).click();
   await expect(page.locator("html")).toHaveAttribute("data-opened-provider-website", "libtv");
   await libtvCard.getByRole("button", { name: /添加|Add/ }).click();
   await expect(page.locator('[data-sidebar-item-id="libtv"]')).toBeVisible();
-  await expect(libtvCard.getByRole("button", { name: /已添加|Added/ })).toBeDisabled();
+  await expect(libtvCard.getByRole("button", { name: /添加|Add/ })).toBeEnabled();
   const tudouCard = page.locator('[data-recommended-provider-id="tudou-api"]');
   await tudouCard.getByRole("button", { name: /打开 土豆API 官网|Open the Tudou API website/ }).click();
   await expect(page.locator("html")).toHaveAttribute("data-opened-provider-website", "tudou-api");
   await tudouCard.getByRole("button", { name: /添加|Add/ }).click();
   await expect(page.locator('[data-sidebar-item-id="tudou-api"]')).toBeVisible();
   await expect(page.locator('[data-sidebar-item-id="tudou-api"]')).toContainText("Potato");
-  await expect(tudouCard.getByRole("button", { name: /已添加|Added/ })).toBeDisabled();
+  await expect(tudouCard.getByRole("button", { name: /添加|Add/ })).toBeEnabled();
   await expect(page.locator("html")).toHaveAttribute("data-provider-order", "apimart,libtv,tudou-api");
 
   await page.locator('[data-sidebar-item-id="tudou-api"]').click();
@@ -79,4 +79,19 @@ test("adds recommended providers on demand from an initially empty list", async 
   await libtvCard.getByRole("button", { name: /添加|Add/ }).click();
   await page.locator('[data-sidebar-item-id="libtv"]').click();
   await expect(page.locator(".settings-libtv-machine-id input")).toHaveValue("machineKeep123");
+});
+
+test("allows adding the same recommended provider more than once", async ({ page }) => {
+  await page.goto("http://127.0.0.1:6981/tests/fixtures/api-settings-recommended-providers.html");
+  await page.getByRole("button", { name: /推荐平台|Recommended providers/ }).click();
+
+  const tudouCard = page.locator('[data-recommended-provider-id="tudou-api"]');
+  const add = tudouCard.getByRole("button", { name: /添加|Add/ });
+  await add.click();
+  await add.click();
+
+  await expect(page.locator('[data-sidebar-item-id="tudou-api"]')).toHaveCount(1);
+  await expect(page.locator('[data-sidebar-item-id="tudou-api-2"]')).toHaveCount(1);
+  await expect(add).toBeEnabled();
+  await expect(add).toHaveText(/添加|Add/);
 });

@@ -960,6 +960,9 @@ test("maps a thumbnail crop selection to original image pixels", async ({ page }
   await expect.poll(() => page.locator("html").getAttribute("data-last-crop-payload")).not.toBeNull();
   const payload = JSON.parse(String(await page.locator("html").getAttribute("data-last-crop-payload")));
   expect(payload).toMatchObject({ x: 500, y: 0, width: 3000, height: 3000 });
+  await expect(page.locator('.react-flow__node[data-id="reference"]')).toHaveCount(1);
+  await expect(page.locator('.react-flow__node[data-id^="assetLoader_"]')).toHaveCount(1);
+  await expect(page.locator('.react-flow__node').filter({ hasText: "Reference-cropped" })).toHaveCount(1);
 });
 
 test("hides the empty generator icon as soon as generation starts", async ({ page }) => {

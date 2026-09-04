@@ -23,7 +23,6 @@ const APIMART_BASE_URLS = [
   'https://api.aiuxu.com/v1',
   'https://api.aishuch.com/v1',
 ];
-const APIMART_HOST_TO_BASE_URL = new Map(APIMART_BASE_URLS.map((baseUrl) => [new URL(baseUrl).host, baseUrl]));
 
 function normalizeConfig(payload = {}) {
   const mode = payload.mode === 'remote' ? 'remote' : 'local';
@@ -130,26 +129,12 @@ function normalizeApiProvider(input = {}, providers = []) {
   };
 }
 
-function getApimartBaseUrl(value) {
-  try {
-    return APIMART_HOST_TO_BASE_URL.get(new URL(String(value || '').trim()).host.toLowerCase()) || '';
-  } catch {
-    return '';
-  }
-}
-
 function isApimartProvider(input = {}) {
-  return String(input.id || '').trim().toLowerCase() === APIMART_PROVIDER_ID
-    || String(input.name || '').trim().toLowerCase() === APIMART_PROVIDER_ID
-    || Boolean(getApimartBaseUrl(input.baseUrl));
+  return String(input.id || '').trim().toLowerCase() === APIMART_PROVIDER_ID;
 }
 
 function isTudouProvider(input = {}) {
-  let host = '';
-  try { host = new URL(String(input.baseUrl || '').trim()).host.toLowerCase(); } catch { /* invalid custom URL */ }
-  return String(input.id || '').trim().toLowerCase() === TUDOU_PROVIDER_ID
-    || String(input.name || '').trim().toLowerCase() === '土豆api'
-    || host === new URL(TUDOU_BASE_URL).host;
+  return String(input.id || '').trim().toLowerCase() === TUDOU_PROVIDER_ID;
 }
 
 function uniqueStrings(values = []) {
@@ -167,7 +152,7 @@ function createApimartProvider(input = {}) {
   return {
     id: APIMART_PROVIDER_ID,
     name: 'APImart',
-    baseUrl: getApimartBaseUrl(input.baseUrl) || APIMART_BASE_URLS[0],
+    baseUrl: String(input.baseUrl || '').trim() || APIMART_BASE_URLS[0],
     apiKey: String(input.apiKey || ''),
     accessKey: '',
     secretKey: '',
@@ -189,7 +174,7 @@ function mergeApimartProviders(inputs = []) {
     const next = createApimartProvider(input);
     return createApimartProvider({
       ...result,
-      baseUrl: getApimartBaseUrl(input.baseUrl) || result.baseUrl,
+      baseUrl: next.baseUrl || result.baseUrl,
       apiKey: next.apiKey || result.apiKey,
       hasApiKey: result.hasApiKey || next.hasApiKey,
       imageModels: uniqueStrings([...result.imageModels, ...next.imageModels]),

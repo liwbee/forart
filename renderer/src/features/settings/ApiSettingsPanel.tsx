@@ -90,9 +90,6 @@ export function ApiSettingsPanel() {
           : [...items, { id, type: "provider", provider }];
     }, []);
   }, [providerOrder, providers]);
-  const apimartAdded = providers.some((provider) => provider.id === APIMART_PROVIDER_ID);
-  const tudouAdded = providers.some((provider) => provider.id === TUDOU_PROVIDER_ID);
-  const libtvAdded = providerOrder.includes("libtv");
   const modelListTabs = useMemo<NativeTabItem<ModelListTab>[]>(() => [
     { value: "chat", label: t("settings:modelTabLlm") },
     { value: "image", label: t("settings:modelTabImage") },
@@ -209,9 +206,18 @@ export function ApiSettingsPanel() {
     }
     setProviders((current) => {
       const fixedId = providerId === "apimart" ? APIMART_PROVIDER_ID : TUDOU_PROVIDER_ID;
-      const existing = current.find((provider) => provider.id === fixedId);
-      const next = existing ? current : [...current, providerId === "apimart" ? createApimartProvider() : createTudouProvider()];
-      setProviderOrder((order) => normalizeApiProviderOrder([...order, fixedId], next));
+      const template = providerId === "apimart" ? createApimartProvider() : createTudouProvider();
+      let id = fixedId;
+      let copyIndex = 1;
+      while (current.some((provider) => provider.id === id)) {
+        copyIndex += 1;
+        id = `${fixedId}-${copyIndex}`;
+      }
+      const provider = copyIndex === 1
+        ? template
+        : { ...template, id, name: `${template.name} ${copyIndex}` };
+      const next = [...current, provider];
+      setProviderOrder((order) => normalizeApiProviderOrder([...order, provider.id], next));
       return next;
     });
   }
@@ -644,21 +650,21 @@ export function ApiSettingsPanel() {
       {
         id: "apimart" as const,
         name: "APIMart",
-        added: apimartAdded,
+        added: false,
         description: t("settings:apimartRecommendedDescription"),
         logo: <ApimartLogo />,
       },
       {
         id: "libtv" as const,
         name: "LibTV",
-        added: libtvAdded,
+        added: false,
         description: t("settings:libtvRecommendedDescription"),
         logo: <LibtvLogo />,
       },
       {
         id: "tudou-api" as const,
         name: t("settings:tudouSettings"),
-        added: tudouAdded,
+        added: false,
         description: t("settings:tudouRecommendedDescription"),
         logo: <TudouLogo />,
       },

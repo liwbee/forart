@@ -138,7 +138,7 @@ test('tudou catalog order keeps user ranking first and appends all official mode
   assert.deepEqual(reloaded.providers[0].modelCatalogOrder, tudou.modelCatalogOrder);
 });
 
-test('api settings normalization merges fixed providers and generates unique custom ids', (t) => {
+test('api settings normalization keeps same-host custom providers separate and generates unique ids', (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-api-normalize-'));
   t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
   const store = createConfigStore({ app: { isPackaged: false }, rootDir: tempRoot, safeStorage: testSafeStorage() });
@@ -154,18 +154,36 @@ test('api settings normalization merges fixed providers and generates unique cus
     providerOrder: ['apimart'],
     libtvActionFissionConcurrency: 42,
   });
-  assert.deepEqual(saved.providers.map((provider) => provider.id), ['apimart', 'my-relay', 'my-relay-2']);
+  assert.deepEqual(saved.providers.map((provider) => provider.id), ['apimart', 'apimart-alt', 'my-relay', 'my-relay-2']);
   const apimart = saved.providers[0];
-  assert.equal(apimart.baseUrl, 'https://api.apimart.ai/v1');
-  assert.deepEqual(apimart.imageModels, ['model-a', 'model-b']);
+  assert.equal(apimart.baseUrl, 'https://api.apib.ai/v1');
+  assert.deepEqual(apimart.imageModels, ['model-a']);
   assert.equal(store.getApiProvider('apimart').apiKey, 'key-1');
-  assert.deepEqual(saved.providers[1].imageModels, ['model-a', 'model-c']);
+  assert.equal(saved.providers[1].baseUrl, 'https://api.apimart.ai/v1');
+  assert.deepEqual(saved.providers[1].imageModels, ['model-b']);
+  assert.deepEqual(saved.providers[2].imageModels, ['model-a', 'model-c']);
   assert.equal(saved.defaultImageProviderId, 'apimart');
   assert.equal(saved.libtvActionFissionConcurrency, 1);
-  assert.deepEqual(saved.providerOrder, ['apimart', 'my-relay', 'my-relay-2']);
+  assert.deepEqual(saved.providerOrder, ['apimart', 'apimart-alt', 'my-relay', 'my-relay-2']);
 
   const clamped = store.saveApiSettings({ ...saved, libtvActionFissionConcurrency: 3 });
   assert.equal(clamped.libtvActionFissionConcurrency, 3);
+});
+
+test('custom providers using recommended hosts are not converted into fixed providers', (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-api-duplicate-host-'));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const store = createConfigStore({ app: { isPackaged: false }, rootDir: tempRoot, safeStorage: testSafeStorage() });
+  const saved = store.saveApiSettings({
+    providers: [
+      { id: 'tudou-api', name: '土豆API', baseUrl: 'https://api.ai-tudou.net/v1', apiKey: 'fixed-key', imageModels: ['fixed-model'] },
+      { id: 'relay', name: 'Tudou relay', baseUrl: 'https://api.ai-tudou.net/v1', apiKey: 'relay-key', imageModels: ['relay-model'] },
+    ],
+    providerOrder: ['tudou-api', 'relay'],
+  });
+  assert.deepEqual(saved.providers.map((provider) => provider.id), ['tudou-api', 'relay']);
+  assert.deepEqual(saved.providers.map((provider) => provider.imageModels), [['fixed-model'], ['relay-model']]);
+  assert.equal(saved.providers[1].baseUrl, 'https://api.ai-tudou.net/v1');
 });
 
 test('public API settings retain configured-key state for Agent and APIMart balance', (t) => {

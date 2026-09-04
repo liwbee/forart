@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { toast } from "sonner";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import { cn } from "../../../lib/utils";
+import type { CanvasStoredAsset } from "../canvasActions";
 
 type CaptureMode = "first" | "last" | "current";
 const CHROMIUM_MEDIA_CONTROLS_HIDE_DELAY_MS = 2500;
@@ -35,7 +36,7 @@ function formatTime(value: number) {
   return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-export function VideoAssetBody({ sourceUrl, thumbUrl, label }: { sourceUrl: string; thumbUrl?: string; label: string }) {
+export function VideoAssetBody({ sourceUrl, thumbUrl, label, onCaptureComplete }: { sourceUrl: string; thumbUrl?: string; label: string; onCaptureComplete?: (asset: CanvasStoredAsset, mode: CaptureMode) => void }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const captureRef = useRef<HTMLDivElement | null>(null);
@@ -184,6 +185,7 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label }: { sourceUrl: stri
       if (!context) throw new Error("无法创建截图画布");
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       let dataUrl = "";
+      let storedAsset: CanvasStoredAsset | null = null;
       try {
         dataUrl = canvas.toDataURL("image/png");
       } catch (error) {
@@ -191,7 +193,7 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label }: { sourceUrl: stri
           ? error.name === "SecurityError"
           : /tainted canvas|tainted canvases|securityerror/i.test(error instanceof Error ? error.message : String(error));
         if (!isTaintedCanvas || !window.easyTool?.captureVideoFrame) throw error;
-        await window.easyTool.captureVideoFrame({
+        storedAsset = await window.easyTool.captureVideoFrame({
           sourceUrl: resolvedSource,
           timeSeconds: targetTime,
           mode,
@@ -201,7 +203,7 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label }: { sourceUrl: stri
       }
       if (dataUrl) {
         if (window.easyTool?.saveCanvasAsset) {
-          await window.easyTool.saveCanvasAsset({ dataUrl, defaultName, kind: "output", type: "image/png" });
+          storedAsset = await window.easyTool.saveCanvasAsset({ dataUrl, defaultName, kind: "output", type: "image/png" });
         } else {
           const link = document.createElement("a");
           link.href = dataUrl;
@@ -209,6 +211,7 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label }: { sourceUrl: stri
           link.click();
         }
       }
+      if (storedAsset) onCaptureComplete?.(storedAsset, mode);
       toast.success("视频帧已保存到画布素材");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "视频帧截取失败");
@@ -218,7 +221,7 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label }: { sourceUrl: stri
         if (wasPlaying) void video.play().catch(() => undefined);
       }
     }
-  }, [duration, label, resolvedSource]);
+  }, [duration, label, onCaptureComplete, resolvedSource]);
 
   if (!activated) {
     return (

@@ -14,6 +14,7 @@ export interface NativeCanvasActions {
   redoCanvasHistory: () => void;
   addImageReferenceFiles: (nodeId: string, files: File[]) => Promise<void>;
   cropNodeImage: (nodeId: string, crop: CanvasImageCropRect) => Promise<void>;
+  createDerivedAssetNode: (sourceNodeId: string, asset: CanvasStoredAsset, label: string, assetType?: NativeCanvasAssetType) => void;
   downloadActionFissionResult: (nodeId: string, rowId: string) => Promise<void>;
   downloadNodeImage: (nodeId: string, imageIndex: number) => Promise<void>;
   discardActionFissionRow: (nodeId: string, rowId: string) => Promise<void>;
@@ -33,6 +34,18 @@ export interface NativeCanvasActions {
   setNodeText: (nodeId: string, text: string) => void;
   stopImageGeneration: (nodeId: string) => Promise<void>;
   stopActionFission: (nodeId: string, rowId?: string) => Promise<void>;
+}
+
+export interface CanvasStoredAsset {
+  url: string;
+  thumbUrl?: string;
+  fileName: string;
+  filePath?: string;
+  thumbFilePath?: string;
+  width?: number;
+  height?: number;
+  durationMs?: number;
+  sizeBytes?: number;
 }
 
 export interface CanvasImageCropRect {

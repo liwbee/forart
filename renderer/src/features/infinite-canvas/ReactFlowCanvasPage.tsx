@@ -44,6 +44,7 @@ import {
   isCanvasAssetFile,
   readMediaFileDimensions,
   type CanvasImageCropRect,
+  type CanvasStoredAsset,
   type NativeCanvasActions,
 } from "./canvasActions";
 import { useNativeCanvasInteractionStore } from "./canvasInteractionStore";
@@ -916,6 +917,38 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     })();
   }, [setNodes]);
 
+  const createDerivedAssetNode = useCallback((sourceNodeId: string, asset: CanvasStoredAsset, label: string, assetType: "image" | "video" | "audio" = "image") => {
+    const source = getNodes().find((node) => node.id === sourceNodeId);
+    if (!source || source.data.kind !== "assetLoader" || !asset?.url) return;
+    const width = Math.max(1, Number(asset.width || 0));
+    const height = Math.max(1, Number(asset.height || 0));
+    const size = assetType === "video"
+      ? getVideoNodeSize(width, height)
+      : getImageNodeSize(width, height);
+    const sourceWidth = Math.max(1, Number(source.style?.width || source.measured?.width || source.width || getImageNodeSize(Number(source.data.assetNaturalWidth || 0), Number(source.data.assetNaturalHeight || 0)).width));
+    const nextNode = createNativeCanvasNode("assetLoader", {
+      x: source.position.x + sourceWidth + 64,
+      y: source.position.y,
+    }, {
+      label,
+      assetUrl: asset.url,
+      assetFileName: asset.fileName || label,
+      assetThumbUrl: asset.thumbUrl || undefined,
+      assetType,
+      assetMimeType: assetType === "image" ? "image/png" : undefined,
+      assetNaturalWidth: width || undefined,
+      assetNaturalHeight: height || undefined,
+      assetDurationMs: asset.durationMs || undefined,
+      assetSizeBytes: asset.sizeBytes || undefined,
+    });
+    nextNode.style = size;
+    if (source.parentId) nextNode.parentId = source.parentId;
+    setNodes((current) => [
+      ...current.map((node) => node.selected ? { ...node, selected: false } : node),
+      { ...nextNode, selected: true },
+    ]);
+  }, [getNodes, setNodes]);
+
   const cropNodeImage = useCallback(async (nodeId: string, crop: CanvasImageCropRect) => {
     const version = (imageMutationVersionRef.current.get(nodeId) || 0) + 1;
     imageMutationVersionRef.current.set(nodeId, version);
@@ -941,24 +974,8 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       defaultName: node.data.label || "cropped-image.png",
     });
     if (!imageThumbnailMountedRef.current || imageMutationVersionRef.current.get(nodeId) !== version) return;
-    const size = getImageNodeSize(result.width, result.height);
-    setNodes((current) => current.map((item) => item.id === nodeId && item.data.kind === "assetLoader"
-      ? {
-          ...item,
-          data: {
-            ...item.data,
-            assetUrl: result.url,
-            assetFileName: result.fileName,
-            assetType: "image",
-            assetMimeType: "image/*",
-            assetThumbUrl: result.thumbUrl || undefined,
-            assetNaturalWidth: result.width,
-            assetNaturalHeight: result.height,
-          },
-          style: { ...item.style, ...size },
-        }
-      : item));
-  }, [getNodes, setNodes, t]);
+    createDerivedAssetNode(nodeId, result, `${String(node.data.label || t("infiniteCanvas:assetNode"))}-cropped`, "image");
+  }, [createDerivedAssetNode, getNodes, t]);
 
   const patchNodeData = useCallback((nodeId: string, patch: Partial<NativeCanvasNode["data"]>) => {
     setNodes((current) => current.map((node) => node.id === nodeId
@@ -1387,6 +1404,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     redoCanvasHistory: redoHistory,
     addImageReferenceFiles: (nodeId, files) => canvasActionHandlersRef.current.addImageReferenceFiles(nodeId, files),
     cropNodeImage,
+    createDerivedAssetNode,
     downloadActionFissionResult: (nodeId, rowId) => canvasActionHandlersRef.current.downloadActionFissionResult(nodeId, rowId),
     downloadNodeImage: (nodeId, imageIndex) => canvasActionHandlersRef.current.downloadNodeImage(nodeId, imageIndex),
     discardActionFissionRow: (nodeId, rowId) => canvasActionHandlersRef.current.discardActionFissionRow(nodeId, rowId),
@@ -1423,7 +1441,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     setNodeText: (nodeId: string, text: string) => patchNodeData(nodeId, { text }),
     stopImageGeneration: (nodeId) => canvasActionHandlersRef.current.stopImageGeneration(nodeId),
     stopActionFission: (nodeId, rowId) => canvasActionHandlersRef.current.stopActionFission(nodeId, rowId),
-  }), [beginHistoryGesture, cropNodeImage, endHistoryGesture, patchActionFissionSelectionSilently, patchNodeData, patchNodeDataSilently, readOnly, setEdges, setNodeAsset, t]);
+  }), [beginHistoryGesture, cropNodeImage, createDerivedAssetNode, endHistoryGesture, patchActionFissionSelectionSilently, patchNodeData, patchNodeDataSilently, readOnly, setEdges, setNodeAsset, t]);
 
   const validateConnection = useCallback<IsValidConnection<NativeCanvasEdge>>((connection) => (
     isNativeCanvasConnectionValid(connection, nodesRef.current, edgesRef.current)

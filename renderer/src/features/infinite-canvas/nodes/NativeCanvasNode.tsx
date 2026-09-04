@@ -638,7 +638,12 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               <span>{t("infiniteCanvas:assetLoading")}</span>
             </div>
           ) : isVideoAsset && primaryAssetUrl ? (
-            <VideoAssetBody sourceUrl={primaryAssetUrl} thumbUrl={data.assetThumbUrl} label={displayLabel} />
+            <VideoAssetBody
+              sourceUrl={primaryAssetUrl}
+              thumbUrl={data.assetThumbUrl}
+              label={displayLabel}
+              onCaptureComplete={(asset, mode) => actions.createDerivedAssetNode(id, asset, `${displayLabel}-${mode}-frame`, "image")}
+            />
           ) : primaryImageUrl ? (
             data.kind === "assetLoader" && isCropping && resolvedPreviewUrl ? (
               <ImageNodeCropEditor
@@ -646,8 +651,12 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 fallbackSrc={resolvedPreviewFallbackUrl}
                 alt={displayLabel}
                 aspect={cropAspect}
-                sourceWidth={data.imageNaturalWidth}
-                sourceHeight={data.imageNaturalHeight}
+                // The crop preview may intentionally use a thumbnail at low
+                // canvas zoom.  Convert its percent selection against the
+                // asset's original dimensions, never the rendered thumbnail
+                // dimensions (legacy image fields remain a fallback).
+                sourceWidth={data.assetNaturalWidth || data.imageNaturalWidth}
+                sourceHeight={data.assetNaturalHeight || data.imageNaturalHeight}
                 onSelectionChange={setCropSelection}
               />
             ) : isMultiImageExpanded ? (
