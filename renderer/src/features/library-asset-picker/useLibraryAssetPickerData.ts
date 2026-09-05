@@ -271,6 +271,15 @@ export function useLibraryAssetPickerData() {
     void queryClient.prefetchQuery({ queryKey: modelLibraryKeys.images(item.id), queryFn: () => listModelImages(item.id) });
   }
 
+  async function resolveModelChoices(item: LibraryAssetItem) {
+    const result = await queryClient.fetchQuery({
+      queryKey: modelLibraryKeys.images(item.id),
+      queryFn: () => listModelImages(item.id),
+    });
+    if (result.images.length > 1) setModelChoiceFor(item);
+    return result.images;
+  }
+
   return {
     activeTab,
     setActiveTab,
@@ -295,5 +304,6 @@ export function useLibraryAssetPickerData() {
     changeTag,
     toggleModelGender,
     prefetchModelChoices,
+    resolveModelChoices,
   };
 }

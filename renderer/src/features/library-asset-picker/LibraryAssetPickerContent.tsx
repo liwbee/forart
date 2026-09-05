@@ -1,4 +1,4 @@
-import { Images, PersonStanding, Users, X, type LucideIcon } from "lucide-react";
+import { Images, PersonStanding, Users, type LucideIcon } from "lucide-react";
 import { Fragment, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AppScrollArea } from "../../components/AppScrollArea";
@@ -6,10 +6,8 @@ import { LazyImage } from "../../components/LazyImage";
 import { NativeTabs } from "../../components/NativeTabs";
 import { RemoteDataState } from "../../components/RemoteDataState";
 import { AppSelect as Select } from "../../components/AppSelect";
-import { Button } from "../../components/ui/button";
-import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
+import { Popover, PopoverAnchor, PopoverClose, PopoverContent } from "../../components/ui/popover";
 import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { LibraryTagFilterButton, useLibraryTagSettingsStore } from "../library-tags";
 import { cacheBustedLibraryAssetUrl, useLibraryAssetPickerData } from "./useLibraryAssetPickerData";
 import type { LibraryAssetItem, LibraryAssetPickerSource, LibraryAssetSelection } from "./types";
@@ -73,6 +71,26 @@ export function LibraryAssetPickerContent({ onSelect }: LibraryAssetPickerConten
       return;
     }
     if (modelChoiceFor?.id === item.id) picker.setModelChoiceFor(null);
+  }
+
+  async function selectModel(item: LibraryAssetItem) {
+    try {
+      const images = await picker.resolveModelChoices(item);
+      if (images.length !== 1) return;
+      const image = images[0];
+      if (!image.asset_url) return;
+      onSelect({
+        kind: "model",
+        entryId: item.id,
+        assetId: image.asset_id,
+        name: image.caption || image.filename || item.name,
+        url: image.asset_url,
+        thumbnailUrl: image.thumbnail_url || undefined,
+        updatedAt: image.created_at,
+      });
+    } catch {
+      picker.setModelChoiceFor(item);
+    }
   }
 
   if (picker.failure) {
@@ -181,7 +199,12 @@ export function LibraryAssetPickerContent({ onSelect }: LibraryAssetPickerConten
               const thumbnailSrc = item.thumbnailUrl ? cacheBustedLibraryAssetUrl(item.thumbnailUrl, cacheStamp) : "";
               const src = thumbnailSrc || originalSrc;
               const itemButton = (
-                <button type="button" data-kind={item.kind} disabled={!src} onClick={item.needsChoices ? undefined : () => selectItem(item)}>
+                <button
+                  type="button"
+                  data-kind={item.kind}
+                  disabled={!src}
+                  onClick={item.needsChoices ? () => void selectModel(item) : () => selectItem(item)}
+                >
                   {src ? <LazyImage src={src} fallbackSrc={originalSrc} alt={item.name} draggable={false} /> : <span>{t("common:empty.noImage")}</span>}
                   <strong>{item.name || t("infiniteCanvas:untitledCanvas")}</strong>
                 </button>
@@ -194,7 +217,7 @@ export function LibraryAssetPickerContent({ onSelect }: LibraryAssetPickerConten
               const choicesOpen = modelChoiceFor?.id === item.id;
               return (
                 <Popover key={item.id} open={choicesOpen} onOpenChange={(open) => changeModelChoicesOpen(item, open)}>
-                  <PopoverTrigger asChild>{itemButton}</PopoverTrigger>
+                  <PopoverAnchor asChild>{itemButton}</PopoverAnchor>
                   <PopoverContent
                     className="library-asset-picker__choices"
                     side="right"
@@ -207,21 +230,6 @@ export function LibraryAssetPickerContent({ onSelect }: LibraryAssetPickerConten
                     onWheel={(event) => event.stopPropagation()}
                     onKeyDown={(event) => event.stopPropagation()}
                   >
-                    <div className="library-asset-picker__choices-head">
-                      <strong>{item.name}</strong>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="inline-flex">
-                            <PopoverClose asChild>
-                              <Button type="button" variant="ghost" size="icon-sm" aria-label={t("common:actions.close")}>
-                                <X aria-hidden="true" />
-                              </Button>
-                            </PopoverClose>
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>{t("common:actions.close")}</TooltipContent>
-                      </Tooltip>
-                    </div>
                     <AppScrollArea className="library-asset-picker__choice-grid" viewportClassName="library-asset-picker__choice-grid-viewport">
                       {picker.modelChoicesQuery.isLoading ? <div className="library-asset-picker__state">{t("freeCanvasEditor:loadingImages")}</div> : null}
                       {picker.modelChoicesFailure ? <RemoteDataState failure={picker.modelChoicesFailure} scope="panel" onRetry={() => picker.modelChoicesQuery.refetch()} /> : null}

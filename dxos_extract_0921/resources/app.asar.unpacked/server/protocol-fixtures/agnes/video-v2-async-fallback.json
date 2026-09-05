@@ -1,0 +1,42 @@
+[
+  {
+    "method": "POST",
+    "url": "https://apihub.agnes-ai.com/v1/videos",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "model": "agnes-video-v2.0",
+        "prompt": "async test",
+        "width": 1152,
+        "height": 648,
+        "num_frames": 121,
+        "frame_rate": 24
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "url": "https://apihub.agnes-ai.com/agnesapi?video_id=agnes-task-1&model_name=agnes-video-v2.0",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": { "kind": "empty" }
+  },
+  {
+    "method": "GET",
+    "url": "https://apihub.agnes-ai.com/v1/videos/agnes-task-1",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": { "kind": "empty" }
+  }
+]

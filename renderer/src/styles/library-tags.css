@@ -324,16 +324,23 @@
 }
 
 .library-tag-filter-menu__scroll {
+  height: min(280px, var(--radix-popover-content-available-height));
   max-height: min(280px, var(--radix-popover-content-available-height));
+  overflow: hidden;
 }
 
 .library-tag-filter-menu__viewport {
-  height: auto;
+  height: 100%;
+  overscroll-behavior: contain;
+}
+
+.library-tag-filter-menu__content {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   align-content: flex-start;
-  gap: 6px;
-  padding: 8px;
+  gap: 10px;
+  padding: 12px 18px 12px 12px;
 }
 
 .library-tag-filter-menu button {

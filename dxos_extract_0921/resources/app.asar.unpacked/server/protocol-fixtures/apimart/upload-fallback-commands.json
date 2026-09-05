@@ -1,0 +1,62 @@
+{
+  "image": [
+    {
+      "method": "POST",
+      "url": "https://apib.test/v1/uploads/images",
+      "headers": { "accept": "application/json", "authorization": "<secret:authorization>" },
+      "body": {
+        "kind": "multipart",
+        "fields": [{ "name": "file", "file": { "name": "reference.png", "type": "image/png", "bytes": 5, "sha256": "6105d6cc76af400325e94d588ce511be5bfdbb73b437dc51eca43917d7a43e3d" } }]
+      }
+    }
+  ],
+  "video": [
+    {
+      "method": "POST",
+      "url": "https://apib.test/v1/uploads/videos",
+      "headers": { "accept": "application/json", "authorization": "<secret:authorization>" },
+      "body": {
+        "kind": "multipart",
+        "fields": [{ "name": "file", "file": { "name": "reference.mp4", "type": "video/mp4", "bytes": 5, "sha256": "0cab1c9617404faf2b24e221e189ca5945813e14d3f766345b09ca13bbe28ffc" } }]
+      }
+    },
+    {
+      "method": "POST",
+      "url": "https://apib.test/v1/uploads/files",
+      "headers": { "accept": "application/json", "authorization": "<secret:authorization>" },
+      "body": {
+        "kind": "multipart",
+        "fields": [{ "name": "file", "file": { "name": "reference.mp4", "type": "video/mp4", "bytes": 5, "sha256": "0cab1c9617404faf2b24e221e189ca5945813e14d3f766345b09ca13bbe28ffc" } }]
+      }
+    }
+  ],
+  "audio": [
+    {
+      "method": "POST",
+      "url": "https://apib.test/v1/uploads/audios",
+      "headers": { "accept": "application/json", "authorization": "<secret:authorization>" },
+      "body": {
+        "kind": "multipart",
+        "fields": [{ "name": "file", "file": { "name": "reference.mp3", "type": "audio/mpeg", "bytes": 5, "sha256": "6ed8919ce20490a5e3ad8630a4fab69475297abd07db73918dd5f36fcfaeb11b" } }]
+      }
+    },
+    {
+      "method": "POST",
+      "url": "https://apib.test/v1/uploads/files",
+      "headers": { "accept": "application/json", "authorization": "<secret:authorization>" },
+      "body": {
+        "kind": "multipart",
+        "fields": [{ "name": "file", "file": { "name": "reference.mp3", "type": "audio/mpeg", "bytes": 5, "sha256": "6ed8919ce20490a5e3ad8630a4fab69475297abd07db73918dd5f36fcfaeb11b" } }]
+      }
+    },
+    {
+      "method": "POST",
+      "url": "https://apib.test/v1/uploads/images",
+      "headers": { "accept": "application/json", "authorization": "<secret:authorization>" },
+      "body": {
+        "kind": "multipart",
+        "fields": [{ "name": "file", "file": { "name": "reference.mp3", "type": "audio/mpeg", "bytes": 5, "sha256": "6ed8919ce20490a5e3ad8630a4fab69475297abd07db73918dd5f36fcfaeb11b" } }]
+      }
+    }
+  ]
+}

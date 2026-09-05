@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "flows": {
+    "globalAssistant": {
+      "entry": "src/shell/Assistant.vue",
+      "execution": "browser",
+      "maxToolRounds": 6,
+      "modelEndpoint": "/api/agent/step-stream",
+      "toolLoading": "base-plus-opt-in-web-mcp",
+      "permission": "browser-guard",
+      "persistence": "ephemeral-chat"
+    },
+    "folderAgentV1": {
+      "entry": "src/stores/agentTasks.ts",
+      "execution": "browser",
+      "maxToolRounds": 16,
+      "modelEndpoint": "/api/agent/step",
+      "toolLoading": "native-plus-enabled-skills",
+      "permission": "browser-guard",
+      "persistence": "ccs-os:agent-tasks",
+      "refreshBehavior": "running-becomes-interrupted-history"
+    },
+    "mcpTestAgent": {
+      "entry": "server/index.ts#/api/mcp/test-agent",
+      "execution": "express",
+      "maxToolRounds": 4,
+      "toolLoading": "selected-server-only",
+      "permission": "app-open-guard",
+      "persistence": "none"
+    },
+    "dingtalkAgent": {
+      "entry": "server/dingtalkAgent.ts",
+      "execution": "dingtalk-stream-process",
+      "modelCallsPerMessage": 1,
+      "contextMessages": 4,
+      "permission": "prompt-only-sensitive-confirmation",
+      "persistence": "in-memory-session-context"
+    },
+    "shortDrama": {
+      "entry": "server/shortDrama.ts",
+      "execution": "direct-domain-api",
+      "stages": [
+        "script",
+        "design",
+        "storyboard",
+        "generate",
+        "timeline"
+      ],
+      "persistence": "json-plus-project-files",
+      "permission": "route-auth-and-app-guard"
+    },
+    "skillsV1": {
+      "entry": "server/skills.ts",
+      "execution": "express-direct-runner",
+      "callablePrefix": "skill__",
+      "persistence": "server/data/skills.json",
+      "permission": "browser-task-guard"
+    }
+  }
+}

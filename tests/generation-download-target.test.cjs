@@ -40,7 +40,7 @@ test('task-center downloads select the requested result image', () => {
   assert.equal(generationTaskImageAt(task, 2), null);
 });
 
-test('action-fission downloads fall back to the terminal task result before canvas writeback', () => {
+test('action-fission downloads prefer the terminal task result while canvas writeback catches up', () => {
   const { actionFissionDownloadTarget } = loadModule();
   assert.deepEqual(actionFissionDownloadTarget({ resultUrl: '', resultFileName: '' }, task), {
     imageUrl: 'first.png',
@@ -50,6 +50,13 @@ test('action-fission downloads fall back to the terminal task result before canv
     resultUrl: 'canvas-result.png',
     resultFileName: 'canvas-result.png',
   }, task), {
+    imageUrl: 'first.png',
+    fileName: 'first.png',
+  });
+  assert.deepEqual(actionFissionDownloadTarget({
+    resultUrl: 'canvas-result.png',
+    resultFileName: 'canvas-result.png',
+  }, undefined), {
     imageUrl: 'canvas-result.png',
     fileName: 'canvas-result.png',
   });

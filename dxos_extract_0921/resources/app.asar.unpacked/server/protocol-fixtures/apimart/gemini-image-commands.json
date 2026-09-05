@@ -1,0 +1,46 @@
+{
+  "generate": {
+    "method": "POST",
+    "url": "https://apib.test/v1beta/models/gemini-2.5-flash-image:generateContent",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "contents": [{ "role": "user", "parts": [{ "text": "image test" }] }],
+        "generationConfig": {
+          "responseModalities": ["TEXT", "IMAGE"],
+          "imageConfig": { "aspectRatio": "2:3", "imageSize": "1K" }
+        }
+      }
+    }
+  },
+  "edit": {
+    "method": "POST",
+    "url": "https://apib.test/v1beta/models/gemini-2.5-flash-image:generateContent",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "contents": [{
+          "role": "user",
+          "parts": [
+            { "inlineData": { "mimeType": "image/png", "data": "aW1hZ2U=" } },
+            { "text": "edit test" }
+          ]
+        }],
+        "generationConfig": {
+          "responseModalities": ["TEXT", "IMAGE"],
+          "imageConfig": { "aspectRatio": "16:9", "imageSize": "2K" }
+        }
+      }
+    }
+  }
+}

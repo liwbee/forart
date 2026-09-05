@@ -1,0 +1,127 @@
+{
+  "veo-lite-text": {
+    "method": "POST",
+    "url": "https://apib.test/v1/videos/generations",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "prompt": "lite test",
+        "model": "veo3.1-lite",
+        "duration": 8,
+        "aspect_ratio": "9:16",
+        "resolution": "4k"
+      }
+    }
+  },
+  "veo-fast-two-frames": {
+    "method": "POST",
+    "url": "https://apib.test/v1/videos/generations",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "prompt": "frame test",
+        "model": "veo3.1-fast",
+        "duration": 5,
+        "aspect_ratio": "16:9",
+        "resolution": "720p",
+        "image_urls": ["https://cdn.test/first.png", "https://cdn.test/last.png"],
+        "generation_type": "frame"
+      }
+    }
+  },
+  "veo-quality-three-images": {
+    "method": "POST",
+    "url": "https://apib.test/v1/videos/generations",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "prompt": "quality test",
+        "model": "veo3.1-quality",
+        "duration": 6,
+        "aspect_ratio": "16:9",
+        "resolution": "1080p",
+        "image_urls": ["https://cdn.test/one.png", "https://cdn.test/two.png", "https://cdn.test/three.png"]
+      }
+    }
+  },
+  "veo-fast-three-references": {
+    "method": "POST",
+    "url": "https://apib.test/v1/videos/generations",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "prompt": "reference test",
+        "model": "veo3.1-fast",
+        "duration": 5,
+        "aspect_ratio": "16:9",
+        "resolution": "720p",
+        "image_urls": ["https://cdn.test/one.png", "https://cdn.test/two.png", "https://cdn.test/three.png"],
+        "generation_type": "reference"
+      }
+    }
+  },
+  "seedance-role-images": {
+    "method": "POST",
+    "url": "https://apib.test/v1/videos/generations",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "prompt": "role test",
+        "model": "doubao-seedance-2.0",
+        "duration": 5,
+        "size": "16:9",
+        "resolution": "480p",
+        "image_with_roles": [
+          { "url": "https://cdn.test/first.png", "role": "first_frame" },
+          { "url": "https://cdn.test/last.png", "role": "last_frame" }
+        ]
+      }
+    }
+  },
+  "seedance-video-audio": {
+    "method": "POST",
+    "url": "https://apib.test/v1/videos/generations",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "prompt": "multimodal test",
+        "model": "doubao-seedance-2.0",
+        "duration": 5,
+        "size": "9:16",
+        "resolution": "720p",
+        "video_urls": ["https://cdn.test/reference.mp4"],
+        "audio_urls": ["https://cdn.test/reference.mp3"]
+      }
+    }
+  }
+}

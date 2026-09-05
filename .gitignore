@@ -47,6 +47,8 @@ server/admin/assets/
 release/
 releases/
 out/
+forart-server-nas-test.tar
+models/background-removal/
 *.asar
 *.blockmap
 *.dmg

@@ -1,0 +1,155 @@
+[
+  {
+    "method": "POST",
+    "url": "https://apihub.agnes-ai.com/v1/images/generations",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "model": "agnes-image-2.1-flash",
+        "prompt": "test",
+        "size": "1024x1024",
+        "extra_body": { "response_format": "url" }
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "url": "https://apihub.agnes-ai.com/v1/videos",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "model": "agnes-video-v2.0",
+        "prompt": "test",
+        "width": 1152,
+        "height": 648,
+        "num_frames": 121,
+        "frame_rate": 24
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "url": "https://apihub.agnes-ai.com/v1/videos",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "model": "agnes-video-2.5-flash",
+        "prompt": "test flash",
+        "mode": "text",
+        "size": "720P",
+        "aspect_ratio": "9:16",
+        "seconds": "12",
+        "n": 1
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "url": "https://apihub.agnes-ai.com/v1/videos",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "model": "agnes-video-2.5-flash",
+        "prompt": "<Picture 1> moves",
+        "mode": "reference",
+        "size": "720P",
+        "aspect_ratio": "16:9",
+        "seconds": "5",
+        "n": 1,
+        "images": ["data:image/png;base64,aW1hZ2U="]
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "url": "https://apihub.agnes-ai.com/v1/images/generations",
+    "headers": { "accept": "application/json", "authorization": "<secret:authorization>", "content-type": "application/json" },
+    "body": {
+      "kind": "json",
+      "value": {
+        "model": "agnes-image-2.1-flash",
+        "prompt": "edit test",
+        "size": "1024x1024",
+        "extra_body": {
+          "response_format": "url",
+          "image": ["data:image/png;base64,b25l", "data:image/webp;base64,dHdv"]
+        }
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "url": "https://apihub.agnes-ai.com/v1/videos",
+    "headers": { "accept": "application/json", "authorization": "<secret:authorization>", "content-type": "application/json" },
+    "body": {
+      "kind": "json",
+      "value": {
+        "model": "agnes-video-v2.0",
+        "prompt": "single image",
+        "width": 1152,
+        "height": 648,
+        "num_frames": 121,
+        "frame_rate": 24,
+        "image": "data:image/png;base64,aW1hZ2U="
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "url": "https://apihub.agnes-ai.com/v1/videos",
+    "headers": { "accept": "application/json", "authorization": "<secret:authorization>", "content-type": "application/json" },
+    "body": {
+      "kind": "json",
+      "value": {
+        "model": "agnes-video-v2.0",
+        "prompt": "v2 keyframes",
+        "width": 1152,
+        "height": 648,
+        "num_frames": 121,
+        "frame_rate": 24,
+        "extra_body": {
+          "image": ["data:image/png;base64,Zmlyc3Q=", "data:image/png;base64,bGFzdA=="],
+          "mode": "keyframes"
+        }
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "url": "https://apihub.agnes-ai.com/v1/videos",
+    "headers": { "accept": "application/json", "authorization": "<secret:authorization>", "content-type": "application/json" },
+    "body": {
+      "kind": "json",
+      "value": {
+        "model": "agnes-video-2.5-flash",
+        "prompt": "flash keyframes",
+        "mode": "keyframe",
+        "size": "720P",
+        "aspect_ratio": "16:9",
+        "seconds": "5",
+        "n": 1,
+        "images": ["data:image/png;base64,Zmlyc3Q=", "data:image/png;base64,bGFzdA=="]
+      }
+    }
+  }
+]

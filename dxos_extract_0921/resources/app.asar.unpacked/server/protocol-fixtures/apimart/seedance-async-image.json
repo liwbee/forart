@@ -1,0 +1,31 @@
+[
+  {
+    "method": "POST",
+    "url": "https://apib.test/v1/videos/generations",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>",
+      "content-type": "application/json"
+    },
+    "body": {
+      "kind": "json",
+      "value": {
+        "prompt": "A photo album rises into frame",
+        "model": "seedance-2.0-mini",
+        "duration": 4,
+        "size": "16:9",
+        "resolution": "480p",
+        "image_urls": ["https://cdn.test/reference.png"]
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "url": "https://apib.test/v1/tasks/task_array_response?language=zh",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "<secret:authorization>"
+    },
+    "body": { "kind": "empty" }
+  }
+]

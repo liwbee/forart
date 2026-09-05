@@ -53,62 +53,64 @@ export function LibraryTagFilterButton({ tags, tagFilter, tagCounts, allLabel, a
 
   const menu = (
     <AppScrollArea className="library-tag-filter-menu__scroll" viewportClassName="library-tag-filter-menu__viewport">
-      {menuContentBefore}
-      <Button
-        type="button"
-        variant={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length && !tagFilter.untaggedOnly ? "default" : "ghost"}
-        role="menuitemcheckbox"
-        aria-checked={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length && !tagFilter.untaggedOnly}
-        className={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length && !tagFilter.untaggedOnly ? "active" : ""}
-        onClick={() => {
-          onChange(createLibraryTagFilter());
-        }}
-      >
-        {allLabel}
-      </Button>
-      {tags.map((tag) => {
-        const included = includeTagSet.has(tag.id);
-        const excluded = excludeTagSet.has(tag.id);
-        const selected = included || excluded;
-        const count = tagCounts?.[tag.id] || 0;
-        const disabled = tagCounts !== undefined && count <= 0 && !selected;
-        return (
-          <div
-            key={tag.id}
-            className={`library-tag-filter-menu__tag${included ? " library-tag-filter-menu__tag--include" : ""}${excluded ? " library-tag-filter-menu__tag--exclude" : ""}${disabled ? " library-tag-filter-menu__tag--empty" : ""}`}
-          >
-            <Button
-              type="button"
-              variant="ghost"
-              role="menuitemcheckbox"
-              aria-checked={selected}
-              className="library-tag-filter-menu__include"
-              disabled={disabled}
-              onClick={() => toggleIncludeTag(tag.id)}
+      <div className="library-tag-filter-menu__content">
+        {menuContentBefore}
+        <Button
+          type="button"
+          variant={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length && !tagFilter.untaggedOnly ? "default" : "ghost"}
+          role="menuitemcheckbox"
+          aria-checked={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length && !tagFilter.untaggedOnly}
+          className={!tagFilter.includeTagIds.length && !tagFilter.excludeTagIds.length && !tagFilter.untaggedOnly ? "active" : ""}
+          onClick={() => {
+            onChange(createLibraryTagFilter());
+          }}
+        >
+          {allLabel}
+        </Button>
+        {tags.map((tag) => {
+          const included = includeTagSet.has(tag.id);
+          const excluded = excludeTagSet.has(tag.id);
+          const selected = included || excluded;
+          const count = tagCounts?.[tag.id] || 0;
+          const disabled = tagCounts !== undefined && count <= 0 && !selected;
+          return (
+            <div
+              key={tag.id}
+              className={`library-tag-filter-menu__tag${included ? " library-tag-filter-menu__tag--include" : ""}${excluded ? " library-tag-filter-menu__tag--exclude" : ""}${disabled ? " library-tag-filter-menu__tag--empty" : ""}`}
             >
-              <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
-              <span>{tag.name}</span>
-              <span className="library-tag-filter-menu__count">{count}</span>
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              disabled={disabled}
-              className="library-tag-filter-menu__exclude"
-              aria-label={t("common:labels.excludeTag", { name: tag.name })}
-              title={t("common:labels.excludeTag", { name: tag.name })}
-              onClick={(event) => {
-                event.stopPropagation();
-                toggleExcludeTag(tag.id);
-              }}
-            >
-              <Ban aria-hidden="true" />
-            </Button>
-          </div>
-        );
-      })}
-      {!tags.length ? <div className="library-tag-filter-menu__empty">{allLabel}</div> : null}
+              <Button
+                type="button"
+                variant="ghost"
+                role="menuitemcheckbox"
+                aria-checked={selected}
+                className="library-tag-filter-menu__include"
+                disabled={disabled}
+                onClick={() => toggleIncludeTag(tag.id)}
+              >
+                <span className={`library-tag-color-dot library-tag-color-dot--${normalizeLibraryTagColor(tag.color)}`} aria-hidden="true" />
+                <span>{tag.name}</span>
+                <span className="library-tag-filter-menu__count">{count}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                disabled={disabled}
+                className="library-tag-filter-menu__exclude"
+                aria-label={t("common:labels.excludeTag", { name: tag.name })}
+                title={t("common:labels.excludeTag", { name: tag.name })}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleExcludeTag(tag.id);
+                }}
+              >
+                <Ban aria-hidden="true" />
+              </Button>
+            </div>
+          );
+        })}
+        {!tags.length ? <div className="library-tag-filter-menu__empty">{allLabel}</div> : null}
+      </div>
     </AppScrollArea>
   );
 

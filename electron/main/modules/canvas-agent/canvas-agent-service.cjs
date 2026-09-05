@@ -13,9 +13,24 @@ const SUPPORTED_TASKS = Object.freeze({
 });
 const REASONING_LEVELS = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
-function safeErrorMessage(error, provider) {
+function isEmptySuccessfulModelResponse(error) {
+  const statusCode = Number(error?.statusCode);
+  if (statusCode < 200 || statusCode >= 300) return false;
+  try {
+    const response = JSON.parse(String(error?.responseBody || ''));
+    return response?.choices === null || (Array.isArray(response?.choices) && response.choices.length === 0);
+  } catch {
+    return false;
+  }
+}
+
+function safeErrorMessage(error, provider, language = 'zh-CN') {
   const secret = String(provider?.apiKey || '').trim();
-  const message = error instanceof Error ? error.message : String(error || 'Agent request failed.');
+  const message = isEmptySuccessfulModelResponse(error)
+    ? language === 'en-US'
+      ? 'The selected LLM returned no content. Choose another LLM model in Agent settings and try again.'
+      : '当前 LLM 模型未返回内容，请在 Agent 设置中选择其他 LLM 模型后重试。'
+    : error instanceof Error ? error.message : String(error || 'Agent request failed.');
   return secret ? message.split(secret).join('[redacted]') : message;
 }
 
@@ -170,12 +185,12 @@ function createCanvasAgentService({ net, assetStore, configStore }) {
     const timeout = setTimeout(() => controller.abort(), 120000);
     activeRuns.set(runId, controller);
     const progress = (stage) => emitProgress({ runId, stage });
+    // 输出语言跟随渲染进程当前界面语言，未携带时使用中文。
+    const language = normalizeRequestLanguage(request.language) || 'zh-CN';
 
     try {
       progress('preparing-request');
       const model = await createAgentModel(provider, route.model);
-      // 输出语言跟随渲染进程当前界面语言，未携带时使用中文。
-      const language = normalizeRequestLanguage(request.language) || 'zh-CN';
       let messages;
       let schema;
       if (task === 'smart-reverse') {
@@ -221,7 +236,7 @@ function createCanvasAgentService({ net, assetStore, configStore }) {
       progress('completed');
       return output;
     } catch (error) {
-      throw new Error(safeErrorMessage(error, provider));
+      throw new Error(safeErrorMessage(error, provider, language));
     } finally {
       clearTimeout(timeout);
       activeRuns.delete(runId);
@@ -238,4 +253,4 @@ function createCanvasAgentService({ net, assetStore, configStore }) {
   return { run, cancel };
 }
 
-module.exports = { createCanvasAgentService, extractJsonCandidate, parseStructuredResult, reasoningForRequest, routeForRequest, splitInstructions, structuredOutputInstruction };
+module.exports = { createCanvasAgentService, extractJsonCandidate, parseStructuredResult, reasoningForRequest, routeForRequest, safeErrorMessage, splitInstructions, structuredOutputInstruction };

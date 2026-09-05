@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { extractJsonCandidate, parseStructuredResult, reasoningForRequest, routeForRequest, splitInstructions, structuredOutputInstruction } = require('../electron/main/modules/canvas-agent/canvas-agent-service.cjs');
+const { extractJsonCandidate, parseStructuredResult, reasoningForRequest, routeForRequest, safeErrorMessage, splitInstructions, structuredOutputInstruction } = require('../electron/main/modules/canvas-agent/canvas-agent-service.cjs');
 const { z } = require('zod');
 const { smartReverseMessages } = require('../electron/main/modules/canvas-agent/tasks/reverse-prompt.cjs');
 const {
@@ -82,6 +82,21 @@ test('Canvas Agent parses plain, fenced, and explanatory JSON responses', () => 
   assert.deepEqual(parseStructuredResult('结果如下： {"optimizedPrompt":"extracted"} 谢谢', schema), { optimizedPrompt: 'extracted' });
   assert.throws(() => parseStructuredResult('not json', schema), /invalid JSON/i);
   assert.equal(extractJsonCandidate('{"a":"} inside string"} trailing'), '{"a":"} inside string"}');
+});
+
+test('Canvas Agent explains an empty successful model response', () => {
+  const error = Object.assign(new Error('Invalid JSON response'), {
+    statusCode: 200,
+    responseBody: JSON.stringify({ choices: null, usage: { total_tokens: 0 } }),
+  });
+  assert.equal(
+    safeErrorMessage(error, {}, 'zh-CN'),
+    '当前 LLM 模型未返回内容，请在 Agent 设置中选择其他 LLM 模型后重试。',
+  );
+  assert.equal(
+    safeErrorMessage(error, {}, 'en-US'),
+    'The selected LLM returned no content. Choose another LLM model in Agent settings and try again.',
+  );
 });
 
 test('Canvas Agent injects the concrete JSON schema into text-output prompts', () => {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AppSelect } from "../../components/AppSelect";
-import { Field, FieldGroup } from "../../components/ui/field";
+import { Field, FieldGroup, FieldLabel } from "../../components/ui/field";
 import type { ForartAgentSettings } from "../../app/appConfig";
 import {
   API_PROVIDER_CHANGED_EVENT,
@@ -114,39 +114,45 @@ export function AgentSettingsPanel({ hidden = false }: AgentSettingsPanelProps) 
             <Field orientation="horizontal" className="settings-download-path-row">
               <h3>{t("settings:agentOptimization")}</h3>
               <div className="settings-agent-controls">
-                <AppSelect
-                  value={reasoningValue}
-                  options={[
-                    { value: "none", label: t("settings:agentReasoningNone") },
-                    { value: "minimal", label: t("settings:agentReasoningMinimal") },
-                    { value: "low", label: t("settings:agentReasoningLow") },
-                    { value: "medium", label: t("settings:agentReasoningMedium") },
-                    { value: "high", label: t("settings:agentReasoningHigh") },
-                    { value: "xhigh", label: t("settings:agentReasoningXhigh") },
-                    { value: "max", label: t("settings:agentReasoningMax") },
-                  ]}
-                  onChange={(value) => setSettings((current) => value === "none"
-                    ? { ...current, thinkingMode: false }
-                    : {
+                <Field className="settings-agent-control">
+                  <FieldLabel className="settings-agent-control__label">{t("settings:agentReasoningLevel")}</FieldLabel>
+                  <AppSelect
+                    value={reasoningValue}
+                    options={[
+                      { value: "none", label: t("settings:agentReasoningNone") },
+                      { value: "minimal", label: t("settings:agentReasoningMinimal") },
+                      { value: "low", label: t("settings:agentReasoningLow") },
+                      { value: "medium", label: t("settings:agentReasoningMedium") },
+                      { value: "high", label: t("settings:agentReasoningHigh") },
+                      { value: "xhigh", label: t("settings:agentReasoningXhigh") },
+                      { value: "max", label: t("settings:agentReasoningMax") },
+                    ]}
+                    onChange={(value) => setSettings((current) => value === "none"
+                      ? { ...current, thinkingMode: false }
+                      : {
+                        ...current,
+                        thinkingMode: true,
+                        reasoningLevel: value as ForartAgentSettings["reasoningLevel"],
+                      })}
+                    ariaLabel={t("settings:agentReasoningLevel")}
+                    className="settings-agent-reasoning-select"
+                    size="sm"
+                  />
+                </Field>
+                <Field className="settings-agent-control">
+                  <FieldLabel className="settings-agent-control__label">{t("settings:agentLlmModel")}</FieldLabel>
+                  <AppSelect
+                    value={selectedModelValue}
+                    options={modelOptions}
+                    onChange={(value) => setSettings((current) => ({
                       ...current,
-                      thinkingMode: true,
-                      reasoningLevel: value as ForartAgentSettings["reasoningLevel"],
-                    })}
-                  ariaLabel={t("settings:agentReasoningLevel")}
-                  className="settings-agent-reasoning-select"
-                  size="sm"
-                />
-                <AppSelect
-                  value={selectedModelValue}
-                  options={modelOptions}
-                  onChange={(value) => setSettings((current) => ({
-                    ...current,
-                    imageGeneratorPromptOptimization: parseModelValue(value),
-                  }))}
-                  ariaLabel={t("settings:agentOptimizationModel")}
-                  placeholder={t("settings:agentModelNone")}
-                  size="sm"
-                />
+                      imageGeneratorPromptOptimization: parseModelValue(value),
+                    }))}
+                    ariaLabel={t("settings:agentLlmModel")}
+                    placeholder={t("settings:agentModelNone")}
+                    size="sm"
+                  />
+                </Field>
               </div>
             </Field>
           </FieldGroup>
