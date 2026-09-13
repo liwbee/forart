@@ -429,7 +429,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  cursor: zoom-in;
+  cursor: pointer;
   touch-action: none;
   background-color: var(--surface-card);
 }

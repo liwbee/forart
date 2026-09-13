@@ -1,4 +1,6 @@
-@import "tailwindcss";
+/* Limit class discovery to renderer code. Runtime data (especially downloaded
+   ONNX models under the project root in development) must never be scanned. */
+@import "tailwindcss" source("../");
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));

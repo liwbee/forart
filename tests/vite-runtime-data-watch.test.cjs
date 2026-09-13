@@ -9,3 +9,8 @@ test('Vite and Git ignore generation SQLite runtime files', () => {
   const gitignore = fs.readFileSync(path.join(__dirname, '..', '.gitignore'), 'utf8');
   assert.match(gitignore, /^generation-tasks\.sqlite\*$/m);
 });
+
+test('Tailwind scans renderer sources instead of downloaded ONNX models', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'styles', 'tailwind.css'), 'utf8');
+  assert.match(source, /@import\s+"tailwindcss"\s+source\("\.\.\/"\);/);
+});

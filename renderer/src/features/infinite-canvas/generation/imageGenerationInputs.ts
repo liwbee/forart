@@ -1,7 +1,7 @@
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import type { ImageModelRule } from "../../settings/imageModelRules";
 import { canvasPreviewSourceUrl } from "../canvasThumbnails";
-import { nativeCanvasNodePrimaryImage } from "../nativeCanvas";
+import { nativeCanvasNodeImages, nativeCanvasNodePrimaryImage } from "../nativeCanvas";
 import type {
   NativeCanvasEdge,
   NativeCanvasEdgeData,
@@ -53,7 +53,7 @@ export function edgeDataForConnection(
   edges: NativeCanvasEdge[],
   targetHandle?: string | null,
 ): NativeCanvasEdgeData | undefined {
-  if (targetKind !== "imageGenerator" && targetKind !== "actionFission" && targetKind !== "smartReverse") return undefined;
+  if (targetKind !== "imageGenerator" && targetKind !== "batchImageGenerator" && targetKind !== "actionFission" && targetKind !== "smartReverse") return undefined;
   const inputKind = inputKindForSource(sourceKind);
   if (!inputKind) return undefined;
   if (targetKind === "smartReverse") {
@@ -62,7 +62,7 @@ export function edgeDataForConnection(
       : { inputKind };
   }
   if (targetHandle === "additional-reference") {
-    if (targetKind !== "actionFission") return undefined;
+    if (targetKind !== "actionFission" && targetKind !== "batchImageGenerator") return undefined;
     if (inputKind === "referenceImage") {
       return {
           inputKind: "additionalReferenceImage",
@@ -88,18 +88,26 @@ function collectReferenceInputs(
     .filter((edge) => edge.target === targetId && edge.data?.inputKind === inputKind)
     .flatMap((edge) => {
       const source = nodeMap.get(edge.source);
-      const primaryImage = source ? nativeCanvasNodePrimaryImage(source.data) : null;
-      const imageUrl = String(primaryImage?.localUrl || primaryImage?.url || "").trim();
-      if (!source || !imageUrl) return [];
-      const previewSourceUrl = canvasPreviewSourceUrl(imageUrl, primaryImage?.thumbUrl);
-      return [{
-        edgeId: edge.id,
-        nodeId: source.id,
-        order: Math.max(1, Number(edge.data?.referenceOrder || 1)),
-        title: String(source.data.label || fallbackTitle),
-        imageUrl: resolveLibraryImageUrl(imageUrl),
-        previewUrl: previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "",
-      }];
+      if (!source) return [];
+      const images = typeof nativeCanvasNodeImages === "function"
+        ? nativeCanvasNodeImages(source.data)
+        : (() => {
+          const primary = nativeCanvasNodePrimaryImage(source.data);
+          return primary ? [primary] : [];
+        })();
+      return images.flatMap((image, index) => {
+        const imageUrl = String(image.localUrl || image.url || "").trim();
+        if (!imageUrl) return [];
+        const previewSourceUrl = canvasPreviewSourceUrl(imageUrl, image.thumbUrl);
+        return [{
+          edgeId: images.length > 1 ? `${edge.id}:${index}` : edge.id,
+          nodeId: source.id,
+          order: Math.max(1, Number(edge.data?.referenceOrder || 1)) + index / 1000,
+          title: images.length > 1 ? `${String(source.data.label || fallbackTitle)} ${index + 1}` : String(source.data.label || fallbackTitle),
+          imageUrl: resolveLibraryImageUrl(imageUrl),
+          previewUrl: previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "",
+        }];
+      });
     })
     .sort((left, right) => left.order - right.order || left.edgeId.localeCompare(right.edgeId));
 }

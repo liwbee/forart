@@ -13,6 +13,21 @@ import {
 } from "./library-storage-layout.mjs";
 
 const PROMPT_LIMIT = 4000;
+const ENTRY_CREATION_LOCKS = new Map();
+
+async function withEntryCreationLock(projectId, work) {
+  const previous = ENTRY_CREATION_LOCKS.get(projectId) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => { release = resolve; });
+  ENTRY_CREATION_LOCKS.set(projectId, current);
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release();
+    if (ENTRY_CREATION_LOCKS.get(projectId) === current) ENTRY_CREATION_LOCKS.delete(projectId);
+  }
+}
 
 function normalizeTags(values) {
   const tags = [];
@@ -333,22 +348,28 @@ export function createUnifiedLibraryService(runtime, { kind, localAssetUrl, loca
   }
 
   async function createEntry(projectId, payload = {}) {
-    const project = await repository.getProject(kind, projectId);
-    if (!project) return null;
-    const timestamp = nowIso();
-    const name = validateFileNamePart(payload.name || config.defaultEntry, config.label);
-    if (await repository.entryNameExists(projectId, name)) throw new Error(`${config.label} must be unique within the project`);
-    const id = newId(config.prefix);
-    const entry = { id, project_id: projectId, kind, name, created_at: timestamp, updated_at: timestamp };
-    const profile = kind === "model"
-      ? { code: String(payload.code || nextCode([], project.name)), gender: sanitizeGender(payload.gender) }
-      : kind === "action" ? { prompt: String(payload.prompt || "").slice(0, PROMPT_LIMIT) } : null;
-    await repository.transaction(async (tx) => {
-      const created = await tx.insertEntry(entry, profile);
-      await updateEntryTags(tx, id, projectId, payload.tags || []);
-      return created;
+    return withEntryCreationLock(projectId, async () => {
+      const project = await repository.getProject(kind, projectId);
+      if (!project) return null;
+      const timestamp = nowIso();
+      const name = payload.name
+        ? validateFileNamePart(payload.name, config.label)
+        : kind === "model"
+          ? await nextAvailableEntryName(projectId, project.name)
+          : validateFileNamePart(config.defaultEntry, config.label);
+      if (await repository.entryNameExists(projectId, name)) throw new Error(`${config.label} must be unique within the project`);
+      const id = newId(config.prefix);
+      const entry = { id, project_id: projectId, kind, name, created_at: timestamp, updated_at: timestamp };
+      const profile = kind === "model"
+        ? { code: String(payload.code || nextCode([], project.name)), gender: sanitizeGender(payload.gender) }
+        : kind === "action" ? { prompt: String(payload.prompt || "").slice(0, PROMPT_LIMIT) } : null;
+      await repository.transaction(async (tx) => {
+        const created = await tx.insertEntry(entry, profile);
+        await updateEntryTags(tx, id, projectId, payload.tags || []);
+        return created;
+      });
+      return materializeEntry(await repository.getEntry(kind, id));
     });
-    return materializeEntry(await repository.getEntry(kind, id));
   }
 
   function nextCode(_rows, projectName) {
@@ -356,33 +377,47 @@ export function createUnifiedLibraryService(runtime, { kind, localAssetUrl, loca
   }
 
   async function createEntryFromFile(projectId, payload = {}) {
-    const project = await repository.getProject(kind, projectId);
-    if (!project) return null;
-    const content = Buffer.isBuffer(payload.buffer) ? payload.buffer : Buffer.from(payload.buffer || "");
-    if (!content.length) throw new Error("Invalid image data");
-    const name = payload.name
-      ? validateFileNamePart(payload.name, config.label)
-      : `${safePathPart(project.name, config.prefix)}_${String((await repository.listEntries(kind, projectId)).length + 1).padStart(3, "0")}`;
-    if (await repository.entryNameExists(projectId, name)) throw new Error(`${config.label} must be unique within the project`);
-    const id = newId(config.prefix);
-    const timestamp = nowIso();
-    const result = await writeAssetInTransaction(content, payload.mime_type || "image/png", payload.filename || "image", {
-      source: config.source,
-      directory: libraryEntryDirectory(runtime, kind, project.name, name),
-      filenameStem: entryFilenameStem(name),
-    }, async (tx, asset) => {
-      const entry = { id, project_id: projectId, kind, name, created_at: timestamp, updated_at: timestamp };
-      const profile = kind === "model"
-        ? { code: String(payload.code || nextCode([], project.name)), gender: sanitizeGender(payload.gender) }
-        : kind === "action" ? { prompt: String(payload.prompt || "").slice(0, PROMPT_LIMIT) } : null;
-      const created = await tx.insertEntry(entry, profile);
-      await tx.insertEntryAsset({ id: newId("entry_asset"), entry_id: id, project_id: projectId, kind, asset_id: asset.id, role: "primary", is_cover: 1, caption: "", sort_order: 0, created_at: timestamp });
-      const currentProject = await tx.getProject(kind, projectId);
-      if (!currentProject?.cover_asset_id) await tx.updateProject(kind, projectId, { cover_asset_id: asset.id, updated_at: timestamp });
-      await updateEntryTags(tx, id, projectId, payload.tags || []);
-      return created;
+    return withEntryCreationLock(projectId, async () => {
+      const project = await repository.getProject(kind, projectId);
+      if (!project) return null;
+      const content = Buffer.isBuffer(payload.buffer) ? payload.buffer : Buffer.from(payload.buffer || "");
+      if (!content.length) throw new Error("Invalid image data");
+      const name = payload.name
+        ? validateFileNamePart(payload.name, config.label)
+        : await nextAvailableEntryName(projectId, project.name);
+      if (await repository.entryNameExists(projectId, name)) throw new Error(`${config.label} must be unique within the project`);
+      const id = newId(config.prefix);
+      const timestamp = nowIso();
+      await writeAssetInTransaction(content, payload.mime_type || "image/png", payload.filename || "image", {
+        source: config.source,
+        directory: libraryEntryDirectory(runtime, kind, project.name, name),
+        filenameStem: entryFilenameStem(name),
+      }, async (tx, asset) => {
+        const entry = { id, project_id: projectId, kind, name, created_at: timestamp, updated_at: timestamp };
+        const profile = kind === "model"
+          ? { code: String(payload.code || nextCode([], project.name)), gender: sanitizeGender(payload.gender) }
+          : kind === "action" ? { prompt: String(payload.prompt || "").slice(0, PROMPT_LIMIT) } : null;
+        const created = await tx.insertEntry(entry, profile);
+        await tx.insertEntryAsset({ id: newId("entry_asset"), entry_id: id, project_id: projectId, kind, asset_id: asset.id, role: "primary", is_cover: 1, caption: "", sort_order: 0, created_at: timestamp });
+        const currentProject = await tx.getProject(kind, projectId);
+        if (!currentProject?.cover_asset_id) await tx.updateProject(kind, projectId, { cover_asset_id: asset.id, updated_at: timestamp });
+        await updateEntryTags(tx, id, projectId, payload.tags || []);
+        return created;
+      });
+      return materializeEntry(await repository.getEntry(kind, id));
     });
-    return materializeEntry(await repository.getEntry(kind, id));
+  }
+
+  async function nextAvailableEntryName(projectId, projectName) {
+    const existingNames = new Set((await repository.listEntries(kind, projectId)).map((entry) => String(entry.name || "")));
+    const baseName = safePathPart(projectName, config.prefix);
+    let index = 1;
+    let name = "";
+    do {
+      name = `${baseName}_${String(index).padStart(3, "0")}`;
+      index += 1;
+    } while (existingNames.has(name));
+    return name;
   }
 
   async function updateEntry(entryId, payload = {}) {

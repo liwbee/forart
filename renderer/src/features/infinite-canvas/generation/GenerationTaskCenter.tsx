@@ -39,6 +39,29 @@ const TASK_PAGE_SIZE = 30;
 const TASK_ROW_HEIGHT = 69;
 const EMPTY_TASK_COUNTS = { all: 0, active: 0, succeeded: 0, exceptional: 0 };
 
+function isSameLocalCalendarDay(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate();
+}
+
+function formatTaskTimestamp(timestamp: number, locale: string, todayLabel: string) {
+  const date = new Date(timestamp);
+  if (isSameLocalCalendarDay(date, new Date())) {
+    const time = new Intl.DateTimeFormat(locale, {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+    return `${todayLabel} ${time}`;
+  }
+  return new Intl.DateTimeFormat(locale, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function canvasImageTaskToGenerationTask(task: CanvasTaskDto): GenerationTaskDto {
   return {
     id: task.id,
@@ -271,12 +294,11 @@ function ImageTaskCenter({ open, onClose }: GenerationTaskCenterProps) {
                 task.resolution || task.quality || "—",
                 task.aspectRatio || "—",
               ].join(" · ");
-              const timestamp = new Intl.DateTimeFormat(i18n.language, {
-                month: "2-digit",
-                day: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit",
-              }).format(task.updatedAt);
+              const timestamp = formatTaskTimestamp(
+                task.updatedAt,
+                i18n.language,
+                t("infiniteCanvas:taskToday"),
+              );
               const duration = Number(task.durationMs || 0) > 0
                 ? formatGenerationDuration(Number(task.durationMs))
                 : "";

@@ -316,31 +316,72 @@ function fileNameFromImageSource(source, contentType, index) {
   return `reference-${index + 1}${extensionFromContentType(contentType) || '.png'}`;
 }
 
+function imageMimeType(value) {
+  const normalized = String(value || '').split(';', 1)[0].trim().toLowerCase();
+  return /^image\/[a-z0-9.+-]+$/i.test(normalized) ? normalized : '';
+}
+
+function imageMimeTypeFromSource(source) {
+  let extension = '';
+  try {
+    extension = path.extname(new URL(String(source || '')).pathname).toLowerCase();
+  } catch {
+    extension = path.extname(String(source || '')).toLowerCase();
+  }
+  const mimeByExtension = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+    '.avif': 'image/avif',
+  };
+  return mimeByExtension[extension] || '';
+}
+
+function typedImageBlob(blob, mimeType) {
+  const normalized = imageMimeType(mimeType);
+  if (!normalized || imageMimeType(blob?.type) === normalized) return blob;
+  return new Blob([blob], { type: normalized });
+}
+
 async function readReferenceBlob({ net, assetStore }, source, signal) {
   const localAsset = assetStore.resolveAssetUrl(source);
   if (localAsset && fs.existsSync(localAsset)) {
     const buffer = fs.readFileSync(localAsset);
+    const contentType = imageMimeTypeFromSource(localAsset) || 'image/png';
     return {
-      blob: new Blob([buffer]),
-      contentType: 'image/' + (path.extname(localAsset).slice(1).replace('jpg', 'jpeg') || 'png'),
+      // A Blob without an explicit type is serialized as application/octet-
+      // stream by FormData. Some OpenAI-compatible gateways preserve that
+      // type when converting the multipart image into image_url.data, which
+      // then fails OpenAI's image MIME validation.
+      blob: new Blob([buffer], { type: contentType }),
+      contentType,
       source,
     };
   }
   const response = await net.fetch(source, { signal });
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
+  const responseBlob = await response.blob();
+  const contentType = imageMimeType(response.headers.get('content-type'))
+    || imageMimeType(responseBlob.type)
+    || imageMimeTypeFromSource(source)
+    || 'image/png';
   return {
-    blob: await response.blob(),
-    contentType: response.headers.get('content-type'),
+    blob: typedImageBlob(responseBlob, contentType),
+    contentType,
     source,
   };
 }
 
 async function referenceToFile(context, source, index, signal) {
   const { blob, contentType, source: readableSource } = await readReferenceBlob(context, source, signal);
-  const mimeType = blob.type || contentType || 'image/png';
+  const mimeType = imageMimeType(blob.type)
+    || imageMimeType(contentType)
+    || imageMimeTypeFromSource(readableSource);
   if (!/^image\//i.test(mimeType)) throw new Error(`Reference image must be an image file, received ${mimeType}.`);
   return {
-    blob,
+    blob: typedImageBlob(blob, mimeType),
     mimeType,
     fileName: fileNameFromImageSource(readableSource, mimeType, index),
   };
@@ -348,10 +389,12 @@ async function referenceToFile(context, source, index, signal) {
 
 async function uploadReferenceImage(context, uploadUrl, headers, source, index, signal) {
   const { blob, contentType, source: readableSource } = await readReferenceBlob(context, source, signal);
-  const mimeType = blob.type || contentType || 'image/png';
+  const mimeType = imageMimeType(blob.type)
+    || imageMimeType(contentType)
+    || imageMimeTypeFromSource(readableSource);
   if (!/^image\//i.test(mimeType)) throw new Error(`Reference image must be an image file, received ${mimeType}.`);
   const formData = new FormData();
-  formData.append('file', blob, fileNameFromImageSource(readableSource, mimeType, index));
+  formData.append('file', typedImageBlob(blob, mimeType), fileNameFromImageSource(readableSource, mimeType, index));
   const payload = await requestJson(context.net, uploadUrl, {
     method: 'POST',
     headers,
@@ -420,9 +463,9 @@ async function normalizeReferenceImages(context, baseUrl, uploadHeaders, referen
     }
     seen.add(value);
     context.generationTaskStore.updateTask(taskId, {
-      status: 'running',
+      status: 'preparing',
       message: '',
-      messageCode: 'image.referenceUploading',
+      messageCode: 'generation.referencesUploading',
       messageParams: { current: normalized.length + 1, total: referenceImages.length },
     });
     normalized.push(await uploadReferenceImage(context, imageUploadsUrl(baseUrl), uploadHeaders, value, normalized.length, signal));
@@ -441,16 +484,16 @@ async function normalizeReferenceImageDataUris(context, referenceImages, taskId,
       throw new Error('Reference images must be http(s), Forart asset URLs, or image Data URIs.');
     }
     seen.add(value);
+    context.generationTaskStore.updateTask(taskId, {
+      status: 'preparing',
+      message: '',
+      messageCode: 'generation.referencesPreparing',
+      messageParams: { current: normalized.length + 1, total: referenceImages.length },
+    });
     if (/^data:image\//i.test(value)) {
       normalized.push(value);
       continue;
     }
-    context.generationTaskStore.updateTask(taskId, {
-      status: 'running',
-      message: '',
-      messageCode: 'image.referencePreparing',
-      messageParams: { current: normalized.length + 1, total: referenceImages.length },
-    });
     normalized.push(await referenceImageToDataUri(context, value, signal));
   }
   return normalized;
@@ -465,10 +508,6 @@ function openAiSizeFor(resolution, aspectRatio) {
   if (ratioW === ratioH) return `${shortEdge}x${shortEdge}`;
   if (ratioW > ratioH) return `${shortEdge}x${Math.round(shortEdge * ratioH / ratioW)}`;
   return `${Math.round(shortEdge * ratioW / ratioH)}x${shortEdge}`;
-}
-
-function isGptImage2Model(model) {
-  return /gpt[-_. ]?image[-_. ]?(?:v)?2/i.test(String(model || ''));
 }
 
 function normalizeCustomPixelSize(value, constraints) {
@@ -514,12 +553,18 @@ async function generateGeminiImage(context, provider, model, prompt, referenceIm
   });
   parts.push({ text: prompt });
   context.generationTaskStore.updateTask(taskId, {
-    status: 'running',
+    status: 'submitting',
     message: '',
-    messageCode: 'image.geminiGenerating',
-    messageParams: null,
+    messageCode: 'generation.requestSubmitting',
+    messageParams: { operation: referenceImages.length ? 'edit' : 'generate' },
   });
   markRemoteExecutionStarted(context, taskId);
+  context.generationTaskStore.updateTask(taskId, {
+    status: 'running',
+    message: '',
+    messageCode: 'generation.remoteProcessing',
+    messageParams: { operation: referenceImages.length ? 'edit' : 'generate' },
+  });
   const payload = await requestJson(context.net, geminiGenerateContentUrl(provider, model), {
     method: 'POST',
     headers: {
@@ -543,7 +588,12 @@ async function generateGeminiImage(context, provider, model, prompt, referenceIm
 }
 
 async function pollImageTask(context, baseUrl, headers, taskId, upstreamTaskId, signal) {
-  context.generationTaskStore.updateTask(taskId, { status: 'running', message: '', messageCode: 'image.waitingForResult', messageParams: null });
+  context.generationTaskStore.updateTask(taskId, {
+    status: 'running',
+    message: '',
+    messageCode: 'generation.remoteProcessing',
+    messageParams: null,
+  });
   await wait(3000, signal);
   while (true) {
     const current = context.generationTaskStore.getTask(taskId);
@@ -556,7 +606,14 @@ async function pollImageTask(context, baseUrl, headers, taskId, upstreamTaskId, 
     const results = findImagesInPayload(payload);
     if (results.length) return results;
     const status = readTaskStatus(payload).toLowerCase();
-    if (status) context.generationTaskStore.updateTask(taskId, { status: 'running', message: status, messageCode: '', messageParams: null });
+    if (status) {
+      context.generationTaskStore.updateTask(taskId, {
+        status: 'running',
+        message: status,
+        messageCode: 'generation.remoteProcessing',
+        messageParams: { providerStatus: status },
+      });
+    }
     if (/(failure|failed|fail|error|errored|cancelled|canceled|rejected|expired|timeout)/i.test(status)) {
       throw new Error(readTaskError(payload) || `Image generation task failed (${summarizePayloadShape(payload)}).`);
     }
@@ -568,7 +625,7 @@ async function saveOutputAsset(context, result, taskId) {
   if (taskId) {
     const current = context.generationTaskStore.getTask(taskId);
     if (!current || ['interrupted', 'superseded'].includes(current.status)) throw new Error('Interrupted');
-    context.generationTaskStore.updateTask(taskId, { status: 'running', message: '', messageCode: 'generation.resultProcessing', messageParams: null });
+    context.generationTaskStore.updateTask(taskId, { status: 'result_processing', message: '', messageCode: 'generation.resultProcessing', messageParams: null });
   }
   const saved = await context.assetStore.saveAsset({
     url: result.url,
@@ -641,11 +698,29 @@ async function submitOpenAiEditTask(context, provider, headers, model, prompt, r
   formData.append('n', String(imageCount));
   if (quality) formData.append('quality', quality);
   for (let index = 0; index < referenceImages.length; index += 1) {
+    context.generationTaskStore.updateTask(taskId, {
+      status: 'preparing',
+      message: '',
+      messageCode: 'generation.referencesPreparing',
+      messageParams: { current: index + 1, total: referenceImages.length },
+    });
     const file = await referenceToFile(context, referenceImages[index], index, signal);
     formData.append('image', file.blob, file.fileName);
   }
+  context.generationTaskStore.updateTask(taskId, {
+    status: 'submitting',
+    message: '',
+    messageCode: 'generation.requestSubmitting',
+    messageParams: { operation: 'edit' },
+  });
   const { 'Content-Type': _contentType, ...multipartHeaders } = headers;
   markRemoteExecutionStarted(context, taskId);
+  context.generationTaskStore.updateTask(taskId, {
+    status: 'running',
+    message: '',
+    messageCode: 'generation.remoteProcessing',
+    messageParams: { operation: 'edit' },
+  });
   return requestJson(context.net, imageEditsUrl(provider), {
     method: 'POST',
     headers: multipartHeaders,
@@ -713,9 +788,9 @@ async function executeImageTask(context, task, payload, signal) {
     return saveOutputAssets(context, polledResults, task.id);
   }
   context.generationTaskStore.updateTask(task.id, {
-    status: 'running',
+    status: 'preparing',
     message: '',
-    messageCode: referenceImages.length ? 'image.referencesPreparing' : 'image.textRequestPreparing',
+    messageCode: 'generation.requestPreparing',
     messageParams: null,
   });
   if (protocol === 'gemini') {
@@ -724,16 +799,9 @@ async function executeImageTask(context, task, payload, signal) {
 
   if (protocol === 'openai') {
     const requestSize = payload.size || openAiSizeFor(resolution, aspectRatio);
-    const requestMode = provider.imageRequestMode === 'openai-json' ? 'openai-json' : 'openai';
     let submitPayload;
-    if (referenceImages.length && requestMode === 'openai') {
-      context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.editSubmitting', messageParams: null });
-      try {
-        submitPayload = await submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, requestSize, quality, imageCount, task.id, signal);
-      } catch (error) {
-        if (isGptImage2Model(model)) throw error;
-        context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.jsonReferenceRetrying', messageParams: null });
-      }
+    if (referenceImages.length) {
+      submitPayload = await submitOpenAiEditTask(context, provider, headers, model, prompt, referenceImages, requestSize, quality, imageCount, task.id, signal);
     }
     if (!submitPayload) {
       const refs = referenceImages.length ? await normalizeReferenceImageDataUris(context, referenceImages, task.id, signal) : [];
@@ -747,8 +815,19 @@ async function executeImageTask(context, task, payload, signal) {
         ...(quality ? { quality } : {}),
         ...(refs.length ? { image: refs } : {}),
       };
-      context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.generationSubmitting', messageParams: null });
+      context.generationTaskStore.updateTask(task.id, {
+        status: 'submitting',
+        message: '',
+        messageCode: 'generation.requestSubmitting',
+        messageParams: { operation: 'generate' },
+      });
       markRemoteExecutionStarted(context, task.id);
+      context.generationTaskStore.updateTask(task.id, {
+        status: 'running',
+        message: '',
+        messageCode: 'generation.remoteProcessing',
+        messageParams: { operation: 'generate' },
+      });
       submitPayload = await requestJson(context.net, submitUrl, {
         method: 'POST',
         headers,
@@ -766,13 +845,16 @@ async function executeImageTask(context, task, payload, signal) {
     return saveOutputAssets(context, polledResults, task.id);
   }
 
-  const requestFormat = rule.requestFormat || 'standard';
-  const refs = requestFormat === 'openai-json-extra-body'
+  const isApimartProtocol = protocol === 'apimart' || protocol === 'compatible';
+  const requestFormat = isApimartProtocol && rule.requestFormat === 'apimart-json-extra-body'
+    ? 'apimart-json-extra-body'
+    : 'standard';
+  const refs = requestFormat === 'apimart-json-extra-body'
     ? await normalizeReferenceImageDataUris(context, referenceImages, task.id, signal)
     : await normalizeReferenceImages(context, baseUrl, uploadHeaders, referenceImages, task.id, signal);
-  const sizeMode = rule.sizeMode || (provider.protocol === 'compatible' ? 'ratio' : 'pixel');
+  const sizeMode = rule.sizeMode || (isApimartProtocol ? 'ratio' : 'pixel');
   const resolutionField = rule.sizeRule?.resolutionField || rule.resolutionField || 'resolution';
-  const requestSize = customSize || (sizeMode === 'ratio' || provider.protocol === 'compatible' ? aspectRatio : payload.size || openAiSizeFor(resolution, aspectRatio));
+  const requestSize = customSize || (sizeMode === 'ratio' || isApimartProtocol ? aspectRatio : payload.size || openAiSizeFor(resolution, aspectRatio));
   const requestResolution = resolution.toUpperCase();
   const sizePayload = resolutionField === 'size'
     ? { size: requestSize }
@@ -780,7 +862,7 @@ async function executeImageTask(context, task, payload, signal) {
       size: requestSize,
       ...(customSize || resolutionField === 'none' || !requestResolution ? {} : { resolution: requestResolution }),
     };
-  const requestBody = requestFormat === 'openai-json-extra-body'
+  const requestBody = requestFormat === 'apimart-json-extra-body'
     ? {
       model,
       prompt,
@@ -802,9 +884,20 @@ async function executeImageTask(context, task, payload, signal) {
       ...(promptExtend && promptExtendMode ? { prompt_extend_mode: promptExtendMode } : {}),
     };
 
-  context.generationTaskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'image.generationSubmitting', messageParams: null });
+  context.generationTaskStore.updateTask(task.id, {
+    status: 'submitting',
+    message: '',
+    messageCode: 'generation.requestSubmitting',
+    messageParams: { operation: referenceImages.length ? 'edit' : 'generate' },
+  });
   const submitUrl = providerEndpointUrl(provider, 'imageGenerationEndpoint', '/v1/images/generations') || imageGenerationsUrl(baseUrl);
   markRemoteExecutionStarted(context, task.id);
+  context.generationTaskStore.updateTask(task.id, {
+    status: 'running',
+    message: '',
+    messageCode: 'generation.remoteProcessing',
+    messageParams: { operation: referenceImages.length ? 'edit' : 'generate' },
+  });
   const submitPayload = await requestJson(context.net, submitUrl, {
     method: 'POST',
     headers,
@@ -842,6 +935,9 @@ function createImageGenerationRunner({
     for (const { task } of entries) {
       generationTaskStore.updateTask(task.id, {
         status: 'interrupted',
+        message: '',
+        messageCode: '',
+        messageParams: null,
         error: `Canvas task anchor failed: ${reason}`,
         interruptReason: 'provider_lost',
       });
@@ -901,6 +997,9 @@ function createImageGenerationRunner({
         if (!current || current.status === 'interrupted' || current.status === 'superseded') return;
         const completed = generationTaskStore.updateTask(task.id, {
           status: 'succeeded',
+          message: '',
+          messageCode: '',
+          messageParams: null,
           error: '',
           result,
         });
@@ -912,6 +1011,9 @@ function createImageGenerationRunner({
         const interrupted = !timedOut && (controller.signal.aborted || String(error?.message || error) === 'Interrupted');
         const completed = generationTaskStore.updateTask(task.id, {
           status: interrupted ? 'interrupted' : 'failed',
+          message: '',
+          messageCode: '',
+          messageParams: null,
           error: interrupted ? 'Interrupted' : timedOut ? execution.errorMessage : error instanceof Error ? error.message : String(error),
         });
         writeTaskTerminalToCanvas(context, completed, completed.status, undefined, completed.error);
@@ -1010,6 +1112,9 @@ function createImageGenerationRunner({
         }
         const interrupted = generationTaskStore.updateTask(task.id, {
           status: 'interrupted',
+          message: '',
+          messageCode: '',
+          messageParams: null,
           error: '',
           interruptReason: provider ? 'app_restart' : 'provider_lost',
         });

@@ -41,7 +41,6 @@ test.beforeEach(async ({ page }) => {
       accessKey: "",
       secretKey: "",
       protocol: "openai",
-      imageRequestMode: "openai",
       imageGenerationEndpoint: "",
       imageEditEndpoint: "",
       imageModels: [longParameterLabels

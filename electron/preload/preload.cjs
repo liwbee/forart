@@ -14,6 +14,15 @@ contextBridge.exposeInMainWorld('forartWindow', {
 });
 
 contextBridge.exposeInMainWorld('easyTool', {
+  backgroundRemovalStatus: () => ipcRenderer.invoke('background-removal:status'),
+  downloadBackgroundRemovalModel: () => ipcRenderer.invoke('background-removal:download'),
+  removeBackgroundRemovalModel: () => ipcRenderer.invoke('background-removal:remove-model'),
+  removeImageBackground: (payload) => ipcRenderer.invoke('background-removal:run', payload),
+  onBackgroundRemovalModelState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('background-removal:model-state', listener);
+    return () => ipcRenderer.removeListener('background-removal:model-state', listener);
+  },
   saveResult: (payload) => ipcRenderer.invoke('save-result', payload),
   listCanvases: () => ipcRenderer.invoke('canvas:list'),
   createCanvas: (payload) => ipcRenderer.invoke('canvas:create', payload),
@@ -106,6 +115,8 @@ contextBridge.exposeInMainWorld('forartConfig', {
   saveApiSettings: (payload) => ipcRenderer.invoke('config:save-api-settings', payload),
   loadAgentSettings: () => ipcRenderer.invoke('config:load-agent-settings'),
   saveAgentSettings: (payload) => ipcRenderer.invoke('config:save-agent-settings', payload),
+  loadExtensionSettings: () => ipcRenderer.invoke('config:load-extension-settings'),
+  saveExtensionSettings: (payload) => ipcRenderer.invoke('config:save-extension-settings', payload),
   requestProviderModels: (payload) => ipcRenderer.invoke('provider:models', payload),
   requestApimartBalance: (payload) => ipcRenderer.invoke('provider:apimart-balance', payload),
   loadImageReviewSettings: () => ipcRenderer.invoke('config:load-image-review-settings'),

@@ -1,4 +1,7 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const { createImageGenerationRunner } = require('../electron/main/modules/image-generation-runner.cjs');
@@ -109,4 +112,60 @@ test('API references are re-uploaded, verified, and submitted with the returned 
     `GET ${returnedUrl}`,
     'POST https://api.apib.ai/v1/images/generations',
   ]);
+});
+
+test('OpenAI edits send local reference assets with an image MIME type', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-image-edit-'));
+  const assetPath = path.join(tempDir, 'reference.png');
+  fs.writeFileSync(assetPath, Buffer.from('png-bytes'));
+  let submittedImage;
+  const net = {
+    async fetch(url, init = {}) {
+      assert.equal(url, 'https://example.test/v1/images/edits');
+      assert.equal(init.method, 'POST');
+      submittedImage = init.body.get('image');
+      return Response.json({ data: [{ b64_json: Buffer.from('result').toString('base64') }] });
+    },
+  };
+  const generationTaskStore = createMemoryGenerationTaskStore('api');
+  const runner = createImageGenerationRunner({
+    net,
+    assetStore: {
+      resolveAssetUrl(source) {
+        return source === 'forart-asset://input/reference.png' ? assetPath : '';
+      },
+      async saveAsset() {
+        return { url: 'forart-asset://output/result.png', fileName: 'result.png' };
+      },
+    },
+    canvasStore: {
+      setGenerationTaskAnchor() {},
+    },
+    generationTaskStore,
+    resolveProvider: () => ({
+      id: 'openai',
+      baseUrl: 'https://example.test',
+      apiKey: 'test',
+      protocol: 'openai',
+    }),
+    resultCommitter: { commit() {} },
+  });
+
+  const task = await runner.startTask({
+    canvasId: 'canvas-openai-edit',
+    target: { type: 'imageGenerator', nodeId: 'node-openai-edit' },
+    providerId: 'openai',
+    model: 'gpt-image-1',
+    modelRule: { imageCountRule: { options: [1], defaultCount: 1 } },
+    prompt: 'edit this image',
+    referenceImages: ['forart-asset://input/reference.png'],
+    resolution: '1K',
+    aspectRatio: '1:1',
+  });
+
+  await waitFor(() => ['succeeded', 'failed'].includes(generationTaskStore.getTask(task.id)?.status));
+  assert.equal(generationTaskStore.getTask(task.id)?.status, 'succeeded', generationTaskStore.getTask(task.id)?.error);
+  assert.equal(submittedImage?.type, 'image/png');
+  assert.equal(submittedImage?.name, 'reference.png');
+  fs.rmSync(tempDir, { recursive: true, force: true });
 });

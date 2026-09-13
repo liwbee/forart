@@ -42,9 +42,16 @@ function registerConfigIpc({ ipcMain, dialog, configStore, app, net, onConfigSav
 
   ipcMain.handle('config:load-agent-settings', async () => configStore.loadAgentSettings());
 
+  ipcMain.handle('config:load-extension-settings', async () => configStore.loadExtensionSettings());
+
   ipcMain.handle('config:save-agent-settings', async (_event, payload) => {
     const agentSettings = configStore.saveAgentSettings(payload);
     return { ok: true, agentSettings };
+  });
+
+  ipcMain.handle('config:save-extension-settings', async (_event, payload) => {
+    const extensionSettings = configStore.saveExtensionSettings(payload);
+    return { ok: true, extensionSettings };
   });
 
   ipcMain.handle('provider:models', async (_event, payload = {}) => {

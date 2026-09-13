@@ -124,6 +124,16 @@ async function runDatabaseSmoke(driver, databaseUrl = "") {
     assert.equal(emptyModelImport.failed_count, 0);
     assert.equal(emptyModelImport.imported[0].gender, "female");
     await model.deleteModel(emptyModelImport.imported[0].id);
+
+    const autoNameModelProject = await model.createProject({ name: `Model auto names ${Date.now()}` });
+    cleanup.push(() => model.deleteProject(autoNameModelProject.id));
+    const autoNameModelImport = await model.importEntries(autoNameModelProject.id, { entries: [{ gender: "female" }, { gender: "male" }] });
+    assert.equal(autoNameModelImport.imported_count, 2);
+    assert.deepEqual(autoNameModelImport.imported.map((entry) => entry.name), [
+      `${autoNameModelProject.name}_001`,
+      `${autoNameModelProject.name}_002`,
+    ]);
+
     const tagName = `front-${Date.now()}`;
     const firstTag = await model.createTag(firstProject.id, { name: tagName, color: "red" });
     cleanup.push(() => model.deleteTag(firstProject.id, firstTag.id));
@@ -191,6 +201,28 @@ async function runDatabaseSmoke(driver, databaseUrl = "") {
     assert.equal(existsSync(renamedOutfitPath), true);
     assert.equal(existsSync(originalOutfitPath), false);
     assert.equal(libraryAssetThumbnailPath(runtime, renamedOutfitAsset), path.join(runtimeDataDir, "thumb", "library-assets", `${renamedOutfitAsset.id}.webp`));
+
+    const autoNameProject = await outfit.createProject({ name: `Outfit auto names ${Date.now()}` });
+    cleanup.push(() => outfit.deleteProject(autoNameProject.id));
+    const autoOne = await outfit.createOutfitFromFile(autoNameProject.id, { buffer: ONE_PIXEL_PNG, filename: "one.png", mime_type: "image/png" });
+    const autoTwo = await outfit.createOutfitFromFile(autoNameProject.id, { buffer: ONE_PIXEL_PNG, filename: "two.png", mime_type: "image/png" });
+    assert.equal(autoOne.name, `${autoNameProject.name}_001`);
+    assert.equal(autoTwo.name, `${autoNameProject.name}_002`);
+    await outfit.deleteOutfit(autoOne.id);
+    const autoReused = await outfit.createOutfitFromFile(autoNameProject.id, { buffer: ONE_PIXEL_PNG, filename: "reused.png", mime_type: "image/png" });
+    assert.equal(autoReused.name, `${autoNameProject.name}_001`);
+
+    const concurrentProject = await outfit.createProject({ name: `Outfit concurrent names ${Date.now()}` });
+    cleanup.push(() => outfit.deleteProject(concurrentProject.id));
+    const concurrentEntries = await Promise.all([
+      outfit.createOutfitFromFile(concurrentProject.id, { buffer: ONE_PIXEL_PNG, filename: "a.png", mime_type: "image/png" }),
+      outfit.createOutfitFromFile(concurrentProject.id, { buffer: ONE_PIXEL_PNG, filename: "b.png", mime_type: "image/png" }),
+    ]);
+    assert.deepEqual(concurrentEntries.map((entry) => entry.name).sort(), [
+      `${concurrentProject.name}_001`,
+      `${concurrentProject.name}_002`,
+    ]);
+
     const action = createActionLibraryService(runtime);
     const actionProject = (await action.listProjects()).projects[0];
     const assetAction = await action.createActionFromFile(actionProject.id, {
@@ -234,7 +266,10 @@ async function runDatabaseSmoke(driver, databaseUrl = "") {
     await action.updateProject(actionProject.id, { cover_asset_id: null });
     await action.deleteAction(assetAction.id);
     await model.deleteModel(entry.id);
+    await model.deleteProject(autoNameModelProject.id);
     await outfit.deleteProject(renameOutfitProject.id);
+    await outfit.deleteProject(autoNameProject.id);
+    await outfit.deleteProject(concurrentProject.id);
     assert.equal(await runtime.repository.getAsset(assetAction.asset_id), null);
     assert.equal(await runtime.repository.countTable("asset_cleanup_jobs"), 0);
     assert.equal(existsSync(actionAssetPath), false);

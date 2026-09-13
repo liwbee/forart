@@ -1348,7 +1348,7 @@ test('LibTV retry and stop transitions clear stale retry metadata', async () => 
   });
 
   await secondStarted;
-  assert.equal(taskStore.getTask(task.id)?.messageCode, 'libtv.generating');
+  assert.equal(taskStore.getTask(task.id)?.messageCode, 'generation.remoteProcessing');
   runner.stopImageTask(task.id);
   assert.equal(taskStore.getTask(task.id)?.status, 'interrupted');
   assert.equal(taskStore.getTask(task.id)?.messageCode, '');

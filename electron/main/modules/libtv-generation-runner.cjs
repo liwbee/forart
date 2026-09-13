@@ -505,7 +505,7 @@ function createLibtvGenerationRunner({
     const current = taskId ? taskStore?.getTask(taskId) : null;
     if (taskId) {
       if (!current || current.status === 'interrupted') throw new Error('Interrupted');
-      taskStore.updateTask(taskId, { status: 'running', message: '', messageCode: 'generation.resultProcessing', messageParams: null });
+      taskStore.updateTask(taskId, { status: 'result_processing', message: '', messageCode: 'generation.resultProcessing', messageParams: null });
     }
     let saved;
     let lastError;
@@ -550,7 +550,12 @@ function createLibtvGenerationRunner({
       ? await waitForOperation(resolveWorkspaceName(), signal)
       : '';
     const workspaceName = firstString(configuredWorkspaceName, payload.workspaceName, 'LibtvImage');
-    taskStore.updateTask(task.id, { status: 'preparing', message: '', messageCode: 'libtv.workspacePreparing', messageParams: null });
+    taskStore.updateTask(task.id, {
+      status: 'preparing',
+      message: '',
+      messageCode: 'generation.requestPreparing',
+      messageParams: { phase: 'workspace' },
+    });
     const ensuredWorkspace = await waitForOperation(libtv.ensureNamedWorkspace({ name: workspaceName }), signal);
     throwIfAborted(signal);
     const workspaceId = firstString(ensuredWorkspace.workspace?.id);
@@ -562,9 +567,12 @@ function createLibtvGenerationRunner({
     taskStore.updateTask(task.id, {
       projectUuid: project.projectUuid,
       projectName: project.projectName,
+      status: 'preparing',
       message: '',
-      messageCode: job.referenceImages.length ? 'libtv.referencesUploading' : 'libtv.nodeCreating',
-      messageParams: null,
+      messageCode: job.referenceImages.length ? 'generation.referencesPreparing' : 'generation.remoteSetup',
+      messageParams: job.referenceImages.length
+        ? { current: 0, total: job.referenceImages.length }
+        : { phase: 'nodeCreating' },
     });
     writeTaskAnchor(task, { projectUuid: project.projectUuid });
 
@@ -581,13 +589,19 @@ function createLibtvGenerationRunner({
       for (let index = 0; index < job.referenceImages.length; index += 1) {
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
         taskStore.updateTask(task.id, {
-          status: 'uploading',
+          status: 'preparing',
           message: '',
-          messageCode: 'libtv.referenceUploading',
+          messageCode: 'generation.referencesPreparing',
           messageParams: { current: index + 1, total: job.referenceImages.length },
         });
         const filePath = await waitForOperation(prepareReferenceFile(job.referenceImages[index], index), signal);
         throwIfAborted(signal);
+        taskStore.updateTask(task.id, {
+          status: 'preparing',
+          message: '',
+          messageCode: 'generation.referencesUploading',
+          messageParams: { current: index + 1, total: job.referenceImages.length },
+        });
         const referenceTitle = `Forart Ref - ${runId} - ${String(index + 1).padStart(2, '0')} - ${safeRemoteTitle(path.basename(filePath), 'image')}`;
         const uploaded = await libtv.uploadImageNode(project.projectUuid, filePath, {
           title: referenceTitle,
@@ -602,7 +616,12 @@ function createLibtvGenerationRunner({
         taskStore.updateTask(task.id, { remoteReferenceNodeIds: [...remoteReferenceNodeIds] });
       }
 
-      taskStore.updateTask(task.id, { status: 'uploading', message: '', messageCode: 'libtv.nodeCreating', messageParams: null });
+      taskStore.updateTask(task.id, {
+        status: 'preparing',
+        message: '',
+        messageCode: 'generation.remoteSetup',
+        messageParams: { phase: 'nodeCreating' },
+      });
       const remoteNodeTitle = `${safeRemoteTitle(job.nodeTitle, 'Forart Image Generator')} - ${runId}`;
       const created = await libtv.createImageNode(project.projectUuid, {
         title: remoteNodeTitle,
@@ -626,10 +645,10 @@ function createLibtvGenerationRunner({
         await libtv.connectLeft(project.projectUuid, remoteNodeId, referenceNodeId, { signal });
       }
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-      taskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'libtv.generating', messageParams: null });
+      taskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'generation.remoteProcessing', messageParams: null });
       let run;
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        taskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'libtv.generating', messageParams: null });
+        taskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'generation.remoteProcessing', messageParams: null });
         let startBusy = false;
         try {
           run = await enqueueRunNode(
@@ -666,9 +685,15 @@ function createLibtvGenerationRunner({
         }
         if (attempt < 2) {
           taskStore.updateTask(task.id, {
+            status: 'running',
             message: '',
-            messageCode: startBusy ? 'libtv.startBusyRetrying' : 'libtv.startRetrying',
-            messageParams: { current: attempt + 1, total: 2 },
+            messageCode: 'generation.remoteProcessing',
+            messageParams: {
+              retry: true,
+              reason: startBusy ? 'busy' : 'not_started',
+              current: attempt + 1,
+              total: 2,
+            },
           });
           await waitFor(2000 * (attempt + 1), signal);
         }
@@ -710,8 +735,8 @@ function createLibtvGenerationRunner({
       ...payload,
       status: payload.queueKey ? 'queued' : 'preparing',
       message: '',
-      messageCode: payload.queueKey ? 'libtv.queueWaiting' : 'libtv.generationPreparing',
-      messageParams: null,
+      messageCode: payload.queueKey ? 'generation.queueWaiting' : 'generation.requestPreparing',
+      messageParams: payload.queueKey ? { phase: 'queue' } : { phase: 'workspace' },
     });
   }
 
@@ -723,7 +748,7 @@ function createLibtvGenerationRunner({
       const { controller } = execution;
       activeControllers.set(task.id, controller);
       try {
-        taskStore.updateTask(task.id, { status: 'preparing', message: '', messageCode: 'libtv.generationPreparing', messageParams: null });
+        taskStore.updateTask(task.id, { status: 'preparing', message: '', messageCode: 'generation.requestPreparing', messageParams: { phase: 'workspace' } });
         const result = await executeImageTask(task, payload, controller.signal);
         const current = taskStore.getTask(task.id);
         if (!current || current.status === 'interrupted') return;
@@ -782,7 +807,7 @@ function createLibtvGenerationRunner({
           signal: controller.signal,
           queryNode: () => queryNodeWithRetry(projectUuid, remoteNodeId, controller.signal),
           waitForNext: () => {
-            taskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'libtv.generating', messageParams: null });
+            taskStore.updateTask(task.id, { status: 'running', message: '', messageCode: 'generation.remoteProcessing', messageParams: null });
             return waitFor(4000, controller.signal);
           },
         });

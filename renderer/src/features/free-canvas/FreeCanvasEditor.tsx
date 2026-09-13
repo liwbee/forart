@@ -5,6 +5,7 @@ import {
   WheelEvent,
   type CSSProperties,
   useEffect,
+  useCallback,
   useMemo,
   useRef,
   useState,
@@ -156,6 +157,23 @@ function imageFilesFromTransfer(dataTransfer: DataTransfer) {
   return Array.from(dataTransfer.files).filter((file) => file.type.startsWith("image/"));
 }
 
+function imageFilesFromClipboard(event: ClipboardEvent) {
+  const itemFiles = Array.from(event.clipboardData?.items || [])
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file));
+  if (itemFiles.length) return itemFiles;
+  return Array.from(event.clipboardData?.files || []).filter((file) => file.type.startsWith("image/"));
+}
+
+function isEditableElement(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable
+    || target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement;
+}
+
 function hasImageFileDrag(dataTransfer: DataTransfer) {
   const items = Array.from(dataTransfer.items || []);
   if (items.some((item) => item.kind === "file" && (!item.type || item.type.startsWith("image/")))) return true;
@@ -253,6 +271,7 @@ export function FreeCanvasEditor() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const objectUrlsRef = useRef<string[]>([]);
   const fileDragDepthRef = useRef(0);
+  const lastPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const interactionRef = useRef<StageInteraction | null>(null);
   const textEditDocumentRef = useRef<ReturnType<typeof snapshotFreeCanvasDocument> | null>(null);
   const textDoubleClickRef = useRef<{ itemId: string; time: number; x: number; y: number } | null>(null);
@@ -382,8 +401,16 @@ export function FreeCanvasEditor() {
     return item;
   }
 
-  function addDroppedFiles(files: File[], point?: { x: number; y: number }) {
-    if (editingTextItemId) stopTextEditing();
+  const addDroppedFiles = useCallback((files: File[], point?: { x: number; y: number }) => {
+    if (editingTextItemId) {
+      const editingItem = useFreeCanvasStore.getState().itemLookup.get(editingTextItemId);
+      if (editingItem?.type === "text" && !editingItem.text.trim()) {
+        deleteItems([editingItem.id]);
+      } else if (textEditDocumentRef.current) {
+        commitFreeCanvasDocumentChange(textEditDocumentRef.current);
+      }
+      textEditDocumentRef.current = null;
+    }
     const maxZIndex = Math.max(...items.map((item) => item.zIndex), 0);
     const nextItems = files.map((file, index) => {
       const src = URL.createObjectURL(file);
@@ -403,7 +430,29 @@ export function FreeCanvasEditor() {
     setSelectedItemId(nextItems[nextItems.length - 1].id);
     setEditingTextItemId("");
     setActiveCanvasTool("select");
-  }
+  }, [canvasSize, deleteItems, editingTextItemId, items, setItems, t]);
+
+  useEffect(() => {
+    function handleClipboardPaste(event: ClipboardEvent) {
+      if (isEditableElement(event.target)) return;
+      const imageFiles = imageFilesFromClipboard(event);
+      if (!imageFiles.length) return;
+
+      event.preventDefault();
+      const stage = stageRef.current;
+      const rect = stage?.getBoundingClientRect();
+      const pointer = lastPointerRef.current || (rect
+        ? { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }
+        : null);
+      const point = pointer && rect
+        ? screenToCanvasPoint(pointer.clientX, pointer.clientY, rect, canvasSize, canvasFitScale, viewport)
+        : undefined;
+      addDroppedFiles(imageFiles, point);
+    }
+
+    window.addEventListener("paste", handleClipboardPaste);
+    return () => window.removeEventListener("paste", handleClipboardPaste);
+  }, [addDroppedFiles, canvasFitScale, canvasSize, viewport]);
 
   function handleLocalImageInput(files: FileList | null) {
     const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
@@ -496,6 +545,7 @@ export function FreeCanvasEditor() {
 
   function handleStagePointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0 && event.button !== 1) return;
+    lastPointerRef.current = { clientX: event.clientX, clientY: event.clientY };
     const stage = stageRef.current;
     const point = getCanvasPoint(event);
     if (!stage || !point) return;
@@ -580,6 +630,7 @@ export function FreeCanvasEditor() {
   }
 
   function handleStagePointerMove(event: PointerEvent<HTMLDivElement>) {
+    lastPointerRef.current = { clientX: event.clientX, clientY: event.clientY };
     const interaction = interactionRef.current;
     if (!interaction || interaction.pointerId !== event.pointerId) return;
     if (interaction.type === "pan") {

@@ -1,5 +1,4 @@
-type ApiProviderProtocol = "openai" | "compatible" | "gemini";
-type ApiProviderImageRequestMode = "openai" | "openai-json";
+type ApiProviderProtocol = "openai" | "apimart" | "gemini";
 export type ApiModelKind = "image" | "chat" | "video";
 export type ApiProviderOrderItem =
   | { type: "provider"; id: string; provider: ApiProvider }
@@ -30,7 +29,6 @@ export interface ApiProvider {
   accessKey: string;
   secretKey: string;
   protocol: ApiProviderProtocol;
-  imageRequestMode: ApiProviderImageRequestMode;
   imageGenerationEndpoint: string;
   imageEditEndpoint: string;
   imageModels: string[];
@@ -132,7 +130,6 @@ export function createApiProvider(providers: ApiProvider[]): ApiProvider {
     accessKey: "",
     secretKey: "",
     protocol: "openai",
-    imageRequestMode: "openai",
     imageGenerationEndpoint: "",
     imageEditEndpoint: "",
     imageModels: [],
@@ -154,8 +151,7 @@ export function createApimartProvider(): ApiProvider {
     hasApiKey: false,
     accessKey: "",
     secretKey: "",
-    protocol: "compatible",
-    imageRequestMode: "openai",
+    protocol: "apimart",
     imageGenerationEndpoint: "",
     imageEditEndpoint: "",
     imageModels: [],
@@ -176,7 +172,6 @@ export function createTudouProvider(): ApiProvider {
     accessKey: "",
     secretKey: "",
     protocol: "gemini",
-    imageRequestMode: "openai",
     imageGenerationEndpoint: "",
     imageEditEndpoint: "",
     imageModels: [],
@@ -198,8 +193,11 @@ export function coerceApiProviderDraft(input: ApiProvider): ApiProvider {
     apiKey: String(input.apiKey || ""),
     accessKey: String(input.accessKey || ""),
     secretKey: String(input.secretKey || ""),
-    protocol: input.protocol === "compatible" || input.protocol === "gemini" ? input.protocol : "openai",
-    imageRequestMode: input.imageRequestMode === "openai-json" ? "openai-json" : "openai",
+    protocol: input.protocol === "gemini"
+      ? "gemini"
+      : String(input.protocol) === "apimart" || String(input.protocol) === "compatible"
+        ? "apimart"
+        : "openai",
     imageGenerationEndpoint: input.imageGenerationEndpoint.trim(),
     imageEditEndpoint: input.imageEditEndpoint.trim(),
     imageModels: uniqueModels(input.imageModels),

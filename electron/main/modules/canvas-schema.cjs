@@ -1,8 +1,9 @@
 const CURRENT_CANVAS_SCHEMA_VERSION = 5;
 
-const NODE_KINDS = new Set(['imageGenerator', 'assetLoader', 'prompt', 'annotation', 'llm', 'smartReverse', 'actionFission', 'group']);
+const NODE_KINDS = new Set(['imageGenerator', 'batchImageGenerator', 'assetLoader', 'prompt', 'annotation', 'llm', 'smartReverse', 'actionFission', 'group']);
 const NODE_DEFAULT_SIZES = Object.freeze({
   imageGenerator: { width: 280, height: 280 },
+  batchImageGenerator: { width: 820, height: 620 },
   assetLoader: { width: 240, height: 320 },
   prompt: { width: 260, height: 160 },
   annotation: { width: 64, height: 40 },
@@ -350,3 +351,4 @@ module.exports = {
   CURRENT_CANVAS_SCHEMA_VERSION,
   upgradeCanvasDocument,
 };
+

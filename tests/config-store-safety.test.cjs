@@ -53,6 +53,8 @@ test('Agent settings preserve OpenAI reasoning effort values and default thinkin
   const store = createConfigStore({ app: { isPackaged: false }, rootDir: tempRoot, safeStorage: testSafeStorage() });
 
   assert.deepEqual(store.loadAgentSettings(), {
+    backgroundRemovalEnabled: false,
+    promptOptimizationEnabled: false,
     thinkingMode: false,
     reasoningLevel: 'medium',
     imageGeneratorPromptOptimization: null,
@@ -60,11 +62,15 @@ test('Agent settings preserve OpenAI reasoning effort values and default thinkin
 
   for (const reasoningLevel of ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']) {
     const saved = store.saveAgentSettings({
+      backgroundRemovalEnabled: true,
+      promptOptimizationEnabled: true,
       thinkingMode: true,
       reasoningLevel,
       imageGeneratorPromptOptimization: { providerId: 'provider-1', model: 'model-1' },
     });
     assert.equal(saved.reasoningLevel, reasoningLevel);
+    assert.equal(saved.backgroundRemovalEnabled, true);
+    assert.equal(saved.promptOptimizationEnabled, true);
   }
 
   const normalized = store.saveAgentSettings({ thinkingMode: false, reasoningLevel: 'none' });
@@ -184,6 +190,19 @@ test('custom providers using recommended hosts are not converted into fixed prov
   assert.deepEqual(saved.providers.map((provider) => provider.id), ['tudou-api', 'relay']);
   assert.deepEqual(saved.providers.map((provider) => provider.imageModels), [['fixed-model'], ['relay-model']]);
   assert.equal(saved.providers[1].baseUrl, 'https://api.ai-tudou.net/v1');
+});
+
+test('legacy compatible protocol values migrate to the explicit APIMart protocol', (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-api-protocol-migration-'));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const store = createConfigStore({ app: { isPackaged: false }, rootDir: tempRoot, safeStorage: testSafeStorage() });
+
+  const saved = store.saveApiSettings({
+    providers: [{ id: 'legacy-relay', name: 'Legacy relay', baseUrl: 'https://example.com/v1', protocol: 'compatible' }],
+    providerOrder: ['legacy-relay'],
+  });
+
+  assert.equal(saved.providers[0].protocol, 'apimart');
 });
 
 test('public API settings retain configured-key state for Agent and APIMart balance', (t) => {

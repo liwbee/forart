@@ -1,16 +1,31 @@
 import type { Edge, Node, XYPosition } from "@xyflow/react";
 import { Bot, FolderKanban, ImageIcon, ImagePlus, ScanSearch, Split, TextCursorInput, Type, type LucideIcon } from "lucide-react";
 import type { ActionFissionState } from "./action-fission/actionFissionTypes";
+export interface BatchImageGeneratorItem {
+  id: string;
+  sourceUrl?: string;
+  sourceThumbUrl?: string;
+  sourceFileName?: string;
+  resultUrl?: string;
+  resultThumbUrl?: string;
+  latestGenerationTaskId?: string;
+  status?: "pending" | "queued" | "running" | "completed" | "failed";
+  error?: string;
+}
+export interface BatchImageGeneratorState {
+  items: BatchImageGeneratorItem[];
+  prompt?: string;
+  layout?: "list" | "grid";
+}
 import {
   getImageGeneratorNodeSize,
-  getImageNodeSize,
   IMAGE_GENERATOR_DEFAULT_SIZE,
   ASSET_LOADER_DEFAULT_SIZE,
 } from "./imageNodeSizing";
 
 export { getImageGeneratorNodeSize, getImageNodeSize, getVideoNodeSize } from "./imageNodeSizing";
 
-export type NativeCanvasNodeKind = "imageGenerator" | "assetLoader" | "prompt" | "annotation" | "llm" | "smartReverse" | "actionFission" | "group";
+export type NativeCanvasNodeKind = "imageGenerator" | "batchImageGenerator" | "assetLoader" | "prompt" | "annotation" | "llm" | "smartReverse" | "actionFission" | "group";
 export type NativeCanvasAssetType = "image" | "video" | "audio";
 
 export interface NativeGenerationResult {
@@ -117,6 +132,7 @@ export interface NativeCanvasNodeData extends Record<string, unknown> {
     resolution?: string;
   };
   actionFission?: ActionFissionState;
+  batchImageGenerator?: BatchImageGeneratorState;
 }
 
 export type NativeCanvasNode = Node<NativeCanvasNodeData, "canvasNode" | "groupNode">;
@@ -155,19 +171,31 @@ export interface NativeSmartReverseResult {
   warnings: string[];
 }
 
-export function nativeCanvasNodePrimaryImage(data: NativeCanvasNodeData): NativeGenerationResult | null {
+export function nativeCanvasNodeImages(data: NativeCanvasNodeData): NativeGenerationResult[] {
   if (data.kind === "imageGenerator") {
-    const generated = data.generatedImages?.find((result) => result.localUrl || result.url);
-    if (generated) return generated;
+    return (data.generatedImages || []).filter((result) => result.localUrl || result.url);
   }
-  if (data.kind !== "assetLoader" || (data.assetType && data.assetType !== "image") || !data.assetUrl) return null;
-  return {
+  if (data.kind === "actionFission") {
+    return (data.actionFission?.rows || []).flatMap((row) => row.resultUrl ? [{
+      localUrl: row.resultUrl, thumbUrl: row.resultThumbUrl, fileName: row.resultFileName,
+      width: row.resultWidth, height: row.resultHeight,
+    }] : []);
+  }
+  if (data.kind === "batchImageGenerator") {
+    return (data.batchImageGenerator?.items || []).flatMap((item) => item.resultUrl ? [{ localUrl: item.resultUrl, thumbUrl: item.resultThumbUrl }] : []);
+  }
+  if (data.kind !== "assetLoader" || (data.assetType && data.assetType !== "image") || !data.assetUrl) return [];
+  return [{
     localUrl: data.assetUrl,
     fileName: data.assetFileName,
     thumbUrl: data.assetThumbUrl,
     width: data.assetNaturalWidth,
     height: data.assetNaturalHeight,
-  };
+  }];
+}
+
+export function nativeCanvasNodePrimaryImage(data: NativeCanvasNodeData): NativeGenerationResult | null {
+  return nativeCanvasNodeImages(data)[0] || null;
 }
 
 export function nativeCanvasNodePrimaryAsset(data: NativeCanvasNodeData): NativeCanvasAsset | null {
@@ -193,7 +221,7 @@ export interface NativeCanvasNodeResizeConfig {
 
 interface NativeCanvasNodeDefinition {
   icon: LucideIcon;
-  labelKey: "imageGenerator" | "assetNode" | "prompt" | "annotation" | "llm" | "smartReverse" | "actionFission" | "group";
+  labelKey: "imageGenerator" | "batchImageGenerator" | "assetNode" | "prompt" | "annotation" | "llm" | "smartReverse" | "actionFission" | "group";
   size: { width: number; height: number };
   acceptsInput: boolean;
   providesOutput: boolean;
@@ -207,6 +235,14 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
     size: IMAGE_GENERATOR_DEFAULT_SIZE,
     acceptsInput: true,
     providesOutput: true,
+  },
+  batchImageGenerator: {
+    icon: ImagePlus,
+    labelKey: "batchImageGenerator",
+    size: { width: 820, height: 620 },
+    acceptsInput: true,
+    providesOutput: true,
+    resizable: { minWidth: 560, minHeight: 360, maxWidth: 1600, maxHeight: 1078 },
   },
   assetLoader: {
     icon: ImageIcon,

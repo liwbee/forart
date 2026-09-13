@@ -273,6 +273,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .settings-api-key-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .library-search {
     width: 100%;
     min-width: 0;

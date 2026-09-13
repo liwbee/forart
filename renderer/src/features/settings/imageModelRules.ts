@@ -48,20 +48,13 @@ interface ImageModelImageCountRule {
 type ImageModelRuleId =
   | "generic-image"
   | "agnes-image"
-  | "gpt-image-2"
-  | "gpt-image-2-official"
-  | "gpt-image-1"
-  | "gemini-3.1-flash"
-  | "gemini-3.1-flash-lite"
-  | "gemini-3-pro"
-  | "gemini-2.5-flash"
-  | "seedream-4"
-  | "seedream-4.5"
+  | "gpt-image"
+  | "gemini-image"
+  | "gemini-lite-image"
   | "seedream-5-lite"
   | "seedream-5-pro"
   | "qwen-image-3"
   | "qwen-image"
-  | "z-image-turbo"
   | "imagen-4"
   | "grok-imagine"
   | "wan-image"
@@ -79,7 +72,7 @@ export interface ImageModelRule {
   referenceImageInput: "none" | "url";
   resolutionCase: "upper";
   sizeMode: "ratio" | "pixel";
-  requestFormat: "standard" | "openai-json-extra-body";
+  requestFormat: "standard" | "apimart-json-extra-body";
   sizeRule: ImageModelSizeRule;
   qualityRule?: ImageModelQualityRule;
   imageCountRule: ImageModelImageCountRule;
@@ -96,10 +89,8 @@ interface RuleMatcher {
 }
 
 const BASIC_ASPECT_RATIOS = ["1:1", "2:3", "3:2", "4:3", "3:4", "16:9", "9:16"];
-const GPT_IMAGE_1_ASPECT_RATIOS = ["1:1", "2:3", "3:2"];
-const GPT_IMAGE_2_ASPECT_RATIOS = ["auto", "1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "3:1", "1:3", "21:9", "9:21"];
+const GPT_IMAGE_ASPECT_RATIOS = ["auto", "1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "3:1", "1:3", "21:9", "9:21"];
 const GEMINI_ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
-const SEEDREAM_ASPECT_RATIOS = ["auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "9:21"];
 const SEEDREAM_5_LITE_ASPECT_RATIOS = ["auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"];
 const IMAGEN_4_ASPECT_RATIOS = ["1:1", "4:3", "3:4", "16:9", "9:16"];
 const GROK_ASPECT_RATIOS = ["1:1", "16:9", "9:16", "3:2", "2:3"];
@@ -146,12 +137,16 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     supportsReferenceImages: true,
     requiresPrompt: true,
     requiresReferenceImages: false,
-    maxReferenceImages: 1,
+    maxReferenceImages: 14,
     referenceImageInput: "url",
     resolutionCase: "upper",
     sizeMode: "ratio",
     requestFormat: "standard",
-    sizeRule: GENERIC_SIZE_RULE,
+    sizeRule: sizeRule({
+      aspectRatios: GEMINI_ASPECT_RATIOS,
+      resolutions: ["1K", "2K", "4K"],
+      defaultResolution: "1K",
+    }),
     imageCountRule: SINGLE_IMAGE_COUNT_RULE,
   },
   {
@@ -165,7 +160,7 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     referenceImageInput: "url",
     resolutionCase: "upper",
     sizeMode: "pixel",
-    requestFormat: "openai-json-extra-body",
+    requestFormat: "apimart-json-extra-body",
     imageCountRule: SINGLE_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
       aspectRatios: BASIC_ASPECT_RATIOS,
@@ -174,28 +169,8 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     }),
   },
   {
-    id: "gpt-image-2",
-    label: "GPT Image 2",
-    modes: ["text_to_image", "image_to_image"],
-    supportsReferenceImages: true,
-    requiresPrompt: true,
-    requiresReferenceImages: false,
-    maxReferenceImages: 16,
-    referenceImageInput: "url",
-    resolutionCase: "upper",
-    sizeMode: "ratio",
-    requestFormat: "standard",
-    imageCountRule: STANDARD_IMAGE_COUNT_RULE,
-    sizeRule: sizeRule({
-      aspectRatios: GPT_IMAGE_2_ASPECT_RATIOS,
-      resolutions: ["1K", "2K", "4K"],
-      allowAutoAspectRatio: true,
-      allowPixelSize: true,
-    }),
-  },
-  {
-    id: "gpt-image-2-official",
-    label: "GPT Image 2 Official",
+    id: "gpt-image",
+    label: "GPT Image",
     modes: ["text_to_image", "image_to_image"],
     supportsReferenceImages: true,
     requiresPrompt: true,
@@ -208,36 +183,15 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     qualityRule: GPT_QUALITY_RULE,
     imageCountRule: STANDARD_IMAGE_COUNT_RULE,
     sizeRule: sizeRule({
-      aspectRatios: GPT_IMAGE_2_ASPECT_RATIOS,
+      aspectRatios: GPT_IMAGE_ASPECT_RATIOS,
       resolutions: ["1K", "2K", "4K"],
       allowAutoAspectRatio: true,
       allowPixelSize: true,
     }),
   },
   {
-    id: "gpt-image-1",
-    label: "GPT Image 1 / 1.5",
-    modes: ["text_to_image", "image_to_image"],
-    supportsReferenceImages: true,
-    requiresPrompt: true,
-    requiresReferenceImages: false,
-    maxReferenceImages: 15,
-    referenceImageInput: "url",
-    resolutionCase: "upper",
-    sizeMode: "ratio",
-    requestFormat: "standard",
-    qualityRule: GPT_QUALITY_RULE,
-    imageCountRule: STANDARD_IMAGE_COUNT_RULE,
-    sizeRule: sizeRule({
-      aspectRatios: GPT_IMAGE_1_ASPECT_RATIOS,
-      resolutions: [],
-      defaultResolution: "",
-      resolutionField: "none",
-    }),
-  },
-  {
-    id: "gemini-3.1-flash",
-    label: "Gemini 3.1 Flash Image",
+    id: "gemini-image",
+    label: "Gemini Image",
     modes: ["text_to_image", "image_to_image"],
     supportsReferenceImages: true,
     requiresPrompt: true,
@@ -255,46 +209,8 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     }),
   },
   {
-    id: "gemini-3.1-flash-lite",
-    label: "Gemini 3.1 Flash Lite Image",
-    modes: ["text_to_image", "image_to_image"],
-    supportsReferenceImages: true,
-    requiresPrompt: true,
-    requiresReferenceImages: false,
-    maxReferenceImages: 14,
-    referenceImageInput: "url",
-    resolutionCase: "upper",
-    sizeMode: "ratio",
-    requestFormat: "standard",
-    imageCountRule: STANDARD_IMAGE_COUNT_RULE,
-    sizeRule: sizeRule({
-      aspectRatios: GEMINI_ASPECT_RATIOS,
-      resolutions: ["1K"],
-      defaultResolution: "1K",
-    }),
-  },
-  {
-    id: "gemini-3-pro",
-    label: "Gemini 3 Pro Image",
-    modes: ["text_to_image", "image_to_image"],
-    supportsReferenceImages: true,
-    requiresPrompt: true,
-    requiresReferenceImages: false,
-    maxReferenceImages: 14,
-    referenceImageInput: "url",
-    resolutionCase: "upper",
-    sizeMode: "ratio",
-    requestFormat: "standard",
-    imageCountRule: SINGLE_IMAGE_COUNT_RULE,
-    sizeRule: sizeRule({
-      aspectRatios: GEMINI_ASPECT_RATIOS,
-      resolutions: ["1K", "2K", "4K"],
-      defaultResolution: "1K",
-    }),
-  },
-  {
-    id: "gemini-2.5-flash",
-    label: "Gemini 2.5 Flash Image",
+    id: "gemini-lite-image",
+    label: "Gemini Lite Image",
     modes: ["text_to_image", "image_to_image"],
     supportsReferenceImages: true,
     requiresPrompt: true,
@@ -309,46 +225,6 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
       aspectRatios: GEMINI_ASPECT_RATIOS,
       resolutions: ["1K"],
       defaultResolution: "1K",
-    }),
-  },
-  {
-    id: "seedream-4",
-    label: "Seedream 4.0",
-    modes: ["text_to_image", "image_to_image"],
-    supportsReferenceImages: true,
-    requiresPrompt: true,
-    requiresReferenceImages: false,
-    maxReferenceImages: 14,
-    referenceImageInput: "url",
-    resolutionCase: "upper",
-    sizeMode: "ratio",
-    requestFormat: "standard",
-    imageCountRule: SEEDREAM_IMAGE_COUNT_RULE,
-    sizeRule: sizeRule({
-      aspectRatios: SEEDREAM_ASPECT_RATIOS,
-      resolutions: ["1K", "2K", "4K"],
-      allowAutoAspectRatio: true,
-      defaultResolution: "2K",
-    }),
-  },
-  {
-    id: "seedream-4.5",
-    label: "Seedream 4.5",
-    modes: ["text_to_image", "image_to_image"],
-    supportsReferenceImages: true,
-    requiresPrompt: true,
-    requiresReferenceImages: false,
-    maxReferenceImages: 14,
-    referenceImageInput: "url",
-    resolutionCase: "upper",
-    sizeMode: "ratio",
-    requestFormat: "standard",
-    imageCountRule: SEEDREAM_IMAGE_COUNT_RULE,
-    sizeRule: sizeRule({
-      aspectRatios: SEEDREAM_ASPECT_RATIOS,
-      resolutions: ["2K", "4K"],
-      allowAutoAspectRatio: true,
-      defaultResolution: "2K",
     }),
   },
   {
@@ -446,25 +322,6 @@ export const IMAGE_MODEL_RULES: ImageModelRule[] = [
     }),
   },
   {
-    id: "z-image-turbo",
-    label: "Z-Image Turbo",
-    modes: ["text_to_image"],
-    supportsReferenceImages: false,
-    requiresPrompt: true,
-    requiresReferenceImages: false,
-    maxReferenceImages: 0,
-    referenceImageInput: "none",
-    resolutionCase: "upper",
-    sizeMode: "ratio",
-    requestFormat: "standard",
-    imageCountRule: SINGLE_IMAGE_COUNT_RULE,
-    sizeRule: sizeRule({
-      aspectRatios: BASIC_ASPECT_RATIOS,
-      resolutions: ["1K", "2K"],
-      defaultResolution: "1K",
-    }),
-  },
-  {
     id: "imagen-4",
     label: "Imagen 4",
     modes: ["text_to_image"],
@@ -553,20 +410,13 @@ const RULE_BY_ID = new Map(IMAGE_MODEL_RULES.map((rule) => [rule.id, rule]));
 
 const RULE_MATCHERS: RuleMatcher[] = [
   { ruleId: "agnes-image", priority: 130, all: ["agnes", "image"], none: ["video"] },
-  { ruleId: "gpt-image-2-official", priority: 120, all: ["gpt", "image", "official"], any: [["2", "v2"]], none: ["video", "audio"] },
-  { ruleId: "gpt-image-2", priority: 110, all: ["gpt", "image"], any: [["2", "v2"]], none: ["video", "audio"], regex: /gpt[-_. ]?image[-_. ]?(?:v)?2/i },
-  { ruleId: "gpt-image-1", priority: 100, all: ["gpt", "image"], any: [["1", "v1", "1.5"]], none: ["video", "audio"] },
-  { ruleId: "seedream-4.5", priority: 97, any: [["seedream", "seeddream", "doubao"], ["4.5"]], none: ["video", "seedance"], regex: /(?:seedream|seeddream|doubao).*4[-_. ]?5/i },
+  { ruleId: "gpt-image", priority: 120, all: ["gpt", "image"], none: ["video", "audio"], regex: /gpt[-_. ]?image/i },
   { ruleId: "seedream-5-pro", priority: 96, all: ["seedream", "pro"], any: [["5", "5.0", "v5"]], none: ["video"] },
   { ruleId: "seedream-5-lite", priority: 95, all: ["seedream", "lite"], any: [["5", "5.0", "v5"]], none: ["video"] },
-  { ruleId: "seedream-4", priority: 90, any: [["seedream", "seeddream", "doubao"]], none: ["video", "seedance"] },
-  { ruleId: "gemini-3.1-flash-lite", priority: 89, all: ["gemini", "flash", "lite"], any: [["3.1"]], none: ["video", "chat"] },
-  { ruleId: "gemini-3.1-flash", priority: 88, all: ["gemini", "flash"], any: [["3.1"]], none: ["video", "chat", "lite"] },
-  { ruleId: "gemini-3-pro", priority: 87, all: ["gemini", "pro"], any: [["3"]], none: ["video", "chat"] },
-  { ruleId: "gemini-2.5-flash", priority: 86, all: ["gemini", "flash"], any: [["2.5"]], none: ["video", "chat"] },
+  { ruleId: "gemini-image", priority: 89, all: ["gemini", "pro"], none: ["video", "chat"] },
+  { ruleId: "gemini-lite-image", priority: 88, all: ["gemini", "flash"], none: ["video", "chat"] },
   { ruleId: "qwen-image-3", priority: 80, regex: /qwen[-_. ]?image[-_. ]?3(?:\.0)?(?:[-_. ]?pro)?/i, none: ["video", "chat"] },
   { ruleId: "qwen-image", priority: 75, all: ["qwen", "image"], none: ["video", "chat"] },
-  { ruleId: "z-image-turbo", priority: 70, all: ["z", "image"], any: [["turbo"]], none: ["video"] },
   { ruleId: "imagen-4", priority: 65, all: ["imagen"], any: [["4", "4.0", "v4"]], none: ["video"] },
   { ruleId: "grok-imagine", priority: 60, any: [["grok"], ["imagine"]], none: ["video"] },
   { ruleId: "wan-image-pro", priority: 56, all: ["image", "pro"], any: [["wan", "wan2.7", "2.7", "27"]], none: ["video"], regex: /wan[-_. ]?2\.?7[-_. ]?image[-_. ]?pro/i },
@@ -661,9 +511,13 @@ export function normalizeImageModelGenerationSelection(
 }
 
 export function normalizeImageModelRuleId(ruleId: unknown): ImageModelRuleId {
+  if (ruleId === "gpt-image-2" || ruleId === "gpt-image-2-official" || ruleId === "gpt-image-1") return "gpt-image";
+  if (ruleId === "gemini-3-pro" || ruleId === "gemini-image") return "gemini-image";
+  if (ruleId === "gemini-3.1-flash" || ruleId === "gemini-3.1-flash-lite" || ruleId === "gemini-2.5-flash" || ruleId === "gemini-lite-image") return "gemini-lite-image";
+  if (ruleId === "seedream-4" || ruleId === "seedream-4.5" || ruleId === "z-image-turbo") return "generic-image";
   if (ruleId === "generic-apimart-image") return "generic-image";
-  if (ruleId === "gemini-apimart-image" || ruleId === "gemini-image") return "generic-image";
-  if (ruleId === "seedream") return "seedream-4";
+  if (ruleId === "gemini-apimart-image") return "generic-image";
+  if (ruleId === "seedream") return "generic-image";
   if (ruleId === "wan2.7-image") return "wan-image";
   if (ruleId === "wan2.7-image-pro") return "wan-image-pro";
   return RULE_BY_ID.has(ruleId as ImageModelRuleId) ? ruleId as ImageModelRuleId : "generic-image";

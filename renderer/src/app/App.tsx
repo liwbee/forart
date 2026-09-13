@@ -17,6 +17,7 @@ import { useDesktopUpdater, type DesktopUpdateStatus } from "./update/DesktopUpd
 import { syncPermissions } from "../features/permissions";
 import { ServerLoginDialog } from "../features/server-auth/ServerLoginDialog";
 import { WorkspaceErrorBoundary } from "../components/WorkspaceErrorBoundary";
+import { toast } from "sonner";
 
 const LIBRARY_QUERY_ROOTS = new Set([
   "storageSettings",
@@ -172,6 +173,20 @@ export function App() {
   useEffect(() => {
     document.title = appTitle;
   }, [appTitle]);
+
+  useEffect(() => {
+    const toastId = "background-removal-model-loading";
+    return window.easyTool?.onBackgroundRemovalModelState?.((state) => {
+      if (state === "loading") {
+        toast.loading("正在加载抠图模型…", {
+          id: toastId,
+          description: "首次使用需要几秒钟，模型会在后台常驻",
+        });
+      } else {
+        toast.dismiss(toastId);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (!isElectron) return;

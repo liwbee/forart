@@ -1,4 +1,4 @@
-import { Check, ExternalLink, GripVertical, KeyRound, Plus, RefreshCw, Sparkles, TestTube2, Trash2, X } from "lucide-react";
+import { Check, ExternalLink, GripVertical, KeyRound, Plus, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -28,7 +28,7 @@ import { LibtvLogo, LibtvSettingsPane } from "./LibtvSettingsPane";
 import { TudouLogo, TudouSettingsPane } from "./TudouSettingsPane";
 
 type ApiSettingsPane = "provider" | "apimart" | "tudou" | "libtv" | "recommended";
-type ApiAction = "verify" | "fetch" | "";
+type ApiAction = "fetch" | "";
 type ModelPickerTab = ApiModelKind | "all";
 type ModelListTab = ApiModelKind;
 type DraftModel = {
@@ -275,9 +275,9 @@ export function ApiSettingsPanel() {
     throw new Error("desktop-required");
   }
 
-  const protocolLabel = (provider: ApiProvider) => provider.protocol === "gemini" ? t("settings:protocolGemini") : provider.protocol === "compatible" ? t("settings:protocolCompatible") : t("settings:protocolOpenAI");
+  const protocolLabel = (provider: ApiProvider) => provider.protocol === "gemini" ? t("settings:protocolGemini") : provider.protocol === "apimart" ? t("settings:protocolApimart") : t("settings:protocolOpenAI");
 
-  function setRequestError(error: unknown, mode: "verify" | "fetch", protocol: string) {
+  function setRequestError(error: unknown, protocol: string) {
     // 主进程抛出的错误码经 ipcRenderer.invoke 会被包装成
     // "Error invoking remote method 'provider:models': Error: <code>"，需子串匹配。
     const message = error instanceof Error ? error.message : String(error);
@@ -285,19 +285,8 @@ export function ApiSettingsPanel() {
       tone: "error",
       text: message.includes("base-url-required") ? t("settings:apiBaseUrlRequired")
         : message.includes("base-url-invalid") ? t("settings:apiBaseUrlInvalid")
-          : t(mode === "verify" ? "settings:apiVerifyFailedWithProtocol" : "settings:apiFetchFailedWithProtocol", { protocol, message }),
+          : t("settings:apiFetchFailedWithProtocol", { protocol, message }),
     });
-  }
-
-  async function verifyAddress() {
-    if (!selectedProvider) return;
-    const protocol = protocolLabel(selectedProvider);
-    setAction("verify"); setStatus({ tone: "busy", text: "" });
-    try {
-      const models = await requestModels(selectedProvider);
-      setStatus({ tone: "ready", text: models.length ? t("settings:apiVerifySuccess", { count: models.length }) : t("settings:apiVerifyNoModels") });
-    } catch (error) { setRequestError(error, "verify", protocol); }
-    finally { setAction(""); }
   }
 
   async function fetchModels() {
@@ -317,7 +306,7 @@ export function ApiSettingsPanel() {
       })));
       setModelPickerFilter(""); setModelPickerTab("all"); setModelPickerOpen(true);
       setStatus({ tone: "ready", text: t("settings:apiFetchPickerReady", { total: models.length }) });
-    } catch (error) { setRequestError(error, "fetch", protocol); }
+    } catch (error) { setRequestError(error, protocol); }
     finally { setAction(""); }
   }
 
@@ -783,11 +772,9 @@ export function ApiSettingsPanel() {
                 <div className="settings-api-form">
                   <label className="settings-field"><span>{t("settings:providerName")}</span><input value={selectedProvider.name} onChange={(event) => patchSelectedProvider({ name: event.target.value })} placeholder={t("settings:providerNamePlaceholder")} /></label>
                   <label className="settings-field"><span>{t("settings:baseUrl")}</span><input value={selectedProvider.baseUrl} onChange={(event) => patchSelectedProvider({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" /></label>
-                  <label className="settings-field"><span>{t("settings:apiKey")}</span><input type="password" value={selectedProvider.apiKey} onChange={(event) => patchSelectedProvider({ apiKey: event.target.value })} placeholder={selectedProvider.hasApiKey ? "已配置，输入以替换" : t("settings:apiKeyPlaceholder")} /></label>
-                  <div className="settings-api-control-row" data-has-request-mode={selectedProvider.protocol === "openai" ? "true" : "false"}>
-                    <label className="settings-field"><span>{t("settings:protocol")}</span><Select value={selectedProvider.protocol} options={[{ value: "compatible", label: t("settings:protocolCompatible") }, { value: "openai", label: t("settings:protocolOpenAI") }, { value: "gemini", label: t("settings:protocolGemini") }]} onChange={(protocol) => patchSelectedProvider({ protocol: protocol as ApiProvider["protocol"] })} ariaLabel={t("settings:protocol")} menuPlacement="bottom" /></label>
-                    {selectedProvider.protocol === "openai" ? <label className="settings-field"><span>{t("settings:imageRequestMode")}</span><Select value={selectedProvider.imageRequestMode} options={[{ value: "openai", label: t("settings:imageRequestModeOpenAI") }, { value: "openai-json", label: t("settings:imageRequestModeOpenAIJson") }]} onChange={(imageRequestMode) => patchSelectedProvider({ imageRequestMode: imageRequestMode as ApiProvider["imageRequestMode"] })} ariaLabel={t("settings:imageRequestMode")} menuPlacement="bottom" /></label> : null}
-                    <Button type="button" className="settings-api-control-button" disabled={action !== ""} onClick={verifyAddress}><TestTube2 data-icon="inline-start" aria-hidden="true" /><span>{action === "verify" ? t("settings:apiVerifying") : t("settings:verifyAddress")}</span></Button>
+                  <div className="settings-api-key-row">
+                    <label className="settings-field"><span>{t("settings:apiKey")}</span><input type="password" value={selectedProvider.apiKey} onChange={(event) => patchSelectedProvider({ apiKey: event.target.value })} placeholder={selectedProvider.hasApiKey ? "已配置，输入以替换" : t("settings:apiKeyPlaceholder")} /></label>
+                    <label className="settings-field"><span>{t("settings:protocol")}</span><Select value={selectedProvider.protocol} options={[{ value: "apimart", label: t("settings:protocolApimart") }, { value: "openai", label: t("settings:protocolOpenAI") }, { value: "gemini", label: t("settings:protocolGemini") }]} onChange={(protocol) => patchSelectedProvider({ protocol: protocol as ApiProvider["protocol"] })} ariaLabel={t("settings:protocol")} menuPlacement="bottom" /></label>
                     <Button type="button" className="settings-api-control-button" disabled={action !== ""} onClick={fetchModels}><RefreshCw data-icon="inline-start" aria-hidden="true" /><span>{action === "fetch" ? t("settings:apiFetching") : t("settings:fetchModels")}</span></Button>
                   </div>
                   {status.text && (status.tone === "ready" || status.tone === "error") ? status.tone === "error" ? <ErrorCopyLine className="settings-inline-status settings-api-action-status" text={status.text} ariaLive="polite" /> : <div className="settings-inline-status settings-api-action-status" data-tone={status.tone} aria-live="polite">{status.text}</div> : null}

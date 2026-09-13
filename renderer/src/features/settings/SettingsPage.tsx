@@ -1,10 +1,10 @@
-import { HardDrive, KeyRound, Settings, Sparkles } from "lucide-react";
+import { HardDrive, KeyRound, Puzzle, Settings } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type ForartAppConfig } from "../../app/appConfig";
 import { NativeTabs, type NativeTabItem } from "../../components/NativeTabs";
 import { ApiSettingsPanel } from "./ApiSettingsPanel";
-import { AgentSettingsPanel } from "./AgentSettingsPanel";
+import { ExtensionSettingsPanel } from "./ExtensionSettingsPanel";
 import { CacheSettingsPanel } from "./CacheSettingsPanel";
 import { GeneralSettingsPanel } from "./GeneralSettingsPanel";
 
@@ -13,7 +13,7 @@ interface SettingsPageProps {
   onConfigChange: (config: ForartAppConfig) => void;
 }
 
-type SettingsTab = "general" | "api" | "agent" | "cache";
+type SettingsTab = "general" | "api" | "extensions" | "cache";
 
 export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   const { t } = useTranslation();
@@ -21,7 +21,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
   const settingsNavTabs = useMemo<NativeTabItem<SettingsTab>[]>(() => [
     { value: "general", label: t("settings:generalSettings"), icon: Settings },
     { value: "api", label: t("settings:apiSettings"), icon: KeyRound },
-    { value: "agent", label: t("settings:agentSettings"), icon: Sparkles },
+    { value: "extensions", label: t("settings:extensionSettings"), icon: Puzzle },
     { value: "cache", label: t("settings:cacheCleanup"), icon: HardDrive },
   ], [t]);
 
@@ -48,7 +48,7 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
           hidden={activeTab !== "general"}
         />
         {activeTab === "api" ? <ApiSettingsPanel /> : null}
-        <AgentSettingsPanel hidden={activeTab !== "agent"} />
+        <ExtensionSettingsPanel hidden={activeTab !== "extensions"} />
         {activeTab === "cache" ? <CacheSettingsPanel /> : null}
       </div>
     </section>

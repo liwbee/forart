@@ -56,7 +56,7 @@ function normalizeResult(input) {
 function normalizeApiTask(input = {}, fallback = {}) {
   const now = Date.now();
   const statusValue = safeString(input.status || fallback.status || 'queued');
-  const status = ['queued', 'submitting', 'running', 'result_processing', 'succeeded', 'failed', 'canceled', 'interrupted', 'superseded'].includes(statusValue)
+  const status = ['queued', 'preparing', 'submitting', 'running', 'result_processing', 'succeeded', 'failed', 'canceled', 'interrupted', 'superseded'].includes(statusValue)
     ? statusValue
     : 'queued';
   const startedAt = Number(input.startedAt || fallback.startedAt || now);
@@ -261,7 +261,7 @@ function createGenerationTaskService({ repository } = {}) {
     if (!current || TERMINAL_STATUSES.has(current.task.status)) return current?.task || null;
     return updateExecutionTask(executorKind, taskId, current.executorKind === EXECUTOR_KINDS.LIBTV
       ? { status: 'interrupted', message: '', messageCode: '', messageParams: null, error: '' }
-      : { status: 'interrupted', error: '', interruptReason: 'user_stop' });
+      : { status: 'interrupted', message: '', messageCode: '', messageParams: null, error: '', interruptReason: 'user_stop' });
   }
 
   function createStoreAdapter(executorKind) {

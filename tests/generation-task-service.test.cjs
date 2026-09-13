@@ -108,13 +108,13 @@ test('generation task service does not version or broadcast an equivalent task u
     canvasId: 'canvas',
     target: { type: 'imageGenerator', nodeId: 'node' },
     status: 'running',
-    messageCode: 'image.waitingForResult',
+    messageCode: 'generation.remoteProcessing',
     messageParams: { attempt: 1 },
   });
   const before = service.getTask('stable-task');
   const returned = api.updateTask('stable-task', {
     status: 'running',
-    messageCode: 'image.waitingForResult',
+    messageCode: 'generation.remoteProcessing',
     messageParams: { attempt: 1 },
   });
   const after = service.getTask('stable-task');

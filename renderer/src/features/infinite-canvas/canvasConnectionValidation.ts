@@ -11,6 +11,7 @@ export interface NativeCanvasConnectionCandidate {
 
 const TYPED_INPUT_NODE_KINDS = new Set([
   "imageGenerator",
+  "batchImageGenerator",
   "actionFission",
   "smartReverse",
 ]);

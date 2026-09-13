@@ -13,6 +13,7 @@ const { registerConfigIpc } = require('./ipc/config-ipc.cjs');
 const { registerGenerationTaskIpc } = require('./ipc/generation-task-ipc.cjs');
 const { registerImageReviewIpc } = require('./ipc/image-review-ipc.cjs');
 const { registerLocalApiIpc } = require('./ipc/local-api-ipc.cjs');
+const { registerBackgroundRemovalIpc } = require('./modules/background-removal.cjs');
 const { registerLibtvIpc } = require('./ipc/libtv-ipc.cjs');
 const { registerUpdaterIpc } = require('./ipc/updater-ipc.cjs');
 const { createActionFolderImportStore } = require('./modules/action-folder-import-store.cjs');
@@ -212,6 +213,7 @@ registerImageReviewIpc({
 });
 registerLibtvIpc({ ipcMain, libtv });
 localApi = registerLocalApiIpc({ ipcMain, configStore, app, dataRoot: portableRootDir });
+registerBackgroundRemovalIpc({ ipcMain, dataRoot: portableRootDir, app });
 registerConfigIpc({
   ipcMain,
   dialog,

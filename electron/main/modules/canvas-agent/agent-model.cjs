@@ -18,7 +18,7 @@ async function createAgentModel(provider, model) {
     const { createGoogle } = await import('@ai-sdk/google');
     return createGoogle({ apiKey, ...(baseURL ? { baseURL } : {}) })(model);
   }
-  if (protocol === 'compatible') {
+  if (protocol === 'apimart' || protocol === 'compatible') {
     const { createOpenAICompatible } = await import('@ai-sdk/openai-compatible');
     return createOpenAICompatible({
       name: String(provider.id || 'forart-provider'),

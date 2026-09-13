@@ -632,7 +632,7 @@ interface PublicApiProvider {
   id: string;
   name: string;
   baseUrl: string;
-  protocol: "openai" | "compatible" | "gemini";
+  protocol: "openai" | "apimart" | "gemini";
   hasApiKey: boolean;
   imageModels: string[];
   chatModels: string[];

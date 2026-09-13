@@ -21,18 +21,26 @@ export type ForartApiProviderConfig = ApiProvider;
 export type ForartApiSettingsConfig = ApiSettings;
 
 export type ForartReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-export type ForartAgentReasoningLevel = Exclude<ForartReasoningEffort, "none">;
-
-export interface ForartAgentModelRoute {
+export type ForartExtensionReasoningLevel = Exclude<ForartReasoningEffort, "none">;
+export interface ForartExtensionModelRoute {
   providerId: string;
   model: string;
 }
 
-export interface ForartAgentSettings {
+export interface ForartExtensionSettings {
+  backgroundRemovalEnabled: boolean;
+  promptOptimizationEnabled: boolean;
   thinkingMode: boolean;
-  reasoningLevel: ForartAgentReasoningLevel;
-  imageGeneratorPromptOptimization: ForartAgentModelRoute | null;
+  reasoningLevel: ForartExtensionReasoningLevel;
+  imageGeneratorPromptOptimization: ForartExtensionModelRoute | null;
 }
+
+/** @deprecated Use the extension-prefixed names. Kept for persisted integrations. */
+export type ForartAgentReasoningLevel = ForartExtensionReasoningLevel;
+/** @deprecated Use ForartExtensionModelRoute. */
+export type ForartAgentModelRoute = ForartExtensionModelRoute;
+/** @deprecated Use ForartExtensionSettings. */
+export type ForartAgentSettings = ForartExtensionSettings;
 
 export interface ForartImageReviewSettings {
   modelFolders: string;
@@ -230,8 +238,12 @@ export interface ForartConfigApi {
   save: (config: ForartAppConfig) => Promise<{ ok: true; config: ForartAppConfig }>;
   loadApiSettings: () => Promise<ForartApiSettingsConfig>;
   saveApiSettings: (settings: ForartApiSettingsConfig) => Promise<{ ok: true; apiSettings: ForartApiSettingsConfig }>;
-  loadAgentSettings: () => Promise<ForartAgentSettings>;
-  saveAgentSettings: (settings: ForartAgentSettings) => Promise<{ ok: true; agentSettings: ForartAgentSettings }>;
+  loadExtensionSettings: () => Promise<ForartExtensionSettings>;
+  saveExtensionSettings: (settings: ForartExtensionSettings) => Promise<{ ok: true; extensionSettings: ForartExtensionSettings }>;
+  /** @deprecated Use loadExtensionSettings/saveExtensionSettings. */
+  loadAgentSettings: () => Promise<ForartExtensionSettings>;
+  /** @deprecated Use loadExtensionSettings/saveExtensionSettings. */
+  saveAgentSettings: (settings: ForartExtensionSettings) => Promise<{ ok: true; agentSettings: ForartExtensionSettings }>;
   requestProviderModels: (payload: { providerId: string }) => Promise<{ models: string[] }>;
   requestApimartBalance: (payload: { providerId: string }) => Promise<{ status: "idle" | "ready"; remainCredits?: number; usedCredits?: number }>;
   loadImageReviewSettings: () => Promise<ForartImageReviewSettings>;
@@ -334,6 +346,11 @@ export interface CanvasSaveRequest {
 }
 
 export interface EasyToolApi {
+  backgroundRemovalStatus: () => Promise<{ id: string; downloaded: boolean; downloading: boolean; size: number; downloadedBytes: number }>;
+  downloadBackgroundRemovalModel: () => Promise<{ id: string; downloaded: boolean; downloading: boolean; size: number; downloadedBytes: number }>;
+  removeBackgroundRemovalModel: () => Promise<{ id: string; downloaded: boolean; downloading: boolean; size: number; downloadedBytes: number }>;
+  removeImageBackground: (payload: { filePath?: string; bytes?: Uint8Array }) => Promise<Uint8Array>;
+  onBackgroundRemovalModelState: (callback: (state: "loading" | "ready" | "error") => void) => () => void;
   saveResult: (payload: { dataUrl?: string; url?: string; defaultName?: string; directory?: string; convertToPng?: boolean }) => Promise<{ canceled: boolean; filePath?: string }>;
   listCanvases: () => Promise<{
     canvases: Array<{ id: string; title: string; icon?: string; canvasType?: string; source?: string; projectId?: string; color?: string; pinned?: boolean; createdAt: number; updatedAt: number; revision?: number; nodeCount: number }>;

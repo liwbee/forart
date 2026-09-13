@@ -395,7 +395,7 @@
   overflow: hidden;
   background: var(--state-hover-bg);
   border-radius: inherit;
-  cursor: zoom-in;
+  cursor: pointer;
 }
 
 .model-image-preview img {

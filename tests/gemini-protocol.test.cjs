@@ -145,17 +145,17 @@ test('AI-Tudou Gemini progress advances through real request phases', async () =
     referenceImages: ['https://assets.example.com/reference.jpg'],
   });
   const messageCodes = taskUpdates.map((patch) => patch.messageCode).filter(Boolean);
-  const referenceIndex = messageCodes.indexOf('image.referencePreparing');
-  const generatingIndex = messageCodes.indexOf('image.geminiGenerating');
+  const referenceIndex = messageCodes.indexOf('generation.referencesPreparing');
+  const generatingIndex = messageCodes.indexOf('generation.requestSubmitting');
   const processingIndex = messageCodes.indexOf('generation.resultProcessing');
 
   assert.equal(task.status, 'succeeded', task.error);
   assert.ok(referenceIndex >= 0);
   assert.ok(generatingIndex > referenceIndex);
   assert.ok(processingIndex > generatingIndex);
-  assert.equal(messageCodes.includes('image.geminiSubmitting'), false);
+  assert.equal(messageCodes.includes('image.geminiGenerating'), false);
   assert.deepEqual(
-    taskUpdates.find((patch) => patch.messageCode === 'image.referencePreparing')?.messageParams,
+    taskUpdates.find((patch) => patch.messageCode === 'generation.referencesPreparing')?.messageParams,
     { current: 1, total: 1 },
   );
 });

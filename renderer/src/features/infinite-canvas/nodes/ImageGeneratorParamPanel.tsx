@@ -2,7 +2,7 @@ import { NodeToolbar, Position, useEdges, useNodes, useStore } from "@xyflow/rea
 import { CircleAlert, Images, Maximize2, Minimize2, Play, Square, Upload } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type SVGProps } from "react";
 import { useTranslation } from "react-i18next";
-import type { ForartAgentSettings, LibtvImageModelRecord } from "../../../app/appConfig";
+import type { ForartExtensionSettings, LibtvImageModelRecord } from "../../../app/appConfig";
 import { AppSelect } from "../../../components/AppSelect";
 import { SizePresetPicker } from "../../../components/SizePresetPicker";
 import { Alert, AlertDescription } from "../../../components/ui/alert";
@@ -63,7 +63,7 @@ import { ImageReferenceStrip } from "./ImageReferenceStrip";
 import { imagePromptDocumentFromReferenceText, normalizeImagePromptDocument } from "../generation/imagePromptReferences";
 import { ImagePromptEditor } from "./ImagePromptEditor";
 import { useCanvasAgent } from "../../canvas-agent";
-import { AGENT_SETTINGS_CHANGED_EVENT, loadAgentSettings, readAgentSettings } from "../../settings/agentSettings";
+import { EXTENSION_SETTINGS_CHANGED_EVENT, loadExtensionSettings, readExtensionSettings } from "../../settings/extensionSettings";
 import { useInfiniteCanvasSettings } from "../infiniteCanvasSettings";
 
 interface ImagePromptOptimizationResult {
@@ -152,7 +152,7 @@ export function ImageGeneratorParamPanel({
     patchNodeDataSilently,
   } = actions;
   const [apiSettings, setApiSettings] = useState<ApiSettings>(() => readApiSettings());
-  const [agentSettings, setAgentSettings] = useState<ForartAgentSettings>(() => readAgentSettings());
+  const [extensionSettings, setExtensionSettings] = useState<ForartExtensionSettings>(() => readExtensionSettings());
   const [apiSettingsLoaded, setApiSettingsLoaded] = useState(() => hasLoadedApiSettings());
   const [libtvModels, setLibtvModels] = useState<LibtvImageModelRecord[]>([]);
   const [libtvSchema, setLibtvSchema] = useState<unknown>(null);
@@ -286,21 +286,21 @@ export function ImageGeneratorParamPanel({
       setApiSettings(readApiSettings());
       setApiSettingsLoaded(hasLoadedApiSettings());
     };
-    const syncAgentSettings = () => setAgentSettings(readAgentSettings());
+    const syncExtensionSettings = () => setExtensionSettings(readExtensionSettings());
     syncSettings();
-    syncAgentSettings();
+    syncExtensionSettings();
     window.addEventListener(API_PROVIDER_CHANGED_EVENT, syncSettings);
-    window.addEventListener(AGENT_SETTINGS_CHANGED_EVENT, syncAgentSettings);
+    window.addEventListener(EXTENSION_SETTINGS_CHANGED_EVENT, syncExtensionSettings);
     void loadApiSettings()
       .then((settings) => {
         setApiSettings(settings);
         setApiSettingsLoaded(true);
       })
       .catch(() => setApiSettingsLoaded(true));
-    void loadAgentSettings().then(setAgentSettings).catch(() => undefined);
+    void loadExtensionSettings().then(setExtensionSettings).catch(() => undefined);
     return () => {
       window.removeEventListener(API_PROVIDER_CHANGED_EVENT, syncSettings);
-      window.removeEventListener(AGENT_SETTINGS_CHANGED_EVENT, syncAgentSettings);
+      window.removeEventListener(EXTENSION_SETTINGS_CHANGED_EVENT, syncExtensionSettings);
     };
   }, [visible]);
 
@@ -311,7 +311,7 @@ export function ImageGeneratorParamPanel({
   const platformItems = useMemo(() => (
     orderedApiProviderItems(providers, apiSettings.providerOrder)
   ), [apiSettings.providerOrder, providers]);
-  const optimizationRoute = agentSettings.imageGeneratorPromptOptimization;
+  const optimizationRoute = extensionSettings.imageGeneratorPromptOptimization;
   const isLibtv = data.imageGenerationBackend === "libtv";
   const provider = providers.find((item) => item.id === data.imageProviderId)
     || providers.find((item) => item.id === apiSettings.defaultImageProviderId)
@@ -380,7 +380,7 @@ export function ImageGeneratorParamPanel({
   const referenceImages = collectImageGeneratorReferences(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:referenceImage"));
   const isActionFission = data.kind === "actionFission";
   const [parameterPanelWidth, setParameterPanelWidth] = useState(isActionFission ? 800 : 668);
-  const showOptimizationMenuButton = showPrompt && !isActionFission;
+  const showOptimizationMenuButton = showPrompt && !isActionFission && extensionSettings.promptOptimizationEnabled;
   const additionalReferenceImages = isActionFission
     ? collectActionFissionAdditionalReferences(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference"))
     : [];

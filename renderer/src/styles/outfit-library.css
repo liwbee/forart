@@ -90,7 +90,7 @@
 }
 
 .outfit-card__image[role="button"] {
-  cursor: zoom-in;
+  cursor: pointer;
 }
 
 .action-card .outfit-card__image[role="button"] {

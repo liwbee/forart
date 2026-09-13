@@ -12,7 +12,7 @@ import { copyText } from "../../../components/ErrorCopyLine";
 import { ImageViewer } from "../../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import { cn } from "../../../lib/utils";
-import { isCanvasAssetFile, readImageFileAsDataUrl, readImageFileDimensions, readMediaFileDimensions, useNativeCanvasActions, type CanvasImageCropRect } from "../canvasActions";
+import { isCanvasAssetFile, readImageFileAsDataUrl, readMediaFileDimensions, useNativeCanvasActions, type CanvasImageCropRect } from "../canvasActions";
 import { useNativeCanvasInteractionStore } from "../canvasInteractionStore";
 import {
   nativeCanvasNodePrimaryImage,
@@ -24,6 +24,7 @@ import {
 import { NativeNodeResizeControl } from "./NativeNodeResizeControl";
 import { ImageGeneratorParamPanel } from "./ImageGeneratorParamPanel";
 import { ActionFissionNodeBody } from "./ActionFissionNodeBody";
+import { BatchImageGeneratorNodeBody } from "./BatchImageGeneratorNodeBody";
 import { canvasPreviewSourceUrl } from "../canvasThumbnails";
 import { useCanvasOriginalImagePreference } from "../canvasZoomImagePreference";
 import { formatGenerationDuration, generationStatusMessage } from "../generation/generationStatus";
@@ -43,6 +44,7 @@ import { SmartReverseNodeBody } from "./ImageReverseNodeBody";
 import { SmartReverseParamPanel } from "./ImageReverseParamPanel";
 import { useSmartReverseRuntimeStore } from "../generation/imageReverseRuntimeStore";
 import { useCanvasAgent } from "../../canvas-agent";
+import { EXTENSION_SETTINGS_CHANGED_EVENT, hasLoadedExtensionSettings, loadExtensionSettings, readExtensionSettings } from "../../settings/extensionSettings";
 
 function GenerationErrorStatus({ message }: { message: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -108,6 +110,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const smartReverseRunning = useSmartReverseRuntimeStore((state) => Boolean(state.runningByNode[id])) || smartReverseRunFromAgent;
   const isAnnotationNode = data.kind === "annotation";
   const isActionFissionNode = data.kind === "actionFission";
+  const isBatchImageGeneratorNode = data.kind === "batchImageGenerator";
   const captionTitle = String(data.label || "").trim() || nodeTypeLabel;
   const isLaunching = useGenerationRuntimeStore((state) => isImageNodeLaunching(state.launchingKeys, id));
   const taskId = nativeCanvasNodeTaskId(data);
@@ -127,12 +130,20 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     : hasGenerationError ? activeGenerationError : "";
   const [timerNow, setTimerNow] = useState(Date.now());
   const [isDownloadBusy, setIsDownloadBusy] = useState(false);
+  const [isBackgroundRemovalBusy, setIsBackgroundRemovalBusy] = useState(false);
+  const [backgroundRemovalEnabled, setBackgroundRemovalEnabled] = useState(() => readExtensionSettings().backgroundRemovalEnabled);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [isCropping, setIsCropping] = useState(false);
   const [cropAspect, setCropAspect] = useState<ImageCropAspect>("original");
   const [cropSelection, setCropSelection] = useState<CanvasImageCropRect | null>(null);
   const [isCropBusy, setIsCropBusy] = useState(false);
+  useEffect(() => {
+    const syncExtensionSettings = () => setBackgroundRemovalEnabled(readExtensionSettings().backgroundRemovalEnabled);
+    window.addEventListener(EXTENSION_SETTINGS_CHANGED_EVENT, syncExtensionSettings);
+    if (!hasLoadedExtensionSettings()) void loadExtensionSettings().then(syncExtensionSettings).catch(() => undefined);
+    return () => window.removeEventListener(EXTENSION_SETTINGS_CHANGED_EVENT, syncExtensionSettings);
+  }, []);
   const generationStartedAt = Number(activeGenerationTask?.runningAt || activeGenerationTask?.startedAt || 0);
   const elapsedText = formatGenerationDuration(generationStartedAt ? timerNow - generationStartedAt : 0);
   const imageWidth = Math.round(Number(data.assetNaturalWidth || data.imageNaturalWidth || 0));
@@ -332,6 +343,25 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     setCropSelection(null);
   }, [isNodeToolbarActive, selected]);
 
+  const removeBackground = useCallback(async () => {
+    if (!backgroundRemovalEnabled || data.kind !== "assetLoader" || data.assetType !== "image" || !data.assetUrl) return;
+    const tool = window.easyTool;
+    if (!tool) return;
+    setIsBackgroundRemovalBusy(true);
+    try {
+      const source = await tool.saveCanvasAsset({ url: resolveLibraryImageUrl(String(data.assetUrl)), defaultName: String(data.assetFileName || "image.png"), kind: "input" });
+      if (!source.filePath) throw new Error("无法定位图片文件");
+      const bytes = await tool.removeImageBackground({ filePath: source.filePath });
+      let binary = ""; for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
+      const saved = await tool.saveCanvasAsset({ dataUrl: `data:image/png;base64,${btoa(binary)}`, defaultName: `${String(data.label || "image")}-抠图.png`, kind: "output" });
+      actions.createDerivedAssetNode(id, saved, `${String(data.label || "素材")}-抠图`, "image");
+      toast.success("已生成抠图素材");
+    } catch (error) {
+      toast.error(`抠图失败：${String(error instanceof Error ? error.message : error)}`);
+    }
+    finally { setIsBackgroundRemovalBusy(false); }
+  }, [actions, backgroundRemovalEnabled, data, id]);
+
   return (
     <>
       {!isAnnotationNode ? (
@@ -346,7 +376,9 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
 
       {toolbarVisible && !isActionFissionNode ? (
         <NodeToolbar nodeId={id} position={Position.Top} offset={toolbarOffset} className="rf-native-node-toolbar">
-          {isAnnotationNode ? (
+          {isBatchImageGeneratorNode ? (
+            <BatchImageGeneratorNodeBody nodeId={id} data={data} />
+          ) : isAnnotationNode ? (
             <AnnotationNodeToolbarControls nodeId={id} style={data.annotationStyle} />
           ) : isCropping ? (
             <>
@@ -449,6 +481,11 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               }}
             >
               <Maximize2 aria-hidden="true" />
+            </Button>
+          ) : null}
+          {backgroundRemovalEnabled && data.kind === "assetLoader" && primaryImageUrl && !isCropping ? (
+            <Button type="button" variant="ghost" size="icon-sm" disabled={isBackgroundRemovalBusy} aria-label="一键抠图" title="一键抠图" onClick={() => void removeBackground()}>
+              {isBackgroundRemovalBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <ImageAiFillIcon aria-hidden="true" />}
             </Button>
           ) : null}
           {data.kind === "assetLoader" && primaryImageUrl && !isCropping ? (

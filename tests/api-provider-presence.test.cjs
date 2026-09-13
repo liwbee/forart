@@ -34,7 +34,7 @@ test('fixed provider templates expose documented defaults without schema logic',
   assert.equal(apimart.id, 'apimart');
   assert.equal(apimart.name, 'APImart');
   assert.equal(apimart.baseUrl, providers.APIMART_BASE_URLS[0]);
-  assert.equal(apimart.protocol, 'compatible');
+  assert.equal(apimart.protocol, 'apimart');
   assert.deepEqual(apimart.imageModels, []);
   assert.equal(apimart.hasApiKey, false);
 
@@ -87,14 +87,12 @@ test('coerceApiProviderDraft only cleans user input and defers schema rules to m
     name: '  My Relay  ',
     baseUrl: ' https://example.com/v1 ',
     protocol: 'weird',
-    imageRequestMode: 'openai-json',
     imageModels: [' model-a ', 'model-a', 'model-b'],
     hasApiKey: true,
   });
   assert.equal(coerced.name, 'My Relay');
   assert.equal(coerced.baseUrl, 'https://example.com/v1');
   assert.equal(coerced.protocol, 'openai');
-  assert.equal(coerced.imageRequestMode, 'openai-json');
   assert.deepEqual(coerced.imageModels, ['model-a', 'model-b']);
   assert.equal(coerced.hasApiKey, true);
   assert.equal(coerced.id, base.id);

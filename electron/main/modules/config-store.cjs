@@ -86,6 +86,8 @@ function normalizeAgentSettings(payload = {}) {
     ? source.reasoningLevel
     : 'medium';
   return {
+    backgroundRemovalEnabled: source.backgroundRemovalEnabled === true,
+    promptOptimizationEnabled: source.promptOptimizationEnabled === true,
     thinkingMode: source.thinkingMode === true || source.thinkingEnabled === true,
     reasoningLevel,
     imageGeneratorPromptOptimization: normalizeAgentModelRoute(
@@ -93,6 +95,9 @@ function normalizeAgentSettings(payload = {}) {
     ),
   };
 }
+
+// Extension settings are persisted under the historical agentSettings key for backwards compatibility.
+const normalizeExtensionSettings = normalizeAgentSettings;
 
 function normalizeApiProvider(input = {}, providers = []) {
   if (isApimartProvider(input)) return createApimartProvider(input);
@@ -116,8 +121,11 @@ function normalizeApiProvider(input = {}, providers = []) {
     apiKey: String(input.apiKey || ''),
     accessKey: String(input.accessKey || ''),
     secretKey: String(input.secretKey || ''),
-    protocol: input.protocol === 'compatible' || input.protocol === 'gemini' ? input.protocol : 'openai',
-    imageRequestMode: input.imageRequestMode === 'openai-json' ? 'openai-json' : 'openai',
+    protocol: input.protocol === 'gemini'
+      ? 'gemini'
+      : input.protocol === 'apimart' || input.protocol === 'compatible'
+        ? 'apimart'
+        : 'openai',
     imageGenerationEndpoint: String(input.imageGenerationEndpoint || '').trim(),
     imageEditEndpoint: String(input.imageEditEndpoint || '').trim(),
     imageModels: Array.isArray(input.imageModels) ? uniqueStrings(input.imageModels) : [],
@@ -156,8 +164,7 @@ function createApimartProvider(input = {}) {
     apiKey: String(input.apiKey || ''),
     accessKey: '',
     secretKey: '',
-    protocol: 'compatible',
-    imageRequestMode: 'openai',
+    protocol: 'apimart',
     imageGenerationEndpoint: '',
     imageEditEndpoint: '',
     imageModels: Array.isArray(input.imageModels) ? uniqueStrings(input.imageModels) : [],
@@ -232,7 +239,16 @@ function normalizeRuleBucket(input = {}) {
   if (!input || typeof input !== 'object') return {};
   return Object.entries(input).reduce((result, [model, ruleId]) => {
     const modelId = String(model || '').trim();
-    const value = String(ruleId || '').trim();
+    const rawValue = String(ruleId || '').trim();
+    const value = ['gpt-image-2', 'gpt-image-2-official', 'gpt-image-1'].includes(rawValue)
+      ? 'gpt-image'
+      : rawValue === 'gemini-3-pro'
+        ? 'gemini-image'
+        : ['gemini-3.1-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'].includes(rawValue)
+          ? 'gemini-lite-image'
+          : ['seedream', 'seedream-4', 'seedream-4.5', 'z-image-turbo'].includes(rawValue)
+            ? 'generic-image'
+            : rawValue;
     if (modelId && value) result[modelId] = value;
     return result;
   }, {});
@@ -306,7 +322,6 @@ function createTudouProvider(input = {}) {
     accessKey: '',
     secretKey: '',
     protocol: 'gemini',
-    imageRequestMode: 'openai',
     imageGenerationEndpoint: '',
     imageEditEndpoint: '',
     imageModels: catalogOrder.image.filter((model) => enabledImageModels.has(model)),
@@ -419,6 +434,14 @@ function createConfigStore({ app, rootDir, safeStorage }) {
     const agentSettings = normalizeAgentSettings(payload);
     writeRaw({ ...readRaw(), agentSettings });
     return agentSettings;
+  }
+
+  function loadExtensionSettings() {
+    return loadAgentSettings();
+  }
+
+  function saveExtensionSettings(payload) {
+    return saveAgentSettings(payload);
   }
 
   function encryptionAvailable() {
@@ -595,11 +618,13 @@ function createConfigStore({ app, rootDir, safeStorage }) {
     loadPublicApiSettings,
     getApiProvider,
     loadAgentSettings,
+    loadExtensionSettings,
     loadImageReviewSettings,
     loadInfiniteCanvasSettings,
     save,
     saveApiSettings,
     saveAgentSettings,
+    saveExtensionSettings,
     saveImageReviewSettings,
     saveInfiniteCanvasSettings,
   };

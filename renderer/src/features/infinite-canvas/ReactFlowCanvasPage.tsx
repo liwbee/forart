@@ -39,7 +39,6 @@ import { copyLibraryImage, resolveLibraryImageUrl } from "../../lib/libraryImage
 import {
   NativeCanvasActionsContext,
   readImageDimensions,
-  readImageFileDimensions,
   readImageFileAsDataUrl,
   isCanvasAssetFile,
   readMediaFileDimensions,

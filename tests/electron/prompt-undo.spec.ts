@@ -23,7 +23,7 @@ test.beforeEach(async ({ page }) => {
 
     const provider = {
       id: "provider-1", name: "Test provider", baseUrl: "https://example.invalid/v1", apiKey: "test-key",
-      protocol: "openai", imageRequestMode: "openai", imageGenerationEndpoint: "", imageEditEndpoint: "",
+      protocol: "openai", imageGenerationEndpoint: "", imageEditEndpoint: "",
       imageModels: ["test-image-model"],
       chatModels: window.localStorage.getItem("forart_prompt_undo_multiple_chat_models") === "true"
         ? ["test-chat-model", "test-chat-model-2"]

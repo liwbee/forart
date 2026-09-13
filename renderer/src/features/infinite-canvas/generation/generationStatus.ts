@@ -9,6 +9,14 @@ import type { TFunction } from "i18next";
 
 const STATUS_TRANSLATION_KEYS: Record<string, string> = {
   "generation.resultProcessing": "resultProcessing",
+  "generation.queueWaiting": "generationQueueWaiting",
+  "generation.requestPreparing": "generationRequestPreparing",
+  "generation.referencesPreparing": "generationReferencesPreparing",
+  "generation.referencesUploading": "generationReferencesUploading",
+  "generation.remoteSetup": "generationRemoteSetup",
+  "generation.requestSubmitting": "generationRequestSubmitting",
+  "generation.remoteProcessing": "generationRemoteProcessing",
+  // Compatibility for tasks persisted before the unified phase names.
   "image.referenceUploading": "imageReferenceUploading",
   "image.referencePreparing": "imageReferencePreparing",
   "image.waitingForResult": "imageWaitingForResult",
@@ -16,7 +24,6 @@ const STATUS_TRANSLATION_KEYS: Record<string, string> = {
   "image.textRequestPreparing": "imageTextRequestPreparing",
   "image.geminiGenerating": "imageGeminiGenerating",
   "image.editSubmitting": "imageEditSubmitting",
-  "image.jsonReferenceRetrying": "imageJsonReferenceRetrying",
   "image.generationSubmitting": "imageGenerationSubmitting",
   "libtv.workspacePreparing": "libtvWorkspacePreparing",
   "libtv.referencesUploading": "libtvReferencesUploading",
@@ -40,10 +47,22 @@ type GenerationStatusTask = {
 export function generationStatusMessage(task: GenerationStatusTask | undefined, t: TFunction) {
   if (task?.messageCode) {
     const translationKey = STATUS_TRANSLATION_KEYS[task.messageCode];
-    if (translationKey) return t(`infiniteCanvas:${translationKey}`, task.messageParams || {});
+    if (translationKey) {
+      const params = task.messageParams || {};
+      if (task.messageCode === "generation.requestSubmitting") {
+        const operation = params.operation === "edit"
+          ? t("infiniteCanvas:generationOperationEdit")
+          : t("infiniteCanvas:generationOperationGenerate");
+        return t(`infiniteCanvas:${translationKey}`, { ...params, operation });
+      }
+      return t(`infiniteCanvas:${translationKey}`, params);
+    }
   }
   const message = task?.remoteMessage || task?.message;
   if (message === "result_processing") return t("infiniteCanvas:resultProcessing");
+  if (/^(queued|pending|submitted|processing|running|in_progress|in-progress)$/i.test(String(message || "").trim())) {
+    return t("infiniteCanvas:generationRemoteProcessing");
+  }
   return message
     ? t("infiniteCanvas:remoteGenerationStatus", { status: message })
     : "";
