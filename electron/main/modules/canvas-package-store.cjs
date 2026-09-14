@@ -350,6 +350,14 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, ne
       add(row?.selectedActionAssetUrl, `${rowPrefix}.selectedActionAssetUrl`);
     }
   }
+  function collectBatchImageGeneratorAssets(batch, add, prefix) {
+    if (!isRecord(batch)) return;
+    for (const item of Array.isArray(batch.items) ? batch.items : []) {
+      const itemPrefix = `${prefix}.item:${item?.id || ''}`;
+      add(item?.sourceUrl, `${itemPrefix}.sourceUrl`);
+      add(item?.resultUrl, `${itemPrefix}.resultUrl`);
+    }
+  }
 
   function collectAssets(canvas) {
     const assetsByPath = new Map();
@@ -360,6 +368,7 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, ne
       add(node.url, `${prefix}.url`);
       add(node.filePath, `${prefix}.filePath`);
       collectActionFissionAssets(node.actionFission, add, `${prefix}.actionFission`);
+      collectBatchImageGeneratorAssets(node.batchImageGenerator, add, `${prefix}.batchImageGenerator`);
 
       const data = isRecord(node.data) ? node.data : {};
       add(data.assetUrl, `${prefix}.data.assetUrl`);
@@ -370,6 +379,7 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, ne
         });
       }
       collectActionFissionAssets(data.actionFission, add, `${prefix}.data.actionFission`);
+      collectBatchImageGeneratorAssets(data.batchImageGenerator, add, `${prefix}.data.batchImageGenerator`);
     }
     return { assets: Array.from(assetsByPath.values()), warnings };
   }

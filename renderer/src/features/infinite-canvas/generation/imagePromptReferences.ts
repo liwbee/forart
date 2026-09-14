@@ -6,6 +6,10 @@ export interface ImagePromptReferenceLabels {
   requestHeader: string;
 }
 
+export function imageReferenceLabel(reference: ImageGeneratorReferenceInput | undefined, index: number, language: string) {
+  return reference?.mentionLabel?.trim() || formatImageReferenceLabel(index, language);
+}
+
 export interface ImageReferenceMentionQuery {
   start: number;
   length: number;
@@ -77,10 +81,11 @@ function lexicalRootNode(children: NativeImagePromptSerializedNode[]): NativeIma
   };
 }
 
-function referenceAliases(index: number) {
+function referenceAliases(reference: ImageGeneratorReferenceInput, index: number) {
   const ordinal = Math.max(0, index) + 1;
   const chinese = formatImageReferenceLabel(index, "zh-CN");
   return new Set([
+    reference.mentionLabel ? `@${reference.mentionLabel}` : "",
     `@${chinese}`,
     `@图${ordinal}`,
     `@Image ${ordinal}`,
@@ -95,7 +100,7 @@ export function imagePromptDocumentFromReferenceText(
 ) {
   const source = String(prompt || "");
   if (!references.length || !source) return undefined;
-  const aliases = references.map((_, index) => referenceAliases(index));
+  const aliases = references.map((reference, index) => referenceAliases(reference, index));
   const tokenPattern = /@(图(?:[零一二三四五六七八九十百]+|\d+)|Image\s+\d+|image\d+)/gi;
   let found = false;
   const children = source.split(/\n/).map((line) => {

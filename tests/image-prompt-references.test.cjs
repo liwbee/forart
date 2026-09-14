@@ -88,6 +88,18 @@ test('reference picker trigger works directly after surrounding text', () => {
   });
 });
 
+test('batch main reference accepts the explicit 主图 mention label', () => {
+  const { imagePromptDocumentFromReferenceText, serializeImagePromptForDisplay } = loadModule();
+  const batchReferences = [{ ...references[0], edgeId: 'batch-task-reference', mentionLabel: '主图' }, references[1]];
+  const generated = imagePromptDocumentFromReferenceText('使用@主图作为主体，并参考@图二的风格', batchReferences);
+  assert.ok(generated);
+  assert.equal(serializeImagePromptForDisplay({
+    document: generated,
+    references: batchReferences,
+    referenceLabel: (index) => `图${index + 1}`,
+  }), '使用@主图作为主体，并参考@图2的风格');
+});
+
 test('structured image tokens serialize to display text and remote identifiers', () => {
   const { buildPromptWithImageReferenceDocument, serializeImagePromptForDisplay } = loadModule();
   assert.equal(serializeImagePromptForDisplay({

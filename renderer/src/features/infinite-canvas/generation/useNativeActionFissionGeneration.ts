@@ -1,12 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { TFunction } from "i18next";
-import { isImageProviderConfigured, loadApiSettings, orderedApiProviders } from "../../settings/apiProviders";
-import {
-  detectImageModelRuleId,
-  getImageModelRule,
-  normalizeImageModelCustomSize,
-  normalizeImageModelSizeSelection,
-} from "../../settings/imageModelRules";
 import {
   actionFissionRowTaskId,
   type ActionFissionRow,
@@ -18,10 +11,9 @@ import {
 } from "../action-fission/actionFissionRules";
 import type { NativeCanvasEdge, NativeCanvasNode } from "../nativeCanvas";
 import {
-  collectActionFissionAdditionalPrompts,
-  collectActionFissionAdditionalReferences,
+  collectAdditionalPromptInputs,
+  collectAdditionalImageReferences,
   collectImageGeneratorReferences,
-  validateImageGeneratorReferences,
 } from "./imageGenerationInputs";
 import {
   actionFissionLaunchKey,
@@ -32,14 +24,19 @@ import {
 } from "./generationRuntimeStore";
 import { activateGenerationHook } from "./generationHookLifecycle";
 import { collectConnectedPrompt } from "./useNativeImageGeneration";
-import { deriveLibtvModelCapabilities } from "../libtv-generation/libtvModelSchema";
 import {
   isGenerationTaskActive,
   isGenerationTaskTerminal,
   useGenerationTaskCache,
-  watchGenerationTask,
 } from "./generationTaskCache";
+import {
+  createBatchTaskRuntime,
+  stopBatchTasks,
+  submitBatchTasks,
+  type BatchTaskRuntime,
+} from "../batch/batchNodeRunner";
 import { downloadMarkerForTaskResult } from "./generationResultDownloadState";
+import { startBatchGeneration } from "./batchGenerationProviders";
 
 interface UseNativeActionFissionGenerationOptions {
   canvasId: string;
@@ -68,6 +65,10 @@ async function prepareActionFissionReferences(
   return { frozenPrimaryReferences: [...primaryReferences], frozenAdditionalReferences: [...additionalReferences] };
 }
 
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 export function useNativeActionFissionGeneration({
   canvasId,
   edges,
@@ -77,7 +78,9 @@ export function useNativeActionFissionGeneration({
   t,
 }: UseNativeActionFissionGenerationOptions) {
   const mountedRef = useRef(true);
-  const taskControllersRef = useRef(new Map<string, AbortController>());
+  const taskRuntimeRef = useRef<BatchTaskRuntime | null>(null);
+  if (!taskRuntimeRef.current) taskRuntimeRef.current = createBatchTaskRuntime();
+  const taskRuntime = taskRuntimeRef.current;
   const nodeQueueControllersRef = useRef(new Map<string, AbortController>());
   const activeNodeRunsRef = useRef(new Set<string>());
   const thumbnailAttemptsRef = useRef(new Set<string>());
@@ -86,11 +89,10 @@ export function useNativeActionFissionGeneration({
   nodesRef.current = nodes;
 
   useEffect(() => activateGenerationHook(mountedRef, () => {
-    taskControllersRef.current.forEach((controller) => controller.abort());
-    taskControllersRef.current.clear();
+    taskRuntime.dispose();
     nodeQueueControllersRef.current.clear();
     activeNodeRunsRef.current.clear();
-  }), []);
+  }), [taskRuntime]);
 
   useEffect(() => {
     if (!window.easyTool?.ensureCanvasAssetThumbnail) return;
@@ -140,16 +142,13 @@ export function useNativeActionFissionGeneration({
   }, [nodes, patchRow]);
 
   const watchRowTask = useCallback(async (taskId: string, nodeId: string, rowId: string) => {
-    if (!mountedRef.current || !window.forartGenerationTasks?.get || taskControllersRef.current.has(taskId)) return;
+    if (!mountedRef.current || !window.forartGenerationTasks?.get || taskRuntime.has(taskId)) return;
     const cachedTask = useGenerationTaskCache.getState().tasksById[taskId];
     if (cachedTask && isGenerationTaskTerminal(cachedTask.status)
       && (handledTerminalVersionsRef.current.get(taskId) || -1) >= cachedTask.version) return;
-    const controller = new AbortController();
     const runtimeKey = actionFissionLaunchKey(canvasId, nodeId, rowId);
-    taskControllersRef.current.set(taskId, controller);
     try {
-      await watchGenerationTask(taskId, controller.signal, (dto) => {
-        if (!isGenerationTaskTerminal(dto.status)) return;
+      await taskRuntime.watch(taskId, (dto) => {
         if ((handledTerminalVersionsRef.current.get(dto.id) || -1) >= dto.version) return;
         handledTerminalVersionsRef.current.set(dto.id, dto.version);
         if (dto.status !== "succeeded" || !dto.result?.images.length) return;
@@ -176,15 +175,13 @@ export function useNativeActionFissionGeneration({
         });
       });
     } catch (error) {
-      if (!controller.signal.aborted) {
+      if (!isAbortError(error)) {
         setGenerationRuntimeError(runtimeKey, error instanceof Error ? error.message : String(error));
       }
-    } finally {
-      taskControllersRef.current.delete(taskId);
     }
-  }, [canvasId, patchRow]);
+  }, [canvasId, patchRow, taskRuntime]);
 
-  const runApiRows = useCallback(async (
+  const runRows = useCallback(async (
     node: NativeCanvasNode,
     rows: ActionFissionRow[],
     primaryReferences: string[],
@@ -193,141 +190,23 @@ export function useNativeActionFissionGeneration({
     additionalPrompts: string[],
     signal: AbortSignal,
   ) => {
-    if (!window.forartGenerationTasks?.startMany) throw new Error(t("infiniteCanvas:canvasDesktopRequired"));
-    const settings = await loadApiSettings();
-    if (signal.aborted) return;
-    const providers = orderedApiProviders(settings.providers, settings.providerOrder).filter(isImageProviderConfigured);
-    const provider = providers.find((item) => item.id === node.data.imageProviderId)
-      || providers.find((item) => item.id === settings.defaultImageProviderId)
-      || providers[0];
-    const model = provider?.imageModels.includes(String(node.data.imageModel || ""))
-      ? String(node.data.imageModel)
-      : provider?.imageModels[0] || "";
-    if (!provider || !model) throw new Error(t("infiniteCanvas:noImageApiConfigured"));
-    const rule = getImageModelRule(provider.modelRules.image[model] || detectImageModelRuleId(model));
-    const size = normalizeImageModelSizeSelection(rule, node.data.imageResolution, node.data.imageAspectRatio);
-    const customSize = normalizeImageModelCustomSize(rule, node.data.imageCustomSize);
-    if (rule.sizeRule.pixelSizeConstraints && node.data.imageCustomSize && !customSize) {
-      throw new Error(t("infiniteCanvas:invalidCustomPixelSize", {
-        min: rule.sizeRule.pixelSizeConstraints.minDimension,
-        max: rule.sizeRule.pixelSizeConstraints.maxDimension,
-      }));
-    }
-
-    const payloads = rows.map((row) => {
-      const references = actionFissionReferenceImages(row, primaryReferences, additionalReferences);
-      const referenceError = validateImageGeneratorReferences(rule, references.length);
-      if (referenceError === "unsupported") throw new Error(t("infiniteCanvas:imageGenerationReferenceNotSupported"));
-      if (referenceError === "tooMany") throw new Error(t("infiniteCanvas:imageGenerationTooManyReferenceImages", { count: rule.maxReferenceImages }));
-      const prompt = actionFissionPrompt(row, connectedPrompt, additionalPrompts);
-      if (!prompt) throw new Error(t("infiniteCanvas:promptRequired"));
-      return {
-        canvasId,
-        nodeId: node.id,
-        target: { type: "actionFissionRow", nodeId: node.id, rowId: row.id },
-        kind: "image",
-        providerId: provider.id,
-        model,
-        modelRule: rule,
-        prompt,
-        referenceImages: references,
-        resolution: size.resolution,
-        aspectRatio: size.aspectRatio,
-        customSize: customSize || undefined,
-        quality: node.data.imageQuality,
-        imageCount: 1,
-        negativePrompt: String(node.data.imageNegativePrompt || "").trim() || undefined,
-        promptExtend: Boolean(node.data.imagePromptExtend),
-        promptExtendMode: node.data.imagePromptExtendMode,
-        status: "submitting",
-      };
-    });
-    if (signal.aborted) return;
-    const tasks = await window.forartGenerationTasks.startMany("api", payloads);
-    if (tasks.length !== rows.length) throw new Error(t("infiniteCanvas:generationTaskCreateFailed"));
-    if (!mountedRef.current) return;
-    patchRows(node.id, tasks.map((task, index) => ({
-      rowId: rows[index].id,
-      patch: {
-        latestGenerationTaskId: task.id,
-        resultDownloadState: undefined,
-        resultDownloadedAt: undefined,
-      },
-    })));
-    endGenerationLaunching(rows.map((row) => actionFissionLaunchKey(canvasId, node.id, row.id)));
-    await Promise.allSettled(tasks.map((task, index) => watchRowTask(task.id, node.id, rows[index].id)));
-  }, [canvasId, patchRows, t, watchRowTask]);
-
-  const runLibtvRows = useCallback(async (
-    node: NativeCanvasNode,
-    rows: ActionFissionRow[],
-    primaryReferences: string[],
-    additionalReferences: string[],
-    connectedPrompt: string,
-    additionalPrompts: string[],
-    signal: AbortSignal,
-  ) => {
-    const libtvApi = window.libtv;
-    if (!window.forartGenerationTasks?.startMany || !libtvApi) throw new Error(t("infiniteCanvas:libtvUnavailable"));
-    const status = await libtvApi.status();
-    if (!status.available) throw new Error(status.error || t("infiniteCanvas:libtvUnavailable"));
-    const account = await libtvApi.account();
-    if (!account.loggedIn) throw new Error(account.error || t("infiniteCanvas:libtvNotLoggedIn"));
-    const state = node.data.libtvImageGeneration || {};
-    const modelName = String(state.modelName || "").trim();
-    if (!modelName) throw new Error(t("infiniteCanvas:libtvModelRequired"));
-    const capabilities = deriveLibtvModelCapabilities(await libtvApi.imageModelSchema({ model: modelName }));
-    if (!capabilities.supportsReferenceImages) throw new Error(t("infiniteCanvas:imageGenerationReferenceNotSupported"));
-    const storedResolution = capabilities.resolutionField === "resolution" ? String(state.resolution || "") : String(state.quality || "");
-    const selectedResolution = capabilities.resolutions.includes(storedResolution) ? storedResolution : capabilities.defaultResolution;
-    const quality = capabilities.resolutionField === "quality"
-      ? selectedResolution
-      : capabilities.qualities.includes(String(state.quality || "")) ? String(state.quality) : capabilities.defaultQuality;
-    const resolution = capabilities.resolutionField === "resolution" ? selectedResolution : "";
-    const aspectRatio = capabilities.aspectRatios.includes(String(state.aspectRatio || ""))
-      ? String(state.aspectRatio)
-      : capabilities.defaultAspectRatio;
-    const referencesByRowId = new Map(rows.map((row) => {
-      const references = actionFissionReferenceImages(row, primaryReferences, additionalReferences);
-      if (references.length > capabilities.maxReferenceImages) {
-        throw new Error(t("infiniteCanvas:imageGenerationTooManyReferenceImages", { count: capabilities.maxReferenceImages }));
-      }
-      return [row.id, references] as const;
+    const inputs = rows.map((row) => ({
+      target: { type: "actionFissionRow", nodeId: node.id, rowId: row.id },
+      prompt: actionFissionPrompt(row, connectedPrompt, additionalPrompts),
+      referenceImages: actionFissionReferenceImages(row, primaryReferences, additionalReferences),
+      nodeTitle: `${t("infiniteCanvas:actionFission")} - ${row.selectedActionName || row.id}`,
     }));
-    const payloads = rows.map((row) => {
-      const prompt = actionFissionPrompt(row, connectedPrompt, additionalPrompts);
-      if (!prompt) throw new Error(t("infiniteCanvas:promptRequired"));
-      return {
-        canvasId,
-        nodeId: node.id,
-        target: { type: "actionFissionRow" as const, nodeId: node.id, rowId: row.id },
-        queueKey: `${canvasId}:${node.id}`,
-        prompt,
-        modelName,
-        count: 1,
-        quality,
-        resolution,
-        aspectRatio,
-        referenceImages: referencesByRowId.get(row.id)!,
-        nodeTitle: `${t("infiniteCanvas:actionFission")} - ${row.selectedActionName || row.id}`,
-        x: Math.round(node.position.x),
-        y: Math.round(node.position.y),
-      };
-    });
-    if (signal.aborted) return;
-    const tasks = await window.forartGenerationTasks.startMany("libtv", payloads);
-    if (tasks.length !== rows.length) throw new Error(t("infiniteCanvas:generationTaskCreateFailed"));
-    if (!mountedRef.current) return;
-    patchRows(node.id, tasks.map((task, index) => ({
-      rowId: rows[index].id,
-      patch: {
-        latestGenerationTaskId: task.id,
-        resultDownloadState: undefined,
-        resultDownloadedAt: undefined,
+    await submitBatchTasks({
+      items: rows,
+      start: () => startBatchGeneration({ canvasId, node, inputs, signal, t }),
+      onTaskIds: (items, tasks) => {
+        if (!mountedRef.current) return;
+        patchRows(node.id, tasks.map((task, index) => ({ rowId: items[index].id, patch: { latestGenerationTaskId: task.id, resultDownloadState: undefined, resultDownloadedAt: undefined } })));
+        endGenerationLaunching(items.map((row) => actionFissionLaunchKey(canvasId, node.id, row.id)));
       },
-    })));
-    endGenerationLaunching(rows.map((row) => actionFissionLaunchKey(canvasId, node.id, row.id)));
-    await Promise.allSettled(tasks.map((task, index) => watchRowTask(task.id, node.id, rows[index].id)));
+      watch: (task, row) => watchRowTask(task.id, node.id, row.id),
+      onCountMismatch: () => new Error(t("infiniteCanvas:generationTaskCreateFailed")),
+    });
   }, [canvasId, patchRows, t, watchRowTask]);
 
   useEffect(() => {
@@ -349,8 +228,8 @@ export function useNativeActionFissionGeneration({
     const state = node?.data.actionFission;
     if (!node || !state) return;
     const references = collectImageGeneratorReferences(nodeId, nodes, edges, t("infiniteCanvas:referenceImage"));
-    const additionalReferences = collectActionFissionAdditionalReferences(nodeId, nodes, edges, t("infiniteCanvas:additionalReference"));
-    const additionalPrompts = collectActionFissionAdditionalPrompts(nodeId, nodes, edges, t("infiniteCanvas:additionalReference"));
+    const additionalReferences = collectAdditionalImageReferences(nodeId, nodes, edges, t("infiniteCanvas:additionalReference"));
+    const additionalPrompts = collectAdditionalPromptInputs(nodeId, nodes, edges, t("infiniteCanvas:additionalReference"));
     const targetRows = rowId ? state.rows.filter((row) => row.id === rowId) : state.rows;
     const runtimeKeys = targetRows.map((row) => actionFissionLaunchKey(canvasId, nodeId, row.id));
     const readiness = getActionFissionRunReadiness(targetRows, references.length);
@@ -381,27 +260,15 @@ export function useNativeActionFissionGeneration({
       );
       const prepared = await referencePreparation;
       if (queueController.signal.aborted) return;
-      if (node.data.imageGenerationBackend === "libtv") {
-        await runLibtvRows(
-          node,
-          targetRows,
-          prepared.frozenPrimaryReferences,
-          prepared.frozenAdditionalReferences,
-          connectedPrompt,
-          frozenAdditionalPrompts,
-          queueController.signal,
-        );
-      } else {
-        await runApiRows(
-          node,
-          targetRows,
-          prepared.frozenPrimaryReferences,
-          prepared.frozenAdditionalReferences,
-          connectedPrompt,
-          frozenAdditionalPrompts,
-          queueController.signal,
-        );
-      }
+      await runRows(
+        node,
+        targetRows,
+        prepared.frozenPrimaryReferences,
+        prepared.frozenAdditionalReferences,
+        connectedPrompt,
+        frozenAdditionalPrompts,
+        queueController.signal,
+      );
     } catch (error) {
       if (mountedRef.current && !queueController.signal.aborted) {
         const message = error instanceof Error ? error.message : String(error);
@@ -412,7 +279,7 @@ export function useNativeActionFissionGeneration({
       activeNodeRunsRef.current.delete(runKey);
       if (nodeQueueControllersRef.current.get(runKey) === queueController) nodeQueueControllersRef.current.delete(runKey);
     }
-  }, [canvasId, edges, nodes, runApiRows, runLibtvRows, t]);
+  }, [canvasId, edges, nodes, runRows, t]);
 
   const stopActionFission = useCallback(async (nodeId: string, rowId?: string, taskIds?: string[]) => {
     const runPrefix = `${nodeId}:`;
@@ -422,16 +289,15 @@ export function useNativeActionFissionGeneration({
     const selectedTaskIds = taskIds ? new Set(taskIds) : null;
     const rows = nodes.find((node) => node.id === nodeId)?.data.actionFission?.rows || [];
     const targets = rowId ? rows.filter((row) => row.id === rowId) : rows;
-    await Promise.allSettled(targets.map(async (row) => {
-      const taskId = actionFissionRowTaskId(row);
-      if (selectedTaskIds && !selectedTaskIds.has(taskId)) return;
-      const task = taskId ? useGenerationTaskCache.getState().tasksById[taskId] : undefined;
-      if (!taskId || !isGenerationTaskActive(task)) return;
-      taskControllersRef.current.get(taskId)?.abort();
-      await window.forartGenerationTasks?.stop(taskId);
-      clearGenerationRuntimeError(actionFissionLaunchKey(canvasId, nodeId, row.id));
-    }));
-  }, [canvasId, nodes]);
+    await stopBatchTasks({
+      items: targets.filter((row) => !selectedTaskIds || selectedTaskIds.has(actionFissionRowTaskId(row))),
+      taskId: actionFissionRowTaskId,
+      isActive: (taskId) => isGenerationTaskActive(useGenerationTaskCache.getState().tasksById[taskId]),
+      abort: (taskId) => taskRuntime.abort(taskId),
+      stop: (taskId) => window.forartGenerationTasks?.stop(taskId) || Promise.resolve(),
+      onStopped: (row) => clearGenerationRuntimeError(actionFissionLaunchKey(canvasId, nodeId, row.id)),
+    });
+  }, [canvasId, nodes, taskRuntime]);
 
   return { runActionFission, stopActionFission };
 }

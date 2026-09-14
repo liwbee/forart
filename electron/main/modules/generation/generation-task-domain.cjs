@@ -25,12 +25,15 @@ function normalizeTarget(input = {}, nodeId = '') {
   const kind = source?.type === 'actionFissionRow'
     || source?.kind === 'actionFissionRow'
     ? 'actionFissionRow'
-    : 'imageGenerator';
+    : source?.type === 'batchImageGeneratorItem' || source?.kind === 'batchImageGeneratorItem'
+      ? 'batchImageGeneratorItem'
+      : 'imageGenerator';
   const rowId = safeString(source?.rowId);
   return {
     kind,
     nodeId: normalizedNodeId,
     rowId: kind === 'actionFissionRow' ? rowId : '',
+    itemId: kind === 'batchImageGeneratorItem' ? safeString(source?.itemId) : '',
   };
 }
 
@@ -41,14 +44,15 @@ function publicTarget(input = {}, nodeId = '', canvasId = '') {
     kind: target.kind,
     nodeId: target.nodeId,
     ...(target.kind === 'actionFissionRow' ? { rowId: target.rowId } : {}),
+    ...(target.kind === 'batchImageGeneratorItem' ? { itemId: target.itemId } : {}),
   };
 }
 
 function targetIdentityKey(input = {}) {
   const target = normalizeTarget(input);
-  return target.kind === 'actionFissionRow'
-    ? `${target.kind}:${target.nodeId}:${target.rowId}`
-    : `${target.kind}:${target.nodeId}`;
+  if (target.kind === 'actionFissionRow') return `${target.kind}:${target.nodeId}:${target.rowId}`;
+  if (target.kind === 'batchImageGeneratorItem') return `${target.kind}:${target.nodeId}:${target.itemId}`;
+  return `${target.kind}:${target.nodeId}`;
 }
 
 function targetKey(canvasId, input = {}) {
@@ -56,7 +60,9 @@ function targetKey(canvasId, input = {}) {
   const target = normalizeTarget(input);
   if (!canvas || !target.nodeId) return '';
   const base = `canvas:${canvas}/node:${target.nodeId}`;
-  return target.kind === 'actionFissionRow' ? `${base}/row:${target.rowId}` : base;
+  if (target.kind === 'actionFissionRow') return `${base}/row:${target.rowId}`;
+  if (target.kind === 'batchImageGeneratorItem') return `${base}/item:${target.itemId}`;
+  return base;
 }
 
 module.exports = {

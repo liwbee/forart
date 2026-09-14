@@ -28,12 +28,14 @@ export interface NativeCanvasActions {
   patchActionFissionSelectionSilently: (nodeId: string, actionFission: NonNullable<NativeCanvasNodeData["actionFission"]>) => void;
   runImageGeneration: (nodeId: string, options?: ImageGenerationRunOptions) => Promise<void>;
   runActionFission: (nodeId: string, rowId?: string) => Promise<void>;
+  runBatchImageGeneration: (nodeId: string, itemId?: string) => Promise<void>;
   removeCanvasEdge: (edgeId: string) => void;
   reorderImageGeneratorReferences: (nodeId: string, orderedEdgeIds: string[]) => void;
   setNodeAsset: (nodeId: string, assetUrl: string, fileName: string, assetType?: NativeCanvasAssetType, assetMimeType?: string, metadata?: { width?: number; height?: number; durationMs?: number; sizeBytes?: number; thumbUrl?: string }) => void;
   setNodeText: (nodeId: string, text: string) => void;
   stopImageGeneration: (nodeId: string) => Promise<void>;
   stopActionFission: (nodeId: string, rowId?: string) => Promise<void>;
+  stopBatchImageGeneration: (nodeId: string, itemId?: string) => Promise<void>;
 }
 
 export interface CanvasStoredAsset {

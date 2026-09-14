@@ -81,7 +81,7 @@ function edge(id, source, target, inputKind, referenceOrder) {
 
 test('reference toolbar prefers thumbnails and falls back to original images', () => {
   const {
-    collectActionFissionAdditionalReferences,
+    collectAdditionalImageReferences,
     collectImageGeneratorReferences,
   } = loadModule();
   const nodes = [
@@ -99,7 +99,7 @@ test('reference toolbar prefers thumbnails and falls back to original images', (
     ['thumb-a.webp', 'original-b.png'],
   );
   assert.deepEqual(
-    collectActionFissionAdditionalReferences('action', nodes, edges).map((item) => item.previewUrl),
+    collectAdditionalImageReferences('action', nodes, edges).map((item) => item.previewUrl),
     ['original-b.png'],
   );
 });

@@ -952,7 +952,7 @@
   grid-template-rows: minmax(0, 1fr);
 }
 
-.rf-action-fission-header-status {
+.rf-generation-header-status {
   margin-right: auto;
 }
 
@@ -1060,7 +1060,7 @@
   align-self: end;
 }
 
-.rf-action-fission-list-card > .rf-action-fission-status {
+.rf-action-fission-list-card > .rf-generation-status {
   grid-column: 2;
   grid-row: 2;
   align-self: start;
@@ -1182,13 +1182,68 @@
   outline-offset: -2px;
 }
 
+.rf-batch-image-generator-empty {
+  min-height: 220px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+
+.rf-batch-image-generator-empty > svg {
+  width: 30px;
+  height: 30px;
+  opacity: .7;
+}
+
+.rf-reference-item--placeholder {
+  display: grid;
+  place-items: center;
+  cursor: default;
+  opacity: .78;
+  touch-action: auto;
+}
+
+.rf-reference-item--placeholder::after,
+.rf-reference-item--placeholder .rf-reference-item__remove {
+  display: none;
+}
+
+.rf-generation-status--result {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  z-index: 4;
+  max-width: calc(100% - 14px);
+  pointer-events: none;
+}
+
+.rf-action-fission-action-preview.is-viewable:focus-visible,
+.rf-action-fission-result-preview.is-viewable:focus-visible {
+  outline: var(--state-focus-outline);
+  outline-offset: -2px;
+}
+
 .rf-action-fission-action-preview.is-viewable .rf-action-fission-action-preview__trigger,
 .rf-action-fission-viewer-trigger {
   cursor: pointer;
 }
 
+.rf-action-fission-action-preview.is-viewable,
+.rf-action-fission-result-preview.is-viewable {
+  cursor: pointer;
+}
+
 .rf-action-fission-action-preview.is-viewable .rf-action-fission-action-preview__trigger:active,
 .rf-action-fission-viewer-trigger:active {
+  cursor: grabbing;
+}
+
+.rf-action-fission-action-preview.is-viewable:active,
+.rf-action-fission-result-preview.is-viewable:active {
   cursor: grabbing;
 }
 
@@ -1269,7 +1324,7 @@
   white-space: nowrap;
 }
 
-.rf-action-fission-status {
+.rf-generation-status {
   max-width: 100%;
   min-height: 18px;
   display: inline-flex;
@@ -1283,14 +1338,14 @@
   line-height: 16px;
 }
 
-.rf-action-fission-status > span {
+.rf-generation-status > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.rf-action-fission-status > time {
+.rf-generation-status > time {
   flex: 0 0 auto;
   padding-left: 5px;
   border-left: 1px solid currentColor;
@@ -1298,35 +1353,35 @@
   opacity: 0.72;
 }
 
-.rf-action-fission-status[data-tone="ready"] {
+.rf-generation-status[data-tone="ready"] {
   border: 1px solid var(--status-info-border);
   color: var(--text-primary);
   background: var(--status-info-bg);
   font-weight: var(--font-weight-semibold);
 }
 
-.rf-action-fission-status[data-tone="idle"] {
+.rf-generation-status[data-tone="idle"] {
   border: 1px solid var(--status-warning-border);
   color: var(--status-warning-text);
   background: var(--status-warning-bg);
 }
 
-.rf-action-fission-status[data-tone="completed"] {
+.rf-generation-status[data-tone="completed"] {
   color: var(--status-success-text);
   background: var(--status-success-bg);
 }
 
-.rf-action-fission-status[data-tone="error"] {
+.rf-generation-status[data-tone="error"] {
   color: var(--status-warning-text);
   background: var(--status-warning-bg);
 }
 
-.rf-action-fission-status[data-tone="running"] {
+.rf-generation-status[data-tone="running"] {
   color: var(--status-running-text);
   background: var(--status-running-bg);
 }
 
-.rf-action-fission-status[data-tone="queued"] {
+.rf-generation-status[data-tone="queued"] {
   color: var(--status-queued-text);
   background: var(--status-queued-bg);
 }
@@ -1365,6 +1420,38 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+}
+
+.rf-batch-image-generator .rf-action-fission-grid {
+  min-width: 0;
+  min-height: 0;
+  align-content: start;
+  align-items: stretch;
+  grid-auto-flow: row;
+  grid-auto-rows: auto;
+  overflow: visible;
+  padding: 0;
+}
+
+.rf-batch-image-generator {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rf-batch-image-generator .rf-action-fission-grid-card {
+  height: auto;
+  min-height: 0;
+  align-self: stretch;
+  contain: paint;
+}
+
+.rf-batch-image-generator[data-layout="list"] .rf-action-fission-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.rf-batch-image-generator[data-layout="list"] .rf-action-fission-list-card {
+  width: 100%;
 }
 
 @container (min-width: 1280px) {
@@ -1438,7 +1525,7 @@
   pointer-events: none;
 }
 
-.rf-action-fission-grid-card > .rf-action-fission-status {
+.rf-action-fission-grid-card > .rf-generation-status {
   z-index: 3;
   grid-column: 2;
   grid-row: 1;
@@ -1447,7 +1534,7 @@
   margin: 7px;
 }
 
-.rf-action-fission-generation-timer {
+.rf-generation-status-timer {
   position: absolute;
   top: 7px;
   right: 7px;
@@ -1466,7 +1553,7 @@
   text-align: center;
 }
 
-.rf-action-fission-generation-status {
+.rf-generation-status-display {
   position: absolute;
   top: 50%;
   left: 50%;
@@ -1488,7 +1575,7 @@
   transform: translate(-50%, -50%);
 }
 
-.rf-action-fission-generation-status > span {
+.rf-generation-status-display > span {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -1504,7 +1591,7 @@
   visibility: hidden;
 }
 
-.rf-action-fission-generation-status.is-error {
+.rf-generation-status-display.is-error {
   inset: 0;
   width: 100%;
   height: 100%;
@@ -1524,13 +1611,13 @@
   transform: none;
 }
 
-.rf-action-fission-generation-status.is-error svg {
+.rf-generation-status-display.is-error svg {
   width: 20px;
   height: 20px;
   flex: 0 0 auto;
 }
 
-.rf-action-fission-generation-status.is-error > span {
+.rf-generation-status-display.is-error > span {
   max-width: 100%;
   display: -webkit-box;
   overflow: hidden;

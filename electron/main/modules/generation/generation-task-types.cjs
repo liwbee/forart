@@ -45,6 +45,7 @@ function normalizeTaskTarget(task = {}) {
     kind: target.kind,
     nodeId: target.nodeId,
     ...(target.kind === 'actionFissionRow' ? { rowId: safeString(task.target?.rowId || task.rowId) } : {}),
+    ...(target.kind === 'batchImageGeneratorItem' ? { itemId: safeString(task.target?.itemId || task.itemId) } : {}),
   };
 }
 

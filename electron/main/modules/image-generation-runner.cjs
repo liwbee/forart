@@ -947,9 +947,14 @@ function createImageGenerationRunner({
 
   function anchorPreparedTasks(entries) {
     const actionGroups = new Map();
+    const batchGroups = new Map();
     const generationEntries = [];
     for (const entry of entries) {
       const { task } = entry;
+      if (task.target?.type === 'batchImageGeneratorItem') {
+        const key = `${task.canvasId}\u0000${task.target.nodeId}`;
+        const group = batchGroups.get(key) || []; group.push(entry); batchGroups.set(key, group); continue;
+      }
       if (task.target?.type !== 'actionFissionRow') {
         generationEntries.push(entry);
         continue;
@@ -958,6 +963,12 @@ function createImageGenerationRunner({
       const group = actionGroups.get(key) || [];
       group.push(entry);
       actionGroups.set(key, group);
+    }
+    for (const group of batchGroups.values()) {
+      const firstTask = group[0].task;
+      const anchors = group.map(({ task }) => ({ itemId: task.target.itemId, taskId: task.id }));
+      const result = context.canvasStore?.setBatchImageGeneratorItemTaskAnchors?.(firstTask.canvasId, firstTask.target.nodeId, anchors);
+      if (result?.ok === false) failPreparedTasks(entries, result.reason || 'unknown');
     }
 
     for (const group of actionGroups.values()) {

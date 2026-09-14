@@ -699,6 +699,30 @@ function createCanvasStore({ rootDir }) {
     return { ...result, applied };
   }
 
+  function setBatchImageGeneratorItemTaskAnchors(canvasId, nodeId, items = []) {
+    const anchors = new Map((Array.isArray(items) ? items : []).map((item) => [String(item?.itemId || ''), String(item?.taskId || '')]));
+    if (!anchors.size || [...anchors.values()].some((value) => !value)) return { ok: false, reason: 'task_anchor_required' };
+    let failure = '';
+    const result = updateCanvasNode(canvasId, nodeId, (node) => {
+      const data = node?.data && typeof node.data === 'object' ? node.data : {};
+      const batch = data.batchImageGenerator && typeof data.batchImageGenerator === 'object' ? data.batchImageGenerator : {};
+      const rows = Array.isArray(batch.items) ? batch.items : [];
+      if ([...anchors.keys()].some((id) => !rows.some((item) => String(item?.id || '') === id))) { failure = 'item_not_found'; return node; }
+      return { ...node, data: { ...data, batchImageGenerator: { ...batch, items: rows.map((item) => anchors.has(String(item?.id || '')) ? { ...item, latestGenerationTaskId: anchors.get(String(item.id)) } : item) } } };
+    });
+    return failure ? { ok: false, reason: failure } : result;
+  }
+
+  function completeBatchImageGeneratorItem(payload = {}) {
+    let applied = false; const taskId = String(payload.taskId || '').trim();
+    const result = updateCanvasNode(payload.canvasId, payload.nodeId, (node) => {
+      const data = node?.data && typeof node.data === 'object' ? node.data : {}; const batch = data.batchImageGenerator || {}; const items = Array.isArray(batch.items) ? batch.items : [];
+      const nextItems = items.map((item) => { if (String(item.id || '') !== String(payload.itemId || '') || (taskId && String(item.latestGenerationTaskId || '') !== taskId)) return item; applied = true; const next = { ...item, status: payload.status === 'succeeded' ? 'completed' : payload.status === 'failed' ? 'failed' : item.status }; if (payload.result?.localUrl) { next.resultUrl = payload.result.localUrl; next.resultThumbUrl = payload.result.thumbUrl; next.resultFileName = payload.result.fileName; next.resultWidth = Number(payload.result.width || 0) || undefined; next.resultHeight = Number(payload.result.height || 0) || undefined; next.resultDownloadState = 'pending'; delete next.resultDownloadedAt; next.error = undefined; } if (payload.status === 'failed') next.error = String(payload.error || 'Generation failed'); return next; });
+      return { ...node, data: { ...data, batchImageGenerator: { ...batch, items: nextItems } } };
+    });
+    return { ...result, applied };
+  }
+
   function completeGenerationNode(payload = {}) {
     const taskId = String(payload.taskId || '').trim();
     let applied = false;
@@ -879,6 +903,8 @@ function createCanvasStore({ rootDir }) {
     setActionFissionRowTaskAnchor,
     setActionFissionRowTaskAnchors,
     completeActionFissionRow,
+    setBatchImageGeneratorItemTaskAnchors,
+    completeBatchImageGeneratorItem,
     completeGenerationNode,
     updateGenerationNode,
     updateCanvasMeta,

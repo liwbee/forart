@@ -312,6 +312,9 @@ function createLibtvGenerationRunner({
   function isActionFissionTask(task) {
     return task?.target?.type === 'actionFissionRow' && task.target.nodeId && task.target.rowId;
   }
+  function isBatchImageGeneratorTask(task) {
+    return task?.target?.type === 'batchImageGeneratorItem' && task.target.nodeId && task.target.itemId;
+  }
 
   function writeTaskAnchor(task, patch = {}) {
     if (!task?.canvasId || !task.target?.nodeId) return false;
@@ -325,6 +328,10 @@ function createLibtvGenerationRunner({
       const result = canvasStore?.setActionFissionRowTaskAnchor(task.canvasId, task.target.nodeId, task.target.rowId, payload);
       if (result?.ok !== false) anchoredTaskIds.add(task.id);
       return result?.ok !== false;
+    } else if (isBatchImageGeneratorTask(task)) {
+      const result = canvasStore?.setBatchImageGeneratorItemTaskAnchors?.(task.canvasId, task.target.nodeId, [{ itemId: task.target.itemId, taskId: task.id }]);
+      if (result?.ok !== false) anchoredTaskIds.add(task.id);
+      return result?.ok !== false;
     } else {
       const result = canvasStore?.setGenerationTaskAnchor(task.canvasId, task.target.nodeId, payload);
       if (result?.ok !== false) anchoredTaskIds.add(task.id);
@@ -333,9 +340,10 @@ function createLibtvGenerationRunner({
   }
 
   function writeTaskAnchors(tasks) {
-    const actionGroups = new Map();
+    const actionGroups = new Map(); const batchGroups = new Map();
     const generationTasks = [];
     for (const task of tasks) {
+      if (isBatchImageGeneratorTask(task)) { const key = `${task.canvasId}\u0000${task.target.nodeId}`; const group = batchGroups.get(key) || []; group.push(task); batchGroups.set(key, group); continue; }
       if (!isActionFissionTask(task)) {
         generationTasks.push(task);
         continue;
@@ -345,6 +353,7 @@ function createLibtvGenerationRunner({
       group.push(task);
       actionGroups.set(key, group);
     }
+    for (const group of batchGroups.values()) { const first = group[0]; const anchors = group.map((task) => ({ itemId: task.target.itemId, taskId: task.id })); const result = canvasStore?.setBatchImageGeneratorItemTaskAnchors?.(first.canvasId, first.target.nodeId, anchors); if (result?.ok === false) return false; group.forEach((task) => anchoredTaskIds.add(task.id)); }
 
     for (const group of actionGroups.values()) {
       const firstTask = group[0];

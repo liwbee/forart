@@ -111,6 +111,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const isAnnotationNode = data.kind === "annotation";
   const isActionFissionNode = data.kind === "actionFission";
   const isBatchImageGeneratorNode = data.kind === "batchImageGenerator";
+  const isBatchLikeNode = isActionFissionNode || isBatchImageGeneratorNode;
   const captionTitle = String(data.label || "").trim() || nodeTypeLabel;
   const isLaunching = useGenerationRuntimeStore((state) => isImageNodeLaunching(state.launchingKeys, id));
   const taskId = nativeCanvasNodeTaskId(data);
@@ -374,11 +375,9 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
         />
       ) : null}
 
-      {toolbarVisible && !isActionFissionNode ? (
+      {toolbarVisible && !isActionFissionNode && !isBatchImageGeneratorNode ? (
         <NodeToolbar nodeId={id} position={Position.Top} offset={toolbarOffset} className="rf-native-node-toolbar">
-          {isBatchImageGeneratorNode ? (
-            <BatchImageGeneratorNodeBody nodeId={id} data={data} />
-          ) : isAnnotationNode ? (
+          {isAnnotationNode ? (
             <AnnotationNodeToolbarControls nodeId={id} style={data.annotationStyle} />
           ) : isCropping ? (
             <>
@@ -575,7 +574,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
         />
       ) : null}
 
-      {definition.acceptsInput ? isActionFissionNode ? (
+      {definition.acceptsInput ? isBatchLikeNode ? (
         <>
           <Handle
             type="target"
@@ -608,7 +607,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
           isPromptNode && "rf-native-node-content--prompt",
           isSmartReverseNode && "rf-native-node-content--image-reverse",
           isAnnotationNode && "rf-native-node-content--annotation",
-          isActionFissionNode && "rf-native-node-content--action-fission",
+          isBatchLikeNode && "rf-native-node-content--action-fission",
           isCropping && "is-cropping",
           isGenerating && "is-generating",
           hasGenerationError && "has-generation-error",
@@ -617,6 +616,8 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
             <AnnotationNodeBody nodeId={id} text={String(data.text || "")} textStyle={data.annotationStyle} />
           ) : isActionFissionNode ? (
             <ActionFissionNodeBody nodeId={id} data={data} paramPanelVisible={toolbarVisible} />
+          ) : isBatchImageGeneratorNode ? (
+            <BatchImageGeneratorNodeBody nodeId={id} data={data} paramPanelVisible={toolbarVisible} />
           ) : isSmartReverseNode ? (
             <SmartReverseNodeBody nodeId={id} data={data} running={smartReverseRunning} />
           ) : isPromptNode ? (

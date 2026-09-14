@@ -2,6 +2,7 @@ const MISSING_TARGET_REASONS = new Set([
   'canvas_not_found',
   'node_not_found',
   'row_not_found',
+  'item_not_found',
 ]);
 
 function createGenerationResultCommitter({ repository, canvasStore } = {}) {
@@ -32,7 +33,9 @@ function createGenerationResultCommitter({ repository, canvasStore } = {}) {
             backend: payload.backend,
             rowId: task.target.rowId,
           })
-        : canvasStore.completeGenerationNode(common);
+        : task.target.type === 'batchImageGeneratorItem'
+          ? canvasStore.completeBatchImageGeneratorItem({ ...common, itemId: task.target.itemId })
+          : canvasStore.completeGenerationNode(common);
       if (result?.ok === false) {
         const targetReason = String(result.reason || 'unknown');
         if (MISSING_TARGET_REASONS.has(targetReason)) {

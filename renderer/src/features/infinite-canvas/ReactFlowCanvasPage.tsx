@@ -74,6 +74,7 @@ import { actionFissionRowTaskId, type ActionFissionRow } from "./action-fission/
 import { emptyCanvasSnapshot, type NativeCanvasSnapshot } from "./canvasWorkspaceTypes";
 import { useNativeImageGeneration } from "./generation/useNativeImageGeneration";
 import { useNativeActionFissionGeneration } from "./generation/useNativeActionFissionGeneration";
+import { useNativeBatchImageGeneration } from "./generation/useNativeBatchImageGeneration";
 import { useNativeLibtvGeneration } from "./libtv-generation/useNativeLibtvGeneration";
 import {
   collectImageGeneratorPrompts,
@@ -124,7 +125,7 @@ const MULTI_SELECTION_SCREEN_GAP = 24;
 
 const CONTEXT_CANVAS_NODE_GROUPS: NativeCanvasNodeKind[][] = [
   ["assetLoader", "prompt"],
-  ["imageGenerator", "smartReverse", "actionFission"],
+  ["imageGenerator", "batchImageGenerator", "smartReverse", "actionFission"],
   ["annotation"],
 ];
 
@@ -709,6 +710,9 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       ...(kind === "actionFission" && !data?.actionFission
         ? { actionFission: createDefaultActionFissionState() }
         : {}),
+      ...(kind === "batchImageGenerator" && !data?.batchImageGenerator
+        ? { batchImageGenerator: { items: [], prompt: "", layout: "grid" as const } }
+        : {}),
       ...((rememberedData.libtvImageGeneration || data?.libtvImageGeneration) ? {
         libtvImageGeneration: {
           ...rememberedData.libtvImageGeneration,
@@ -1141,6 +1145,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     patchRows: patchActionFissionRows,
     t,
   });
+  const { runBatchImageGeneration, stopBatchImageGeneration } = useNativeBatchImageGeneration({ canvasId, nodes, edges, patchNodeData: patchNodeDataSilently, t });
   const runImageGeneration = useCallback(async (nodeId: string, options?: ImageGenerationRunOptions) => {
     const node = nodes.find((item) => item.id === nodeId);
     if (node?.data.imageGenerationBackend === "libtv") await runLibtvGeneration(nodeId, options);
@@ -1222,6 +1227,17 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
         directory: imageDownloadPath,
         t,
       });
+      return;
+    }
+
+    if (node.data.kind === "batchImageGenerator") {
+      const item = node.data.batchImageGenerator?.items?.[imageIndex];
+      const imageUrl = String(item?.resultUrl || "");
+      if (!imageUrl) return;
+      await saveGenerationImageFile({ imageUrl, defaultName: item?.sourceFileName || FALLBACK_DOWNLOAD_NAME, convertToPng: false, directory: imageDownloadPath, t });
+      const latestNode = nodesRef.current.find((candidate) => candidate.id === nodeId && candidate.data.kind === "batchImageGenerator");
+      const latestItems = latestNode?.data.batchImageGenerator?.items || [];
+      patchNodeDataSilently(nodeId, { batchImageGenerator: { ...(latestNode?.data.batchImageGenerator || { items: [] }), items: latestItems.map((candidate, index) => index === imageIndex ? { ...candidate, resultDownloadState: "downloaded", resultDownloadedAt: Date.now() } : candidate) } });
       return;
     }
 
@@ -1381,8 +1397,10 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     discardActionFissionRow: stopActionFissionImmediately,
     runImageGeneration,
     runActionFission,
+    runBatchImageGeneration,
     stopImageGeneration,
     stopActionFission,
+    stopBatchImageGeneration,
   });
   canvasActionHandlersRef.current = {
     addImageReferenceFiles,
@@ -1391,8 +1409,10 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     discardActionFissionRow: stopActionFissionImmediately,
     runImageGeneration,
     runActionFission,
+    runBatchImageGeneration,
     stopImageGeneration,
     stopActionFission,
+    stopBatchImageGeneration,
   };
 
   const canvasActions = useMemo<NativeCanvasActions>(() => ({
@@ -1436,10 +1456,12 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     },
     runImageGeneration: (nodeId, options) => canvasActionHandlersRef.current.runImageGeneration(nodeId, options),
     runActionFission: (nodeId, rowId) => canvasActionHandlersRef.current.runActionFission(nodeId, rowId),
+    runBatchImageGeneration: (nodeId, itemId) => canvasActionHandlersRef.current.runBatchImageGeneration(nodeId, itemId),
     setNodeAsset,
     setNodeText: (nodeId: string, text: string) => patchNodeData(nodeId, { text }),
     stopImageGeneration: (nodeId) => canvasActionHandlersRef.current.stopImageGeneration(nodeId),
     stopActionFission: (nodeId, rowId) => canvasActionHandlersRef.current.stopActionFission(nodeId, rowId),
+    stopBatchImageGeneration: (nodeId, itemId) => canvasActionHandlersRef.current.stopBatchImageGeneration(nodeId, itemId),
   }), [beginHistoryGesture, cropNodeImage, createDerivedAssetNode, endHistoryGesture, patchActionFissionSelectionSilently, patchNodeData, patchNodeDataSilently, readOnly, setEdges, setNodeAsset, t]);
 
   const validateConnection = useCallback<IsValidConnection<NativeCanvasEdge>>((connection) => (

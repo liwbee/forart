@@ -23,6 +23,8 @@ function normalizeTarget(input = {}, nodeId = '') {
   const target = normalizeDomainTarget(input, nodeId);
   return target.kind === 'actionFissionRow'
     ? { type: target.kind, nodeId: target.nodeId, rowId: target.rowId }
+    : target.kind === 'batchImageGeneratorItem'
+      ? { type: target.kind, nodeId: target.nodeId, itemId: target.itemId }
     : { type: target.kind, nodeId: target.nodeId };
 }
 

@@ -17,6 +17,8 @@ export interface ImageGeneratorReferenceInput {
   title: string;
   imageUrl: string;
   previewUrl: string;
+  /** Optional human-facing mention label, e.g. the batch source's 主图. */
+  mentionLabel?: string;
 }
 
 export interface ImageGeneratorPromptInput {
@@ -130,7 +132,7 @@ export function collectSmartReverseReferences(
   return collectReferenceInputs(targetId, nodes, edges, "referenceImage", fallbackTitle);
 }
 
-export function collectActionFissionAdditionalReferences(
+export function collectAdditionalImageReferences(
   targetId: string,
   nodes: NativeCanvasNode[],
   edges: NativeCanvasEdge[],
@@ -170,7 +172,7 @@ export function collectImageGeneratorPrompts(
   return collectPromptInputs(targetId, nodes, edges, "prompt", fallbackTitle);
 }
 
-export function collectActionFissionAdditionalPrompts(
+export function collectAdditionalPromptInputs(
   targetId: string,
   nodes: NativeCanvasNode[],
   edges: NativeCanvasEdge[],

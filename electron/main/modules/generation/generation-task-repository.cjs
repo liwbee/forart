@@ -153,7 +153,9 @@ function compactTerminalTask(task = {}) {
     canvasId: safeString(task.canvasId),
     target: target.kind === 'actionFissionRow'
       ? { type: target.kind, nodeId: target.nodeId, rowId: target.rowId }
-      : { type: target.kind, nodeId: target.nodeId },
+      : target.kind === 'batchImageGeneratorItem'
+        ? { type: target.kind, nodeId: target.nodeId, itemId: target.itemId }
+        : { type: target.kind, nodeId: target.nodeId },
     status: safeString(task.status),
     startedAt: Number(task.startedAt || task.createdAt || 0),
     updatedAt: Number(task.updatedAt || 0),
@@ -663,7 +665,7 @@ function createGenerationTaskRepository({ rootDir, databasePath, Database } = {}
       canvasId,
       targetKind: target.kind,
       nodeId: target.nodeId,
-      rowId: target.rowId || null,
+      rowId: (target.rowId || target.itemId) || null,
       executorKind,
       status: nextStatus,
       summaryJson: JSON.stringify(fragments.summary),
@@ -680,7 +682,7 @@ function createGenerationTaskRepository({ rootDir, databasePath, Database } = {}
         canvasId,
         targetKind: target.kind,
         nodeId: target.nodeId,
-        rowId: target.rowId || null,
+        rowId: (target.rowId || target.itemId) || null,
         taskId: id,
         updatedAt: timestamp,
       });
@@ -800,7 +802,9 @@ function createGenerationTaskRepository({ rootDir, databasePath, Database } = {}
       status: String(row.status),
       target: row.target_kind === 'actionFissionRow'
         ? { type: 'actionFissionRow', nodeId: String(row.node_id), rowId: String(row.row_id || '') }
-        : { type: 'imageGenerator', nodeId: String(row.node_id) },
+        : row.target_kind === 'batchImageGeneratorItem'
+          ? { type: 'batchImageGeneratorItem', nodeId: String(row.node_id), itemId: String(row.row_id || '') }
+          : { type: 'imageGenerator', nodeId: String(row.node_id) },
     }));
   }
 
@@ -957,7 +961,9 @@ function createGenerationTaskRepository({ rootDir, databasePath, Database } = {}
       status: String(row.status),
       target: row.target_kind === 'actionFissionRow'
         ? { type: 'actionFissionRow', nodeId: String(row.node_id), rowId: String(row.row_id || '') }
-        : { type: 'imageGenerator', nodeId: String(row.node_id) },
+        : row.target_kind === 'batchImageGeneratorItem'
+          ? { type: 'batchImageGeneratorItem', nodeId: String(row.node_id), itemId: String(row.row_id || '') }
+          : { type: 'imageGenerator', nodeId: String(row.node_id) },
     };
   }
 

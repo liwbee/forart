@@ -168,6 +168,16 @@ function normalizeCurrentNodeData(data: Record<string, unknown>, kind: NativeCan
     normalized.actionFission = normalizeActionFissionState(normalized.actionFission);
     return normalized;
   }
+  if (kind === "batchImageGenerator") {
+    const batch = normalized.batchImageGenerator && typeof normalized.batchImageGenerator === "object" ? normalized.batchImageGenerator : { items: [] };
+    normalized.batchImageGenerator = {
+      ...batch,
+      items: Array.isArray(batch.items) ? batch.items.map((item, index) => ({ ...item, id: String(item?.id || `batch_item_${index + 1}`), status: ["pending", "queued", "running", "completed", "failed"].includes(String(item?.status)) ? item.status : "pending" })) : [],
+      prompt: String(batch.prompt || ""),
+      layout: batch.layout === "list" ? "list" : "grid",
+      taskReferenceOrder: Math.max(0, Math.floor(Number(batch.taskReferenceOrder || 0))),
+    };
+  }
   if (kind !== "imageGenerator") return normalized;
   normalized.libtvImageGeneration = normalizeLibtvImageGeneration(data.libtvImageGeneration);
   normalized.generatedImages = normalizeGeneratedImages(data);

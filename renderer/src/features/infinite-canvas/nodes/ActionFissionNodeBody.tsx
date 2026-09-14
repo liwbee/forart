@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import type { GenerationTaskDto } from "../../../app/appConfig";
 import {
-  CircleAlert,
   Download,
   Grid2X2,
   Images,
@@ -22,7 +21,7 @@ import { RemoteDataState } from "../../../components/RemoteDataState";
 import { Button } from "../../../components/ui/button";
 import { ButtonGroup } from "../../../components/ui/button-group";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "../../../components/ui/hover-card";
-import { Switch } from "../../../components/ui/switch";
+import { AdditionalReferenceToggle } from "./AdditionalReferenceToggle";
 import { ToggleGroup, ToggleGroupItem } from "../../../components/ui/toggle-group";
 import { ImageViewer } from "../../../lib/ImageViewer";
 import { cn } from "../../../lib/utils";
@@ -48,19 +47,21 @@ import {
 } from "../action-fission/actionFissionTypes";
 import { useActionFissionLibraryData } from "../action-fission/useActionFissionLibraryData";
 import { useNativeCanvasActions } from "../canvasActions";
-import { formatGenerationDuration, generationStatusMessage } from "../generation/generationStatus";
+import { generationStatusPresentation, generationStatusTone, type GenerationStatusTone } from "../generation/generationStatusPresentation";
+import { GenerationStatusDisplay } from "../generation/GenerationStatusDisplay";
 import { isGenerationTaskActive, useGenerationTaskCache } from "../generation/generationTaskCache";
 import type { NativeCanvasNodeData } from "../nativeCanvas";
 import type { NativeCanvasEdge, NativeCanvasNode } from "../nativeCanvas";
 import {
-  collectActionFissionAdditionalPrompts,
-  collectActionFissionAdditionalReferences,
+  collectAdditionalPromptInputs,
+  collectAdditionalImageReferences,
   collectImageGeneratorReferences,
 } from "../generation/imageGenerationInputs";
 import { ActionFissionBatchActions, ActionFissionParamPanel } from "./ActionFissionParamPanel";
 import { actionFissionLaunchingRowIds, useGenerationRuntimeStore } from "../generation/generationRuntimeStore";
 import { ReferenceComparisonImageViewer } from "./ReferenceComparisonImageViewer";
 import { useInfiniteCanvasSettings } from "../infiniteCanvasSettings";
+import { BatchNodeProgress } from "../batch/BatchNodeProgress";
 
 interface ActionFissionNodeBodyProps {
   nodeId: string;
@@ -68,32 +69,25 @@ interface ActionFissionNodeBodyProps {
   paramPanelVisible: boolean;
 }
 
-type RowTone = "idle" | "queued" | "ready" | "running" | "completed" | "error";
+type RowTone = GenerationStatusTone;
 
 function isRowQueued(task: GenerationTaskDto | undefined, launching = false) {
-  return Boolean(
-    launching
-    || task?.status === "queued"
-    || task?.status === "preparing"
-    || task?.status === "submitting",
-  );
+  return generationStatusTone({ task, launching }) === "queued";
 }
 
 function isRowGenerating(task: GenerationTaskDto | undefined) {
-  return task?.status === "running" || task?.status === "result_processing";
+  return generationStatusTone({ task }) === "running";
 }
 
 function toneForRow(row: ActionFissionRow, task: GenerationTaskDto | undefined, launching = false, runtimeError = ""): RowTone {
-  if (launching) return "queued";
-  if (runtimeError || task?.status === "failed") return "error";
-  if (isRowQueued(task)) return "queued";
-  if (isRowGenerating(task)) return "running";
-  if (
-    (row.resultUrl || task?.status === "succeeded")
-    && row.resultDownloadState !== "downloaded"
-  ) return "completed";
-  if (row.selectedActionId) return "ready";
-  return "idle";
+  return generationStatusTone({
+    task,
+    launching,
+    runtimeError,
+    resultAvailable: Boolean(row.resultUrl || task?.status === "succeeded"),
+    resultDownloaded: row.resultDownloadState === "downloaded",
+    ready: Boolean(row.selectedActionId),
+  });
 }
 
 function isRowRunning(task: GenerationTaskDto | undefined) {
@@ -107,19 +101,6 @@ function statusDetails(tone: RowTone, t: ReturnType<typeof useTranslation>["t"])
   if (tone === "error") return t("infiniteCanvas:generationFailed");
   if (tone === "ready") return t("infiniteCanvas:actionFissionReady");
   return t("infiniteCanvas:actionFissionPending");
-}
-
-function rowStatusMessage(task: GenerationTaskDto | undefined, tone: RowTone, t: ReturnType<typeof useTranslation>["t"], runtimeError = "") {
-  if (tone === "error") return runtimeError || task?.errorMessage || t("infiniteCanvas:generationFailed");
-  if (tone === "queued" || tone === "running") {
-    return generationStatusMessage(task, t) || statusDetails(tone, t);
-  }
-  return statusDetails(tone, t);
-}
-
-function rowElapsedText(task: GenerationTaskDto | undefined, now: number) {
-  const runningAt = Number(task?.runningAt || 0);
-  return formatGenerationDuration(runningAt ? now - runningAt : 0);
 }
 
 function RowStatus({
@@ -140,44 +121,17 @@ function RowStatus({
   hideTransient?: boolean;
 }) {
   const { t } = useTranslation();
-  const rowTone = toneForRow(row, task, launching, runtimeError);
-  const tone = rowTone === "ready" && !hasReference ? "idle" : rowTone;
-  if (hideTransient && (tone === "queued" || tone === "running" || tone === "error")) return null;
-  const message = launching ? t("infiniteCanvas:generationPreparing") : rowStatusMessage(task, tone, t, runtimeError);
-  const showElapsed = tone === "running";
-  return (
-    <span className="rf-action-fission-status" data-tone={tone} title={message}>
-      <span>{message}</span>
-      {showElapsed ? <time>{rowElapsedText(task, now)}</time> : null}
-    </span>
-  );
-}
-
-function RowGenerationOverlay({ row, task, runtimeError, now, launching }: { row: ActionFissionRow; task?: GenerationTaskDto; runtimeError?: string; now: number; launching: boolean }) {
-  const { t } = useTranslation();
   const tone = toneForRow(row, task, launching, runtimeError);
-  if (tone !== "queued" && tone !== "running" && tone !== "error") return null;
-  const message = launching ? t("infiniteCanvas:generationPreparing") : rowStatusMessage(task, tone, t, runtimeError);
-  return (
-    <>
-      {tone === "running" ? (
-        <time
-          className="rf-action-fission-generation-timer"
-          aria-label={t("infiniteCanvas:generationElapsed", { time: rowElapsedText(task, now) })}
-        >
-          {rowElapsedText(task, now)}
-        </time>
-      ) : null}
-      <div
-        className={cn("rf-action-fission-generation-status", tone === "error" && "is-error")}
-        role={tone === "error" ? "alert" : "status"}
-        aria-live="polite"
-      >
-        {tone === "error" ? <CircleAlert aria-hidden="true" /> : null}
-        <span>{message}</span>
-      </div>
-    </>
-  );
+  const presentation = generationStatusPresentation({
+    task,
+    launching,
+    runtimeError,
+    resultAvailable: Boolean(row.resultUrl || task?.status === "succeeded"),
+    resultDownloaded: row.resultDownloadState === "downloaded",
+    ready: Boolean(row.selectedActionId) && hasReference,
+  }, t, now);
+  if (hideTransient && presentation.showTransient) return null;
+  return <GenerationStatusDisplay presentation={{ ...presentation, tone }} mode="inline" />;
 }
 
 interface ViewerImage {
@@ -192,36 +146,6 @@ function openPreviewFromKeyboard(event: React.KeyboardEvent<HTMLDivElement>, onO
   event.preventDefault();
   event.stopPropagation();
   onOpen();
-}
-
-function AdditionalReferenceToggle({
-  checked,
-  disabled,
-  onCheckedChange,
-}: {
-  checked: boolean;
-  disabled: boolean;
-  onCheckedChange: (checked: boolean) => void;
-}) {
-  const { t } = useTranslation();
-  const stopPropagation = (event: React.SyntheticEvent) => event.stopPropagation();
-  return (
-    <div
-      className="rf-action-fission-additional-toggle nodrag nopan"
-      onPointerDown={stopPropagation}
-      onClick={stopPropagation}
-      onDoubleClick={stopPropagation}
-    >
-      <span>{t("infiniteCanvas:additionalReference")}</span>
-      <Switch
-        size="sm"
-        checked={checked}
-        disabled={disabled}
-        aria-label={t("infiniteCanvas:useAdditionalReference")}
-        onCheckedChange={onCheckedChange}
-      />
-    </div>
-  );
 }
 
 function ActionPreview({
@@ -359,7 +283,7 @@ function ResultPreview({
           <Download aria-hidden="true" />
         </Button>
       ) : null}
-      {showStatusOverlay ? <RowGenerationOverlay row={row} task={task} runtimeError={runtimeError} now={now} launching={launching} /> : null}
+      {showStatusOverlay ? <GenerationStatusDisplay presentation={generationStatusPresentation({ task, launching, runtimeError, resultAvailable: Boolean(originalUrl || task?.status === "succeeded"), resultDownloaded: row.resultDownloadState === "downloaded", ready: Boolean(row.selectedActionId) }, t, now)} mode="overlay" /> : null}
     </div>
   );
 }
@@ -508,11 +432,11 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
     [canvasEdges, canvasNodes, nodeId, t],
   );
   const additionalReferences = useMemo(
-    () => collectActionFissionAdditionalReferences(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference")),
+    () => collectAdditionalImageReferences(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference")),
     [canvasEdges, canvasNodes, nodeId, t],
   );
   const additionalPrompts = useMemo(
-    () => collectActionFissionAdditionalPrompts(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference")),
+    () => collectAdditionalPromptInputs(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference")),
     [canvasEdges, canvasNodes, nodeId, t],
   );
   const viewerReferences = useMemo(() => {
@@ -757,9 +681,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
       data-has-additional-references={hasAdditionalReferences || undefined}
     >
       {!libraryFailure ? <header className="rf-action-fission-header">
-        <span className="rf-action-fission-status rf-action-fission-group-status rf-action-fission-header-status" data-tone={groupTone}>
-          {groupStatus}
-        </span>
+        <BatchNodeProgress className="rf-action-fission-group-status" completed={completedRowCount} total={state.rows.length} tone={groupTone} label={groupStatus} />
         <Button className="nodrag" type="button" variant="ghost" size="sm" disabled={state.rows.length >= MAX_ACTION_FISSION_ROWS} onClick={() => setState(addActionFissionRow(state))}>
           <Plus data-icon="inline-start" aria-hidden="true" />
           {t("infiniteCanvas:actionFissionAddRow")}

@@ -50,6 +50,7 @@ test('every renderer-owned generation hook uses the StrictMode-safe lifecycle', 
   const hookPaths = [
     path.join('generation', 'useNativeImageGeneration.ts'),
     path.join('generation', 'useNativeActionFissionGeneration.ts'),
+    path.join('generation', 'useNativeBatchImageGeneration.ts'),
     path.join('libtv-generation', 'useNativeLibtvGeneration.ts'),
   ];
 
@@ -64,7 +65,7 @@ test('every renderer-owned generation hook uses the StrictMode-safe lifecycle', 
       hookPath,
     ), 'utf8');
     assert.match(source, /useEffect\(\(\) => activateGenerationHook\(mountedRef,/);
-    assert.match(source, /watchGenerationTask\(/);
+    assert.match(source, /watchGenerationTask\(|createBatchTaskRuntime\(/);
     assert.doesNotMatch(source, /setTimeout\(resolve, 1000\)/);
     assert.doesNotMatch(source, /forartGenerationTasks\.get\(taskId\)/);
   }

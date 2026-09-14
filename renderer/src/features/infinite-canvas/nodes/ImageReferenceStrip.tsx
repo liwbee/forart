@@ -37,11 +37,12 @@ interface ReferenceItemProps {
   item: ImageGeneratorReferenceInput;
   index: number;
   invalid: boolean;
+  readOnly?: boolean;
   onRemove: (edgeId: string) => void;
   onView: (item: ImageGeneratorReferenceInput) => void;
 }
 
-function SortableReferenceItem({ item, index, invalid, onRemove, onView }: ReferenceItemProps) {
+function SortableReferenceItem({ item, index, invalid, readOnly = false, onRemove, onView }: ReferenceItemProps) {
   const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.edgeId });
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition };
@@ -56,6 +57,7 @@ function SortableReferenceItem({ item, index, invalid, onRemove, onView }: Refer
       {...attributes}
       {...listeners}
       onDoubleClick={(event) => {
+        if (readOnly) return;
         event.preventDefault();
         event.stopPropagation();
         onView(item);
@@ -76,7 +78,7 @@ function SortableReferenceItem({ item, index, invalid, onRemove, onView }: Refer
         </HoverCardContent>
       </HoverCard>
       <span className="rf-reference-item__order">{index + 1}</span>
-      <Button
+      {!readOnly ? <Button
         className="rf-reference-item__remove"
         type="button"
         variant="ghost"
@@ -90,7 +92,7 @@ function SortableReferenceItem({ item, index, invalid, onRemove, onView }: Refer
         }}
       >
         <X aria-hidden="true" />
-      </Button>
+      </Button> : null}
     </div>
   );
 }
@@ -148,6 +150,8 @@ interface ImageReferenceStripProps {
   actions?: ReactNode;
   prompts: ImageGeneratorPromptInput[];
   items: ImageGeneratorReferenceInput[];
+  prefixItems?: ImageGeneratorReferenceInput[];
+  prefixItemOrder?: number;
   maxReferences?: number;
   supported: boolean;
   onRemove: (edgeId: string) => void;
@@ -158,6 +162,8 @@ export function ImageReferenceStrip({
   actions,
   prompts,
   items,
+  prefixItems = [],
+  prefixItemOrder = 0,
   maxReferences = Number.POSITIVE_INFINITY,
   supported,
   onRemove,
@@ -173,26 +179,33 @@ export function ImageReferenceStrip({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const invalid = !supported || items.length > maxReferences;
+  const sortableItems = useMemo(() => {
+    if (!prefixItems.length) return items;
+    const next = [...items];
+    const insertionIndex = Math.max(0, Math.min(next.length, Math.round(prefixItemOrder)));
+    next.splice(insertionIndex, 0, ...prefixItems);
+    return next;
+  }, [items, prefixItemOrder, prefixItems]);
   const renderedItems = useMemo(() => {
-    if (!optimisticOrder) return items;
-    const itemById = new Map(items.map((item) => [item.edgeId, item]));
+    if (!optimisticOrder) return sortableItems;
+    const itemById = new Map(sortableItems.map((item) => [item.edgeId, item]));
     const orderedItems = optimisticOrder.flatMap((edgeId) => {
       const item = itemById.get(edgeId);
       return item ? [item] : [];
     });
-    return orderedItems.length === items.length ? orderedItems : items;
-  }, [items, optimisticOrder]);
+    return orderedItems.length === sortableItems.length ? orderedItems : sortableItems;
+  }, [optimisticOrder, sortableItems]);
   const draggedItem = renderedItems.find((item) => item.edgeId === draggedId) || null;
 
   useEffect(() => {
     if (!optimisticOrder) return;
-    const itemIds = items.map((item) => item.edgeId);
+    const itemIds = sortableItems.map((item) => item.edgeId);
     const sameMembers = itemIds.length === optimisticOrder.length
       && itemIds.every((edgeId) => optimisticOrder.includes(edgeId));
     if (!sameMembers || itemIds.every((edgeId, index) => edgeId === optimisticOrder[index])) {
       setOptimisticOrder(null);
     }
-  }, [items, optimisticOrder]);
+  }, [optimisticOrder, sortableItems]);
   const restrictToReferenceViewport = useCallback<Modifier>(({ activeNodeRect, draggingNodeRect, overlayNodeRect, transform }) => {
     const viewport = itemsViewportRef.current?.getBoundingClientRect();
     const draggedRect = overlayNodeRect || draggingNodeRect || activeNodeRect;
@@ -256,7 +269,8 @@ export function ImageReferenceStrip({
                 key={item.edgeId}
                 item={item}
                 index={index}
-                invalid={!supported || index >= maxReferences}
+                invalid={!supported || (prefixItems.some((prefix) => prefix.edgeId === item.edgeId) ? false : renderedItems.slice(0, index).filter((candidate) => !prefixItems.some((prefix) => prefix.edgeId === candidate.edgeId)).length >= maxReferences)}
+                readOnly={prefixItems.some((prefix) => prefix.edgeId === item.edgeId)}
                 onRemove={onRemove}
                 onView={setViewerItem}
               />

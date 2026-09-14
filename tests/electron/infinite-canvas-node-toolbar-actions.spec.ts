@@ -984,7 +984,7 @@ test("hides the empty action fission grid icon as soon as row generation starts"
 
   await emptyRow.getByRole("button", { name: "Rerun" }).click();
 
-  await expect(emptyRow.locator(".rf-action-fission-generation-status")).toBeVisible();
+  await expect(emptyRow.locator(".rf-generation-status-display")).toBeVisible();
   await expect(emptyIcon).toHaveCount(0);
 });
 

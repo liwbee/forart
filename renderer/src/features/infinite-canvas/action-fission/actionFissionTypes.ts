@@ -1,3 +1,5 @@
+import type { BatchNodeItemBase } from "../batch/batchNodeTypes";
+
 export const MAX_ACTION_FISSION_ROWS = 15;
 export const DEFAULT_ACTION_FISSION_ROWS = 4;
 export const MAX_ACTION_FISSION_CATEGORY_GROUPS = 10;
@@ -12,7 +14,7 @@ export interface ActionFissionCategoryGroup {
   excludeActionTagIds: string[];
 }
 
-export interface ActionFissionRow {
+export interface ActionFissionRow extends BatchNodeItemBase {
   id: string;
   categoryGroups: ActionFissionCategoryGroup[];
   selectedCategoryGroupId?: string;

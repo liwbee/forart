@@ -44,8 +44,8 @@ import {
   type NativeImagePromptDocument,
 } from "../nativeCanvas";
 import {
-  collectActionFissionAdditionalPrompts,
-  collectActionFissionAdditionalReferences,
+  collectAdditionalPromptInputs,
+  collectAdditionalImageReferences,
   collectImageGeneratorPrompts,
   collectImageGeneratorReferences,
   type ImageGeneratorReferenceInput,
@@ -65,6 +65,7 @@ import { ImagePromptEditor } from "./ImagePromptEditor";
 import { useCanvasAgent } from "../../canvas-agent";
 import { EXTENSION_SETTINGS_CHANGED_EVENT, loadExtensionSettings, readExtensionSettings } from "../../settings/extensionSettings";
 import { useInfiniteCanvasSettings } from "../infiniteCanvasSettings";
+import { BATCH_TASK_REFERENCE_EDGE_ID } from "../batch/batchNodeTypes";
 
 interface ImagePromptOptimizationResult {
   optimizedPrompt: string;
@@ -123,6 +124,17 @@ interface PendingLibtvSelection {
   aspectRatio: string;
   imageCount: number;
 }
+
+const BATCH_TASK_REFERENCE_PLACEHOLDER = `data:image/svg+xml,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c3aed"/><stop offset="0.5" stop-color="#06b6d4"/><stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="16" fill="url(#g)"/>
+  <path d="M25 29h46M25 48h46M25 67h30" stroke="white" stroke-width="6" stroke-linecap="round" opacity=".9"/>
+</svg>`)}`;
 
 export function ImageGeneratorParamPanel({
   nodeId,
@@ -378,15 +390,34 @@ export function ImageGeneratorParamPanel({
   // expose and preserve the connected prompt edge.
   const promptInputs = collectImageGeneratorPrompts(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:prompt"));
   const referenceImages = collectImageGeneratorReferences(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:referenceImage"));
-  const isActionFission = data.kind === "actionFission";
+  const isActionFission = data.kind === "actionFission" || data.kind === "batchImageGenerator";
   const [parameterPanelWidth, setParameterPanelWidth] = useState(isActionFission ? 800 : 668);
   const showOptimizationMenuButton = showPrompt && !isActionFission && extensionSettings.promptOptimizationEnabled;
   const additionalReferenceImages = isActionFission
-    ? collectActionFissionAdditionalReferences(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference"))
+    ? collectAdditionalImageReferences(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference"))
     : [];
   const additionalReferencePrompts = isActionFission
-    ? collectActionFissionAdditionalPrompts(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference"))
+    ? collectAdditionalPromptInputs(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference"))
     : [];
+  const batchTaskReferenceItems: ImageGeneratorReferenceInput[] = data.kind === "batchImageGenerator" && (data.batchImageGenerator?.items || []).length > 0
+    ? [{
+      edgeId: BATCH_TASK_REFERENCE_EDGE_ID,
+      nodeId,
+      order: Number(data.batchImageGenerator?.taskReferenceOrder || 0),
+      title: t("infiniteCanvas:mainReference"),
+      mentionLabel: t("infiniteCanvas:mainReference"),
+      imageUrl: BATCH_TASK_REFERENCE_PLACEHOLDER,
+      previewUrl: BATCH_TASK_REFERENCE_PLACEHOLDER,
+    }]
+    : [];
+  const primaryReferenceCapacity = Math.max(0, maxReferences - (batchTaskReferenceItems.length ? 1 : 0));
+  const promptReferenceImages = (() => {
+    if (!batchTaskReferenceItems.length) return referenceImages;
+    const next = [...referenceImages];
+    const index = Math.max(0, Math.min(next.length, Math.round(Number(data.batchImageGenerator?.taskReferenceOrder || 0))));
+    next.splice(index, 0, batchTaskReferenceItems[0]);
+    return next;
+  })();
   const advancedRule = isLibtv ? undefined : rule.advancedRule;
   const promptExtendRule = advancedRule?.promptExtend;
   const hasAnyReferenceImage = referenceImages.length + additionalReferenceImages.length > 0;
@@ -823,7 +854,7 @@ export function ImageGeneratorParamPanel({
             type="button"
             variant="ghost"
             size="icon-xs"
-            disabled={!referenceSupported || referenceImages.length >= maxReferences}
+            disabled={!referenceSupported || referenceImages.length >= primaryReferenceCapacity}
             aria-label={t("infiniteCanvas:uploadReferenceImage")}
             title={t("infiniteCanvas:uploadReferenceImage")}
             onClick={() => referenceInputRef.current?.click()}
@@ -834,7 +865,7 @@ export function ImageGeneratorParamPanel({
             type="button"
             variant="ghost"
             size="icon-xs"
-            disabled={!referenceSupported || referenceImages.length >= maxReferences}
+            disabled={!referenceSupported || referenceImages.length >= primaryReferenceCapacity}
             aria-label={t("infiniteCanvas:referenceFromLibrary")}
             title={t("infiniteCanvas:referenceFromLibrary")}
             onClick={() => actions.openLibraryForReference(nodeId)}
@@ -845,10 +876,25 @@ export function ImageGeneratorParamPanel({
       )}
       prompts={promptInputs}
       items={referenceImages}
-      maxReferences={maxReferences}
+      prefixItems={batchTaskReferenceItems}
+      maxReferences={primaryReferenceCapacity}
       supported={referenceSupported}
       onRemove={actions.removeCanvasEdge}
-      onReorder={(edgeIds) => actions.reorderImageGeneratorReferences(nodeId, edgeIds)}
+      onReorder={(orderedIds) => {
+        if (data.kind !== "batchImageGenerator" || !batchTaskReferenceItems.length) {
+          actions.reorderImageGeneratorReferences(nodeId, orderedIds);
+          return;
+        }
+        const placeholderIndex = orderedIds.indexOf(batchTaskReferenceItems[0].edgeId);
+        const sharedIds = orderedIds.filter((edgeId) => edgeId !== batchTaskReferenceItems[0].edgeId);
+        actions.reorderImageGeneratorReferences(nodeId, sharedIds);
+        patchNodeData(nodeId, {
+          batchImageGenerator: {
+            ...(data.batchImageGenerator || { items: [] }),
+            taskReferenceOrder: Math.max(0, placeholderIndex),
+          },
+        });
+      }}
     />
   );
 
@@ -976,7 +1022,7 @@ export function ImageGeneratorParamPanel({
                             <ImageReferenceStrip
                               prompts={additionalReferencePrompts}
                               items={additionalReferenceImages}
-                              maxReferences={Math.max(0, maxReferences - referenceImages.length)}
+                              maxReferences={Math.max(0, primaryReferenceCapacity - referenceImages.length)}
                               supported={referenceSupported}
                               onRemove={actions.removeCanvasEdge}
                               onReorder={(edgeIds) => actions.reorderImageGeneratorReferences(nodeId, edgeIds)}
@@ -1008,7 +1054,7 @@ export function ImageGeneratorParamPanel({
                           id={`image-generator-prompt-${nodeId}`}
                           value={promptDraft}
                           document={promptDocumentDraft}
-                          references={referenceImages}
+                          references={promptReferenceImages}
                           placeholder={t("infiniteCanvas:imageComposerPlaceholder")}
                           ariaLabel={t("infiniteCanvas:prompt")}
                           expanded={promptExpanded}

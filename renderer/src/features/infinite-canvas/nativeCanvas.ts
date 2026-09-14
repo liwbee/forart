@@ -1,22 +1,9 @@
 import type { Edge, Node, XYPosition } from "@xyflow/react";
 import { Bot, FolderKanban, ImageIcon, ImagePlus, ScanSearch, Split, TextCursorInput, Type, type LucideIcon } from "lucide-react";
 import type { ActionFissionState } from "./action-fission/actionFissionTypes";
-export interface BatchImageGeneratorItem {
-  id: string;
-  sourceUrl?: string;
-  sourceThumbUrl?: string;
-  sourceFileName?: string;
-  resultUrl?: string;
-  resultThumbUrl?: string;
-  latestGenerationTaskId?: string;
-  status?: "pending" | "queued" | "running" | "completed" | "failed";
-  error?: string;
-}
-export interface BatchImageGeneratorState {
-  items: BatchImageGeneratorItem[];
-  prompt?: string;
-  layout?: "list" | "grid";
-}
+import type { BatchNodeItemBase, BatchNodeStateBase } from "./batch/batchNodeTypes";
+export interface BatchImageGeneratorItem extends BatchNodeItemBase { sourceUrl?: string; sourceThumbUrl?: string; sourceFileName?: string; useAdditionalReferences?: boolean; resultUrl?: string; resultThumbUrl?: string; resultFileName?: string; resultWidth?: number; resultHeight?: number; resultDownloadState?: "pending" | "downloaded"; resultDownloadedAt?: number; }
+export type BatchImageGeneratorState = BatchNodeStateBase<BatchImageGeneratorItem> & { prompt?: string; taskReferenceOrder?: number };
 import {
   getImageGeneratorNodeSize,
   IMAGE_GENERATOR_DEFAULT_SIZE,
@@ -181,9 +168,7 @@ export function nativeCanvasNodeImages(data: NativeCanvasNodeData): NativeGenera
       width: row.resultWidth, height: row.resultHeight,
     }] : []);
   }
-  if (data.kind === "batchImageGenerator") {
-    return (data.batchImageGenerator?.items || []).flatMap((item) => item.resultUrl ? [{ localUrl: item.resultUrl, thumbUrl: item.resultThumbUrl }] : []);
-  }
+  if (data.kind === "batchImageGenerator") return (data.batchImageGenerator?.items || []).flatMap((item) => item.resultUrl ? [{ localUrl: item.resultUrl, thumbUrl: item.resultThumbUrl }] : []);
   if (data.kind !== "assetLoader" || (data.assetType && data.assetType !== "image") || !data.assetUrl) return [];
   return [{
     localUrl: data.assetUrl,
@@ -242,7 +227,10 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
     size: { width: 820, height: 620 },
     acceptsInput: true,
     providesOutput: true,
-    resizable: { minWidth: 560, minHeight: 360, maxWidth: 1600, maxHeight: 1078 },
+    resizable: {
+      minWidth: 680,
+      minHeight: 420,
+    },
   },
   assetLoader: {
     icon: ImageIcon,
@@ -285,8 +273,6 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
     resizable: {
       minWidth: 680,
       minHeight: 420,
-      maxWidth: 1600,
-      maxHeight: 1078,
     },
   },
   smartReverse: {
@@ -367,6 +353,18 @@ export function cloneNativeCanvasNodeData(data: NativeCanvasNodeData): NativeCan
         } as typeof row & Record<string, unknown>;
         delete clonedRow.latestGenerationTaskId;
         return clonedRow;
+      }),
+    };
+  }
+  if (data.batchImageGenerator) {
+    clonedData.batchImageGenerator = {
+      ...data.batchImageGenerator,
+      items: data.batchImageGenerator.items.map((item) => {
+        const clonedItem = { ...item };
+        delete clonedItem.latestGenerationTaskId;
+        delete clonedItem.status;
+        delete clonedItem.error;
+        return clonedItem;
       }),
     };
   }

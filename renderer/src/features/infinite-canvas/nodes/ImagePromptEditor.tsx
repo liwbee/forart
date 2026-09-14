@@ -50,8 +50,8 @@ import { ScrollArea } from "../../../components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip";
 import {
   findImageReferenceMentionQuery,
-  formatImageReferenceLabel,
   normalizeImagePromptDocument,
+  imageReferenceLabel,
   serializeImagePromptForDisplay,
 } from "../generation/imagePromptReferences";
 import type { ImageGeneratorReferenceInput } from "../generation/imageGenerationInputs";
@@ -65,7 +65,7 @@ type SerializedImageReferenceNode = Spread<{
 
 interface ReferenceContextValue {
   references: ImageGeneratorReferenceInput[];
-  referenceLabel: (index: number) => string;
+  referenceLabel: (reference: ImageGeneratorReferenceInput | undefined, index: number) => string;
   invalidLabel: string;
 }
 
@@ -104,7 +104,7 @@ function ImageReferenceToken({ edgeId }: { edgeId: string }) {
   const token = (
     <span
       className={valid ? "rf-image-prompt-reference-token" : "rf-image-prompt-reference-token is-invalid"}
-      aria-label={valid ? context?.referenceLabel(index) : context?.invalidLabel}
+      aria-label={valid ? context?.referenceLabel(reference, index) : context?.invalidLabel}
       contentEditable={false}
     >
       {reference?.previewUrl || reference?.imageUrl ? (
@@ -118,7 +118,7 @@ function ImageReferenceToken({ edgeId }: { edgeId: string }) {
           draggable={false}
         />
       ) : null}
-      {valid ? context?.referenceLabel(index) : context?.invalidLabel}
+      {valid ? context?.referenceLabel(reference, index) : context?.invalidLabel}
     </span>
   );
   if (!reference?.previewUrl && !reference?.imageUrl) return token;
@@ -224,8 +224,8 @@ function MentionPickerPlugin({ references }: { references: ImageGeneratorReferen
   const filteredReferences = useMemo(() => {
     if (!query) return [];
     const normalizedQuery = query.query.trim().toLocaleLowerCase();
-    return references.filter((_, index) => (
-      !normalizedQuery || context?.referenceLabel(index).toLocaleLowerCase().includes(normalizedQuery)
+    return references.filter((reference, index) => (
+      !normalizedQuery || context?.referenceLabel(reference, index).toLocaleLowerCase().includes(normalizedQuery)
     ));
   }, [context, query, references]);
   const open = Boolean(query && filteredReferences.length);
@@ -298,7 +298,7 @@ function MentionPickerPlugin({ references }: { references: ImageGeneratorReferen
               onClick={() => chooseReference(index)}
             >
               <ImageWithFallback className="size-8 shrink-0 rounded-sm object-cover" src={reference.previewUrl} fallbackSrc={reference.imageUrl} alt="" loading="lazy" decoding="async" draggable={false} />
-              <span className="min-w-0 flex-1 truncate text-left">{context?.referenceLabel(references.indexOf(reference))}</span>
+              <span className="min-w-0 flex-1 truncate text-left">{context?.referenceLabel(reference, references.indexOf(reference))}</span>
             </Button>
           ))}
         </div>
@@ -436,7 +436,7 @@ export function ImagePromptEditor({
   const [focused, setFocused] = useState(false);
   const latestDocumentRef = useRef(document);
   const referenceLabel = useCallback(
-    (index: number) => formatImageReferenceLabel(index, i18n.resolvedLanguage || i18n.language),
+    (reference: ImageGeneratorReferenceInput | undefined, index: number) => imageReferenceLabel(reference, index, i18n.resolvedLanguage || i18n.language),
     [i18n.language, i18n.resolvedLanguage],
   );
   const contextValue = useMemo<ReferenceContextValue>(() => ({
@@ -453,7 +453,7 @@ export function ImagePromptEditor({
     const nextValue = serializeImagePromptForDisplay({
       document: currentDocument,
       references,
-      referenceLabel,
+      referenceLabel: (index) => referenceLabel(references[index], index),
       missingReferenceLabel: t("infiniteCanvas:invalidImageReference"),
     });
     if (nextValue !== value) {
@@ -523,7 +523,7 @@ export function ImagePromptEditor({
               const echoText = serializeImagePromptForDisplay({
                 document: nextDocument,
                 references,
-                referenceLabel,
+                referenceLabel: (index) => referenceLabel(references[index], index),
                 missingReferenceLabel: t("infiniteCanvas:invalidImageReference"),
               });
               if (echoText === value) return;
@@ -531,7 +531,7 @@ export function ImagePromptEditor({
               const plainText = serializeImagePromptForDisplay({
                 document: nextDocument,
                 references,
-                referenceLabel,
+                referenceLabel: (index) => referenceLabel(references[index], index),
                 missingReferenceLabel: t("infiniteCanvas:invalidImageReference"),
               });
               onChange(plainText, nextDocument);

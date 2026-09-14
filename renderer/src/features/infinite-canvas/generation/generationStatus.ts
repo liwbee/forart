@@ -37,7 +37,7 @@ const STATUS_TRANSLATION_KEYS: Record<string, string> = {
   "libtv.recovering": "libtvRecovering",
 };
 
-type GenerationStatusTask = {
+export type GenerationStatusTask = {
   message?: string;
   messageCode?: string;
   messageParams?: Record<string, string | number>;
