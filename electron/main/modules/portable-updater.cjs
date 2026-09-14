@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { createHash } = require('crypto');
 const { spawn } = require('child_process');
+const AdmZip = require('adm-zip');
 
 const REPO_URL = 'https://github.com/liwbee/forart';
 const GITHUB_API_ROOT = 'https://api.github.com/repos/liwbee/forart';
@@ -223,6 +224,50 @@ async function removeDirectoryBestEffort(directory) {
 function safeFileName(fileName, fallback = 'Forart-windows-portable.zip') {
   const baseName = path.basename(String(fileName || fallback));
   return baseName.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || fallback;
+}
+
+function readPortableArchiveText(zip, candidates) {
+  for (const candidate of candidates) {
+    const entry = zip.getEntry(candidate);
+    if (entry) return zip.readAsText(entry).replace(/^\uFEFF/, '').trim();
+  }
+  return '';
+}
+
+function validatePortableArchiveVersion(zipPath, expectedVersion) {
+  let zip;
+  try {
+    zip = new AdmZip(zipPath);
+  } catch (error) {
+    throw new Error(`Downloaded portable package is not a readable zip: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const versionText = readPortableArchiveText(zip, [
+    'resources/app/VERSION',
+    'app/VERSION',
+    'VERSION',
+  ]);
+  const packageText = readPortableArchiveText(zip, [
+    'resources/app/package.json',
+    'app/package.json',
+    'package.json',
+  ]);
+  const packagedVersion = normalizeVersion(versionText.split(/\r?\n/)[0] || (() => {
+    try { return JSON.parse(packageText).version; } catch { return ''; }
+  })());
+  const expected = normalizeVersion(expectedVersion);
+  if (!packagedVersion) throw new Error('Downloaded portable package does not contain an application VERSION file.');
+  if (!expected || packagedVersion !== expected) {
+    throw new Error(`Downloaded portable package version mismatch. Expected ${expected || 'unknown'}, got ${packagedVersion}.`);
+  }
+  if (packageText) {
+    let packageVersion = '';
+    try { packageVersion = normalizeVersion(JSON.parse(packageText).version); } catch { /* VERSION is authoritative. */ }
+    if (packageVersion && packageVersion !== expected) {
+      throw new Error(`Downloaded portable package package.json version mismatch. Expected ${expected}, got ${packageVersion}.`);
+    }
+  }
+  return packagedVersion;
 }
 
 function findPortableAsset(release) {
@@ -771,6 +816,8 @@ function createPortableUpdater({ app, rootDir, dataRoot = rootDir, net }) {
         });
       }, `sha256:${expectedDigest}`);
 
+      validatePortableArchiveVersion(zipPath, latestRelease.version);
+
       emitProgress(onProgress, {
         phase: 'scheduling',
         percent: 100,
@@ -826,4 +873,5 @@ module.exports = {
   createPortableUpdater,
   downloadFileWithProgress,
   normalizeSha256Digest,
+  validatePortableArchiveVersion,
 };
