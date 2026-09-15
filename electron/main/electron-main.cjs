@@ -64,8 +64,15 @@ const assetStore = createAssetStore({ rootDir: portableRootDir, net });
 const canvasStore = createCanvasStore({ rootDir: portableRootDir });
 const generationTaskRepository = createGenerationTaskRepository({ rootDir: portableRootDir });
 const canvasCacheStore = createCanvasCacheStore({ assetStore, canvasStore, generationTaskRepository, shell });
-const canvasPackageStore = createCanvasPackageStore({ rootDir: appRootDir, dialog, canvasStore, assetStore, net });
 const configStore = createConfigStore({ app, rootDir: portableRootDir, safeStorage });
+const canvasPackageStore = createCanvasPackageStore({
+  rootDir: appRootDir,
+  dialog,
+  canvasStore,
+  assetStore,
+  net,
+  resolveDownloadPath: () => configStore.load()?.fileDownloadPath || app.getPath('downloads'),
+});
 const canvasAgent = createCanvasAgentService({ net, assetStore, configStore });
 const canvasTaskRepository = createCanvasTaskRepository({ rootDir: portableRootDir });
 canvasTaskRepository.migrateLegacyImageTasks();
@@ -188,7 +195,7 @@ function registerImageReviewProtocol() {
   protocol.handle('forart-review-preview', handleScaledImageRequest);
 }
 
-registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskService, net });
+registerCanvasIpc({ ipcMain, app, configStore, canvasStore, assetStore, canvasPackageStore, generationTaskService, net });
 registerCanvasAgentIpc({ ipcMain, canvasAgentRuntime });
 registerCanvasTaskIpc({ ipcMain, repository: canvasTaskRepository });
 ipcMain.handle('canvas-cache:scan', async () => canvasCacheStore.scan());

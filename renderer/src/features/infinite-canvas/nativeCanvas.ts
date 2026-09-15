@@ -2,7 +2,8 @@ import type { Edge, Node, XYPosition } from "@xyflow/react";
 import { Bot, FolderKanban, ImageIcon, ImagePlus, ScanSearch, Split, TextCursorInput, Type, type LucideIcon } from "lucide-react";
 import type { ActionFissionState } from "./action-fission/actionFissionTypes";
 import type { BatchNodeItemBase, BatchNodeStateBase } from "./batch/batchNodeTypes";
-export interface BatchImageGeneratorItem extends BatchNodeItemBase { sourceUrl?: string; sourceThumbUrl?: string; sourceFileName?: string; useAdditionalReferences?: boolean; resultUrl?: string; resultThumbUrl?: string; resultFileName?: string; resultWidth?: number; resultHeight?: number; resultDownloadState?: "pending" | "downloaded"; resultDownloadedAt?: number; }
+import { BATCH_NODE_DEFAULT_SIZE, BATCH_NODE_RESIZE_CONFIG } from "./batchNodeSizing";
+export interface BatchImageGeneratorItem extends BatchNodeItemBase { sourceUrl?: string; sourceThumbUrl?: string; sourceFileName?: string; sourceLoadState?: "loading" | "ready" | "failed"; sourceLoadError?: string; useAdditionalReferences?: boolean; resultUrl?: string; resultThumbUrl?: string; resultFileName?: string; resultWidth?: number; resultHeight?: number; resultDownloadState?: "pending" | "downloaded"; resultDownloadedAt?: number; }
 export type BatchImageGeneratorState = BatchNodeStateBase<BatchImageGeneratorItem> & { prompt?: string; taskReferenceOrder?: number };
 import {
   getImageGeneratorNodeSize,
@@ -202,6 +203,10 @@ export interface NativeCanvasNodeResizeConfig {
   minHeight: number;
   maxWidth?: number;
   maxHeight?: number;
+  widthStep?: number;
+  heightStep?: number;
+  widthSnapOrigin?: number;
+  heightSnapOrigin?: number;
 }
 
 interface NativeCanvasNodeDefinition {
@@ -224,13 +229,10 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
   batchImageGenerator: {
     icon: ImagePlus,
     labelKey: "batchImageGenerator",
-    size: { width: 820, height: 620 },
+    size: BATCH_NODE_DEFAULT_SIZE,
     acceptsInput: true,
     providesOutput: true,
-    resizable: {
-      minWidth: 680,
-      minHeight: 420,
-    },
+    resizable: BATCH_NODE_RESIZE_CONFIG,
   },
   assetLoader: {
     icon: ImageIcon,
@@ -267,13 +269,10 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
   actionFission: {
     icon: Split,
     labelKey: "actionFission",
-    size: { width: 820, height: 620 },
+    size: BATCH_NODE_DEFAULT_SIZE,
     acceptsInput: true,
     providesOutput: true,
-    resizable: {
-      minWidth: 680,
-      minHeight: 420,
-    },
+    resizable: BATCH_NODE_RESIZE_CONFIG,
   },
   smartReverse: {
     icon: ScanSearch,

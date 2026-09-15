@@ -1,6 +1,8 @@
 import { Maximize2, Minimize2, Play, Scissors, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { getActiveForartConfig } from "../../../data-source/runtime";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import { cn } from "../../../lib/utils";
 import type { CanvasStoredAsset } from "../canvasActions";
@@ -36,7 +38,8 @@ function formatTime(value: number) {
   return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-export function VideoAssetBody({ sourceUrl, thumbUrl, label, onCaptureComplete }: { sourceUrl: string; thumbUrl?: string; label: string; onCaptureComplete?: (asset: CanvasStoredAsset, mode: CaptureMode) => void }) {
+export function VideoAssetBody({ sourceUrl, thumbUrl, label, className, onCaptureComplete }: { sourceUrl: string; thumbUrl?: string; label: string; className?: string; onCaptureComplete?: (asset: CanvasStoredAsset, mode: CaptureMode) => void }) {
+  const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const captureRef = useRef<HTMLDivElement | null>(null);
@@ -157,7 +160,7 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label, onCaptureComplete }
   const captureFrame = useCallback(async (mode: CaptureMode) => {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) {
-      toast.error("视频画面尚未准备好");
+      toast.error(t("infiniteCanvas:videoNotReady"));
       return;
     }
     setCaptureOpen(false);
@@ -182,7 +185,7 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label, onCaptureComplete }
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const context = canvas.getContext("2d");
-      if (!context) throw new Error("无法创建截图画布");
+      if (!context) throw new Error(t("infiniteCanvas:videoCanvasUnavailable"));
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       let dataUrl = "";
       let storedAsset: CanvasStoredAsset | null = null;
@@ -205,29 +208,33 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label, onCaptureComplete }
         if (window.easyTool?.saveCanvasAsset) {
           storedAsset = await window.easyTool.saveCanvasAsset({ dataUrl, defaultName, kind: "output", type: "image/png" });
         } else {
-          const link = document.createElement("a");
-          link.href = dataUrl;
-          link.download = defaultName;
-          link.click();
+          if (window.easyTool?.saveResult) {
+            await window.easyTool.saveResult({ dataUrl, defaultName, directory: getActiveForartConfig()?.fileDownloadPath, convertToPng: false });
+          } else {
+            const link = document.createElement("a");
+            link.href = dataUrl;
+            link.download = defaultName;
+            link.click();
+          }
         }
       }
       if (storedAsset) onCaptureComplete?.(storedAsset, mode);
-      toast.success("视频帧已保存到画布素材");
+      toast.success(t("infiniteCanvas:videoFrameSaved"));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "视频帧截取失败");
+      toast.error(error instanceof Error ? error.message : t("infiniteCanvas:videoFrameCaptureFailed"));
     } finally {
       if (mode !== "current") {
         video.currentTime = beforeTime;
         if (wasPlaying) void video.play().catch(() => undefined);
       }
     }
-  }, [duration, label, onCaptureComplete, resolvedSource]);
+  }, [duration, label, onCaptureComplete, resolvedSource, t]);
 
   if (!activated) {
     return (
       <button
         type="button"
-        className={cn("rf-native-video-poster", !resolvedThumb && "is-empty")}
+        className={cn("rf-native-video-poster", className, !resolvedThumb && "is-empty")}
         onClick={(event) => {
           event.stopPropagation();
           setActivated(true);
@@ -241,7 +248,7 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label, onCaptureComplete }
   }
 
   return (
-    <div ref={shellRef} className={cn("rf-native-video-shell nodrag nopan nowheel", fullscreen && "is-fullscreen", !controlsVisible && "is-controls-hidden")} onPointerMove={revealControls} onPointerEnter={revealControls} onPointerLeave={hideControlsOnPointerLeave} onFocusCapture={revealControls}>
+    <div ref={shellRef} className={cn("rf-native-video-shell nodrag nopan nowheel", className, fullscreen && "is-fullscreen", !controlsVisible && "is-controls-hidden")} onPointerMove={revealControls} onPointerEnter={revealControls} onPointerLeave={hideControlsOnPointerLeave} onFocusCapture={revealControls}>
       <video
         ref={videoRef}
         className="rf-native-video"
@@ -270,29 +277,29 @@ export function VideoAssetBody({ sourceUrl, thumbUrl, label, onCaptureComplete }
         }}
         onPointerDown={(event) => event.stopPropagation()}
       >
-        <VideoSlider className="rf-native-video-progress" value={currentTime} max={duration} onChange={seek} ariaLabel="播放进度" />
+        <VideoSlider className="rf-native-video-progress" value={currentTime} max={duration} onChange={seek} ariaLabel={t("infiniteCanvas:videoPlaybackProgress")} />
         <div className="rf-native-video-controls-row">
-          <button type="button" className="rf-native-video-control" onClick={togglePlayback} aria-label={playing ? "暂停" : "播放"}>
+          <button type="button" className="rf-native-video-control" onClick={togglePlayback} aria-label={t(playing ? "infiniteCanvas:videoPause" : "infiniteCanvas:videoPlay")}>
             {playing ? <span className="rf-native-video-pause-glyph" aria-hidden="true"><i /><i /></span> : <Play fill="currentColor" aria-hidden="true" />}
           </button>
           <div className="rf-native-video-volume-group">
-            <button type="button" className="rf-native-video-control" onClick={() => setVolume((value) => value > 0 ? 0 : 1)} aria-label={volume > 0 ? "静音" : "取消静音"}>
+            <button type="button" className="rf-native-video-control" onClick={() => setVolume((value) => value > 0 ? 0 : 1)} aria-label={t(volume > 0 ? "infiniteCanvas:videoMute" : "infiniteCanvas:videoUnmute")}>
               {volume > 0 ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
             </button>
-            <VideoSlider className="rf-native-video-volume" value={volume} max={1} onChange={setVolume} ariaLabel="音量" />
+            <VideoSlider className="rf-native-video-volume" value={volume} max={1} onChange={setVolume} ariaLabel={t("infiniteCanvas:videoVolume")} />
           </div>
           <span className="rf-native-video-time rf-native-video-time-total">{formatTime(currentTime)} / {formatTime(duration)}</span>
           <div ref={captureRef} className="rf-native-video-capture">
-            <button type="button" className={cn("rf-native-video-control", captureOpen && "is-active")} onClick={() => setCaptureOpen((open) => !open)} aria-label="截取视频帧" aria-expanded={captureOpen}>
+            <button type="button" className={cn("rf-native-video-control", captureOpen && "is-active")} onClick={() => setCaptureOpen((open) => !open)} aria-label={t("infiniteCanvas:videoCaptureFrame")} aria-expanded={captureOpen}>
               <Scissors aria-hidden="true" />
             </button>
             {captureOpen ? <div className="rf-native-video-capture-menu" role="menu">
-              <button type="button" role="menuitem" onClick={() => void captureFrame("first")}>截取首帧</button>
-              <button type="button" role="menuitem" onClick={() => void captureFrame("last")}>截取尾帧</button>
-              <button type="button" role="menuitem" onClick={() => void captureFrame("current")}>截取当前帧</button>
+              <button type="button" role="menuitem" onClick={() => void captureFrame("first")}>{t("infiniteCanvas:videoCaptureFirstFrame")}</button>
+              <button type="button" role="menuitem" onClick={() => void captureFrame("last")}>{t("infiniteCanvas:videoCaptureLastFrame")}</button>
+              <button type="button" role="menuitem" onClick={() => void captureFrame("current")}>{t("infiniteCanvas:videoCaptureCurrentFrame")}</button>
             </div> : null}
           </div>
-          <button type="button" className="rf-native-video-control" onClick={toggleFullscreen} aria-label={fullscreen ? "退出全屏" : "全屏"}>
+          <button type="button" className="rf-native-video-control" onClick={toggleFullscreen} aria-label={t(fullscreen ? "infiniteCanvas:videoExitFullscreen" : "infiniteCanvas:videoFullscreen")}>
             {fullscreen ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
           </button>
         </div>

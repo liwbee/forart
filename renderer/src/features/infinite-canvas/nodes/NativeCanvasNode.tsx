@@ -25,6 +25,7 @@ import { NativeNodeResizeControl } from "./NativeNodeResizeControl";
 import { ImageGeneratorParamPanel } from "./ImageGeneratorParamPanel";
 import { ActionFissionNodeBody } from "./ActionFissionNodeBody";
 import { BatchImageGeneratorNodeBody } from "./BatchImageGeneratorNodeBody";
+import { AssetUploadPlaceholder } from "./AssetUploadPlaceholder";
 import { canvasPreviewSourceUrl } from "../canvasThumbnails";
 import { useCanvasOriginalImagePreference } from "../canvasZoomImagePreference";
 import { formatGenerationDuration, generationStatusMessage } from "../generation/generationStatus";
@@ -351,17 +352,17 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     setIsBackgroundRemovalBusy(true);
     try {
       const source = await tool.saveCanvasAsset({ url: resolveLibraryImageUrl(String(data.assetUrl)), defaultName: String(data.assetFileName || "image.png"), kind: "input" });
-      if (!source.filePath) throw new Error("无法定位图片文件");
+      if (!source.filePath) throw new Error(t("infiniteCanvas:backgroundRemovalFileMissing"));
       const bytes = await tool.removeImageBackground({ filePath: source.filePath });
       let binary = ""; for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
       const saved = await tool.saveCanvasAsset({ dataUrl: `data:image/png;base64,${btoa(binary)}`, defaultName: `${String(data.label || "image")}-抠图.png`, kind: "output" });
-      actions.createDerivedAssetNode(id, saved, `${String(data.label || "素材")}-抠图`, "image");
-      toast.success("已生成抠图素材");
+      actions.createDerivedAssetNode(id, saved, `${String(data.label || t("infiniteCanvas:assetNode"))}-${t("infiniteCanvas:backgroundRemovalAction")}`, "image");
+      toast.success(t("infiniteCanvas:backgroundRemovalCompleted"));
     } catch (error) {
-      toast.error(`抠图失败：${String(error instanceof Error ? error.message : error)}`);
+      toast.error(t("infiniteCanvas:backgroundRemovalFailed", { message: String(error instanceof Error ? error.message : error) }));
     }
     finally { setIsBackgroundRemovalBusy(false); }
-  }, [actions, backgroundRemovalEnabled, data, id]);
+  }, [actions, backgroundRemovalEnabled, data, id, t]);
 
   return (
     <>
@@ -483,7 +484,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
             </Button>
           ) : null}
           {backgroundRemovalEnabled && data.kind === "assetLoader" && primaryImageUrl && !isCropping ? (
-            <Button type="button" variant="ghost" size="icon-sm" disabled={isBackgroundRemovalBusy} aria-label="一键抠图" title="一键抠图" onClick={() => void removeBackground()}>
+            <Button type="button" variant="ghost" size="icon-sm" disabled={isBackgroundRemovalBusy} aria-label={t("infiniteCanvas:backgroundRemovalAction")} title={t("infiniteCanvas:backgroundRemovalAction")} onClick={() => void removeBackground()}>
               {isBackgroundRemovalBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <ImageAiFillIcon aria-hidden="true" />}
             </Button>
           ) : null}
@@ -542,15 +543,17 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
             event.currentTarget.value = "";
             if (!file) return;
             if (!isCanvasAssetFile(file)) return;
+            const assetType = file.type.startsWith("video/") || /\.(mp4|m4v|mov|webm)$/i.test(file.name) ? "video" as const : "image" as const;
+            actions.patchNodeData(id, {
+              assetType,
+              assetLoadState: "processing",
+              assetLoadError: undefined,
+            });
             void readMediaFileDimensions(file)
               .then((dimensions) => {
-                const assetType = file.type.startsWith("video/") || /\.(mp4|m4v|mov|webm)$/i.test(file.name) ? "video" as const : "image" as const;
                 actions.patchNodeData(id, {
                   assetNaturalWidth: dimensions.width,
                   assetNaturalHeight: dimensions.height,
-                  assetType,
-                  assetLoadState: "processing",
-                  assetLoadError: undefined,
                 });
                 if (window.easyTool?.importCanvasAssetFile) {
                   return window.easyTool.importCanvasAssetFile({ file }).then((stored) => {
@@ -671,15 +674,13 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               />
             </>
           ) : isAssetLoading ? (
-            <div className="rf-native-image-placeholder is-uploading" role="status" aria-live="polite">
-              <LoaderCircle className="animate-spin" aria-hidden="true" />
-              <span>{t("infiniteCanvas:assetLoading")}</span>
-            </div>
+            <AssetUploadPlaceholder label={t("infiniteCanvas:assetLoading")} />
           ) : isVideoAsset && primaryAssetUrl ? (
             <VideoAssetBody
               sourceUrl={primaryAssetUrl}
               thumbUrl={data.assetThumbUrl}
               label={displayLabel}
+              className="rf-upload-asset-ready"
               onCaptureComplete={(asset, mode) => actions.createDerivedAssetNode(id, asset, `${displayLabel}-${mode}-frame`, "image")}
             />
           ) : primaryImageUrl ? (
@@ -764,6 +765,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
             ) : resolvedPreviewUrl ? hasMultipleGeneratedImages ? (
               <>
                 <ImageWithFallback
+                  className={data.kind === "assetLoader" ? "rf-upload-asset-ready" : undefined}
                   src={resolvedPreviewUrl}
                   fallbackSrc={resolvedPreviewFallbackUrl}
                   deferSourceChange
@@ -796,6 +798,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               </>
             ) : (
               <ImageWithFallback
+                className={data.kind === "assetLoader" ? "rf-upload-asset-ready" : undefined}
                 src={resolvedPreviewUrl}
                 fallbackSrc={resolvedPreviewFallbackUrl}
                 deferSourceChange

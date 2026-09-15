@@ -51,7 +51,7 @@ export function TudouSettingsPane({ provider, onProviderChange, onRemove }: Tudo
           </label>
           <label className="settings-field">
             <span>{t("settings:apiKey")}</span>
-            <Input type="password" value={provider.apiKey} onChange={(event) => onProviderChange({ apiKey: event.target.value })} placeholder={provider.hasApiKey ? "已配置，输入以替换" : t("settings:apiKeyPlaceholder")} />
+            <Input type="password" value={provider.apiKey} onChange={(event) => onProviderChange({ apiKey: event.target.value })} placeholder={provider.hasApiKey ? t("settings:apiKeyConfiguredPlaceholder") : t("settings:apiKeyPlaceholder")} />
           </label>
         </div>
       </section>

@@ -48,7 +48,7 @@ test("keeps the third asset column and vertical scrollbar inside the visible rai
       serverUrl: "http://127.0.0.1:6981",
       serverAuthUsername: "",
       serverAuthToken: "",
-      imageDownloadPath: "",
+      fileDownloadPath: "",
       photoshopExecutablePath: "",
       language: "en-US",
     };

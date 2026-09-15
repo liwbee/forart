@@ -102,7 +102,7 @@ function collectLegacyGenerationTaskIds(document: NativeCanvasDocument | null) {
 }
 
 interface CanvasWorkspacePageProps {
-  imageDownloadPath?: string;
+  fileDownloadPath?: string;
   serverUrl?: string;
   sharedCanvasesEnabled?: boolean;
 }
@@ -133,7 +133,7 @@ async function remoteFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   return response;
 }
 
-export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedCanvasesEnabled = false }: CanvasWorkspacePageProps) {
+export function CanvasWorkspacePage({ fileDownloadPath, serverUrl = "", sharedCanvasesEnabled = false }: CanvasWorkspacePageProps) {
   const { t } = useTranslation();
   const canViewSharedCanvases = sharedCanvasesEnabled;
   const serverAuthToken = getActiveForartConfig()?.serverAuthToken || "";
@@ -966,7 +966,7 @@ export function CanvasWorkspacePage({ imageDownloadPath, serverUrl = "", sharedC
             <ReactFlowCanvasPage
               key={tab.id}
               canvasId={tab.id}
-              imageDownloadPath={imageDownloadPath}
+              fileDownloadPath={fileDownloadPath}
               initialSnapshot={activeDocument}
               onInteractionChange={handleCanvasInteractionChange}
               onSnapshotChange={handleSnapshotChange}

@@ -19,12 +19,22 @@ import { GenerationStatusDisplay } from "../generation/GenerationStatusDisplay";
 import { useGenerationTaskCache } from "../generation/generationTaskCache";
 import { useCanvasOriginalImagePreference } from "../canvasZoomImagePreference";
 import { GenerationMediaPreview } from "./GenerationMediaPreview";
+import { AssetUploadPlaceholder } from "./AssetUploadPlaceholder";
 import { aggregateBatchItems, downloadBatchItemsSequentially, isBatchGenerationReady, isBatchItemActive, resolveBatchItemResult } from "../batch/batchItemPresentation";
 import type { ImageViewerAction, ImageViewerNavigation } from "../../../lib/ImageViewer";
 import type { ImageViewerActivity } from "../../../lib/ImageViewerSurface";
 
 type BatchItemTask = ReturnType<typeof useGenerationTaskCache.getState>["tasksById"][string] | undefined;
 type BatchItemTone = ReturnType<typeof generationStatusTone>;
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Failed to read image"));
+    reader.readAsDataURL(file);
+  });
+}
 
 function batchItemTone(item: BatchImageGeneratorItem, task: BatchItemTask): BatchItemTone {
   return generationStatusTone({
@@ -72,34 +82,49 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
   const setItemAdditionalReferences = (itemId: string, checked: boolean) => patch({ ...state, items: items.map((item) => item.id === itemId ? { ...item, useAdditionalReferences: checked } : item) });
   const addFiles = async (files: FileList | null) => {
     if (!files) return;
-    const next = [...items];
-    for (const file of Array.from(files).slice(0, 50 - next.length)) {
-      if (!file.type.startsWith("image/")) continue;
-      const sourceUrl = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ""));
-        reader.readAsDataURL(file);
-      });
-      let storedUrl = sourceUrl;
-      let thumbUrl = "";
+    const selectedFiles = Array.from(files)
+      .filter((file) => file.type.startsWith("image/"))
+      .slice(0, Math.max(0, 50 - items.length));
+    if (!selectedFiles.length) return;
+
+    const uploads = selectedFiles.map((file) => ({
+      file,
+      item: {
+        id: crypto.randomUUID(),
+        sourceFileName: file.name,
+        sourceLoadState: "loading" as const,
+        status: "pending" as const,
+      },
+    }));
+    patch({ ...state, items: [...items, ...uploads.map(({ item }) => item)] });
+
+    await Promise.all(uploads.map(async ({ file, item }) => {
       try {
-        const stored = await window.easyTool?.importCanvasAssetFile?.({ file });
-        if (stored?.url) {
-          storedUrl = stored.url;
-          thumbUrl = stored.thumbUrl || "";
-        }
-      } catch {
-        // Keep the data URL fallback when local asset storage is unavailable.
+        const sourceUrlPromise = readFileAsDataUrl(file);
+        const storedPromise = window.easyTool?.importCanvasAssetFile?.({ file });
+        const [sourceUrl, stored] = await Promise.all([sourceUrlPromise, storedPromise]);
+        actions.patchBatchImageGeneratorItemSilently(nodeId, item.id, {
+          sourceUrl: stored?.url || sourceUrl,
+          sourceThumbUrl: stored?.thumbUrl || undefined,
+          sourceLoadState: "ready",
+          sourceLoadError: undefined,
+        });
+      } catch (error) {
+        actions.patchBatchImageGeneratorItemSilently(nodeId, item.id, {
+          sourceLoadState: "failed",
+          sourceLoadError: error instanceof Error ? error.message : String(error),
+          status: "failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
-      next.push({ id: crypto.randomUUID(), sourceUrl: storedUrl, sourceThumbUrl: thumbUrl || undefined, sourceFileName: file.name, status: "pending" });
-    }
-    patch({ ...state, items: next });
+    }));
   };
 
   const aggregate = aggregateBatchItems(items, tasksById);
   const completed = aggregate.completed;
   const running = aggregate.active > 0;
-  const batchReady = isBatchGenerationReady(items, String(data.text || state.prompt || ""), connectedPrompts.map((item) => item.text));
+  const sourcesLoading = items.some((item) => item.sourceLoadState === "loading");
+  const batchReady = !sourcesLoading && isBatchGenerationReady(items, String(data.text || state.prompt || ""), connectedPrompts.map((item) => item.text));
 
   const downloadAll = async () => {
     if (downloadBusyItemId) return;
@@ -193,6 +218,7 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
           {items.length ? <div className="rf-action-fission-grid">
           {items.map((item: BatchImageGeneratorItem, index) => {
             const task = item.latestGenerationTaskId ? tasksById[item.latestGenerationTaskId] : undefined;
+            const sourceLoading = item.sourceLoadState === "loading";
             const tone = batchItemTone(item, task);
             const result = resolveBatchItemResult(item, task);
             const itemRunning = tone === "queued" || tone === "running";
@@ -211,19 +237,23 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
             };
             const resultPreview = (
               <div className={`rf-action-fission-result-preview nodrag nopan${itemRunning ? " is-generating" : ""}${showOverlay && tone === "error" ? " has-generation-error" : ""}`}>
-                <GenerationMediaPreview src={result.url} thumbSrc={result.thumbUrl} preferOriginal={preferOriginalImages} alt={t("infiniteCanvas:actionFissionResultPreview")} onClick={openResult} onKeyDown={openResultFromKeyboard} />
+                {sourceLoading
+                  ? <AssetUploadPlaceholder className="rf-asset-upload-result-placeholder" label={t("infiniteCanvas:assetLoading")} />
+                  : <GenerationMediaPreview src={result.url} thumbSrc={result.thumbUrl} preferOriginal={preferOriginalImages} alt={t("infiniteCanvas:actionFissionResultPreview")} onClick={openResult} onKeyDown={openResultFromKeyboard} />}
                 {canDownload ? <Button className={`rf-action-fission-download${isPendingDownload ? " is-pending" : ""}`} type="button" variant="ghost" size="icon-xs" disabled={downloadBusyItemId === item.id} aria-label={t(isPendingDownload ? "infiniteCanvas:imagePendingDownload" : "infiniteCanvas:imageDownloaded")} title={t(isPendingDownload ? "infiniteCanvas:imagePendingDownload" : "infiniteCanvas:imageDownloaded")} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); downloadItem(); }}><Download aria-hidden="true" /></Button> : null}
-                {showOverlay ? <GenerationStatusDisplay presentation={presentation} mode="overlay" /> : null}
-                {!showOverlay && state.layout !== "list" ? <GenerationStatusDisplay presentation={presentation} mode="inline" className="rf-generation-status--result" /> : null}
+                {!sourceLoading && showOverlay ? <GenerationStatusDisplay presentation={presentation} mode="overlay" /> : null}
+                {!sourceLoading && !showOverlay && state.layout !== "list" ? <GenerationStatusDisplay presentation={presentation} mode="inline" className="rf-generation-status--result" /> : null}
               </div>
             );
-            const sourcePreview = <GenerationMediaPreview className="rf-action-fission-action-preview nodrag nopan" src={item.sourceUrl} thumbSrc={item.sourceThumbUrl} alt={item.sourceFileName || `${t("infiniteCanvas:batchImageItem")} ${index + 1}`} onClick={openSource} onKeyDown={openSourceFromKeyboard} />;
-            return <article className={state.layout === "list" ? "rf-action-fission-list-card" : "rf-action-fission-grid-card"} data-index={String(index + 1).padStart(2, "0")} key={item.id}>
+            const sourcePreview = sourceLoading
+              ? <AssetUploadPlaceholder className="rf-action-fission-action-preview rf-asset-upload-thumbnail-placeholder nodrag nopan" label={t("infiniteCanvas:assetLoading")} />
+              : <GenerationMediaPreview className="rf-action-fission-action-preview nodrag nopan" src={item.sourceUrl} thumbSrc={item.sourceThumbUrl} alt={item.sourceFileName || `${t("infiniteCanvas:batchImageItem")} ${index + 1}`} onClick={openSource} onKeyDown={openSourceFromKeyboard} />;
+            return <article className={state.layout === "list" ? "rf-action-fission-list-card" : "rf-action-fission-grid-card"} data-index={String(index + 1).padStart(2, "0")} data-source-loading={sourceLoading || undefined} data-source-ready={item.sourceLoadState === "ready" || undefined} key={item.id}>
               {resultPreview}
               {state.layout !== "list" ? <div className="rf-action-fission-action-stack">{hasAdditionalReferences ? <AdditionalReferenceToggle checked={Boolean(item.useAdditionalReferences)} disabled={itemRunning} onCheckedChange={(checked) => setItemAdditionalReferences(item.id, checked)} /> : null}{sourcePreview}</div> : <>{hasAdditionalReferences ? <AdditionalReferenceToggle checked={Boolean(item.useAdditionalReferences)} disabled={itemRunning} onCheckedChange={(checked) => setItemAdditionalReferences(item.id, checked)} /> : null}{sourcePreview}</>}
               <div className="rf-action-fission-row-summary"><strong>{item.sourceFileName || `${t("infiniteCanvas:batchImageItem")} ${index + 1}`}</strong></div>
               {state.layout === "list" ? <GenerationStatusDisplay presentation={presentation} mode="inline" /> : null}
-              <div className="rf-action-fission-row-actions nodrag"><Button type="button" variant="ghost" size="icon-xs" disabled={!itemRunning && !batchReady} aria-label={itemRunning ? t("infiniteCanvas:stopRun") : t("infiniteCanvas:run")} onClick={() => void (itemRunning ? actions.stopBatchImageGeneration(nodeId, item.id) : actions.runBatchImageGeneration(nodeId, item.id))}>{itemRunning ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" />}</Button><Button type="button" variant="ghost" size="icon-xs" aria-label={t("common:actions.delete")} onClick={() => deleteItem(item)}><Trash2 aria-hidden="true" /></Button></div>
+              <div className="rf-action-fission-row-actions nodrag"><Button type="button" variant="ghost" size="icon-xs" disabled={!itemRunning && (!batchReady || !item.sourceUrl)} aria-label={itemRunning ? t("infiniteCanvas:stopRun") : t("infiniteCanvas:run")} onClick={() => void (itemRunning ? actions.stopBatchImageGeneration(nodeId, item.id) : actions.runBatchImageGeneration(nodeId, item.id))}>{itemRunning ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" />}</Button><Button type="button" variant="ghost" size="icon-xs" aria-label={t("common:actions.delete")} onClick={() => deleteItem(item)}><Trash2 aria-hidden="true" /></Button></div>
             </article>;
           })}
           </div> : <div className="rf-action-fission-empty rf-batch-image-generator-empty" role="status">

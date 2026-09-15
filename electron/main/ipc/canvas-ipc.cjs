@@ -46,7 +46,7 @@ async function stopMissingGenerationTargets(canvasId, canvasStore, generationTas
   return stopResults;
 }
 
-function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackageStore, generationTaskService, net }) {
+function registerCanvasIpc({ ipcMain, app, configStore, canvasStore, assetStore, canvasPackageStore, generationTaskService, net }) {
   const canvasSaveSessions = new Map();
   const canvasSaveQueues = new Map();
   const pendingTargetReconciliations = new Map();
@@ -99,7 +99,10 @@ function registerCanvasIpc({ ipcMain, app, canvasStore, assetStore, canvasPackag
       if (id && canvasTransferJobs.get(id) === controller) canvasTransferJobs.delete(id);
     }
   };
-  ipcMain.handle('save-result', async (_event, payload) => assetStore.saveResult(payload, app.getPath('downloads')));
+  ipcMain.handle('save-result', async (_event, payload = {}) => assetStore.saveResult({
+    ...payload,
+    directory: configStore?.load()?.fileDownloadPath || '',
+  }, app.getPath('downloads')));
   ipcMain.handle('canvas:list', async () => ({ canvases: canvasStore.listCanvases(), projects: canvasStore.listProjects() }));
   ipcMain.handle('canvas:create', async (_event, payload) => canvasStore.createCanvas(payload));
   ipcMain.handle('canvas:create-project', async (_event, payload) => canvasStore.createProject(payload));

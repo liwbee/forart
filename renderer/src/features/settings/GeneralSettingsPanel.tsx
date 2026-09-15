@@ -28,7 +28,7 @@ interface StatusState {
 function sameAppConfig(left: ForartAppConfig, right: ForartAppConfig) {
   return left.mode === right.mode
     && left.localLibraryPath === right.localLibraryPath
-    && left.imageDownloadPath === right.imageDownloadPath
+    && left.fileDownloadPath === right.fileDownloadPath
     && left.photoshopExecutablePath === right.photoshopExecutablePath
     && left.taskHistoryRetentionDays === right.taskHistoryRetentionDays
     && left.serverUrl === right.serverUrl
@@ -42,10 +42,10 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
   const [mode, setMode] = useState<ForartMode>(config.mode);
   const [runModeExpanded, setRunModeExpanded] = useState(false);
   const [localLibraryPath, setLocalLibraryPath] = useState(config.localLibraryPath);
-  const [imageDownloadPath, setImageDownloadPath] = useState(config.imageDownloadPath);
+  const [fileDownloadPath, setFileDownloadPath] = useState(config.fileDownloadPath);
   const [photoshopExecutablePath, setPhotoshopExecutablePath] = useState(config.photoshopExecutablePath);
   const [taskHistoryRetentionDays, setTaskHistoryRetentionDays] = useState(config.taskHistoryRetentionDays);
-  const [defaultImageDownloadPath, setDefaultImageDownloadPath] = useState("");
+  const [defaultFileDownloadPath, setDefaultFileDownloadPath] = useState("");
   const [serverUrl, setServerUrl] = useState(config.serverUrl);
   const [serverAuthUsername, setServerAuthUsername] = useState(config.serverAuthUsername);
   const [serverAuthToken, setServerAuthToken] = useState(config.serverAuthToken);
@@ -65,7 +65,7 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
     if (savingConfigRef.current) return;
     setMode(config.mode);
     setLocalLibraryPath(config.localLibraryPath);
-    setImageDownloadPath(config.imageDownloadPath);
+    setFileDownloadPath(config.fileDownloadPath);
     setPhotoshopExecutablePath(config.photoshopExecutablePath);
     setTaskHistoryRetentionDays(config.taskHistoryRetentionDays);
     setServerUrl(config.serverUrl);
@@ -77,7 +77,7 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
     let canceled = false;
     async function loadDefaultPaths() {
       const paths = await window.forartConfig?.defaultPaths().catch(() => null);
-      if (!canceled && paths?.imageDownloadPath) setDefaultImageDownloadPath(paths.imageDownloadPath);
+      if (!canceled && paths?.fileDownloadPath) setDefaultFileDownloadPath(paths.fileDownloadPath);
     }
     void loadDefaultPaths();
     return () => {
@@ -90,9 +90,9 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
     if (result && !result.canceled) setLocalLibraryPath(result.path);
   }
 
-  async function chooseImageDownloadDirectory() {
+  async function chooseFileDownloadDirectory() {
     const result = await window.forartConfig?.chooseDirectory();
-    if (result && !result.canceled) setImageDownloadPath(result.path);
+    if (result && !result.canceled) setFileDownloadPath(result.path);
   }
 
   async function choosePhotoshopExecutable() {
@@ -232,7 +232,7 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
       void saveGeneralSettings(normalizeConfig({
         mode,
         localLibraryPath,
-        imageDownloadPath,
+        fileDownloadPath,
         photoshopExecutablePath,
         taskHistoryRetentionDays,
         serverUrl,
@@ -243,7 +243,7 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
     }, 450);
 
     return () => window.clearTimeout(timeout);
-  }, [config.mode, config.serverUrl, imageDownloadPath, i18n.language, localLibraryPath, mode, photoshopExecutablePath, refreshConnectionStatus, saveGeneralSettings, serverAuthToken, serverAuthUsername, serverUrl, taskHistoryRetentionDays]);
+  }, [config.mode, config.serverUrl, fileDownloadPath, i18n.language, localLibraryPath, mode, photoshopExecutablePath, refreshConnectionStatus, saveGeneralSettings, serverAuthToken, serverAuthUsername, serverUrl, taskHistoryRetentionDays]);
 
   return (
     <div hidden={hidden}>
@@ -330,16 +330,16 @@ export function GeneralSettingsPanel({ config, onConfigChange, hidden = false }:
           ) : null}
         </div>
 
-        <div className="settings-subsection settings-download-path-row" aria-label={t("settings:imageDownloadConfig")}>
-          <h3>{t("settings:imageDownloadPath")}</h3>
+        <div className="settings-subsection settings-download-path-row" aria-label={t("settings:fileDownloadConfig")}>
+          <h3>{t("settings:fileDownloadPath")}</h3>
           <div className="settings-download-path-control">
             <input
-              value={imageDownloadPath}
-              onChange={(event) => setImageDownloadPath(event.target.value)}
-              placeholder={defaultImageDownloadPath || t("settings:imageDownloadDefault")}
-              aria-label={t("settings:imageDownloadDirectory")}
+              value={fileDownloadPath}
+              onChange={(event) => setFileDownloadPath(event.target.value)}
+              placeholder={defaultFileDownloadPath || t("settings:fileDownloadDefault")}
+              aria-label={t("settings:fileDownloadDirectory")}
             />
-            <Button type="button" variant="ghost" size="icon-lg" title={t("setup:chooseDirectory")} aria-label={t("setup:chooseDirectory")} onClick={chooseImageDownloadDirectory}>
+            <Button type="button" variant="ghost" size="icon-lg" title={t("setup:chooseDirectory")} aria-label={t("setup:chooseDirectory")} onClick={chooseFileDownloadDirectory}>
               <FolderOpen aria-hidden="true" />
             </Button>
           </div>

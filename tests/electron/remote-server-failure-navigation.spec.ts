@@ -37,7 +37,7 @@ test("keeps resource pages rendered when the configured server is unreachable", 
       serverUrl: "http://127.0.0.1:9",
       serverAuthUsername: "",
       serverAuthToken: "",
-      imageDownloadPath: "",
+      fileDownloadPath: "",
       photoshopExecutablePath: "",
       language: "en-US",
     };
@@ -161,7 +161,7 @@ test("does not throw while resolving a stored relative asset against a malformed
       serverUrl: "http://127.0.0.1:69809",
       serverAuthUsername: "",
       serverAuthToken: "",
-      imageDownloadPath: "",
+      fileDownloadPath: "",
       photoshopExecutablePath: "",
       language: "en-US",
     });
@@ -193,7 +193,7 @@ test("keeps mounted pages rendered after switching from a healthy server to an u
       serverUrl: "http://127.0.0.1:6981",
       serverAuthUsername: "",
       serverAuthToken: "",
-      imageDownloadPath: "",
+      fileDownloadPath: "",
       photoshopExecutablePath: "",
       language: "en-US",
     };
@@ -212,7 +212,7 @@ test("keeps mounted pages rendered after switching from a healthy server to an u
           config = nextConfig;
           return { ok: true, config };
         },
-        defaultPaths: async () => ({ imageDownloadPath: "" }),
+        defaultPaths: async () => ({ fileDownloadPath: "" }),
         testServer: async (serverUrl: string) => ({ ok: serverUrl === "http://127.0.0.1:6981" }),
         appInfo: async () => ({
           name: "Forart",

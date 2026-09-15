@@ -25,6 +25,7 @@ import {
 } from "../../settings/apiProviders";
 import { ImageViewer } from "../../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
+import { getActiveForartConfig } from "../../../data-source/runtime";
 import { formatGenerationDuration } from "./generationStatus";
 import { FALLBACK_DOWNLOAD_NAME, saveGenerationImageFile } from "./generationDownload";
 import { generationTaskImageAt } from "./generationDownloadTarget";
@@ -230,6 +231,7 @@ function ImageTaskCenter({ open, onClose }: GenerationTaskCenterProps) {
       await saveGenerationImageFile({
         imageUrl: image.assetUrl,
         defaultName: image.fileName || FALLBACK_DOWNLOAD_NAME,
+        directory: getActiveForartConfig()?.fileDownloadPath,
         t,
       });
     } finally {

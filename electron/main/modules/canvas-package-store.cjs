@@ -269,7 +269,7 @@ function sanitizeCanvasForPackage(canvas, options = {}) {
   });
 }
 
-function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, net }) {
+function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, net, resolveDownloadPath = () => '' }) {
   const canvasAssetsRoot = () => assetStore.canvasAssetsRoot();
   const inputRoot = () => assetStore.assetDirectory('input');
   const outputRoot = () => assetStore.assetDirectory('output');
@@ -419,29 +419,25 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, ne
   async function exportJson(canvasId, options = {}) {
     const canvas = canvasStore.readCanvas(canvasId);
     if (!canvas) throw new Error('Canvas not found.');
-    const defaultPath = path.join(process.env.USERPROFILE || process.env.HOME || rootDir, `${safeFileBaseName(canvas.title)}.forart-canvas.json`);
-    const result = await dialog.showSaveDialog({
-      title: 'Export canvas JSON',
-      defaultPath,
-      filters: [{ name: 'Forart canvas JSON', extensions: ['forart-canvas.json', 'json'] }],
-    });
-    if (result.canceled || !result.filePath) return { ok: true, canceled: true };
+    const directory = path.resolve(resolveDownloadPath() || process.env.USERPROFILE || process.env.HOME || rootDir);
+    await fs.promises.mkdir(directory, { recursive: true });
+    const filePath = uniqueFilePath(directory, `${safeFileBaseName(canvas.title)}.forart-canvas.json`);
     const cleaned = sanitizeCanvasForJsonOnly(canvas);
     reportProgress(options.onProgress, 'preparing', 5);
     try {
       await runPackageWorker({
         operation: 'write-json',
-        targetPath: result.filePath,
+        targetPath: filePath,
         json: JSON.stringify(cleaned, null, 2) + '\n',
       }, {
         signal: options.signal,
         onProgress: mapWorkerProgress(options.onProgress, 5, 100),
       });
     } catch (error) {
-      await fs.promises.rm(`${result.filePath}.part`, { force: true }).catch(() => undefined);
+      await fs.promises.rm(`${filePath}.part`, { force: true }).catch(() => undefined);
       throw error;
     }
-    return { ok: true, canceled: false, filePath: result.filePath, warnings: [] };
+    return { ok: true, canceled: false, filePath, warnings: [] };
   }
 
   function packagePayload(canvas) {
@@ -504,14 +500,10 @@ function createCanvasPackageStore({ rootDir, dialog, canvasStore, assetStore, ne
   async function exportPackage(canvasId, options = {}) {
     const canvas = canvasStore.readCanvas(canvasId);
     if (!canvas) throw new Error('Canvas not found.');
-    const defaultPath = path.join(process.env.USERPROFILE || process.env.HOME || rootDir, `${safeFileBaseName(canvas.title)}.forartcanvas`);
-    const result = await dialog.showSaveDialog({
-      title: 'Export canvas with resources',
-      defaultPath,
-      filters: [{ name: 'Forart canvas package', extensions: ['forartcanvas'] }],
-    });
-    if (result.canceled || !result.filePath) return { ok: true, canceled: true };
-    return writeCanvasPackageToPath(canvasId, result.filePath, options);
+    const directory = path.resolve(resolveDownloadPath() || process.env.USERPROFILE || process.env.HOME || rootDir);
+    await fs.promises.mkdir(directory, { recursive: true });
+    const filePath = uniqueFilePath(directory, `${safeFileBaseName(canvas.title)}.forartcanvas`);
+    return writeCanvasPackageToPath(canvasId, filePath, options);
   }
 
   function createPackageForUpload(canvasId, options = {}) {

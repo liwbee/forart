@@ -431,9 +431,9 @@ function applyRuntimeNodeDataPatch(
   return next;
 }
 
-function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onInteractionChange, onSnapshotChange, onViewportChange, onSave, readOnly }: {
+function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onInteractionChange, onSnapshotChange, onViewportChange, onSave, readOnly }: {
   canvasId: string;
-  imageDownloadPath?: string;
+  fileDownloadPath?: string;
   initialSnapshot: NativeCanvasSnapshot;
   onInteractionChange?: (active: boolean) => void;
   onSnapshotChange?: (snapshot: NativeCanvasSnapshot) => void;
@@ -833,6 +833,11 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
   const setNodeAsset = useCallback((nodeId: string, assetUrl: string, fileName: string, assetType: "image" | "video" | "audio" = "image", assetMimeType = "", metadata: { width?: number; height?: number; durationMs?: number; sizeBytes?: number; thumbUrl?: string } = {}) => {
     const version = (imageMutationVersionRef.current.get(nodeId) || 0) + 1;
     imageMutationVersionRef.current.set(nodeId, version);
+    // Show the shared upload placeholder immediately while library selections
+    // and other non-file sources are persisted and thumbnailized asynchronously.
+    setNodes((current) => current.map((node) => node.id === nodeId
+      ? { ...node, data: { ...node.data, assetLoadState: "processing", assetLoadError: undefined } }
+      : node));
     void (async () => {
       let storedUrl = assetUrl;
       let thumbUrl = metadata.thumbUrl || "";
@@ -1006,6 +1011,21 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     const transformHistory = (node: NativeCanvasNode) => applyRuntimeNodeDataPatch(node, patch);
     rebaseNode(nodeId, transformCurrent, transformHistory);
     setNodes((current) => current.map((node) => node.id === nodeId ? transformCurrent(node) : node));
+  }, [rebaseNode, setNodes]);
+
+  const patchBatchImageGeneratorItemSilently = useCallback((nodeId: string, itemId: string, itemPatch: Partial<import("./nativeCanvas").BatchImageGeneratorItem>) => {
+    const transform = (node: NativeCanvasNode) => {
+      const batch = node.data.kind === "batchImageGenerator" ? node.data.batchImageGenerator : undefined;
+      if (!batch?.items.some((item) => item.id === itemId)) return node;
+      return applyNativeNodeDataPatch(node, {
+        batchImageGenerator: {
+          ...batch,
+          items: batch.items.map((item) => item.id === itemId ? { ...item, ...itemPatch } : item),
+        },
+      });
+    };
+    rebaseNode(nodeId, transform, transform);
+    setNodes((current) => current.map((node) => node.id === nodeId ? transform(node) : node));
   }, [rebaseNode, setNodes]);
 
   const patchActionFissionSelectionSilently = useCallback((
@@ -1224,7 +1244,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
         imageUrl,
         defaultName: image.fileName || FALLBACK_DOWNLOAD_NAME,
         convertToPng: false,
-        directory: imageDownloadPath,
+        directory: fileDownloadPath,
         t,
       });
       return;
@@ -1234,7 +1254,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
       const item = node.data.batchImageGenerator?.items?.[imageIndex];
       const imageUrl = String(item?.resultUrl || "");
       if (!imageUrl) return;
-      await saveGenerationImageFile({ imageUrl, defaultName: item?.sourceFileName || FALLBACK_DOWNLOAD_NAME, convertToPng: false, directory: imageDownloadPath, t });
+      await saveGenerationImageFile({ imageUrl, defaultName: item?.sourceFileName || FALLBACK_DOWNLOAD_NAME, convertToPng: false, directory: fileDownloadPath, t });
       const latestNode = nodesRef.current.find((candidate) => candidate.id === nodeId && candidate.data.kind === "batchImageGenerator");
       const latestItems = latestNode?.data.batchImageGenerator?.items || [];
       patchNodeDataSilently(nodeId, { batchImageGenerator: { ...(latestNode?.data.batchImageGenerator || { items: [] }), items: latestItems.map((candidate, index) => index === imageIndex ? { ...candidate, resultDownloadState: "downloaded", resultDownloadedAt: Date.now() } : candidate) } });
@@ -1247,7 +1267,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     if (!image || !imageUrl) return;
     const { saved } = await downloadGenerationResult({
       resolveTarget: () => ({ imageUrl, fileName: image.fileName }),
-      directory: imageDownloadPath,
+      directory: fileDownloadPath,
     }, t);
     if (!saved) return;
     const latestNode = nodesRef.current.find((item) => item.id === nodeId && item.data.kind === "imageGenerator");
@@ -1259,7 +1279,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
         ? { ...item, downloadState: "downloaded", downloadedAt: Date.now() }
         : item),
     });
-  }, [nodes, patchNodeDataSilently, t, imageDownloadPath]);
+  }, [nodes, patchNodeDataSilently, t, fileDownloadPath]);
 
   const downloadContextNodeImage = useCallback(async () => {
     if (!contextNodeImage || !contextNode) return;
@@ -1274,7 +1294,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     const { task, saved } = await downloadGenerationResult({
       taskId: actionFissionRowTaskId(row) || undefined,
       resolveTarget: (loadedTask) => actionFissionDownloadTarget(row, loadedTask),
-      directory: imageDownloadPath,
+      directory: fileDownloadPath,
     }, t);
     if (!saved) return;
     const target = actionFissionDownloadTarget(row, task);
@@ -1285,7 +1305,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     const latestTarget = latestRow ? actionFissionDownloadTarget(latestRow, task) : null;
     if (!latestTarget || latestTarget.imageUrl !== target.imageUrl) return;
     patchActionFissionRow(nodeId, rowId, { resultDownloadState: "downloaded", resultDownloadedAt: Date.now() });
-  }, [nodes, patchActionFissionRow, t, imageDownloadPath]);
+  }, [nodes, patchActionFissionRow, t, fileDownloadPath]);
 
   const addReferenceImage = useCallback(async (targetNodeId: string, source: {
     imageUrl: string;
@@ -1445,6 +1465,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     patchActionFissionSelectionSilently,
     patchNodeData,
     patchNodeDataSilently,
+    patchBatchImageGeneratorItemSilently,
     removeCanvasEdge: (edgeId: string) => setEdges((current) => current.filter((edge) => edge.id !== edgeId)),
     reorderImageGeneratorReferences: (nodeId: string, orderedEdgeIds: string[]) => {
       const orderById = new Map(orderedEdgeIds.map((edgeId, index) => [edgeId, index + 1]));
@@ -1462,7 +1483,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
     stopImageGeneration: (nodeId) => canvasActionHandlersRef.current.stopImageGeneration(nodeId),
     stopActionFission: (nodeId, rowId) => canvasActionHandlersRef.current.stopActionFission(nodeId, rowId),
     stopBatchImageGeneration: (nodeId, itemId) => canvasActionHandlersRef.current.stopBatchImageGeneration(nodeId, itemId),
-  }), [beginHistoryGesture, cropNodeImage, createDerivedAssetNode, endHistoryGesture, patchActionFissionSelectionSilently, patchNodeData, patchNodeDataSilently, readOnly, setEdges, setNodeAsset, t]);
+  }), [beginHistoryGesture, cropNodeImage, createDerivedAssetNode, endHistoryGesture, patchActionFissionSelectionSilently, patchBatchImageGeneratorItemSilently, patchNodeData, patchNodeDataSilently, readOnly, setEdges, setNodeAsset, t]);
 
   const validateConnection = useCallback<IsValidConnection<NativeCanvasEdge>>((connection) => (
     isNativeCanvasConnectionValid(connection, nodesRef.current, edgesRef.current)
@@ -2241,7 +2262,7 @@ function NativeCanvasSurface({ canvasId, imageDownloadPath, initialSnapshot, onI
 
 interface ReactFlowCanvasPageProps {
   canvasId: string;
-  imageDownloadPath?: string;
+  fileDownloadPath?: string;
   initialSnapshot?: NativeCanvasSnapshot;
   onInteractionChange?: (active: boolean) => void;
   onSnapshotChange?: (snapshot: NativeCanvasSnapshot) => void;
@@ -2309,12 +2330,12 @@ function instantiateCanvasClipboardPayload(
   };
 }
 
-export const ReactFlowCanvasPage = memo(function ReactFlowCanvasPage({ canvasId, imageDownloadPath, initialSnapshot = emptyCanvasSnapshot(), onInteractionChange, onSnapshotChange, onViewportChange, onSave, readOnly = false }: ReactFlowCanvasPageProps) {
+export const ReactFlowCanvasPage = memo(function ReactFlowCanvasPage({ canvasId, fileDownloadPath, initialSnapshot = emptyCanvasSnapshot(), onInteractionChange, onSnapshotChange, onViewportChange, onSave, readOnly = false }: ReactFlowCanvasPageProps) {
   const { t } = useTranslation();
   return (
     <section className="infinite-canvas-page" aria-label={t("infiniteCanvas:title")}>
       <ReactFlowProvider>
-        <NativeCanvasSurface canvasId={canvasId} imageDownloadPath={imageDownloadPath} initialSnapshot={initialSnapshot} onInteractionChange={onInteractionChange} onSnapshotChange={onSnapshotChange} onViewportChange={onViewportChange} onSave={onSave} readOnly={readOnly} />
+        <NativeCanvasSurface canvasId={canvasId} fileDownloadPath={fileDownloadPath} initialSnapshot={initialSnapshot} onInteractionChange={onInteractionChange} onSnapshotChange={onSnapshotChange} onViewportChange={onViewportChange} onSave={onSave} readOnly={readOnly} />
       </ReactFlowProvider>
     </section>
   );

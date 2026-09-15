@@ -21,7 +21,7 @@ test.beforeEach(async ({ page }) => {
       serverUrl: "",
       serverAuthUsername: "",
       serverAuthToken: "",
-      imageDownloadPath: "",
+      fileDownloadPath: "",
       photoshopExecutablePath: "",
       language: "en-US",
     };
@@ -443,6 +443,126 @@ test("exposes generation actions in the image generator top toolbar", async ({ p
 
   await toolbar.getByRole("button", { name: "Run" }).click();
   await expect.poll(() => page.locator("html").getAttribute("data-started-node-id")).toBe("image-generator");
+});
+
+test("keeps action-fission toolbars attached after a snapped resize", async ({ page }) => {
+  const topToolbar = await selectNode(page, "action-fission");
+  const node = page.locator('.react-flow__node[data-id="action-fission"]');
+  const resizeHandle = node.locator(".rf-native-node-resize-control");
+  const platform = page.getByRole("combobox", { name: "Platform", exact: true });
+  const parameterPanel = platform.locator("xpath=ancestor::*[@data-slot='card'][1]");
+
+  await expect(resizeHandle).toBeVisible();
+  await expect(parameterPanel).toBeVisible();
+  const handleBox = await resizeHandle.boundingBox();
+  expect(handleBox).not.toBeNull();
+
+  const startX = handleBox!.x + handleBox!.width / 2;
+  const startY = handleBox!.y + handleBox!.height / 2;
+  const alignmentSamples: number[] = [];
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  for (let step = 1; step <= 12; step += 1) {
+    await page.mouse.move(startX + (137 * step) / 12, startY + (73 * step) / 12);
+    const [nodeBox, topBox, panelBox] = await Promise.all([node.boundingBox(), topToolbar.boundingBox(), parameterPanel.boundingBox()]);
+    if (nodeBox && topBox && panelBox) {
+      alignmentSamples.push(
+        Math.max(
+          Math.abs((topBox.x + topBox.width / 2) - (nodeBox.x + nodeBox.width / 2)),
+          Math.abs((panelBox.x + panelBox.width / 2) - (nodeBox.x + nodeBox.width / 2)),
+        ),
+      );
+    }
+  }
+  await page.mouse.up();
+  expect(Math.max(...alignmentSamples)).toBeLessThanOrEqual(1);
+
+  await expect.poll(async () => {
+    const [nodeBox, topBox, panelBox] = await Promise.all([
+      node.boundingBox(),
+      topToolbar.boundingBox(),
+      parameterPanel.boundingBox(),
+    ]);
+    if (!nodeBox || !topBox || !panelBox) return null;
+    const topCenterDelta = Math.abs((topBox.x + topBox.width / 2) - (nodeBox.x + nodeBox.width / 2));
+    const panelCenterDelta = Math.abs((panelBox.x + panelBox.width / 2) - (nodeBox.x + nodeBox.width / 2));
+    const topGap = nodeBox.y - (topBox.y + topBox.height);
+    const panelGap = panelBox.y - (nodeBox.y + nodeBox.height);
+    return topCenterDelta <= 1
+      && panelCenterDelta <= 1
+      && Math.abs(topGap - 28.8) <= 1
+      && Math.abs(panelGap - 16) <= 1;
+  }).toBe(true);
+});
+
+test("snaps batch-style nodes by one fixed grid card or one spaced list row", async ({ page }) => {
+  await selectNode(page, "action-fission");
+  const node = page.locator('.react-flow__node[data-id="action-fission"]');
+  const resizeHandle = node.locator(".rf-native-node-resize-control");
+  const grid = node.locator(".rf-action-fission-grid");
+  const firstCard = node.locator(".rf-action-fission-grid-card").first();
+  const firstResultPreview = firstCard.locator(".rf-action-fission-result-preview");
+
+  await expect(firstResultPreview).toHaveCSS("width", "240px");
+  await expect(firstResultPreview).toHaveCSS("height", "320px");
+  expect(await firstCard.evaluate((element) => element.getBoundingClientRect().height))
+    .toBeGreaterThan(await firstResultPreview.evaluate((element) => element.getBoundingClientRect().height));
+
+  const dragResizeBy = async (deltaX: number, deltaY: number) => {
+    const handleBox = await resizeHandle.boundingBox();
+    expect(handleBox).not.toBeNull();
+    const startX = handleBox!.x + handleBox!.width / 2;
+    const startY = handleBox!.y + handleBox!.height / 2;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + deltaX, startY + deltaY);
+    await page.mouse.up();
+  };
+  const gridColumnCount = () => grid.evaluate((element) => (
+    window.getComputedStyle(element).gridTemplateColumns.split(/\s+/).filter(Boolean).length
+  ));
+
+  // The fixture predates snapped sizes. The first resize brings it to the
+  // three-column/four-row minimum without changing its visual position.
+  await dragResizeBy(1, -100);
+  await expect(node).toHaveCSS("width", "762px");
+  await expect(node).toHaveCSS("height", "478px");
+  await expect.poll(gridColumnCount).toBe(3);
+
+  const addRow = node.getByRole("button", { name: "Add row" });
+  await addRow.click();
+  await addRow.click();
+  await addRow.click();
+  await node.getByRole("radio", { name: "List layout" }).click();
+
+  const viewport = node.locator(".rf-action-fission-scroll-viewport");
+  const listCards = node.locator(".rf-action-fission-list-card");
+  await expect(listCards).toHaveCount(5);
+  await viewport.evaluate((element) => { element.scrollTop = 0; });
+  const fullyVisibleListRows = async () => {
+    const viewportBox = await viewport.boundingBox();
+    const cardBoxes = await listCards.evaluateAll((elements) => elements.map((element) => {
+      const box = element.getBoundingClientRect();
+      return { top: box.top, bottom: box.bottom };
+    }));
+    if (!viewportBox) return 0;
+    const viewportBottom = viewportBox.y + viewportBox.height;
+    return cardBoxes.filter((box) => box.top >= viewportBox.y - 0.5 && box.bottom <= viewportBottom + 0.5).length;
+  };
+
+  await expect.poll(fullyVisibleListRows).toBe(4);
+  await node.getByRole("radio", { name: "Grid layout" }).click();
+
+  // At the fixture's 80% canvas zoom, these pointer deltas cross exactly one
+  // 248px width step and one 100px height step in flow coordinates.
+  await dragResizeBy(110, 41);
+  await expect(node).toHaveCSS("width", "1010px");
+  await expect(node).toHaveCSS("height", "578px");
+  await expect.poll(gridColumnCount).toBe(4);
+
+  await node.getByRole("radio", { name: "List layout" }).click();
+  await viewport.evaluate((element) => { element.scrollTop = 0; });
+  await expect.poll(fullyVisibleListRows).toBe(5);
 });
 
 test("does not flash an unconfigured-model warning while API settings are loading", async ({ page }) => {

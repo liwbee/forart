@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { SizePresetPicker } from "../../components/SizePresetPicker";
 import { cacheBustedLibraryImageUrl } from "../../lib/libraryImageActions";
+import { getActiveForartConfig } from "../../data-source/runtime";
 import { LibraryAssetPickerRail } from "../library-asset-picker/LibraryAssetPickerRail";
 import type { LibraryAssetSelection } from "../library-asset-picker/types";
 import {
@@ -68,6 +69,15 @@ const TEXT_CREATE_MIN_WIDTH = 96;
 
 type ActiveTextTool = "fontSize" | "color";
 type ActiveCanvasTool = "select" | "text";
+
+function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Failed to read exported canvas"));
+    reader.readAsDataURL(blob);
+  });
+}
 
 type StageInteraction =
   | {
@@ -893,12 +903,17 @@ export function FreeCanvasEditor() {
     try {
       const blob = await renderCanvasBlob();
       const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `free-canvas-${Date.now()}.png`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      const defaultName = `free-canvas-${Date.now()}.png`;
+      if (window.easyTool?.saveResult) {
+        await window.easyTool.saveResult({ dataUrl: await blobToDataUrl(blob), defaultName, directory: getActiveForartConfig()?.fileDownloadPath, convertToPng: false });
+      } else {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = defaultName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
       URL.revokeObjectURL(url);
     } catch (error) {
       setExportError(error instanceof Error ? error.message : String(error));

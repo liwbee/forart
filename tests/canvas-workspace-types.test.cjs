@@ -23,9 +23,14 @@ function loadCanvasWorkspaceTypes() {
       return {
         NATIVE_CANVAS_NODE_DEFINITIONS: {
           prompt: { size: { width: 260, height: 160 } },
+          batchImageGenerator: { size: { width: 1010, height: 478 } },
+          actionFission: { size: { width: 1010, height: 478 } },
         },
         createNativeCanvasGroupNode: () => { throw new Error('Unexpected group migration.'); },
       };
+    }
+    if (specifier === './batchNodeSizing') {
+      return { BATCH_NODE_DEFAULT_HEIGHT: 478, BATCH_NODE_DEFAULT_WIDTH: 1010 };
     }
     return require(specifier);
   };
@@ -76,4 +81,54 @@ test('renderer opens a canvas saved with the current schema version', () => {
   assert.equal(canvas.canvasSchemaVersion, 5);
   assert.equal(canvas.nodes[0].data.text, 'hello');
   assert.deepEqual(canvas.viewport, { x: 3, y: 4, zoom: 1.2 });
+});
+
+test('renderer migrates the legacy default batch-node size to four rows and four 3:4 cards', () => {
+  const { normalizeCanvasDocument } = loadCanvasWorkspaceTypes();
+  const canvas = normalizeCanvasDocument({
+    canvasSchemaVersion: 5,
+    id: 'canvas-batch',
+    title: 'Batch canvas',
+    projectId: 'project-1',
+    createdAt: 1,
+    updatedAt: 1,
+    revision: 1,
+    nodeCount: 1,
+    nodes: [{
+      id: 'batch-1',
+      type: 'canvasNode',
+      position: { x: 0, y: 0 },
+      style: { width: 820, height: 620 },
+      data: { kind: 'batchImageGenerator', label: '' },
+    }],
+    connections: [],
+    viewport: { x: 0, y: 0, scale: 1 },
+  });
+
+  assert.deepEqual(canvas.nodes[0].style, { width: 1010, height: 478 });
+});
+
+test('renderer migrates the previous four-row batch-node default to the new card width', () => {
+  const { normalizeCanvasDocument } = loadCanvasWorkspaceTypes();
+  const canvas = normalizeCanvasDocument({
+    canvasSchemaVersion: 5,
+    id: 'canvas-batch-previous',
+    title: 'Previous batch canvas',
+    projectId: 'project-1',
+    createdAt: 1,
+    updatedAt: 1,
+    revision: 1,
+    nodeCount: 1,
+    nodes: [{
+      id: 'fission-1',
+      type: 'canvasNode',
+      position: { x: 0, y: 0 },
+      style: { width: 820, height: 478 },
+      data: { kind: 'actionFission', label: '' },
+    }],
+    connections: [],
+    viewport: { x: 0, y: 0, scale: 1 },
+  });
+
+  assert.deepEqual(canvas.nodes[0].style, { width: 1010, height: 478 });
 });

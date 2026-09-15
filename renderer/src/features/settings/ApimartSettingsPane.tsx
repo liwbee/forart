@@ -181,7 +181,7 @@ export function ApimartSettingsPane({ provider, fetchingModels, status, onProvid
           <div className="settings-field">
             <span>{t("settings:apiKey")}</span>
             <div className="settings-apimart-api-key-row">
-            <Input type="password" value={provider.apiKey} onChange={(event) => onProviderChange({ apiKey: event.target.value })} placeholder={provider.hasApiKey ? "已配置，输入以替换" : t("settings:apiKeyPlaceholder")} />
+            <Input type="password" value={provider.apiKey} onChange={(event) => onProviderChange({ apiKey: event.target.value })} placeholder={provider.hasApiKey ? t("settings:apiKeyConfiguredPlaceholder") : t("settings:apiKeyPlaceholder")} />
               <Button type="button" className="settings-api-control-button" disabled={fetchingModels || testingEndpoints} onClick={onFetchModels}>
                 <RefreshCw data-icon="inline-start" aria-hidden="true" />
                 <span>{fetchingModels ? t("settings:apiFetching") : t("settings:fetchModels")}</span>

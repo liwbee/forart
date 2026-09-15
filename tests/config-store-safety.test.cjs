@@ -285,12 +285,14 @@ test('config sections preserve sibling data and use atomic replacement', (t) => 
     mode: 'remote',
     localLibraryPath: 'D:/Library',
     serverUrl: 'http://127.0.0.1:6980/',
-    imageDownloadPath: 'D:/Downloads',
+    fileDownloadPath: 'D:/Downloads',
     photoshopExecutablePath: 'C:/Adobe/Photoshop.exe',
     language: 'en-US',
   });
   persisted = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   assert.equal(persisted.serverUrl, 'http://127.0.0.1:6980');
+  assert.equal(persisted.fileDownloadPath, 'D:/Downloads');
+  assert.equal('imageDownloadPath' in persisted, false);
   assert.equal(persisted.photoshopExecutablePath, 'C:/Adobe/Photoshop.exe');
   assert.equal(persisted.apiSettings.providers.find((provider) => provider.id === 'custom').apiKey, '');
   assert.equal(persisted.apiSettings.libtvMachineId, 'PC02');

@@ -60,7 +60,7 @@ export const workspaceRoutes: WorkspaceRoute[] = [
     render: ({ appConfig }) => (
       <LazyWorkspacePage fallback={<CanvasPageSkeleton />}>
         <CanvasPage
-          imageDownloadPath={appConfig.imageDownloadPath}
+          fileDownloadPath={appConfig.fileDownloadPath}
           serverUrl={appConfig.mode === "remote" ? appConfig.serverUrl : ""}
           sharedCanvasesEnabled={appConfig.mode === "remote"}
         />

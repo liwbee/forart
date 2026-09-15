@@ -81,7 +81,7 @@ function registerConfigIpc({ ipcMain, dialog, configStore, app, net, onConfigSav
   });
 
   ipcMain.handle('config:default-paths', async () => ({
-    imageDownloadPath: app.getPath('downloads'),
+    fileDownloadPath: app.getPath('downloads'),
   }));
 
   ipcMain.handle('dialog:choose-directory', async (_event, payload = {}) => {

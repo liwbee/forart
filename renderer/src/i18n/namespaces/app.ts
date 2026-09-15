@@ -1,6 +1,8 @@
 export const zhCN = {
   loadingLabel: "Forart 正在启动",
   loadingConfig: "正在读取配置...",
+  backgroundRemovalLoading: "正在加载抠图模型…",
+  backgroundRemovalLoadingDescription: "首次使用需要几秒钟，模型会在后台常驻",
   mainNavigation: "主导航",
   settingsNavigation: "设置导航",
   windowControls: "窗口控制",
@@ -67,6 +69,8 @@ export const zhCN = {
 export const enUS = {
   loadingLabel: "Forart is starting",
   loadingConfig: "Loading configuration...",
+  backgroundRemovalLoading: "Loading background removal model…",
+  backgroundRemovalLoadingDescription: "The first use may take a few seconds; the model stays available in the background",
   mainNavigation: "Main navigation",
   settingsNavigation: "Settings navigation",
   windowControls: "Window controls",

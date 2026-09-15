@@ -7,6 +7,7 @@ import {
   type NativeCanvasNode,
   type NativeCanvasNodeKind,
 } from "./nativeCanvas";
+import { BATCH_NODE_DEFAULT_HEIGHT, BATCH_NODE_DEFAULT_WIDTH } from "./batchNodeSizing";
 
 export interface CanvasRecord {
   id: string;
@@ -196,6 +197,21 @@ function normalizeNode(input: unknown): NativeCanvasNode | null {
     data: normalizeCurrentNodeData(data, kind),
     selected: false,
   };
+  // Preserve the intended four-column/four-row default for canvases saved
+  // before grid cards adopted the regular 240x320 asset-node dimensions.
+  // Migrate only the two exact historical defaults so custom sizes survive.
+  if ((kind === "actionFission" || kind === "batchImageGenerator") && normalized.style && typeof normalized.style === "object") {
+    const style = normalized.style as Record<string, unknown>;
+    const width = Number(style.width);
+    const height = Number(style.height);
+    if (width === 820 && (height === 620 || height === 478)) {
+      normalized.style = {
+        ...style,
+        width: BATCH_NODE_DEFAULT_WIDTH,
+        height: BATCH_NODE_DEFAULT_HEIGHT,
+      };
+    }
+  }
   if (normalized.parentId) {
     delete normalized.extent;
     delete normalized.expandParent;

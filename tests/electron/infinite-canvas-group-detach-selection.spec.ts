@@ -14,7 +14,7 @@ test.beforeEach(async ({ page }) => {
       serverUrl: "",
       serverAuthUsername: "",
       serverAuthToken: "",
-      imageDownloadPath: "",
+      fileDownloadPath: "",
       photoshopExecutablePath: "",
       language: "en-US",
     };

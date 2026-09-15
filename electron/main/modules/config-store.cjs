@@ -33,7 +33,7 @@ function normalizeConfig(payload = {}) {
     serverUrl: String(payload.serverUrl || '').trim().replace(/\/+$/, ''),
     serverAuthUsername: String(payload.serverAuthUsername || '').trim(),
     serverAuthToken: String(payload.serverAuthToken || '').trim(),
-    imageDownloadPath: String(payload.imageDownloadPath || '').trim(),
+    fileDownloadPath: String(payload.fileDownloadPath ?? payload.imageDownloadPath ?? '').trim(),
     photoshopExecutablePath: String(payload.photoshopExecutablePath || '').trim(),
     taskHistoryRetentionDays: TASK_HISTORY_RETENTION_DAY_OPTIONS.includes(requestedTaskHistoryRetentionDays)
       ? requestedTaskHistoryRetentionDays
@@ -379,6 +379,7 @@ function createConfigStore({ app, rootDir, safeStorage }) {
 
   function persistedConfig(raw, config) {
     const next = { ...raw, ...config };
+    delete next.imageDownloadPath;
     delete next.serverAuthToken;
     delete next.serverAuthTokenEncrypted;
     if (config.serverAuthToken) {

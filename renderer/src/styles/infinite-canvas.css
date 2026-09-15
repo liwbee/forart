@@ -1107,6 +1107,49 @@
   background: var(--surface-card);
 }
 
+.rf-asset-upload-placeholder {
+  position: relative;
+  display: grid;
+  place-items: stretch;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-control);
+}
+
+.rf-asset-upload-placeholder__surface {
+  width: 100%;
+  height: 100%;
+  min-height: 64px;
+  border-radius: 0;
+  background: linear-gradient(105deg, var(--surface-control), color-mix(in srgb, var(--primary) 16%, var(--surface-control)) 50%, var(--surface-control));
+  background-size: 240% 100%;
+  animation: rf-native-generator-sheen 1900ms ease-in-out infinite;
+}
+
+.rf-asset-upload-thumbnail-placeholder {
+  pointer-events: none;
+}
+
+.rf-asset-upload-result-placeholder {
+  min-height: 120px;
+}
+
+.rf-action-fission-grid-card[data-source-loading] {
+  animation: rf-upload-card-in 220ms ease-out both;
+}
+
+.rf-action-fission-grid-card[data-source-ready] .rf-action-fission-action-preview img,
+.rf-action-fission-list-card[data-source-ready] .rf-action-fission-action-preview img {
+  animation: rf-upload-asset-in 240ms ease-out both;
+}
+
+.rf-upload-asset-ready {
+  animation: rf-upload-asset-in 240ms ease-out both;
+}
+
 .rf-action-fission-action-preview {
   width: 54px;
   height: 72px;
@@ -1418,7 +1461,8 @@
 
 .rf-action-fission-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, 240px);
+  justify-content: start;
   gap: 8px;
 }
 
@@ -1440,9 +1484,8 @@
 }
 
 .rf-batch-image-generator .rf-action-fission-grid-card {
-  height: auto;
   min-height: 0;
-  align-self: stretch;
+  align-self: start;
   contain: paint;
 }
 
@@ -1454,30 +1497,26 @@
   width: 100%;
 }
 
-@container (min-width: 1280px) {
-  .rf-action-fission-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-}
-
 .rf-action-fission-grid-card {
   position: relative;
+  width: 240px;
+  height: auto;
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
+  grid-template-rows: 320px auto;
   overflow: hidden;
-  border: 1px solid var(--border-subtle);
+  border: 0;
   border-radius: var(--radius);
   background: var(--surface-control);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
 }
 
 .rf-action-fission-grid-card > .rf-action-fission-result-preview {
   width: 100%;
-  height: auto;
+  height: 100%;
   min-width: 0;
   min-height: 0;
-  aspect-ratio: 3 / 4;
   grid-column: 1 / 3;
   grid-row: 1;
   border: 0;
@@ -1955,12 +1994,6 @@
   grid-column: 1 / -1;
 }
 
-@container (max-width: 760px) {
-  .rf-action-fission-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 .rf-native-node-content--image.is-generating img {
   filter: blur(12px) saturate(0.86) brightness(1.04);
   opacity: 0.72;
@@ -2422,12 +2455,30 @@
   }
 }
 
+@keyframes rf-upload-card-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes rf-upload-asset-in {
+  from { opacity: 0; transform: scale(1.025); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rf-native-node-frame.is-generating::after,
-  .rf-action-fission-result-preview.is-generating::after {
+  .rf-action-fission-result-preview.is-generating::after,
+  .rf-asset-upload-placeholder__surface {
     animation: none;
     opacity: 0.18;
     background-position: 50% 0;
+  }
+
+  .rf-action-fission-grid-card[data-source-loading],
+  .rf-action-fission-grid-card[data-source-ready] .rf-action-fission-action-preview img,
+  .rf-action-fission-list-card[data-source-ready] .rf-action-fission-action-preview img,
+  .rf-upload-asset-ready {
+    animation: none;
   }
 }
 
@@ -2816,17 +2867,6 @@
   height: 24px;
 }
 
-.rf-native-image-placeholder.is-uploading {
-  background:
-    linear-gradient(110deg,
-      color-mix(in srgb, var(--surface-card-muted) 88%, transparent) 35%,
-      color-mix(in srgb, var(--primary) 12%, var(--surface-card-muted)) 50%,
-      color-mix(in srgb, var(--surface-card-muted) 88%, transparent) 65%);
-  background-size: 220% 100%;
-  animation: rf-native-upload-placeholder 1600ms ease-in-out infinite;
-}
-
-.rf-native-image-placeholder.is-uploading span,
 .rf-native-image-placeholder.is-error span {
   max-width: 90%;
   font-size: 12px;
@@ -2835,11 +2875,6 @@
 
 .rf-native-image-placeholder.is-error {
   color: var(--destructive);
-}
-
-@keyframes rf-native-upload-placeholder {
-  from { background-position: 140% 0; }
-  to { background-position: -40% 0; }
 }
 
 .rf-native-canvas .rf-image-generator-prompt {

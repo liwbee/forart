@@ -178,9 +178,9 @@ export function App() {
     const toastId = "background-removal-model-loading";
     return window.easyTool?.onBackgroundRemovalModelState?.((state) => {
       if (state === "loading") {
-        toast.loading("正在加载抠图模型…", {
+        toast.loading(t("app:backgroundRemovalLoading"), {
           id: toastId,
-          description: "首次使用需要几秒钟，模型会在后台常驻",
+          description: t("app:backgroundRemovalLoadingDescription"),
         });
       } else {
         toast.dismiss(toastId);

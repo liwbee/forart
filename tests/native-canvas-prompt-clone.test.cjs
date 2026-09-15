@@ -23,6 +23,12 @@ function loadNativeCanvas() {
       };
     }
     if (specifier === './action-fission/actionFissionTypes') return {};
+    if (specifier === './batchNodeSizing') {
+      return {
+        BATCH_NODE_DEFAULT_SIZE: { width: 1010, height: 478 },
+        BATCH_NODE_RESIZE_CONFIG: { minWidth: 762, minHeight: 478 },
+      };
+    }
     return require(specifier);
   };
   new Function('require', 'module', 'exports', '__filename', '__dirname', output)(

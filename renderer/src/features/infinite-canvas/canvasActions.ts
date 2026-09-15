@@ -25,6 +25,7 @@ export interface NativeCanvasActions {
   openActionFissionRowSettings: (nodeId: string, rowId: string) => void;
   patchNodeData: (nodeId: string, patch: Partial<NativeCanvasNodeData>) => void;
   patchNodeDataSilently: (nodeId: string, patch: Partial<NativeCanvasNodeData>) => void;
+  patchBatchImageGeneratorItemSilently: (nodeId: string, itemId: string, patch: Partial<import("./nativeCanvas").BatchImageGeneratorItem>) => void;
   patchActionFissionSelectionSilently: (nodeId: string, actionFission: NonNullable<NativeCanvasNodeData["actionFission"]>) => void;
   runImageGeneration: (nodeId: string, options?: ImageGenerationRunOptions) => Promise<void>;
   runActionFission: (nodeId: string, rowId?: string) => Promise<void>;

@@ -8,7 +8,9 @@ export interface ForartAppConfig {
   serverUrl: string;
   serverAuthUsername: string;
   serverAuthToken: string;
-  imageDownloadPath: string;
+  fileDownloadPath: string;
+  /** @deprecated Use fileDownloadPath. Kept for compatibility with older integrations. */
+  imageDownloadPath?: string;
   photoshopExecutablePath: string;
   taskHistoryRetentionDays: TaskHistoryRetentionDays;
   language: "zh-CN" | "en-US";
@@ -250,7 +252,7 @@ export interface ForartConfigApi {
   saveImageReviewSettings: (settings: ForartImageReviewSettings) => Promise<{ ok: true; imageReview: ForartImageReviewSettings }>;
   loadInfiniteCanvasSettings: () => Promise<ForartInfiniteCanvasSettings>;
   saveInfiniteCanvasSettings: (settings: ForartInfiniteCanvasSettings) => Promise<{ ok: true; infiniteCanvas: ForartInfiniteCanvasSettings }>;
-  defaultPaths: () => Promise<{ imageDownloadPath: string }>;
+  defaultPaths: () => Promise<{ fileDownloadPath: string }>;
   chooseDirectory: (payload?: { title?: string }) => Promise<{ canceled: boolean; path: string }>;
   chooseFile: (payload?: { title?: string; filterName?: string; extensions?: string[] }) => Promise<{ canceled: boolean; path: string }>;
   testServer: (serverUrl: string) => Promise<{ ok: boolean; status?: number; error?: string; payload?: unknown }>;
@@ -604,7 +606,7 @@ export const DEFAULT_APP_CONFIG: ForartAppConfig = {
   serverUrl: "",
   serverAuthUsername: "",
   serverAuthToken: "",
-  imageDownloadPath: "",
+  fileDownloadPath: "",
   photoshopExecutablePath: "",
   taskHistoryRetentionDays: 15,
   language: "zh-CN",
@@ -619,7 +621,7 @@ export function normalizeConfig(input: Partial<ForartAppConfig>): ForartAppConfi
     serverUrl: String(input.serverUrl || "").trim().replace(/\/+$/, ""),
     serverAuthUsername: String(input.serverAuthUsername || "").trim(),
     serverAuthToken: String(input.serverAuthToken || "").trim(),
-    imageDownloadPath: String(input.imageDownloadPath || "").trim(),
+    fileDownloadPath: String(input.fileDownloadPath ?? input.imageDownloadPath ?? "").trim(),
     photoshopExecutablePath: String(input.photoshopExecutablePath || "").trim(),
     taskHistoryRetentionDays: TASK_HISTORY_RETENTION_DAY_OPTIONS.includes(Number(input.taskHistoryRetentionDays) as TaskHistoryRetentionDays)
       ? Number(input.taskHistoryRetentionDays) as TaskHistoryRetentionDays

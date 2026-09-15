@@ -90,7 +90,7 @@ export async function downloadLibraryOriginalImage(url: string, defaultName: str
   const fileName = fileNameWithExtension(defaultName, extensionFromMime(blob.type) || ".png");
 
   if (window.easyTool?.saveResult) {
-    await window.easyTool.saveResult({ url: downloadUrl, defaultName: fileName });
+    await window.easyTool.saveResult({ url: downloadUrl, defaultName: fileName, directory: getActiveForartConfig()?.fileDownloadPath });
     return;
   }
 
