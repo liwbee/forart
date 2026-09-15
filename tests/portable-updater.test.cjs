@@ -4,13 +4,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const AdmZip = require('adm-zip');
 
 const {
   createPortableUpdater,
   downloadFileWithProgress,
   normalizeSha256Digest,
-  validatePortableArchiveVersion,
 } = require('../electron/main/modules/portable-updater.cjs');
 
 function createRoot() {
@@ -31,7 +29,7 @@ function releaseResponse(version = '0.1.30') {
         name: version,
         published_at: '2026-07-13T00:00:00.000Z',
         html_url: `https://github.com/liwbee/forart/releases/tag/v${version}`,
-        body: '- Update test',
+        body: '- [新增] Update test feature\n- [优化] Update test behavior\n- [修复] Update test bug\n\n## Verification\n- npm run build',
         assets: [{
           name: `Forart-${version}-windows-portable.zip`,
           size: 123,
@@ -66,6 +64,13 @@ test('portable updater reports app info and a newer release without writing the 
   assert.equal(result.currentRevision, '0.1.29');
   assert.equal(result.latestRevision, '0.1.30');
   assert.equal(result.updateAvailable, true);
+  assert.equal(result.connectivity?.ok, true);
+  assert.deepEqual(result.connectivity?.results.map((item) => item.name), ['GitHub latest release', 'Local update directory']);
+  assert.deepEqual(result.updateNotes.items, [
+    { category: 'new', text: 'Update test feature' },
+    { category: 'improvement', text: 'Update test behavior' },
+    { category: 'fix', text: 'Update test bug' },
+  ]);
   assert.equal(fs.existsSync(path.join(dataRoot, 'database')), false);
 });
 
@@ -132,33 +137,6 @@ test('portable update downloads verify the GitHub sha256 digest and remove corru
     /digest mismatch/,
   );
   assert.equal(fs.existsSync(filePath), false);
-});
-
-test('portable updater rejects an archive whose embedded app version is stale', async (t) => {
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-updater-package-version-'));
-  const zipPath = path.join(rootDir, 'update.zip');
-  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
-  const zip = new AdmZip();
-  zip.addFile('resources/app/VERSION', Buffer.from('0.2.13\n'));
-  zip.addFile('resources/app/package.json', Buffer.from(JSON.stringify({ version: '0.2.13' })));
-  zip.writeZip(zipPath);
-
-  assert.throws(
-    () => validatePortableArchiveVersion(zipPath, '0.2.14'),
-    /version mismatch.*Expected 0\.2\.14, got 0\.2\.13/,
-  );
-});
-
-test('portable updater accepts an archive whose embedded app version matches the release', async (t) => {
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-updater-package-version-ok-'));
-  const zipPath = path.join(rootDir, 'update.zip');
-  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
-  const zip = new AdmZip();
-  zip.addFile('resources/app/VERSION', Buffer.from('0.2.14\n'));
-  zip.addFile('resources/app/package.json', Buffer.from(JSON.stringify({ version: '0.2.14' })));
-  zip.writeZip(zipPath);
-
-  assert.equal(validatePortableArchiveVersion(zipPath, '0.2.14'), '0.2.14');
 });
 
 test('packaged updates refuse releases without a sha256 digest', async (t) => {

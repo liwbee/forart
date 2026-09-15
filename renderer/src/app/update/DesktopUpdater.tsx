@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, Download, RefreshCw, X, type LucideIcon } from "lucide-react";
+import { Download, RefreshCw, X, type LucideIcon } from "lucide-react";
 import type {
   ForartAppInfo,
   ForartUpdateCheckResult,
-  ForartUpdateConnectivityResult,
   ForartUpdateNotes,
   ForartUpdateProgress,
+  ForartUpdateRelease,
   ForartUpdateRunResult,
 } from "../appConfig";
 import { AppScrollArea } from "../../components/AppScrollArea";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../../components/ui/collapsible";
 import {
   Dialog,
   DialogClose,
@@ -23,7 +22,6 @@ import {
   DialogTitle,
 } from "../../components/ui/dialog";
 import { Progress } from "../../components/ui/progress";
-import { Separator } from "../../components/ui/separator";
 
 export type DesktopUpdateStatus = "idle" | "checking" | "available" | "current" | "error" | "updating" | "updated";
 
@@ -95,9 +93,6 @@ export function useDesktopUpdater({ enabled, language }: DesktopUpdaterOptions):
   const [checkResult, setCheckResult] = useState<ForartUpdateCheckResult | null>(null);
   const [notes, setNotes] = useState<ForartUpdateNotes | null>(null);
   const [progress, setProgress] = useState<ForartUpdateProgress | null>(null);
-  const [connectivity, setConnectivity] = useState<ForartUpdateConnectivityResult | null>(null);
-  const [connectivityChecking, setConnectivityChecking] = useState(false);
-  const [notesOpen, setNotesOpen] = useState(false);
 
   const checkForUpdates = useCallback(async (showCheckingState = true) => {
     if (!enabled) return;
@@ -178,14 +173,6 @@ export function useDesktopUpdater({ enabled, language }: DesktopUpdaterOptions):
     });
   }, [enabled, language, t]);
 
-  async function runConnectivityCheck() {
-    if (connectivityChecking) return;
-    setConnectivityChecking(true);
-    const result = await window.forartConfig?.updateConnectivity().catch((): ForartUpdateConnectivityResult => ({ ok: false, results: [] }));
-    setConnectivity(result || { ok: false, results: [] });
-    setConnectivityChecking(false);
-  }
-
   async function confirmUpdate() {
     if (status === "checking" || status === "updating") return;
     if (status !== "available") {
@@ -234,33 +221,21 @@ export function useDesktopUpdater({ enabled, language }: DesktopUpdaterOptions):
     : status === "updated"
       ? t("app:updateModalCompleteTitle")
       : t("app:updateModalTitle");
-  const noteItems = notes?.items || [];
+  const releaseHistory: ForartUpdateRelease[] = checkResult?.recentReleases?.length
+    ? checkResult.recentReleases
+    : notes
+      ? [{ version: notes.version || latestVersionLabel, updatedAt: notes.updatedAt || "", items: notes.items }]
+      : [];
   const updateSummaryText = status === "available"
     ? t("app:updateAvailableSummary", { version: latestVersionDisplay })
     : status === "current"
       ? t("app:updateCurrentSummary", { version: currentVersionDisplay })
-      : message || t("app:updateConnectivityWarn");
-  const statusBadgeText = status === "error"
-    ? t("app:updateErrorBadge")
-    : status === "current" || status === "updated"
-      ? t("app:updateOkBadge")
-      : t("app:updateReadyBadge");
+      : message || t("app:updateCheckFailed");
   const progressPercent = Math.max(0, Math.min(100, progress?.percent || 0));
   const progressVisible = Boolean(progress && (status === "updating" || status === "updated"));
   const progressPhase = progress ? t(updatePhaseKey(progress.phase)) : "";
   const progressSpeed = progress ? `${formatBytes(progress.bytesPerSecond)}/s` : "";
   const progressTotal = progress ? formatBytes(progress.downloadedBytes) : "0 B";
-  const connectivityResults = connectivity?.results || [];
-  const connectivityFailedCount = connectivityResults.filter((item) => !item.ok).length;
-  const connectivitySummaryText = connectivityChecking
-    ? t("app:updateConnectivityChecking")
-    : connectivityResults.length
-      ? connectivityFailedCount
-        ? t("app:updateConnectivityIssueSummary", { failed: connectivityFailedCount, total: connectivityResults.length })
-        : t("app:updateConnectivityOk")
-      : t("app:updateConnectivityNotTested");
-  const connectivityBadgeVariant = connectivityFailedCount ? "destructive" : connectivityResults.length ? "secondary" : "outline";
-
   const dialog = (
     <Dialog
       open={modalOpen}
@@ -269,14 +244,13 @@ export function useDesktopUpdater({ enabled, language }: DesktopUpdaterOptions):
         setModalOpen(open);
       }}
     >
-      <DialogContent className="grid max-h-[calc(100dvh-32px)] w-[min(980px,calc(100vw-32px))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden border-0 p-0 shadow-none">
-        <DialogHeader className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 border-b bg-muted/30 p-5 text-left">
-          <div className="flex min-w-0 flex-col gap-2">
+      <DialogContent className="grid h-[min(820px,80dvh)] max-h-[80dvh] w-[min(960px,calc(100vw-32px))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden border-0 p-0 shadow-none">
+        <DialogHeader className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 bg-background p-4 px-5 text-left">
+          <div className="flex min-w-0 flex-col gap-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <DialogTitle id="forart-update-title" className="text-xl leading-7">{modalTitle}</DialogTitle>
-              <Badge variant={status === "error" ? "destructive" : status === "current" || status === "updated" ? "secondary" : "outline"}>{statusBadgeText}</Badge>
+              <DialogTitle id="forart-update-title" className="text-base leading-6">{modalTitle}</DialogTitle>
             </div>
-            <DialogDescription className="sr-only">{updateSummaryText}</DialogDescription>
+            <DialogDescription className="mt-1 truncate text-xs text-muted-foreground">{t("app:updateModalSubtitle")}</DialogDescription>
           </div>
           <DialogClose asChild>
             <Button variant="ghost" size="icon" aria-label={t("app:updateClose")} disabled={status === "updating"}>
@@ -287,38 +261,36 @@ export function useDesktopUpdater({ enabled, language }: DesktopUpdaterOptions):
 
         <AppScrollArea className="h-full min-h-0 bg-background" viewportClassName="px-5 py-4">
           <div className="grid gap-4">
-            <section className="min-w-0 rounded-xl bg-card p-4 ring-1 ring-border/45">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-3">
-                  <h3 className="m-0 text-sm font-semibold">{t("app:updateConnectivity")}</h3>
-                  <Badge variant={connectivityBadgeVariant}>{connectivitySummaryText}</Badge>
-                </div>
-                <Button variant="ghost" size="sm" type="button" disabled={connectivityChecking || status === "updating"} onClick={runConnectivityCheck}>
-                  <RefreshCw data-icon="inline-start" className={connectivityChecking ? "animate-spin" : undefined} aria-hidden="true" />
-                  <span>{connectivityChecking ? t("app:updateConnectivityChecking") : t("app:updateConnectivityTest")}</span>
-                </Button>
-              </div>
-            </section>
-
-            <section className="grid gap-3 rounded-xl bg-card p-4 ring-1 ring-border/45">
-              <div className="flex min-w-0 items-center gap-3">
-                <span className={`size-2.5 shrink-0 rounded-full ${status === "error" ? "bg-destructive" : status === "current" || status === "updated" ? "bg-emerald-500" : "bg-amber-500"}`} aria-hidden="true" />
-                <strong className="min-w-0 text-sm text-foreground">{message || updateSummaryText}</strong>
-              </div>
-              <Separator />
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="flex min-w-0 flex-col gap-1 p-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex min-w-0 flex-col gap-1 rounded-2xl border border-border bg-background px-4 py-3">
                   <span className="text-xs font-medium text-muted-foreground">{t("app:updateCurrentVersion")}</span>
                   <strong className="truncate text-base font-semibold text-foreground">{currentVersionDisplay}</strong>
                   <span className="text-xs text-muted-foreground">{currentUpdateDateLabel}</span>
                 </div>
-                <div className="flex min-w-0 flex-col gap-1 p-3">
-                  <span className="text-xs font-medium text-muted-foreground">{t("app:updateLatestVersion")}</span>
+                <div className="flex min-w-0 flex-col gap-1 rounded-2xl border border-border bg-background px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-medium text-muted-foreground">{t("app:updateLatestVersion")}</span>
+                    <Button
+                      variant="ghost"
+                      size="micro"
+                      type="button"
+                      disabled={status === "checking" || status === "updating"}
+                      onClick={() => checkForUpdates(true)}
+                    >
+                      <RefreshCw className={status === "checking" ? "animate-spin" : undefined} aria-hidden="true" />
+                      {status === "checking" ? t("app:updateChecking") : t("app:updateCheckAction")}
+                    </Button>
+                  </div>
                   <strong className="truncate text-base font-semibold text-foreground">{latestVersionDisplay}</strong>
                   <span className="text-xs text-muted-foreground">{latestUpdateDateLabel}</span>
                 </div>
+            </div>
+            <div className="flex min-h-12 flex-wrap items-center justify-between gap-2 rounded-2xl border border-border px-4 py-3 text-sm">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className={`size-2.5 shrink-0 rounded-full ${status === "error" ? "bg-destructive" : status === "current" || status === "updated" ? "bg-emerald-500" : "bg-amber-500"}`} aria-hidden="true" />
+                <strong className="min-w-0 text-sm text-foreground">{message || updateSummaryText}</strong>
               </div>
-            </section>
+            </div>
 
             {progressVisible ? (
               <section className="grid gap-3 rounded-xl bg-card p-4 ring-1 ring-border/45" aria-label={t("app:updateProgressLabel")}>
@@ -340,38 +312,45 @@ export function useDesktopUpdater({ enabled, language }: DesktopUpdaterOptions):
               </section>
             ) : null}
 
-            <Collapsible open={notesOpen} onOpenChange={setNotesOpen}>
-              <section className="rounded-xl bg-card p-4 ring-1 ring-border/45">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="m-0 text-sm font-semibold">{t("app:updateNotes")}</h3>
-                    <p className="m-0 mt-1 text-xs text-muted-foreground">{noteItems.length ? t("app:updateNotesCount", { count: noteItems.length }) : t("app:updateNoNotes")}</p>
-                  </div>
-                  <CollapsibleTrigger asChild>
-                    <Button variant="ghost" size="icon" type="button" aria-label={notesOpen ? t("app:updateNotesCollapse") : t("app:updateNotesExpand")}>
-                      <ChevronDown className={notesOpen ? "rotate-180 transition-transform" : "transition-transform"} aria-hidden="true" />
-                    </Button>
-                  </CollapsibleTrigger>
+            <div className="mt-2 min-h-0 space-y-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="m-0 text-sm font-semibold">{t("app:updateNotes")}</h3>
+                  <p className="m-0 mt-1 text-xs text-muted-foreground">{releaseHistory.length ? t("app:updateNotesCount", { count: releaseHistory.length }) : t("app:updateNoNotes")}</p>
                 </div>
-                <CollapsibleContent>
-                  {noteItems.length ? (
-                    <ol className="mt-4 grid gap-2 pl-5 pr-2 text-sm leading-6 text-muted-foreground">
-                      {noteItems.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
-                    </ol>
-                  ) : (
-                    <p className="mt-4 text-sm text-muted-foreground">{t("app:updateNoNotes")}</p>
-                  )}
-                </CollapsibleContent>
-              </section>
-            </Collapsible>
+                {releaseHistory.length ? <Badge variant="outline">{t("app:updateNotesCount", { count: releaseHistory.length })}</Badge> : null}
+              </div>
+              {releaseHistory.length ? (
+                <div className="mt-4 grid gap-5 border-l border-border/70 pl-4">
+                  {releaseHistory.map((release) => (
+                    <section key={`${release.version}-${release.updatedAt}`} className="grid gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <strong className="text-sm text-foreground">{displayVersion(release.version)}</strong>
+                        {release.updatedAt ? <span className="text-xs text-muted-foreground">{formatUpdateDate(release.updatedAt)}</span> : null}
+                        {normalizeVersionLabel(release.version) === latestVersionLabel ? <Badge variant="secondary">{t("app:updateLatestBadge")}</Badge> : null}
+                        {normalizeVersionLabel(release.version) === currentVersionLabel ? <Badge variant="outline">{t("app:updateCurrentBadge")}</Badge> : null}
+                      </div>
+                      {release.items.length ? (
+                        <ol className="grid gap-2 text-sm leading-6">
+                          {release.items.map((item, index) => (
+                            <li key={`${release.version}-${item.text}-${index}`} className="flex items-start gap-2">
+                              <Badge variant={item.category === "fix" ? "outline" : item.category === "new" ? "secondary" : "outline"} className="mt-0.5 shrink-0">{t(`app:updateCategory${item.category === "new" ? "New" : item.category === "improvement" ? "Improvement" : "Fix"}`)}</Badge>
+                              <span className="min-w-0 text-muted-foreground">{item.text}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : <p className="text-sm text-muted-foreground">{t("app:updateNoNotes")}</p>}
+                    </section>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-muted-foreground">{t("app:updateNoNotes")}</p>
+              )}
+            </div>
           </div>
         </AppScrollArea>
 
         <DialogFooter className="border-t bg-muted/30 p-5">
-          <Button variant="ghost" type="button" disabled={status === "checking" || status === "updating"} onClick={() => checkForUpdates(true)}>
-            <RefreshCw data-icon="inline-start" className={status === "checking" ? "animate-spin" : undefined} aria-hidden="true" />
-            {t("app:updateCheckAction")}
-          </Button>
           <Button type="button" disabled={status !== "available"} onClick={confirmUpdate}>
             <Download data-icon="inline-start" aria-hidden="true" />
             {status === "updating" ? t("app:updateUpdating") : t("app:updateStart")}

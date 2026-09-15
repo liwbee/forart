@@ -44,7 +44,8 @@ export const zhCN = {
   updatePhaseUpdating: "正在更新",
   updateModalAvailableTitle: "发现新更新",
   updateModalCompleteTitle: "更新完成",
-  updateModalTitle: "项目更新",
+  updateModalTitle: "版本更新",
+  updateModalSubtitle: "查看当前版本和更新日志",
   updateAvailableSummary: "有可用更新 {{version}}",
   updateCurrentSummary: "已是最新版本 {{version}}",
   updateErrorBadge: "错误",
@@ -64,6 +65,11 @@ export const zhCN = {
   updateNotesCount: "{{count}} 条更新",
   updateConnectivityNotTested: "未检测",
   updateConnectivityIssueSummary: "{{failed}}/{{total}} 异常",
+  updateCategoryNew: "新增",
+  updateCategoryImprovement: "优化",
+  updateCategoryFix: "修复",
+  updateLatestBadge: "最新",
+  updateCurrentBadge: "当前",
 } as const;
 
 export const enUS = {
@@ -112,7 +118,8 @@ export const enUS = {
   updatePhaseUpdating: "Updating",
   updateModalAvailableTitle: "Update available",
   updateModalCompleteTitle: "Update complete",
-  updateModalTitle: "Project update",
+  updateModalTitle: "Version update",
+  updateModalSubtitle: "View the current version and release notes",
   updateAvailableSummary: "Update available {{version}}",
   updateCurrentSummary: "Already up to date {{version}}",
   updateErrorBadge: "Error",
@@ -132,4 +139,9 @@ export const enUS = {
   updateNotesCount: "{{count}} update notes",
   updateConnectivityNotTested: "Not tested",
   updateConnectivityIssueSummary: "{{failed}}/{{total}} failed",
+  updateCategoryNew: "New",
+  updateCategoryImprovement: "Improved",
+  updateCategoryFix: "Fixed",
+  updateLatestBadge: "Latest",
+  updateCurrentBadge: "Current",
 } as const;

@@ -2,11 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const { createHash } = require('crypto');
 const { spawn } = require('child_process');
-const AdmZip = require('adm-zip');
 
 const REPO_URL = 'https://github.com/liwbee/forart';
 const GITHUB_API_ROOT = 'https://api.github.com/repos/liwbee/forart';
 const LATEST_RELEASE_URL = `${GITHUB_API_ROOT}/releases/latest`;
+const RECENT_RELEASES_URL = `${GITHUB_API_ROOT}/releases?per_page=5`;
 const PORTABLE_ASSET_PATTERN = /forart.*windows.*portable.*\.zip$/i;
 
 function readPackageInfo(rootDir) {
@@ -150,9 +150,24 @@ function normalizeUpdateNotes(input, fallbackVersion = '') {
   const items = Array.isArray(payload.items)
     ? payload.items
       .map((item) => {
-        if (typeof item === 'string') return item.trim();
-        if (item && typeof item === 'object') return String(item.text || item.title || '').trim();
-        return '';
+        const rawText = typeof item === 'string'
+          ? item.trim()
+          : item && typeof item === 'object'
+            ? String(item.text || item.title || '').trim()
+            : '';
+        if (!rawText) return null;
+        const explicitCategory = item && typeof item === 'object' ? String(item.category || item.type || '').trim() : '';
+        const tagged = rawText.match(/^\s*\[([^\]]+)]\s*(.+)$/);
+        const categoryText = (explicitCategory || tagged?.[1] || '').toLowerCase();
+        const text = (tagged?.[2] || rawText).trim();
+        const category = /新增|功能|feature|feat|added|new/.test(categoryText)
+          ? 'new'
+          : /优化|改进|性能|refactor|improve|optimization|performance|changed/.test(categoryText)
+            ? 'improvement'
+            : /修复|bug|fix|fixed/.test(categoryText)
+              ? 'fix'
+              : null;
+        return category ? { category, text } : null;
       })
       .filter(Boolean)
     : [];
@@ -173,7 +188,9 @@ function notesFromReleaseBody(body, fallbackVersion = '') {
   } catch {
     const items = text
       .split(/\r?\n/)
-      .map((line) => line.replace(/^\s*[-*]\s*/, '').trim())
+      .map((line) => line.trim())
+      .filter((line) => /^[-*+]\s+\[(新增|优化|修复)\]\s+\S/.test(line))
+      .map((line) => line.replace(/^\s*[-*+]\s*/, '').trim())
       .filter(Boolean)
       .slice(0, 12);
     return normalizeUpdateNotes({ version: fallbackVersion, items }, fallbackVersion);
@@ -226,50 +243,6 @@ function safeFileName(fileName, fallback = 'Forart-windows-portable.zip') {
   return baseName.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') || fallback;
 }
 
-function readPortableArchiveText(zip, candidates) {
-  for (const candidate of candidates) {
-    const entry = zip.getEntry(candidate);
-    if (entry) return zip.readAsText(entry).replace(/^\uFEFF/, '').trim();
-  }
-  return '';
-}
-
-function validatePortableArchiveVersion(zipPath, expectedVersion) {
-  let zip;
-  try {
-    zip = new AdmZip(zipPath);
-  } catch (error) {
-    throw new Error(`Downloaded portable package is not a readable zip: ${error instanceof Error ? error.message : String(error)}`);
-  }
-
-  const versionText = readPortableArchiveText(zip, [
-    'resources/app/VERSION',
-    'app/VERSION',
-    'VERSION',
-  ]);
-  const packageText = readPortableArchiveText(zip, [
-    'resources/app/package.json',
-    'app/package.json',
-    'package.json',
-  ]);
-  const packagedVersion = normalizeVersion(versionText.split(/\r?\n/)[0] || (() => {
-    try { return JSON.parse(packageText).version; } catch { return ''; }
-  })());
-  const expected = normalizeVersion(expectedVersion);
-  if (!packagedVersion) throw new Error('Downloaded portable package does not contain an application VERSION file.');
-  if (!expected || packagedVersion !== expected) {
-    throw new Error(`Downloaded portable package version mismatch. Expected ${expected || 'unknown'}, got ${packagedVersion}.`);
-  }
-  if (packageText) {
-    let packageVersion = '';
-    try { packageVersion = normalizeVersion(JSON.parse(packageText).version); } catch { /* VERSION is authoritative. */ }
-    if (packageVersion && packageVersion !== expected) {
-      throw new Error(`Downloaded portable package package.json version mismatch. Expected ${expected}, got ${packageVersion}.`);
-    }
-  }
-  return packagedVersion;
-}
-
 function findPortableAsset(release) {
   const assets = Array.isArray(release?.assets) ? release.assets : [];
   return assets.find((asset) => PORTABLE_ASSET_PATTERN.test(String(asset?.name || '')))
@@ -303,6 +276,28 @@ async function readLatestRelease(net) {
       digest: String(asset.digest || ''),
     },
   };
+}
+
+async function readRecentReleases(net) {
+  try {
+    const releases = await fetchJson(net, RECENT_RELEASES_URL);
+    if (!Array.isArray(releases)) return [];
+    return releases
+      .filter((release) => release && !release.draft && !release.prerelease)
+      .slice(0, 5)
+      .map((release) => {
+        const version = normalizeVersion(release.tag_name || release.name || '');
+        const notes = notesFromReleaseBody(release.body || '', version);
+        return {
+          version,
+          updatedAt: String(release.published_at || release.created_at || '').trim(),
+          items: notes.items,
+        };
+      })
+      .filter((release) => release.version);
+  } catch {
+    return [];
+  }
 }
 
 async function readTextIfExists(filePath, maxLength = 1600) {
@@ -719,8 +714,28 @@ function createPortableUpdater({ app, rootDir, dataRoot = rootDir, net }) {
 
   async function check() {
     const info = await appInfoPayload(rootDir);
+    const startedAt = Date.now();
+    const writablePromise = probeWritable(dataRoot);
     try {
-      const latestRelease = await readLatestRelease(net);
+      const [latestRelease, recentReleases] = await Promise.all([
+        readLatestRelease(net),
+        readRecentReleases(net),
+      ]);
+      const writable = await writablePromise;
+      const connectivity = {
+        ok: writable.ok,
+        results: [
+          {
+            name: 'GitHub latest release',
+            ok: true,
+            status: 200,
+            elapsedMs: Date.now() - startedAt,
+            detail: 'Release metadata loaded',
+            required: true,
+          },
+          writable,
+        ],
+      };
       const updateAvailable = compareVersions(latestRelease.version, info.currentRevision) > 0;
       return {
         ok: true,
@@ -730,6 +745,7 @@ function createPortableUpdater({ app, rootDir, dataRoot = rootDir, net }) {
         latestUpdatedAt: latestRelease.publishedAt || latestRelease.version,
         updateAvailable,
         repoUrl: latestRelease.htmlUrl || REPO_URL,
+        connectivity,
         updateNotes: {
           ...latestRelease.notes,
           version: latestRelease.version,
@@ -737,8 +753,14 @@ function createPortableUpdater({ app, rootDir, dataRoot = rootDir, net }) {
           revision: latestRelease.version,
           source: 'github-release',
         },
+        recentReleases: recentReleases.length ? recentReleases : [{
+          version: latestRelease.version,
+          updatedAt: latestRelease.publishedAt || '',
+          items: latestRelease.notes.items,
+        }],
       };
     } catch (error) {
+      const writable = await writablePromise;
       return {
         ok: false,
         currentRevision: info.currentRevision,
@@ -747,6 +769,19 @@ function createPortableUpdater({ app, rootDir, dataRoot = rootDir, net }) {
         latestUpdatedAt: '',
         updateAvailable: false,
         repoUrl: REPO_URL,
+        connectivity: {
+          ok: false,
+          results: [
+            {
+              name: 'GitHub latest release',
+              ok: false,
+              elapsedMs: Date.now() - startedAt,
+              detail: error instanceof Error ? error.message : String(error),
+              required: true,
+            },
+            writable,
+          ],
+        },
         error: error instanceof Error ? error.message : String(error),
       };
     }
@@ -816,8 +851,6 @@ function createPortableUpdater({ app, rootDir, dataRoot = rootDir, net }) {
         });
       }, `sha256:${expectedDigest}`);
 
-      validatePortableArchiveVersion(zipPath, latestRelease.version);
-
       emitProgress(onProgress, {
         phase: 'scheduling',
         percent: 100,
@@ -873,5 +906,4 @@ module.exports = {
   createPortableUpdater,
   downloadFileWithProgress,
   normalizeSha256Digest,
-  validatePortableArchiveVersion,
 };

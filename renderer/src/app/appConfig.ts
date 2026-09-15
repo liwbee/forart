@@ -189,6 +189,8 @@ export interface ForartUpdateCheckResult {
   updateAvailable: boolean;
   repoUrl: string;
   updateNotes?: ForartUpdateNotes;
+  recentReleases?: ForartUpdateRelease[];
+  connectivity?: ForartUpdateConnectivityResult;
   error?: string;
 }
 
@@ -217,8 +219,19 @@ export interface ForartUpdateNotes {
   updatedAt?: string;
   revision?: string;
   source?: string;
-  items: string[];
+  items: ForartUpdateNoteItem[];
   error?: string;
+}
+
+export interface ForartUpdateRelease {
+  version: string;
+  updatedAt: string;
+  items: ForartUpdateNoteItem[];
+}
+
+export interface ForartUpdateNoteItem {
+  category: "new" | "improvement" | "fix";
+  text: string;
 }
 
 export interface ForartUpdateConnectivityItem {
