@@ -11,7 +11,6 @@ import { NativeTabs, type NativeTabItem } from "../../components/NativeTabs";
 import { SearchInput } from "../../components/SearchInput";
 import { VirtualList } from "../../components/VirtualList";
 import { Button } from "../../components/ui/button";
-import { Checkbox } from "../../components/ui/checkbox";
 import {
   Card,
   CardAction,
@@ -22,12 +21,11 @@ import {
 } from "../../components/ui/card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { ApimartLogo, ApimartSettingsPane, type ApiPanelStatus } from "./ApimartSettingsPane";
-import { APIMART_PROVIDER_ID, coerceApiProviderDraft, createApiProvider, createApimartProvider, createTudouProvider, loadApiSettings, normalizeApiProviderOrder, readApiSettings, saveApiSettings, TUDOU_IMAGE_MODELS, TUDOU_PROVIDER_ID, uniqueModels, type ApiModelKind, type ApiProvider } from "./apiProviders";
+import { APIMART_PROVIDER_ID, coerceApiProviderDraft, createApiProvider, createApimartProvider, loadApiSettings, normalizeApiProviderOrder, readApiSettings, saveApiSettings, uniqueModels, type ApiModelKind, type ApiProvider } from "./apiProviders";
 import { detectImageModelRuleId, IMAGE_MODEL_RULES, normalizeImageModelRuleId } from "./imageModelRules";
 import { LibtvLogo, LibtvSettingsPane } from "./LibtvSettingsPane";
-import { TudouLogo, TudouSettingsPane } from "./TudouSettingsPane";
 
-type ApiSettingsPane = "provider" | "apimart" | "tudou" | "libtv" | "recommended";
+type ApiSettingsPane = "provider" | "apimart" | "libtv" | "recommended";
 type ApiAction = "fetch" | "";
 type ModelPickerTab = ApiModelKind | "all";
 type ModelListTab = ApiModelKind;
@@ -41,11 +39,8 @@ type DraftModel = {
 type ApiSidebarItem =
   | { id: "libtv"; type: "libtv" }
   | { id: "apimart"; type: "apimart"; provider: ApiProvider }
-  | { id: "tudou-api"; type: "tudou"; provider: ApiProvider }
   | { id: string; type: "provider"; provider: ApiProvider };
 type FetchedModelEntry = { id: string; kind: ApiModelKind; selected: boolean };
-
-const TUDOU_IMAGE_MODEL_SET = new Set<string>(TUDOU_IMAGE_MODELS);
 
 function classifyModel(id: string): ApiModelKind {
   const text = id.toLowerCase();
@@ -86,8 +81,7 @@ export function ApiSettingsPanel() {
       const provider = providersById.get(id);
       if (!provider) return items;
       return provider.id === APIMART_PROVIDER_ID ? [...items, { id: "apimart", type: "apimart", provider }]
-        : provider.id === TUDOU_PROVIDER_ID ? [...items, { id: TUDOU_PROVIDER_ID, type: "tudou", provider }]
-          : [...items, { id, type: "provider", provider }];
+        : [...items, { id, type: "provider", provider }];
     }, []);
   }, [providerOrder, providers]);
   const modelListTabs = useMemo<NativeTabItem<ModelListTab>[]>(() => [
@@ -114,7 +108,7 @@ export function ApiSettingsPanel() {
         } else {
           const firstProvider = settings.providers.find((provider) => provider.id === firstProviderId) || null;
           setSelectedProviderId(firstProvider?.id || "");
-          setActivePane(firstProvider?.id === APIMART_PROVIDER_ID ? "apimart" : firstProvider?.id === TUDOU_PROVIDER_ID ? "tudou" : "provider");
+          setActivePane(firstProvider?.id === APIMART_PROVIDER_ID ? "apimart" : "provider");
         }
         setSettingsLoaded(true);
       })
@@ -161,7 +155,7 @@ export function ApiSettingsPanel() {
       return;
     }
     setSelectedProviderId(firstItem.id);
-    setActivePane(firstItem.type === "apimart" ? "apimart" : firstItem.type === "tudou" ? "tudou" : "provider");
+    setActivePane(firstItem.type === "apimart" ? "apimart" : "provider");
   }, [activePane, providerOrder, providers, selectedProviderId, settingsLoaded, sidebarItems]);
 
   useEffect(() => {
@@ -199,14 +193,14 @@ export function ApiSettingsPanel() {
     });
   }
 
-  function addRecommendedProvider(providerId: "apimart" | "tudou-api" | "libtv") {
+  function addRecommendedProvider(providerId: "apimart" | "libtv") {
     if (providerId === "libtv") {
       setProviderOrder((order) => normalizeApiProviderOrder([...order, "libtv"], providers));
       return;
     }
     setProviders((current) => {
-      const fixedId = providerId === "apimart" ? APIMART_PROVIDER_ID : TUDOU_PROVIDER_ID;
-      const template = providerId === "apimart" ? createApimartProvider() : createTudouProvider();
+      const fixedId = APIMART_PROVIDER_ID;
+      const template = createApimartProvider();
       let id = fixedId;
       let copyIndex = 1;
       while (current.some((provider) => provider.id === id)) {
@@ -226,14 +220,6 @@ export function ApiSettingsPanel() {
     setProviders((current) => current.filter((provider) => provider.id !== APIMART_PROVIDER_ID));
     setProviderOrder((current) => current.filter((id) => id !== APIMART_PROVIDER_ID));
     setDefaultImageProviderId((current) => current === APIMART_PROVIDER_ID ? "" : current);
-    setSelectedProviderId("");
-    setActivePane("recommended");
-  }
-
-  function removeTudouProvider() {
-    setProviders((current) => current.filter((provider) => provider.id !== TUDOU_PROVIDER_ID));
-    setProviderOrder((current) => current.filter((id) => id !== TUDOU_PROVIDER_ID));
-    setDefaultImageProviderId((current) => current === TUDOU_PROVIDER_ID ? "" : current);
     setSelectedProviderId("");
     setActivePane("recommended");
   }
@@ -351,7 +337,7 @@ export function ApiSettingsPanel() {
         } else {
           const nextProvider = next.find((provider) => provider.id === nextProviderId) || null;
           setSelectedProviderId(nextProvider?.id || "");
-          setActivePane(nextProvider?.id === APIMART_PROVIDER_ID ? "apimart" : nextProvider?.id === TUDOU_PROVIDER_ID ? "tudou" : "provider");
+          setActivePane(nextProvider?.id === APIMART_PROVIDER_ID ? "apimart" : "provider");
         }
         return nextOrder;
       });
@@ -416,9 +402,7 @@ export function ApiSettingsPanel() {
 
     const kind = draftModel.kind;
     const key = kind === "image" ? "imageModels" : kind === "chat" ? "chatModels" : "videoModels";
-    const isTudouImage = selectedProvider.id === TUDOU_PROVIDER_ID && kind === "image";
-    const existingModels = isTudouImage ? selectedProvider.modelCatalogOrder?.image || [] : selectedProvider[key];
-    if (existingModels.includes(model)) {
+    if (selectedProvider[key].includes(model)) {
       setDraftModel((current) => current ? { ...current, error: t("settings:modelAlreadyExists") } : current);
       draftModelInputRef.current?.select();
       return;
@@ -433,29 +417,11 @@ export function ApiSettingsPanel() {
         },
       },
     } : {};
-    patchSelectedProvider(isTudouImage ? {
-      modelCatalogOrder: { image: [...existingModels, model] },
-      imageModels: [...selectedProvider.imageModels, model],
-      ...imageRulePatch,
-    } : {
+    patchSelectedProvider({
       [key]: [...selectedProvider[key], model],
       ...imageRulePatch,
     } as Partial<ApiProvider>);
     setDraftModel(null);
-  }
-
-  function deleteTudouCustomImageModel(model: string) {
-    if (!selectedProvider || selectedProvider.id !== TUDOU_PROVIDER_ID || TUDOU_IMAGE_MODEL_SET.has(model)) return;
-    const aliases = { ...selectedProvider.modelAliases.image };
-    const rules = { ...selectedProvider.modelRules.image };
-    delete aliases[model];
-    delete rules[model];
-    patchSelectedProvider({
-      modelCatalogOrder: { image: (selectedProvider.modelCatalogOrder?.image || []).filter((item) => item !== model) },
-      imageModels: selectedProvider.imageModels.filter((item) => item !== model),
-      modelAliases: { ...selectedProvider.modelAliases, image: aliases },
-      modelRules: { ...selectedProvider.modelRules, image: rules },
-    });
   }
 
   function renderDraftModelRow(kind: ApiModelKind) {
@@ -547,76 +513,13 @@ export function ApiSettingsPanel() {
         <span className="settings-api-provider-drag-handle" aria-hidden="true" {...dragHandleProps}><GripVertical size={14} /></span>
         {item.type === "libtv" ? <span className="settings-api-provider-logo settings-libtv-sidebar-logo"><LibtvLogo /></span>
           : item.type === "apimart" ? <span className="settings-api-provider-logo settings-api-provider-logo--apimart"><ApimartLogo /></span>
-            : item.type === "tudou" ? <span className="settings-api-provider-logo settings-api-provider-logo--tudou"><TudouLogo /></span>
             : <><span className="settings-api-provider-info"><strong>{item.provider.name || item.provider.id}</strong><small>{item.provider.baseUrl || t("settings:baseUrlNotConfigured")}</small></span><span className="settings-api-provider-pill">{item.provider.protocol}</span></>}
       </>
     );
   }
 
-  function renderTudouImageModelList(showHeading = true) {
-    if (!selectedProvider || selectedProvider.id !== TUDOU_PROVIDER_ID) return null;
-    const models = selectedProvider.modelCatalogOrder?.image || [];
-    const enabledModels = new Set(selectedProvider.imageModels);
-    const rows = models.map((model) => ({ id: `tudou-image-${model}`, model }));
-    return (
-      <section className="settings-api-model-card">
-        {showHeading ? <div className="settings-api-model-head"><div><h3>{t("settings:imageModels")}</h3></div></div> : null}
-        <div className="settings-api-model-list-wrap">
-          <AppScrollArea className="settings-api-model-list" viewportClassName="settings-api-model-list__viewport" viewportRef={imageModelListViewportRef} scrollbars={models.length > 1 || draftModel?.kind === "image" ? "vertical" : "none"}>
-            <div className="settings-api-model-list-content">
-              <DraggableList
-              items={rows}
-              getId={(row) => row.id}
-              className="settings-api-model-sortable-list"
-              scrollContainerRef={imageModelListViewportRef}
-              onReorder={(nextRows) => {
-                const imageModelOrder = nextRows.map((row) => row.model);
-                patchSelectedProvider({
-                  modelCatalogOrder: { image: imageModelOrder },
-                  imageModels: imageModelOrder.filter((model) => enabledModels.has(model)),
-                });
-              }}
-              renderItem={(row, { dragHandleProps }) => {
-                const { model } = row;
-                const enabled = enabledModels.has(model);
-                const isCustomModel = !TUDOU_IMAGE_MODEL_SET.has(model);
-                const imageRuleId = normalizeImageModelRuleId(selectedProvider.modelRules.image[model] || detectImageModelRuleId(model));
-                return (
-                  <div className={`settings-api-model-row settings-api-model-row--catalog has-rule${isCustomModel ? " is-custom" : ""}`} data-enabled={enabled}>
-                    <span className="settings-api-model-drag-handle" aria-hidden="true" {...dragHandleProps}><GripVertical size={14} /></span>
-                    <Checkbox
-                      checked={enabled}
-                      aria-label={t("settings:enableModel", { model })}
-                      onCheckedChange={(checked) => {
-                        const nextEnabled = new Set(enabledModels);
-                        if (checked === true) nextEnabled.add(model);
-                        else nextEnabled.delete(model);
-                        patchSelectedProvider({ imageModels: models.filter((item) => nextEnabled.has(item)) });
-                      }}
-                    />
-                    <label className="settings-api-model-alias">
-                      <input value={selectedProvider.modelAliases.image[model] ?? model} onChange={(event) => updateModelAlias("image", model, event.target.value)} onBlur={() => clearEmptyModelAlias("image", model)} placeholder={model} title={model} />
-                      <small title={model}>{model}</small>
-                    </label>
-                    <label className="settings-api-model-rule"><Select value={imageRuleId} options={IMAGE_MODEL_RULES.map((rule) => ({ value: rule.id, label: rule.labelKey ? t(`settings:${rule.labelKey}`) : rule.label }))} onChange={(ruleId) => patchSelectedProvider({ modelRules: { ...selectedProvider.modelRules, image: { ...selectedProvider.modelRules.image, [model]: normalizeImageModelRuleId(ruleId) } } })} ariaLabel={t("settings:modelRule")} menuPlacement="bottom" /></label>
-                    {isCustomModel ? <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" aria-label={t("settings:deleteModel")} title={t("settings:deleteModel")} onClick={() => deleteTudouCustomImageModel(model)}><Trash2 aria-hidden="true" /></Button> : null}
-                  </div>
-                );
-              }}
-              />
-              {renderDraftModelRow("image")}
-            </div>
-          </AppScrollArea>
-        </div>
-      </section>
-    );
-  }
-
   function renderProviderModelLists() {
     if (!selectedProvider) return null;
-    const activeList = selectedProvider.id === TUDOU_PROVIDER_ID && modelListTab === "image"
-      ? renderTudouImageModelList(false)
-      : renderModelList(modelListTab, false);
     return (
       <>
         <div className="settings-api-model-toolbar">
@@ -629,7 +532,7 @@ export function ApiSettingsPanel() {
           />
           <Button type="button" variant="ghost" size="icon-sm" aria-label={t("settings:addModel")} title={t("settings:addModel")} onClick={beginAddModel}><Plus aria-hidden="true" /></Button>
         </div>
-        {activeList}
+        {renderModelList(modelListTab, false)}
       </>
     );
   }
@@ -649,13 +552,6 @@ export function ApiSettingsPanel() {
         added: false,
         description: t("settings:libtvRecommendedDescription"),
         logo: <LibtvLogo />,
-      },
-      {
-        id: "tudou-api" as const,
-        name: t("settings:tudouSettings"),
-        added: false,
-        description: t("settings:tudouRecommendedDescription"),
-        logo: <TudouLogo />,
       },
     ];
 
@@ -734,11 +630,11 @@ export function ApiSettingsPanel() {
             className="settings-api-provider-list"
             onReorder={(items) => applySidebarOrder(items.map((item) => item.id))}
             renderItem={(item, { isDragging, dragHandleProps }) => {
-              const selected = item.type === "libtv" ? activePane === "libtv" : item.type === "apimart" ? activePane === "apimart" : item.type === "tudou" ? activePane === "tudou" : activePane === "provider" && item.id === selectedProvider?.id;
+              const selected = item.type === "libtv" ? activePane === "libtv" : item.type === "apimart" ? activePane === "apimart" : activePane === "provider" && item.id === selectedProvider?.id;
               return (
-                <Button type="button" variant={selected ? "default" : "outline"} data-sidebar-item-id={item.id} className={`settings-api-provider-card${item.type !== "provider" ? " settings-api-provider-card--fixed" : ""}${isDragging ? " is-dragging" : ""}`} aria-label={item.type === "libtv" ? t("settings:libtvCliSettings") : item.type === "apimart" ? t("settings:apimartSettings") : item.type === "tudou" ? t("settings:tudouSettings") : undefined} onClick={() => {
+                <Button type="button" variant={selected ? "default" : "outline"} data-sidebar-item-id={item.id} className={`settings-api-provider-card${item.type !== "provider" ? " settings-api-provider-card--fixed" : ""}${isDragging ? " is-dragging" : ""}`} aria-label={item.type === "libtv" ? t("settings:libtvCliSettings") : item.type === "apimart" ? t("settings:apimartSettings") : undefined} onClick={() => {
                   if (item.type === "libtv") { setSelectedProviderId(""); setActivePane("libtv"); }
-                  else { setSelectedProviderId(item.id); setActivePane(item.type === "apimart" ? "apimart" : item.type === "tudou" ? "tudou" : "provider"); }
+                  else { setSelectedProviderId(item.id); setActivePane(item.type === "apimart" ? "apimart" : "provider"); }
                 }}>
                   {renderSidebarContent(item, dragHandleProps)}
                 </Button>
@@ -762,8 +658,6 @@ export function ApiSettingsPanel() {
             />
           ) : activePane === "apimart" && selectedProvider?.id === APIMART_PROVIDER_ID ? (
             <><ApimartSettingsPane provider={selectedProvider} fetchingModels={action === "fetch"} status={status} onProviderChange={patchSelectedProvider} onFetchModels={fetchModels} onRemove={removeApimartProvider} />{renderProviderModelLists()}</>
-          ) : activePane === "tudou" && selectedProvider?.id === TUDOU_PROVIDER_ID ? (
-            <><TudouSettingsPane provider={selectedProvider} onProviderChange={patchSelectedProvider} onRemove={removeTudouProvider} />{renderProviderModelLists()}</>
           ) : selectedProvider ? (
             <>
               <header className="settings-api-content-head"><div><h2>{selectedProvider.name || t("settings:provider")}</h2></div><div className="settings-api-content-actions"><ConfirmingDeleteButton label={t("settings:removeProvider")} confirmLabel={t("settings:confirmRemoveProvider")} resetKey={selectedProvider.id} cancelLabel={t("common:actions.cancel")} onDelete={deleteSelectedProvider} /></div></header>

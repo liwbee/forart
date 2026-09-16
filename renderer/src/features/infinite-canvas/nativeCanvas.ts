@@ -169,7 +169,13 @@ export function nativeCanvasNodeImages(data: NativeCanvasNodeData): NativeGenera
       width: row.resultWidth, height: row.resultHeight,
     }] : []);
   }
-  if (data.kind === "batchImageGenerator") return (data.batchImageGenerator?.items || []).flatMap((item) => item.resultUrl ? [{ localUrl: item.resultUrl, thumbUrl: item.resultThumbUrl }] : []);
+  if (data.kind === "batchImageGenerator") return (data.batchImageGenerator?.items || []).flatMap((item) => item.resultUrl ? [{
+    localUrl: item.resultUrl,
+    thumbUrl: item.resultThumbUrl,
+    fileName: item.resultFileName,
+    width: item.resultWidth,
+    height: item.resultHeight,
+  }] : []);
   if (data.kind !== "assetLoader" || (data.assetType && data.assetType !== "image") || !data.assetUrl) return [];
   return [{
     localUrl: data.assetUrl,

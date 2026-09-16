@@ -27,7 +27,8 @@ import { ImageViewer } from "../../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import { getActiveForartConfig } from "../../../data-source/runtime";
 import { formatGenerationDuration } from "./generationStatus";
-import { FALLBACK_DOWNLOAD_NAME, saveGenerationImageFile } from "./generationDownload";
+import { saveGenerationImageFile } from "./generationDownload";
+import { storedImageDownloadTarget } from "../assetNaming";
 import { generationTaskImageAt } from "./generationDownloadTarget";
 import {
   isGenerationTaskActive,
@@ -225,12 +226,13 @@ function ImageTaskCenter({ open, onClose }: GenerationTaskCenterProps) {
 
   const downloadTaskImage = useCallback(async (task: GenerationTaskDto, imageIndex = 0) => {
     const image = generationTaskImageAt(task, imageIndex);
-    if (!image || downloadingTaskId) return;
+    const target = storedImageDownloadTarget(image && { localUrl: image.assetUrl, fileName: image.fileName });
+    if (!target || downloadingTaskId) return;
     setDownloadingTaskId(task.id);
     try {
       await saveGenerationImageFile({
-        imageUrl: image.assetUrl,
-        defaultName: image.fileName || FALLBACK_DOWNLOAD_NAME,
+        imageUrl: target.imageUrl,
+        defaultName: target.fileName,
         directory: getActiveForartConfig()?.fileDownloadPath,
         t,
       });

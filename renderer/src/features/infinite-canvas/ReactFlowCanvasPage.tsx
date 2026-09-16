@@ -11,14 +11,15 @@ import {
   ReactFlow,
   ReactFlowProvider,
   SelectionMode,
+  applyNodeChanges,
   useEdgesState,
-  useNodesState,
   useReactFlow,
   useStore,
   useViewport,
   type Connection,
   type EdgeMouseHandler,
   type IsValidConnection,
+  type NodeChange,
   type NodeTypes,
   type OnConnectEnd,
   type OnConnectStart,
@@ -50,6 +51,8 @@ import { useNativeCanvasInteractionStore } from "./canvasInteractionStore";
 import { CanvasFloatingPanel } from "./components/CanvasFloatingPanel";
 import { CanvasSaveStatusIndicator } from "./components/CanvasSaveStatusIndicator";
 import { applyNativeNodeDataPatch } from "./applyNativeNodeDataPatch";
+import { sameCanvasNodeRuntime } from "./canvasNodeChanges";
+import { withActionFissionSelection } from "./action-fission/actionFissionSelection";
 import { applyCanvasNodeThumbnail, collectMissingCanvasThumbnailTargets } from "./canvasThumbnails";
 import {
   cloneNativeCanvasNodeData,
@@ -88,8 +91,9 @@ import {
   partitionGenerationStopTasks,
   requiresGenerationStopConfirmation,
 } from "./generation/generationTaskCache";
-import { downloadGenerationResult, FALLBACK_DOWNLOAD_NAME, saveGenerationImageFile } from "./generation/generationDownload";
+import { downloadGenerationResult, saveGenerationImageFile } from "./generation/generationDownload";
 import { actionFissionDownloadTarget } from "./generation/generationDownloadTarget";
+import { derivedAssetName, storedImageDownloadTarget, type DerivedAssetKind } from "./assetNaming";
 import {
   beginInfiniteCanvasHistoryGesture,
   commitInfiniteCanvasHistoryGesture,
@@ -388,16 +392,6 @@ const HISTORY_REBASED_NODE_DATA_FIELDS: (keyof NativeCanvasNode["data"])[] = [
   "assetLoadError",
 ];
 
-const ACTION_FISSION_SELECTION_FIELDS = [
-  "selectedCategoryGroupId",
-  "selectedActionId",
-  "selectedActionName",
-  "selectedActionPrompt",
-  "selectedActionTags",
-  "selectedActionAssetUrl",
-  "selectedActionThumbUrl",
-] as const;
-
 function sameActionFissionConfiguration(left: ActionFissionRow, right: ActionFissionRow) {
   return JSON.stringify(left.categoryGroups || []) === JSON.stringify(right.categoryGroups || []);
 }
@@ -431,6 +425,17 @@ function applyRuntimeNodeDataPatch(
   return next;
 }
 
+/** Shallow data comparison used to keep no-op silent patches from republishing nodes. */
+function sameNodeData(a: NativeCanvasNode["data"], b: NativeCanvasNode["data"]) {
+  const keys = Object.keys(a) as (keyof NativeCanvasNode["data"])[];
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => Object.is(a[key], b[key]));
+}
+
+function sameNodeGeometry(a: NativeCanvasNode, b: NativeCanvasNode) {
+  return a.style === b.style && a.position === b.position;
+}
+
 function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onInteractionChange, onSnapshotChange, onViewportChange, onSave, readOnly }: {
   canvasId: string;
   fileDownloadPath?: string;
@@ -445,7 +450,22 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
   const { settings, updateSettings } = useInfiniteCanvasSettings();
   const { connectionsVisible, minimapOpen, snapToGrid } = settings;
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState<NativeCanvasNode>(initialSnapshot.nodes);
+  const [nodes, setNodes] = useState<NativeCanvasNode[]>(initialSnapshot.nodes);
+  const onNodesChange = useCallback((changes: NodeChange<NativeCanvasNode>[]) => {
+    setNodes((current) => {
+      const next = applyNodeChanges(changes, current);
+      // Drop change batches that did not actually change anything: republishing an
+      // identical array re-renders the whole canvas and can sustain a measurement loop.
+      const meaningful = changes.some((change) => {
+        if (change.type === "add" || change.type === "remove" || change.type === "replace") return true;
+        if (!("id" in change) || !change.id) return true;
+        const before = current.find((node) => node.id === change.id);
+        const after = next.find((node) => node.id === change.id);
+        return !before || !after || !sameCanvasNodeRuntime(before, after);
+      });
+      return meaningful ? next : current;
+    });
+  }, []);
   const [edges, setEdges, onEdgesChange] = useEdgesState<NativeCanvasEdge>(initialSnapshot.edges);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
@@ -701,6 +721,24 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     setCanvasInteraction("selection", false);
   }, [endSelectionGesture, getNodes, setCanvasInteraction, setNodes]);
 
+  // Selection-derived interaction state (sole selected node, toolbar target) is derived
+  // from our own node state instead of React Flow's onSelectionChange effect. React Flow
+  // runs that callback from an effect whose dependency array contains the callback itself
+  // plus its own selection snapshot, so writing to the interaction store from inside it fed
+  // straight back into React's update loop ("Maximum update depth exceeded", reproducible
+  // right after a multi-selection collapses into the new group node). Deriving it from
+  // `nodes` keeps the write on our own update path, where it converges.
+  useEffect(() => {
+    syncSelection(nodes.filter((node) => node.selected).map((node) => node.id));
+  }, [nodes, syncSelection]);
+
+  const handleSelectionChange = useCallback(({ edges: selectedEdges }: {
+    nodes: NativeCanvasNode[];
+    edges: NativeCanvasEdge[];
+  }) => {
+    setEdgeToolbarPoint((current) => current && selectedEdges.some((edge) => edge.id === current.edgeId) ? current : null);
+  }, []);
+
   const addNode = useCallback((kind: NativeCanvasNodeKind, x: number, y: number, data?: Partial<NativeCanvasNode["data"]>) => {
     const definition = NATIVE_CANVAS_NODE_DEFINITIONS[kind];
     const rememberedData = rememberedGenerationNodeData(kind);
@@ -925,7 +963,14 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     })();
   }, [setNodes]);
 
-  const createDerivedAssetNode = useCallback((sourceNodeId: string, asset: CanvasStoredAsset, label: string, assetType: "image" | "video" | "audio" = "image") => {
+  // 派生节点统一入口：命名由 assetNaming.derivedAssetName 统一给出（Crop-/Matting-/Frame-…），
+  // 调用方只需要说明这是什么派生（kind）和显示标签（label），不需要自己拼文件名。
+  const createDerivedAssetNode = useCallback((sourceNodeId: string, asset: CanvasStoredAsset, options: {
+    kind: DerivedAssetKind;
+    label: string;
+    assetType?: "image" | "video" | "audio";
+  }) => {
+    const { kind, label, assetType = "image" } = options;
     const source = getNodes().find((node) => node.id === sourceNodeId);
     if (!source || source.data.kind !== "assetLoader" || !asset?.url) return;
     const width = Math.max(1, Number(asset.width || 0));
@@ -940,7 +985,7 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     }, {
       label,
       assetUrl: asset.url,
-      assetFileName: asset.fileName || label,
+      assetFileName: derivedAssetName(kind, source.data.assetFileName || source.data.label),
       assetThumbUrl: asset.thumbUrl || undefined,
       assetType,
       assetMimeType: assetType === "image" ? "image/png" : undefined,
@@ -982,7 +1027,10 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
       defaultName: node.data.label || "cropped-image.png",
     });
     if (!imageThumbnailMountedRef.current || imageMutationVersionRef.current.get(nodeId) !== version) return;
-    createDerivedAssetNode(nodeId, result, `${String(node.data.label || t("infiniteCanvas:assetNode"))}-cropped`, "image");
+    createDerivedAssetNode(nodeId, result, {
+      kind: "crop",
+      label: `${String(node.data.label || t("infiniteCanvas:assetNode"))}-cropped`,
+    });
   }, [createDerivedAssetNode, getNodes, t]);
 
   const patchNodeData = useCallback((nodeId: string, patch: Partial<NativeCanvasNode["data"]>) => {
@@ -1006,12 +1054,30 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     }
   }, []);
 
+  // A silent patch that resolves to the same data must not publish a new node array:
+  // node-level effects re-apply their values on every render, and republishing nodes
+  // there re-renders the canvas, which lets React run away until it aborts with
+  // "Maximum update depth exceeded".
+  const applySilentNodePatch = useCallback((nodeId: string, transform: (node: NativeCanvasNode) => NativeCanvasNode) => {
+    setNodes((current) => {
+      let changed = false;
+      const next = current.map((node) => {
+        if (node.id !== nodeId) return node;
+        const patched = transform(node);
+        if (patched === node || (sameNodeData(node.data, patched.data) && sameNodeGeometry(node, patched))) return node;
+        changed = true;
+        return patched;
+      });
+      return changed ? next : current;
+    });
+  }, [setNodes]);
+
   const patchNodeDataSilently = useCallback((nodeId: string, patch: Partial<NativeCanvasNode["data"]>) => {
     const transformCurrent = (node: NativeCanvasNode) => applyNativeNodeDataPatch(node, patch);
     const transformHistory = (node: NativeCanvasNode) => applyRuntimeNodeDataPatch(node, patch);
     rebaseNode(nodeId, transformCurrent, transformHistory);
-    setNodes((current) => current.map((node) => node.id === nodeId ? transformCurrent(node) : node));
-  }, [rebaseNode, setNodes]);
+    applySilentNodePatch(nodeId, transformCurrent);
+  }, [applySilentNodePatch, rebaseNode]);
 
   const patchBatchImageGeneratorItemSilently = useCallback((nodeId: string, itemId: string, itemPatch: Partial<import("./nativeCanvas").BatchImageGeneratorItem>) => {
     const transform = (node: NativeCanvasNode) => {
@@ -1025,26 +1091,39 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
       });
     };
     rebaseNode(nodeId, transform, transform);
-    setNodes((current) => current.map((node) => node.id === nodeId ? transform(node) : node));
-  }, [rebaseNode, setNodes]);
+    applySilentNodePatch(nodeId, transform);
+  }, [applySilentNodePatch, rebaseNode]);
 
   const patchActionFissionSelectionSilently = useCallback((
     nodeId: string,
     actionFission: NonNullable<NativeCanvasNode["data"]["actionFission"]>,
   ) => {
-    const transformCurrent = (node: NativeCanvasNode) => applyNativeNodeDataPatch(node, { actionFission });
     const selectedRows = new Map(actionFission.rows.map((row) => [row.id, row]));
+    // Current state: copy the selection fields that actually differ. Rows that already
+    // match keep their identity, so re-applying the same selection publishes nothing.
+    const transformCurrent = (node: NativeCanvasNode) => {
+      const current = node.data.kind === "actionFission" ? node.data.actionFission : undefined;
+      if (!current) return node;
+      const rows = current.rows.map((row) => (
+        selectedRows.has(row.id) ? withActionFissionSelection(row, selectedRows.get(row.id)!) : row
+      ));
+      if (rows.every((row, index) => row === current.rows[index])) return node;
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          actionFission: { ...current, rows },
+        },
+      };
+    };
+    // History keeps the configuration-rebased variant: undo/redo restores the row's
+    // configuration, and the selection overlay is re-applied on top of it.
     const transformHistory = (node: NativeCanvasNode) => {
       if (node.data.kind !== "actionFission" || !node.data.actionFission) return node;
       const rows = node.data.actionFission.rows.map((row) => {
         const selectedRow = selectedRows.get(row.id);
         if (!selectedRow || !sameActionFissionConfiguration(row, selectedRow)) return row;
-        const nextRow = { ...row } as ActionFissionRow & Record<string, unknown>;
-        const selectedRecord = selectedRow as ActionFissionRow & Record<string, unknown>;
-        ACTION_FISSION_SELECTION_FIELDS.forEach((field) => {
-          (nextRow as Record<string, unknown>)[field] = structuredClone(selectedRecord[field]);
-        });
-        return nextRow;
+        return withActionFissionSelection(row, selectedRow);
       });
       return {
         ...node,
@@ -1055,14 +1134,14 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
       };
     };
     rebaseNode(nodeId, transformCurrent, transformHistory);
-    setNodes((current) => current.map((node) => node.id === nodeId ? transformCurrent(node) : node));
-  }, [rebaseNode, setNodes]);
+    applySilentNodePatch(nodeId, transformCurrent);
+  }, [applySilentNodePatch, rebaseNode]);
 
   const patchImageNodeThumbnail = useCallback((nodeId: string, sourceUrl: string, thumbUrl: string) => {
     const transform = (node: NativeCanvasNode) => applyCanvasNodeThumbnail([node], nodeId, sourceUrl, thumbUrl)[0];
     rebaseNode(nodeId, transform);
-    setNodes((current) => current.map((node) => node.id === nodeId ? transform(node) : node));
-  }, [rebaseNode, setNodes]);
+    applySilentNodePatch(nodeId, transform);
+  }, [applySilentNodePatch, rebaseNode]);
 
   useEffect(() => {
     const ensureThumbnail = window.easyTool?.ensureCanvasAssetThumbnail;
@@ -1237,12 +1316,12 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     const node = nodes.find((item) => item.id === nodeId);
     if (!node) return;
     if (node.data.kind === "assetLoader") {
-      const image = nativeCanvasNodePrimaryImage(node.data);
-      const imageUrl = String(image?.localUrl || image?.url || "");
-      if (!image || !imageUrl) return;
+      // 素材节点下载的就是“库里那份文件”：沿用它在库中的名字和格式。
+      const target = storedImageDownloadTarget(nativeCanvasNodePrimaryImage(node.data));
+      if (!target) return;
       await saveGenerationImageFile({
-        imageUrl,
-        defaultName: image.fileName || FALLBACK_DOWNLOAD_NAME,
+        imageUrl: target.imageUrl,
+        defaultName: target.fileName,
         convertToPng: false,
         directory: fileDownloadPath,
         t,
@@ -1252,27 +1331,26 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
 
     if (node.data.kind === "batchImageGenerator") {
       const item = node.data.batchImageGenerator?.items?.[imageIndex];
-      const imageUrl = String(item?.resultUrl || "");
-      if (!imageUrl) return;
-      await saveGenerationImageFile({ imageUrl, defaultName: item?.sourceFileName || FALLBACK_DOWNLOAD_NAME, convertToPng: false, directory: fileDownloadPath, t });
+      // 批量结果的下载名同样用回传名，不再回退到上传时的原图名。
+      const target = storedImageDownloadTarget(item && { localUrl: item.resultUrl, fileName: item.resultFileName });
+      if (!target) return;
+      await saveGenerationImageFile({ imageUrl: target.imageUrl, defaultName: target.fileName, directory: fileDownloadPath, t });
       const latestNode = nodesRef.current.find((candidate) => candidate.id === nodeId && candidate.data.kind === "batchImageGenerator");
       const latestItems = latestNode?.data.batchImageGenerator?.items || [];
       patchNodeDataSilently(nodeId, { batchImageGenerator: { ...(latestNode?.data.batchImageGenerator || { items: [] }), items: latestItems.map((candidate, index) => index === imageIndex ? { ...candidate, resultDownloadState: "downloaded", resultDownloadedAt: Date.now() } : candidate) } });
       return;
     }
 
-    const images = node?.data.generatedImages || [];
-    const image = images[imageIndex];
-    const imageUrl = String(image?.localUrl || image?.url || "");
-    if (!image || !imageUrl) return;
+    const target = storedImageDownloadTarget((node.data.generatedImages || [])[imageIndex]);
+    if (!target) return;
     const { saved } = await downloadGenerationResult({
-      resolveTarget: () => ({ imageUrl, fileName: image.fileName }),
+      resolveTarget: () => target,
       directory: fileDownloadPath,
     }, t);
     if (!saved) return;
     const latestNode = nodesRef.current.find((item) => item.id === nodeId && item.data.kind === "imageGenerator");
     const latestImages = latestNode?.data.generatedImages || [];
-    const latestIndex = latestImages.findIndex((item) => String(item.localUrl || item.url || "") === imageUrl);
+    const latestIndex = latestImages.findIndex((item) => String(item.localUrl || item.url || "").trim() === target.imageUrl);
     if (latestIndex < 0) return;
     patchNodeDataSilently(nodeId, {
       generatedImages: latestImages.map((item, index) => index === latestIndex
@@ -1984,10 +2062,7 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
               onNodesChange={onNodesChange}
               onNodesDelete={readOnly ? undefined : stopDeletedNodeTasks}
               onEdgesChange={onEdgesChange}
-              onSelectionChange={({ nodes: selectedNodes, edges: selectedEdges }) => {
-                syncSelection(selectedNodes.map((node) => node.id));
-                setEdgeToolbarPoint((current) => current && selectedEdges.some((edge) => edge.id === current.edgeId) ? current : null);
-              }}
+              onSelectionChange={handleSelectionChange}
               onEdgeMouseMove={trackSelectedEdge}
               onEdgeMouseLeave={leaveSelectedEdge}
               isValidConnection={validateConnection}

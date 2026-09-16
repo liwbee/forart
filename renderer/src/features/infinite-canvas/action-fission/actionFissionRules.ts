@@ -86,6 +86,31 @@ export function randomizeActionFissionRows(
   candidatesByRowId: ReadonlyMap<string, readonly ActionFissionCategoryCandidates[]>,
   options: RandomizeRowsOptions = {},
 ) {
+  return pickActionFissionRows(rows, candidatesByRowId, options);
+}
+
+/**
+ * Resolve rows that are waiting for an automatic action assignment.
+ *
+ * Returns `null` when the library cannot fill any of the requested rows, so callers
+ * that react to this by writing node data can leave the canvas untouched instead of
+ * republishing nodes on every render (which lets React run away until it aborts with
+ * "Maximum update depth exceeded").
+ */
+export function assignPendingActionFissionRows(
+  rows: readonly ActionFissionRow[],
+  candidatesByRowId: ReadonlyMap<string, readonly ActionFissionCategoryCandidates[]>,
+  rowIds: ReadonlySet<string>,
+): ActionFissionRow[] | null {
+  const next = pickActionFissionRows(rows, candidatesByRowId, { rowIds });
+  return next.some((row, index) => row !== rows[index]) ? next : null;
+}
+
+function pickActionFissionRows(
+  rows: readonly ActionFissionRow[],
+  candidatesByRowId: ReadonlyMap<string, readonly ActionFissionCategoryCandidates[]>,
+  options: RandomizeRowsOptions = {},
+) {
   const random = options.random || Math.random;
   const candidateCount = (rowId: string) => new Set(
     (candidatesByRowId.get(rowId) || []).flatMap(({ actions }) => actions).map((action) => action.id),

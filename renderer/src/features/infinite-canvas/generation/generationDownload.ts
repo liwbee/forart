@@ -2,23 +2,25 @@ import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import type { GenerationTaskDto } from "../../../app/appConfig";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
+import { FALLBACK_DOWNLOAD_NAME } from "../assetNaming";
 import { loadGenerationTasks } from "./generationTaskCache";
 
-// 文件名在生成结果落库时由主进程 generation-naming.cjs 一次定死
-// （平台-模型-生成时刻时间戳，多图追加序号）；下载侧直接使用现成文件名，
-// 同名冲突由保存层自动加序号去重。
-export const FALLBACK_DOWNLOAD_NAME = "generated-image.png";
-
-// 生成结果保存层：easyTool.saveResult 优先，浏览器 <a download> 兜底。
-// 三个消费方（画布节点下载、动作裂变行下载、任务中心下载）共用。
+// 文件名在结果落库时由主进程 generation-naming.cjs 一次定死
+// （生成结果：平台-模型-生成时刻时间戳，多图追加序号；派生资产：Crop-/Matting- 等前缀）；
+// 下载侧直接使用资产在库中的名字，同名冲突由保存层自动加序号去重。
+// 新增节点只要把结果的 fileName 存进节点数据，就自动获得正确命名，不需要自己拼名字。
+//
+// 结果保存层：easyTool.saveResult 优先，浏览器 <a download> 兜底。
+// 所有下载入口（画布节点、派生节点、动作裂变行、任务中心）共用。
 export async function saveGenerationImageFile(options: {
   imageUrl: string;
-  defaultName: string;
+  defaultName?: string;
   convertToPng?: boolean;
   directory?: string;
   t: TFunction;
 }) {
-  const { imageUrl, defaultName, convertToPng = true, directory, t } = options;
+  const { imageUrl, convertToPng = true, directory, t } = options;
+  const defaultName = String(options.defaultName || "").trim() || FALLBACK_DOWNLOAD_NAME;
   const resolvedUrl = resolveLibraryImageUrl(imageUrl);
   try {
     if (window.easyTool?.saveResult) {
@@ -69,7 +71,7 @@ export async function downloadGenerationResult(plan: GenerationResultDownloadPla
   if (!target || !target.imageUrl) return { task, saved: false };
   const saved = await saveGenerationImageFile({
     imageUrl: target.imageUrl,
-    defaultName: target.fileName?.trim() || FALLBACK_DOWNLOAD_NAME,
+    defaultName: target.fileName,
     convertToPng: plan.convertToPng,
     directory: plan.directory,
     t,

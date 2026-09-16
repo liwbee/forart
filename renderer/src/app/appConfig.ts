@@ -330,7 +330,7 @@ export interface ForartWindowApi {
   minimize: () => Promise<{ ok: boolean }>;
   toggleMaximize: () => Promise<{ ok: boolean; maximized?: boolean }>;
   close: () => Promise<{ ok: boolean }>;
-  openOfficialWebsite: (providerId: "apimart" | "libtv" | "tudou-api") => Promise<{ ok: boolean }>;
+  openOfficialWebsite: (providerId: "apimart" | "libtv") => Promise<{ ok: boolean }>;
   onMaximizedChanged: (callback: (maximized: boolean) => void) => () => void;
 }
 

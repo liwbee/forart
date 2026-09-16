@@ -11,7 +11,7 @@ test("adds recommended providers on demand from an initially empty list", async 
 
   await recommendedButton.click();
   const recommendedCards = page.locator("[data-recommended-provider-id]");
-  await expect(recommendedCards).toHaveCount(3);
+  await expect(recommendedCards).toHaveCount(2);
   const firstCardBounds = await recommendedCards.nth(0).boundingBox();
   const secondCardBounds = await recommendedCards.nth(1).boundingBox();
   expect(firstCardBounds).not.toBeNull();
@@ -31,38 +31,13 @@ test("adds recommended providers on demand from an initially empty list", async 
   await libtvCard.getByRole("button", { name: /添加|Add/ }).click();
   await expect(page.locator('[data-sidebar-item-id="libtv"]')).toBeVisible();
   await expect(libtvCard.getByRole("button", { name: /添加|Add/ })).toBeEnabled();
-  const tudouCard = page.locator('[data-recommended-provider-id="tudou-api"]');
-  await tudouCard.getByRole("button", { name: /打开 土豆API 官网|Open the Tudou API website/ }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-opened-provider-website", "tudou-api");
-  await tudouCard.getByRole("button", { name: /添加|Add/ }).click();
-  await expect(page.locator('[data-sidebar-item-id="tudou-api"]')).toBeVisible();
-  await expect(page.locator('[data-sidebar-item-id="tudou-api"]')).toContainText("Potato");
-  await expect(tudouCard.getByRole("button", { name: /添加|Add/ })).toBeEnabled();
-  await expect(page.locator("html")).toHaveAttribute("data-provider-order", "apimart,libtv,tudou-api");
-
-  await page.locator('[data-sidebar-item-id="tudou-api"]').click();
-  await page.getByRole("tab", { name: /图像|Image/ }).click();
-  const tudouModelRows = page.locator(".settings-api-model-row--catalog");
-  const tudouModelToggles = tudouModelRows.locator('[data-slot="checkbox"]');
-  await expect(tudouModelRows).toHaveCount(8);
-  await expect(tudouModelToggles).toHaveCount(8);
-  for (let index = 0; index < 8; index += 1) {
-    await expect(tudouModelToggles.nth(index)).toHaveAttribute("data-state", "unchecked");
-  }
-  await tudouModelToggles.first().click();
-  await expect(tudouModelToggles.first()).toHaveAttribute("data-state", "checked");
+  await expect(page.locator("html")).toHaveAttribute("data-provider-order", "apimart,libtv");
 
   await page.locator('[data-sidebar-item-id="apimart"]').click();
   await page.getByRole("button", { name: /移除|Remove/ }).click();
   await page.getByRole("button", { name: /确认移除|Confirm removal/ }).click();
   await expect(page.locator('[data-sidebar-item-id="apimart"]')).toHaveCount(0);
   await expect(apimartCard.getByRole("button", { name: /添加|Add/ })).toBeEnabled();
-
-  await page.locator('[data-sidebar-item-id="tudou-api"]').click();
-  await page.getByRole("button", { name: /移除|Remove/ }).click();
-  await page.getByRole("button", { name: /确认移除|Confirm removal/ }).click();
-  await expect(page.locator('[data-sidebar-item-id="tudou-api"]')).toHaveCount(0);
-  await expect(tudouCard.getByRole("button", { name: /添加|Add/ })).toBeEnabled();
 
   await page.locator('[data-sidebar-item-id="libtv"]').click();
   await expect(page.locator('[data-libtv-status-loading="install"]')).toBeVisible();
@@ -85,13 +60,13 @@ test("allows adding the same recommended provider more than once", async ({ page
   await page.goto("http://127.0.0.1:6981/tests/fixtures/api-settings-recommended-providers.html");
   await page.getByRole("button", { name: /推荐平台|Recommended providers/ }).click();
 
-  const tudouCard = page.locator('[data-recommended-provider-id="tudou-api"]');
-  const add = tudouCard.getByRole("button", { name: /添加|Add/ });
+  const apimartCard = page.locator('[data-recommended-provider-id="apimart"]');
+  const add = apimartCard.getByRole("button", { name: /添加|Add/ });
   await add.click();
   await add.click();
 
-  await expect(page.locator('[data-sidebar-item-id="tudou-api"]')).toHaveCount(1);
-  await expect(page.locator('[data-sidebar-item-id="tudou-api-2"]')).toHaveCount(1);
+  await expect(page.locator('[data-sidebar-item-id="apimart"]')).toHaveCount(1);
+  await expect(page.locator('[data-sidebar-item-id="apimart-2"]')).toHaveCount(1);
   await expect(add).toBeEnabled();
   await expect(add).toHaveText(/添加|Add/);
 });

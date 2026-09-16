@@ -1482,23 +1482,20 @@ body {
   display: block;
 }
 
-.settings-api-provider-logo--apimart,
-.settings-api-provider-logo--tudou {
+.settings-api-provider-logo--apimart {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
 }
 
-.settings-api-provider-logo.settings-api-provider-logo--apimart svg,
-.settings-api-provider-logo.settings-api-provider-logo--tudou svg {
+.settings-api-provider-logo.settings-api-provider-logo--apimart svg {
   width: 24px;
   height: 24px;
   flex: 0 0 24px;
 }
 
-.settings-api-provider-logo--apimart span,
-.settings-api-provider-logo--tudou span {
+.settings-api-provider-logo--apimart span {
   color: inherit;
   font-size: 20px;
   font-weight: var(--font-weight-bold);
@@ -1543,19 +1540,16 @@ body {
   color: currentColor;
 }
 
-.settings-api-recommended-card-logo[data-provider="apimart"],
-.settings-api-recommended-card-logo[data-provider="tudou-api"] {
+.settings-api-recommended-card-logo[data-provider="apimart"] {
   gap: var(--space-2);
 }
 
-.settings-api-recommended-card-logo[data-provider="apimart"] svg,
-.settings-api-recommended-card-logo[data-provider="tudou-api"] svg {
+.settings-api-recommended-card-logo[data-provider="apimart"] svg {
   width: 28px;
   height: 28px;
 }
 
-.settings-api-recommended-card-logo[data-provider="apimart"] > span:not(.sr-only),
-.settings-api-recommended-card-logo[data-provider="tudou-api"] > span:not(.sr-only) {
+.settings-api-recommended-card-logo[data-provider="apimart"] > span:not(.sr-only) {
   font-size: 20px;
   font-weight: var(--font-weight-bold);
   letter-spacing: 0;
@@ -2171,14 +2165,6 @@ body {
   grid-template-columns: 28px minmax(0, 1fr) minmax(220px, 0.34fr) 40px;
 }
 
-.settings-api-model-row--catalog.has-rule {
-  grid-template-columns: 28px 24px minmax(0, 1fr) minmax(220px, 0.34fr);
-}
-
-.settings-api-model-row--catalog.has-rule.is-custom {
-  grid-template-columns: 28px 24px minmax(0, 1fr) minmax(220px, 0.34fr) 40px;
-}
-
 .settings-api-model-row--draft {
   grid-template-columns: 28px minmax(0, 1fr) 32px 32px;
   border-style: dashed;
@@ -2186,14 +2172,6 @@ body {
 
 .settings-api-model-row--draft.has-rule {
   grid-template-columns: 28px minmax(0, 1fr) minmax(220px, 0.34fr) 32px 32px;
-}
-
-.settings-api-model-row--catalog[data-enabled="false"] {
-  opacity: 0.64;
-}
-
-.settings-api-model-row--catalog > [data-slot="checkbox"] {
-  justify-self: center;
 }
 
 .settings-api-model-drag-handle {
@@ -2282,8 +2260,7 @@ body {
 }
 
 .settings-api-model-row--draft > [data-slot="button"],
-.settings-api-model-row--draft.has-rule > [data-slot="button"],
-.settings-api-model-row--catalog.has-rule.is-custom > [data-slot="button"] {
+.settings-api-model-row--draft.has-rule > [data-slot="button"] {
   grid-column: auto;
 }
 

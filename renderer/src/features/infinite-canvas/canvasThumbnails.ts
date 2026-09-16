@@ -6,11 +6,16 @@ export interface CanvasThumbnailTarget {
   sourceUrl: string;
 }
 
-/** Prefer the derived thumbnail, but allow high-zoom canvas views to request the original. */
-export function canvasPreviewSourceUrl(originalUrl: unknown, thumbnailUrl: unknown, preferOriginal = false): string {
+/**
+ * Canvas previews always render the derived thumbnail and only fall back to the
+ * original when no thumbnail exists. Loading full-resolution originals into the
+ * canvas keeps hundreds of megabytes of decoded image data alive in the
+ * renderer, which never comes back until the window is reloaded.
+ */
+export function canvasPreviewSourceUrl(originalUrl: unknown, thumbnailUrl: unknown): string {
   const original = String(originalUrl || "").trim();
   const thumbnail = String(thumbnailUrl || "").trim();
-  return preferOriginal ? (original || thumbnail) : (thumbnail || original);
+  return thumbnail || original;
 }
 
 export function collectMissingCanvasThumbnailTargets(nodes: NativeCanvasNode[]): CanvasThumbnailTarget[] {

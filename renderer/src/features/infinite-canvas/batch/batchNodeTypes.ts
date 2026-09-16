@@ -4,6 +4,9 @@ export type BatchItemStatus = "pending" | "queued" | "running" | "completed" | "
 /** Stable prompt-reference id for the per-item source image in batch generation. */
 export const BATCH_TASK_REFERENCE_EDGE_ID = "batch-task-reference";
 
+/** Maximum item count a batch-style node accepts (batch image generation and action fission). */
+export const MAX_BATCH_NODE_ITEMS = 50;
+
 export interface BatchItemResult {
   url?: string;
   thumbUrl?: string;

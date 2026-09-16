@@ -43,8 +43,8 @@ function createRunner(fetch, savedAssets) {
       canvasStore: { setGenerationTaskAnchor() {} },
       generationTaskStore,
       // 生产环境由 configStore 解析 provider（密钥不跨进程）；测试用替身返回固定配置。
-      resolveProvider: (providerId) => String(providerId) === 'ai-tudou'
-        ? { id: 'ai-tudou', baseUrl: 'https://api.ai-tudou.net', apiKey: 'secret-key', protocol: 'gemini' }
+      resolveProvider: (providerId) => String(providerId) === 'gemini-relay'
+        ? { id: 'gemini-relay', baseUrl: 'https://gemini.example.com', apiKey: 'secret-key', protocol: 'gemini' }
         : {},
       resultCommitter: { commit() {} },
     }),
@@ -55,10 +55,10 @@ async function runGeminiTask(runner, generationTaskStore, overrides = {}) {
   const task = await runner.startTask({
     canvasId: 'canvas-gemini',
     target: { type: 'imageGenerator', nodeId: 'node-gemini' },
-    providerId: 'ai-tudou',
+    providerId: 'gemini-relay',
     provider: {
-      id: 'ai-tudou',
-      baseUrl: 'https://api.ai-tudou.net',
+      id: 'gemini-relay',
+      baseUrl: 'https://gemini.example.com',
       apiKey: 'secret-key',
       protocol: 'gemini',
     },
@@ -76,7 +76,7 @@ async function runGeminiTask(runner, generationTaskStore, overrides = {}) {
   return generationTaskStore.getTask(task.id);
 }
 
-test('AI-Tudou Gemini requests use Bearer auth and place reference images before the prompt', async () => {
+test('Gemini-native requests use Bearer auth and place reference images before the prompt', async () => {
   const savedAssets = [];
   let request;
   const { runner, generationTaskStore } = createRunner(async (url, init) => {
@@ -89,7 +89,7 @@ test('AI-Tudou Gemini requests use Bearer auth and place reference images before
   const task = await runGeminiTask(runner, generationTaskStore);
 
   assert.equal(task.status, 'succeeded', task.error);
-  assert.equal(request.url, 'https://api.ai-tudou.net/v1beta/models/gemini-3-pro-image-preview:generateContent');
+  assert.equal(request.url, 'https://gemini.example.com/v1beta/models/gemini-3-pro-image-preview:generateContent');
   assert.equal(request.init.headers.Authorization, 'Bearer secret-key');
   assert.equal(request.init.headers['x-goog-api-key'], undefined);
   assert.deepEqual(request.body.contents[0].parts, [
@@ -104,7 +104,7 @@ test('AI-Tudou Gemini requests use Bearer auth and place reference images before
   assert.equal(savedAssets.length, 1);
 });
 
-test('AI-Tudou Gemini responses skip thoughts and parse Markdown and inline base64 images', async () => {
+test('Gemini-native responses skip thoughts and parse Markdown and inline base64 images', async () => {
   const savedAssets = [];
   const { runner, generationTaskStore } = createRunner(async () => Response.json({
     candidates: [{
@@ -128,7 +128,7 @@ test('AI-Tudou Gemini responses skip thoughts and parse Markdown and inline base
   assert.equal(task.result.results.length, 2);
 });
 
-test('AI-Tudou Gemini progress advances through real request phases', async () => {
+test('Gemini-native progress advances through real request phases', async () => {
   const savedAssets = [];
   const { runner, generationTaskStore, taskUpdates } = createRunner(async (url) => {
     if (String(url) === 'https://assets.example.com/reference.jpg') {

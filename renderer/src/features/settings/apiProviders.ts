@@ -3,7 +3,6 @@ export type ApiModelKind = "image" | "chat" | "video";
 export type ApiProviderOrderItem =
   | { type: "provider"; id: string; provider: ApiProvider }
   | { type: "apimart"; id: "apimart"; provider: ApiProvider }
-  | { type: "tudou"; id: "tudou-api"; provider: ApiProvider }
   | { type: "libtv"; id: "libtv" };
 
 interface ApiModelAliases {
@@ -14,10 +13,6 @@ interface ApiModelAliases {
 
 interface ApiModelRules {
   image: Record<string, string>;
-}
-
-interface ApiModelCatalogOrder {
-  image: string[];
 }
 
 export interface ApiProvider {
@@ -36,23 +31,10 @@ export interface ApiProvider {
   videoModels: string[];
   modelAliases: ApiModelAliases;
   modelRules: ApiModelRules;
-  modelCatalogOrder?: ApiModelCatalogOrder;
 }
 
 export const API_PROVIDER_CHANGED_EVENT = "forart-api-providers-changed";
 export const APIMART_PROVIDER_ID = "apimart";
-export const TUDOU_PROVIDER_ID = "tudou-api";
-export const TUDOU_BASE_URL = "https://api.ai-tudou.net/v1";
-export const TUDOU_IMAGE_MODELS = [
-  "gpt-image-2-1k",
-  "gpt-image-2-2k",
-  "gpt-image-2-4k",
-  "gemini-3.1-flash-image-preview",
-  "gemini-3-pro-image-preview",
-  "grok-imagine-image",
-  "grok-imagine-image-pro",
-  "grok-imagine-image-edit",
-] as const;
 export const APIMART_BASE_URLS = [
   "https://api.apimart.ai/v1",
   "https://api.apib.ai/v1",
@@ -162,27 +144,6 @@ export function createApimartProvider(): ApiProvider {
   };
 }
 
-export function createTudouProvider(): ApiProvider {
-  return {
-    id: TUDOU_PROVIDER_ID,
-    name: "土豆API",
-    baseUrl: TUDOU_BASE_URL,
-    apiKey: "",
-    hasApiKey: false,
-    accessKey: "",
-    secretKey: "",
-    protocol: "gemini",
-    imageGenerationEndpoint: "",
-    imageEditEndpoint: "",
-    imageModels: [],
-    chatModels: [],
-    videoModels: [],
-    modelAliases: emptyModelAliases(),
-    modelRules: emptyModelRules(),
-    modelCatalogOrder: { image: [...TUDOU_IMAGE_MODELS] },
-  };
-}
-
 // 编辑草稿的 UI 层输入整形：只做 trim/枚举回退/列表去重。
 // 不做类型探测与合并——那是主进程 normalizeApiSettings 的职责。
 export function coerceApiProviderDraft(input: ApiProvider): ApiProvider {
@@ -258,17 +219,13 @@ export function orderedApiProviderItems(providers: ApiProvider[], providerOrder:
     if (!provider) return items;
     return provider.id === APIMART_PROVIDER_ID
       ? [...items, { type: "apimart", id: APIMART_PROVIDER_ID, provider }]
-      : provider.id === TUDOU_PROVIDER_ID
-        ? [...items, { type: "tudou", id: TUDOU_PROVIDER_ID, provider }]
-        : [...items, { type: "provider", id, provider }];
+      : [...items, { type: "provider", id, provider }];
   }, []);
   providers.forEach((provider) => {
     if (!result.some((item) => item.id === provider.id)) {
       result.push(provider.id === APIMART_PROVIDER_ID
         ? { type: "apimart", id: APIMART_PROVIDER_ID, provider }
-        : provider.id === TUDOU_PROVIDER_ID
-          ? { type: "tudou", id: TUDOU_PROVIDER_ID, provider }
-          : { type: "provider", id: provider.id, provider });
+        : { type: "provider", id: provider.id, provider });
     }
   });
   return result;

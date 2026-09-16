@@ -36,7 +36,6 @@ const {
   canvasPreviewSourceUrl,
   collectMissingCanvasThumbnailTargets,
 } = loadTypeScriptModule(path.join(featureRoot, 'canvasThumbnails.ts'));
-const { nextCanvasOriginalImagePreference } = loadTypeScriptModule(path.join(featureRoot, 'canvasZoomImagePreference.ts'));
 
 function node(id, kind, data = {}) {
   return { id, type: 'canvasNode', position: { x: 0, y: 0 }, data: { kind, label: id, ...data } };
@@ -44,18 +43,10 @@ function node(id, kind, data = {}) {
 
 test('prefers thumbnails and falls back to the original image', () => {
   assert.equal(canvasPreviewSourceUrl('original.png', 'thumb.webp'), 'thumb.webp');
-  assert.equal(canvasPreviewSourceUrl('original.png', 'thumb.webp', true), 'original.png');
-  assert.equal(canvasPreviewSourceUrl('', 'thumb.webp', true), 'thumb.webp');
+  assert.equal(canvasPreviewSourceUrl('', 'thumb.webp'), 'thumb.webp');
   assert.equal(canvasPreviewSourceUrl('small.png', ''), 'small.png');
   assert.equal(canvasPreviewSourceUrl('small.png', undefined), 'small.png');
   assert.equal(canvasPreviewSourceUrl('', ''), '');
-});
-
-test('canvas original-image preference uses a hysteresis band around 400 percent', () => {
-  assert.equal(nextCanvasOriginalImagePreference(false, 4.05), false);
-  assert.equal(nextCanvasOriginalImagePreference(false, 4.11), true);
-  assert.equal(nextCanvasOriginalImagePreference(true, 4.0), true);
-  assert.equal(nextCanvasOriginalImagePreference(true, 3.89), false);
 });
 
 test('collects every missing thumbnail in image and multi-result generator nodes', () => {

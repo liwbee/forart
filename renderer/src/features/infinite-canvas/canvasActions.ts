@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import { i18n } from "../../i18n";
 import type { ImageGenerationRunOptions, NativeCanvasAssetType, NativeCanvasNodeData } from "./nativeCanvas";
+import type { DerivedAssetKind } from "./assetNaming";
 import type {
   ImageGeneratorPromptInput,
   ImageGeneratorReferenceInput,
@@ -14,7 +15,11 @@ export interface NativeCanvasActions {
   redoCanvasHistory: () => void;
   addImageReferenceFiles: (nodeId: string, files: File[]) => Promise<void>;
   cropNodeImage: (nodeId: string, crop: CanvasImageCropRect) => Promise<void>;
-  createDerivedAssetNode: (sourceNodeId: string, asset: CanvasStoredAsset, label: string, assetType?: NativeCanvasAssetType) => void;
+  createDerivedAssetNode: (sourceNodeId: string, asset: CanvasStoredAsset, options: {
+    kind: DerivedAssetKind;
+    label: string;
+    assetType?: NativeCanvasAssetType;
+  }) => void;
   downloadActionFissionResult: (nodeId: string, rowId: string) => Promise<void>;
   downloadNodeImage: (nodeId: string, imageIndex: number) => Promise<void>;
   discardActionFissionRow: (nodeId: string, rowId: string) => Promise<void>;

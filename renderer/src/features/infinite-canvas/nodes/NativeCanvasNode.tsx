@@ -1,5 +1,5 @@
 import { Handle, NodeToolbar, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
-import ImageAiFillIcon from "@iconify-react/ri/image-ai-fill";
+import { ImageAiFillIcon } from "./canvasNodeIcons";
 import { ArrowLeft, Check, ChevronUp, CircleAlert, Copy, Crop, Download, Images, LoaderCircle, Maximize2, Play, Square, Trash2, Upload, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
@@ -8,6 +8,7 @@ import { AppSelect } from "../../../components/AppSelect";
 import { ImageWithFallback } from "../../../components/ImageWithFallback";
 import { Button } from "../../../components/ui/button";
 import { Textarea } from "../../../components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip";
 import { copyText } from "../../../components/ErrorCopyLine";
 import { ImageViewer } from "../../../lib/ImageViewer";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
@@ -27,7 +28,6 @@ import { ActionFissionNodeBody } from "./ActionFissionNodeBody";
 import { BatchImageGeneratorNodeBody } from "./BatchImageGeneratorNodeBody";
 import { AssetUploadPlaceholder } from "./AssetUploadPlaceholder";
 import { canvasPreviewSourceUrl } from "../canvasThumbnails";
-import { useCanvasOriginalImagePreference } from "../canvasZoomImagePreference";
 import { formatGenerationDuration, generationStatusMessage } from "../generation/generationStatus";
 import {
   clearNodeGenerationRuntimeErrors,
@@ -140,6 +140,23 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const [cropAspect, setCropAspect] = useState<ImageCropAspect>("original");
   const [cropSelection, setCropSelection] = useState<CanvasImageCropRect | null>(null);
   const [isCropBusy, setIsCropBusy] = useState(false);
+  const [referenceHintsVisible, setReferenceHintsVisible] = useState(false);
+  useEffect(() => {
+    if (!isBatchLikeNode) return;
+    // The handles are revealed by `.react-flow__node:hover`, so their hints follow
+    // the same boundary: the whole node element, caption, dots and body included.
+    const nodeElement = nodeFrameRef.current?.closest(".react-flow__node");
+    if (!nodeElement) return;
+    const showHints = () => setReferenceHintsVisible(true);
+    const hideHints = () => setReferenceHintsVisible(false);
+    nodeElement.addEventListener("pointerenter", showHints);
+    nodeElement.addEventListener("pointerleave", hideHints);
+    return () => {
+      nodeElement.removeEventListener("pointerenter", showHints);
+      nodeElement.removeEventListener("pointerleave", hideHints);
+      setReferenceHintsVisible(false);
+    };
+  }, [isBatchLikeNode]);
   useEffect(() => {
     const syncExtensionSettings = () => setBackgroundRemovalEnabled(readExtensionSettings().backgroundRemovalEnabled);
     window.addEventListener(EXTENSION_SETTINGS_CHANGED_EVENT, syncExtensionSettings);
@@ -169,12 +186,10 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const annotationFrameStyle = isAnnotationNode
     ? { "--rf-annotation-outline-width": `${(1 / Math.max(zoom, 0.01)).toFixed(2)}px` } as CSSProperties
     : undefined;
-  const preferOriginalImages = useCanvasOriginalImagePreference(zoom);
   const resolvedImageUrl = primaryImageUrl ? resolveLibraryImageUrl(primaryImageUrl) : "";
-  const resolvedThumbnailUrl = primaryImage?.thumbUrl ? resolveLibraryImageUrl(primaryImage.thumbUrl) : "";
-  const previewSourceUrl = canvasPreviewSourceUrl(primaryImageUrl, primaryImage?.thumbUrl, preferOriginalImages);
+  const previewSourceUrl = canvasPreviewSourceUrl(primaryImageUrl, primaryImage?.thumbUrl);
   const resolvedPreviewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
-  const resolvedPreviewFallbackUrl = preferOriginalImages ? (resolvedThumbnailUrl || resolvedImageUrl) : resolvedImageUrl;
+  const resolvedPreviewFallbackUrl = resolvedImageUrl;
   const isAssetLoading = data.kind === "assetLoader" && data.assetLoadState === "processing";
   const assetLoadError = data.kind === "assetLoader" && data.assetLoadState === "error"
     ? String(data.assetLoadError || "")
@@ -355,8 +370,11 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
       if (!source.filePath) throw new Error(t("infiniteCanvas:backgroundRemovalFileMissing"));
       const bytes = await tool.removeImageBackground({ filePath: source.filePath });
       let binary = ""; for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
-      const saved = await tool.saveCanvasAsset({ dataUrl: `data:image/png;base64,${btoa(binary)}`, defaultName: `${String(data.label || "image")}-抠图.png`, kind: "output" });
-      actions.createDerivedAssetNode(id, saved, `${String(data.label || t("infiniteCanvas:assetNode"))}-${t("infiniteCanvas:backgroundRemovalAction")}`, "image");
+      const saved = await tool.saveCanvasAsset({ dataUrl: `data:image/png;base64,${btoa(binary)}`, defaultName: `${String(data.label || "image")}-matting.png`, kind: "output" });
+      actions.createDerivedAssetNode(id, saved, {
+        kind: "matting",
+        label: `${String(data.label || t("infiniteCanvas:assetNode"))}-${t("infiniteCanvas:backgroundRemovalAction")}`,
+      });
       toast.success(t("infiniteCanvas:backgroundRemovalCompleted"));
     } catch (error) {
       toast.error(t("infiniteCanvas:backgroundRemovalFailed", { message: String(error instanceof Error ? error.message : error) }));
@@ -579,22 +597,34 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
 
       {definition.acceptsInput ? isBatchLikeNode ? (
         <>
-          <Handle
-            type="target"
-            position={Position.Left}
-            id="input"
-            style={{ top: "25%" }}
-            aria-label={t("infiniteCanvas:mainReference")}
-            title={t("infiniteCanvas:mainReference")}
-          />
-          <Handle
-            type="target"
-            position={Position.Left}
-            id="additional-reference"
-            style={{ top: "75%" }}
-            aria-label={t("infiniteCanvas:additionalReference")}
-            title={t("infiniteCanvas:additionalReference")}
-          />
+          <Tooltip open={referenceHintsVisible && !dragging}>
+            <TooltipTrigger asChild>
+              <Handle
+                type="target"
+                position={Position.Left}
+                id="input"
+                style={{ top: "25%" }}
+                aria-label={t("infiniteCanvas:mainReference")}
+              />
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              {t("infiniteCanvas:mainReference")}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip open={referenceHintsVisible && !dragging}>
+            <TooltipTrigger asChild>
+              <Handle
+                type="target"
+                position={Position.Left}
+                id="additional-reference"
+                style={{ top: "75%" }}
+                aria-label={t("infiniteCanvas:additionalReference")}
+              />
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              {t("infiniteCanvas:additionalReference")}
+            </TooltipContent>
+          </Tooltip>
         </>
       ) : <Handle type="target" position={Position.Left} id="input" /> : null}
 
@@ -681,7 +711,10 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               thumbUrl={data.assetThumbUrl}
               label={displayLabel}
               className="rf-upload-asset-ready"
-              onCaptureComplete={(asset, mode) => actions.createDerivedAssetNode(id, asset, `${displayLabel}-${mode}-frame`, "image")}
+              onCaptureComplete={(asset, mode) => actions.createDerivedAssetNode(id, asset, {
+                kind: "frame",
+                label: `${displayLabel}-${mode}-frame`,
+              })}
             />
           ) : primaryImageUrl ? (
             data.kind === "assetLoader" && isCropping && resolvedPreviewUrl ? (
@@ -707,10 +740,9 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               >
                 {generatedImages.map((result, index) => {
                   const resultUrl = String(result.localUrl || result.url || "");
-                  const resultThumbUrl = result.thumbUrl ? resolveLibraryImageUrl(result.thumbUrl) : "";
-                  const previewSourceUrl = canvasPreviewSourceUrl(resultUrl, result.thumbUrl, preferOriginalImages);
+                  const previewSourceUrl = canvasPreviewSourceUrl(resultUrl, result.thumbUrl);
                   const previewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
-                  const previewFallbackUrl = preferOriginalImages ? (resultThumbUrl || resolveLibraryImageUrl(resultUrl)) : resolveLibraryImageUrl(resultUrl);
+                  const previewFallbackUrl = resolveLibraryImageUrl(resultUrl);
                   const isPending = result.downloadState !== "downloaded";
                   return (
                     <div

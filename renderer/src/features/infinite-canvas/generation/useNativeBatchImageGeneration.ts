@@ -10,6 +10,7 @@ import {
 } from "./imageGenerationInputs";
 import { buildPromptWithImageReferenceDocument, imagePromptDocumentFromReferenceText } from "./imagePromptReferences";
 import { BATCH_TASK_REFERENCE_EDGE_ID } from "../batch/batchNodeTypes";
+import { batchItemPatchChanges } from "../batch/batchItemPatch";
 import { isGenerationTaskActive, useGenerationTaskCache } from "./generationTaskCache";
 import { activateGenerationHook } from "./generationHookLifecycle";
 import {
@@ -44,6 +45,7 @@ export function useNativeBatchImageGeneration({
   const runControllers = useRef(new Map<string, AbortController>());
   const pendingItemPatches = useRef(new Map<string, Partial<BatchImageGeneratorItem>>());
   const pendingPatchNodeIds = useRef(new Map<string, string>());
+  const watchedTaskIdsRef = useRef(new Set<string>());
   const patchFlushScheduled = useRef(false);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
@@ -79,12 +81,21 @@ export function useNativeBatchImageGeneration({
         const node = nodesRef.current.find((item) => item.id === nodeIdForPatch);
         const state = node?.data.batchImageGenerator;
         if (!state) return;
+        let changed = false;
+        const items = state.items.map((item) => {
+          const patch = byItem.get(item.id);
+          if (!patch || !batchItemPatchChanges(item, patch)) return item;
+          changed = true;
+          return { ...item, ...patch };
+        });
+        // Re-reporting a task result that is already on the item must not republish nodes:
+        // the watcher effect below re-registers on every node change, so an unchanged write
+        // would bounce between the two halves until React aborts.
+        if (!changed) return;
         patchNodeData(nodeIdForPatch, {
           batchImageGenerator: {
             ...state,
-            items: state.items.map((item) => byItem.has(item.id)
-              ? { ...item, ...byItem.get(item.id) }
-              : item),
+            items,
           },
         });
       });
@@ -259,7 +270,14 @@ export function useNativeBatchImageGeneration({
     nodes.forEach((node) => {
       if (node.data.kind !== "batchImageGenerator") return;
       node.data.batchImageGenerator?.items.forEach((item) => {
-        if (item.latestGenerationTaskId) void watchItem(item.latestGenerationTaskId, node.id, item.id);
+        const taskId = String(item.latestGenerationTaskId || "");
+        if (!taskId) return;
+        // A finished task reports its (already applied) result as soon as it is watched
+        // again, so re-registering on every node change created an endless write loop.
+        // Each task is watched once per mounted canvas.
+        if (watchedTaskIdsRef.current.has(taskId)) return;
+        watchedTaskIdsRef.current.add(taskId);
+        void watchItem(taskId, node.id, item.id);
       });
     });
   }, [nodes, watchItem]);

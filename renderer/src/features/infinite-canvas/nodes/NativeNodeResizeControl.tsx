@@ -1,10 +1,10 @@
-import ResizeIcon from "@iconify-react/pajamas/resize";
 import { NodeResizeControl, useReactFlow, useUpdateNodeInternals, type ResizeParams } from "@xyflow/react";
 import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useNativeCanvasActions } from "../canvasActions";
 import { snapResizeDimension } from "../batchNodeSizing";
 import type { NativeCanvasNode, NativeCanvasNodeResizeConfig } from "../nativeCanvas";
+import { ResizeHandleIcon } from "./canvasNodeIcons";
 
 interface NativeNodeResizeControlProps extends NativeCanvasNodeResizeConfig {
   nodeId: string;
@@ -114,7 +114,7 @@ export function NativeNodeResizeControl({
       }}
     >
       <span title={t("infiniteCanvas:dragResize")}>
-        <ResizeIcon aria-hidden="true" />
+        <ResizeHandleIcon aria-hidden="true" />
       </span>
     </NodeResizeControl>
   );

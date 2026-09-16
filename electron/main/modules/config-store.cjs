@@ -3,18 +3,6 @@ const fs = require('fs');
 const { normalizeLibtvMachineId } = require('./libtv-workspace.cjs');
 
 const APIMART_PROVIDER_ID = 'apimart';
-const TUDOU_PROVIDER_ID = 'tudou-api';
-const TUDOU_BASE_URL = 'https://api.ai-tudou.net/v1';
-const TUDOU_IMAGE_MODELS = [
-  'gpt-image-2-1k',
-  'gpt-image-2-2k',
-  'gpt-image-2-4k',
-  'gemini-3.1-flash-image-preview',
-  'gemini-3-pro-image-preview',
-  'grok-imagine-image',
-  'grok-imagine-image-pro',
-  'grok-imagine-image-edit',
-];
 const TASK_HISTORY_RETENTION_DAY_OPTIONS = Object.freeze([1, 3, 7, 15, 30]);
 const DEFAULT_TASK_HISTORY_RETENTION_DAYS = 15;
 const APIMART_BASE_URLS = [
@@ -101,7 +89,6 @@ const normalizeExtensionSettings = normalizeAgentSettings;
 
 function normalizeApiProvider(input = {}, providers = []) {
   if (isApimartProvider(input)) return createApimartProvider(input);
-  if (isTudouProvider(input)) return createTudouProvider(input);
   const name = String(input.name || 'API').trim() || 'API';
   const base = (String(input.id || name || 'custom-api')
     .trim()
@@ -141,19 +128,8 @@ function isApimartProvider(input = {}) {
   return String(input.id || '').trim().toLowerCase() === APIMART_PROVIDER_ID;
 }
 
-function isTudouProvider(input = {}) {
-  return String(input.id || '').trim().toLowerCase() === TUDOU_PROVIDER_ID;
-}
-
 function uniqueStrings(values = []) {
   return [...new Set(values.map((value) => String(value).trim()).filter(Boolean))];
-}
-
-function normalizeModelCatalogOrder(input = {}) {
-  const requested = input && Array.isArray(input.image) ? uniqueStrings(input.image) : [];
-  return {
-    image: [...requested, ...TUDOU_IMAGE_MODELS.filter((model) => !requested.includes(model))],
-  };
 }
 
 function createApimartProvider(input = {}) {
@@ -195,27 +171,6 @@ function mergeApimartProviders(inputs = []) {
       modelRules: { image: { ...result.modelRules.image, ...next.modelRules.image } },
     });
   }, createApimartProvider());
-}
-
-function mergeTudouProviders(inputs = []) {
-  return inputs.reduce((result, input) => {
-    const next = createTudouProvider(input);
-    return createTudouProvider({
-      ...result,
-      apiKey: next.apiKey || result.apiKey,
-      hasApiKey: result.hasApiKey || next.hasApiKey,
-      imageModels: uniqueStrings([...result.imageModels, ...next.imageModels]),
-      chatModels: uniqueStrings([...result.chatModels, ...next.chatModels]),
-      videoModels: uniqueStrings([...result.videoModels, ...next.videoModels]),
-      modelAliases: {
-        image: { ...result.modelAliases.image, ...next.modelAliases.image },
-        chat: { ...result.modelAliases.chat, ...next.modelAliases.chat },
-        video: { ...result.modelAliases.video, ...next.modelAliases.video },
-      },
-      modelRules: { image: { ...result.modelRules.image, ...next.modelRules.image } },
-      modelCatalogOrder: next.modelCatalogOrder,
-    });
-  }, createTudouProvider());
 }
 
 function normalizeAliasBucket(input = {}) {
@@ -263,24 +218,21 @@ function normalizeModelRules(input = {}) {
 function normalizeApiSettings(payload = {}) {
   const rawProviders = Array.isArray(payload.providers) ? payload.providers : [];
   const apimartInputs = rawProviders.filter(isApimartProvider);
-  const tudouInputs = rawProviders.filter(isTudouProvider);
   const apimartSourceIds = new Set(apimartInputs.map((provider) => String(provider.id || '').trim()).filter(Boolean));
-  const tudouSourceIds = new Set(tudouInputs.map((provider) => String(provider.id || '').trim()).filter(Boolean));
   const customProviders = rawProviders
-    .filter((provider) => !isApimartProvider(provider) && !isTudouProvider(provider))
+    .filter((provider) => !isApimartProvider(provider))
     .reduce((result, item) => {
       const provider = normalizeApiProvider(item, result);
       return result.some((current) => current.id === provider.id) ? result : [...result, provider];
     }, []);
   const providers = [
     ...(apimartInputs.length ? [mergeApimartProviders(apimartInputs)] : []),
-    ...(tudouInputs.length ? [mergeTudouProviders(tudouInputs)] : []),
     ...customProviders,
   ];
   const rawDefaultProviderId = String(payload.defaultImageProviderId || '');
   const requestedDefaultProviderId = apimartSourceIds.has(rawDefaultProviderId)
     ? APIMART_PROVIDER_ID
-    : tudouSourceIds.has(rawDefaultProviderId) ? TUDOU_PROVIDER_ID : rawDefaultProviderId;
+    : rawDefaultProviderId;
   const defaultImageProviderId = providers.some((provider) => provider.id === requestedDefaultProviderId)
     ? requestedDefaultProviderId
     : '';
@@ -288,7 +240,7 @@ function normalizeApiSettings(payload = {}) {
   const providerOrder = Array.isArray(payload.providerOrder)
     ? [...new Set(payload.providerOrder.map((id) => {
       const value = String(id);
-      return apimartSourceIds.has(value) ? APIMART_PROVIDER_ID : tudouSourceIds.has(value) ? TUDOU_PROVIDER_ID : value;
+      return apimartSourceIds.has(value) ? APIMART_PROVIDER_ID : value;
     }))].filter((id) => validOrderIds.has(id))
     : [];
   providers.forEach((provider) => {
@@ -303,34 +255,6 @@ function normalizeApiSettings(payload = {}) {
     libtvActionFissionConcurrency: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(requestedLibtvConcurrency)
       ? requestedLibtvConcurrency
       : 1,
-  };
-}
-
-function createTudouProvider(input = {}) {
-  const catalogOrder = normalizeModelCatalogOrder({
-    image: [
-      ...(input.modelCatalogOrder && Array.isArray(input.modelCatalogOrder.image) ? input.modelCatalogOrder.image : []),
-      ...(Array.isArray(input.imageModels) ? input.imageModels : []),
-    ],
-  });
-  const enabledImageModels = new Set(Array.isArray(input.imageModels) ? input.imageModels.map(String) : []);
-  return {
-    id: TUDOU_PROVIDER_ID,
-    name: '土豆API',
-    baseUrl: TUDOU_BASE_URL,
-    apiKey: String(input.apiKey || ''),
-    accessKey: '',
-    secretKey: '',
-    protocol: 'gemini',
-    imageGenerationEndpoint: '',
-    imageEditEndpoint: '',
-    imageModels: catalogOrder.image.filter((model) => enabledImageModels.has(model)),
-    chatModels: Array.isArray(input.chatModels) ? uniqueStrings(input.chatModels) : [],
-    videoModels: Array.isArray(input.videoModels) ? uniqueStrings(input.videoModels) : [],
-    modelAliases: normalizeModelAliases(input.modelAliases),
-    modelRules: normalizeModelRules(input.modelRules),
-    modelCatalogOrder: catalogOrder,
-    hasApiKey: Boolean(input.hasApiKey || String(input.apiKey || '').trim()),
   };
 }
 
@@ -635,5 +559,4 @@ module.exports = {
   DEFAULT_TASK_HISTORY_RETENTION_DAYS,
   TASK_HISTORY_RETENTION_DAY_OPTIONS,
   createConfigStore,
-  TUDOU_IMAGE_MODELS,
 };

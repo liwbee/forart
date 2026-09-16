@@ -61,9 +61,8 @@ test('app window IPC opens only registered provider websites', async () => {
 
   assert.deepEqual(await handlers.get('window:open-official-website')({}, 'apimart'), { ok: true });
   assert.deepEqual(await handlers.get('window:open-official-website')({}, 'libtv'), { ok: true });
-  assert.deepEqual(await handlers.get('window:open-official-website')({}, 'tudou-api'), { ok: true });
   assert.deepEqual(await handlers.get('window:open-official-website')({}, 'unknown'), { ok: false });
-  assert.deepEqual(openedUrls, ['https://apimart.ai/', 'https://www.liblib.tv/', 'https://api.ai-tudou.net/']);
+  assert.deepEqual(openedUrls, ['https://apimart.ai/', 'https://www.liblib.tv/']);
 });
 
 test('app window publishes maximize and restore changes to the renderer', async () => {

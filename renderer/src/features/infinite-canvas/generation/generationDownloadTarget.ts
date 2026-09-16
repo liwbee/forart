@@ -1,5 +1,6 @@
 import type { GenerationTaskDto } from "../../../app/appConfig";
 import type { ActionFissionRow } from "../action-fission/actionFissionTypes";
+import { storedImageDownloadTarget } from "../assetNaming";
 
 export function generationTaskImageAt(task: Pick<GenerationTaskDto, "result"> | undefined, imageIndex: number) {
   const safeIndex = Math.max(0, Math.trunc(Number(imageIndex || 0)));
@@ -14,10 +15,8 @@ export function actionFissionDownloadTarget(
   // The terminal task result is authoritative while the canvas row writeback
   // is catching up. A stale row.resultUrl must not mask a newly generated
   // image that is already visible in the task center.
-  const imageUrl = String(taskImage?.assetUrl || row.resultUrl || "").trim();
-  if (!imageUrl) return null;
-  return {
-    imageUrl,
-    fileName: String(taskImage?.fileName || row.resultFileName || "").trim(),
-  };
+  return storedImageDownloadTarget({
+    localUrl: String(taskImage?.assetUrl || row.resultUrl || ""),
+    fileName: String(taskImage?.fileName || row.resultFileName || ""),
+  });
 }

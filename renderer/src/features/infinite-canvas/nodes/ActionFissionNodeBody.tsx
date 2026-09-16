@@ -27,7 +27,6 @@ import { ImageViewer } from "../../../lib/ImageViewer";
 import { cn } from "../../../lib/utils";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
 import { canvasPreviewSourceUrl } from "../canvasThumbnails";
-import { useCanvasOriginalImagePreference } from "../canvasZoomImagePreference";
 import type { ActionEntry, ActionProject, ActionTag } from "../../action-library/types";
 import {
   addActionFissionRow,
@@ -38,6 +37,7 @@ import {
   actionFissionReferenceImages,
   getActionFissionRunReadiness,
   randomizeActionFissionRows,
+  assignPendingActionFissionRows,
 } from "../action-fission/actionFissionRules";
 import {
   actionFissionRowTaskId,
@@ -151,19 +151,15 @@ function openPreviewFromKeyboard(event: React.KeyboardEvent<HTMLDivElement>, onO
 function ActionPreview({
   row,
   onOpen,
-  preferOriginalImages,
 }: {
   row: ActionFissionRow;
   onOpen: (image: ViewerImage) => void;
-  preferOriginalImages: boolean;
 }) {
   const { t } = useTranslation();
   const originalUrl = row.selectedActionAssetUrl ? resolveLibraryImageUrl(row.selectedActionAssetUrl) : "";
-  const hoverPreviewSourceUrl = canvasPreviewSourceUrl(row.selectedActionAssetUrl, row.selectedActionThumbUrl);
-  const hoverPreviewUrl = hoverPreviewSourceUrl ? resolveLibraryImageUrl(hoverPreviewSourceUrl) : "";
-  const previewSourceUrl = canvasPreviewSourceUrl(row.selectedActionAssetUrl, row.selectedActionThumbUrl, preferOriginalImages);
+  const previewSourceUrl = canvasPreviewSourceUrl(row.selectedActionAssetUrl, row.selectedActionThumbUrl);
   const previewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
-  const previewFallbackUrl = preferOriginalImages ? (hoverPreviewUrl || originalUrl) : originalUrl;
+  const previewFallbackUrl = originalUrl;
   const alt = t("infiniteCanvas:actionFissionActionPreview");
   return (
     <div className={cn("rf-action-fission-action-preview nodrag nopan", originalUrl && "is-viewable")}>
@@ -183,10 +179,10 @@ function ActionPreview({
             {previewUrl ? <ImageWithFallback src={previewUrl} fallbackSrc={previewFallbackUrl} deferSourceChange alt={alt} loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
           </div>
         </HoverCardTrigger>
-        {hoverPreviewUrl || originalUrl || row.selectedActionName || row.selectedActionPrompt ? (
+        {previewUrl || originalUrl || row.selectedActionName || row.selectedActionPrompt ? (
           <HoverCardContent className="rf-action-fission-action-hover-preview" side="top" sideOffset={8}>
-            {hoverPreviewUrl || originalUrl ? <div className="rf-action-fission-action-hover-preview__image">
-              <ImageWithFallback src={hoverPreviewUrl} fallbackSrc={originalUrl} alt={alt} loading="lazy" decoding="async" draggable={false} />
+            {previewUrl || originalUrl ? <div className="rf-action-fission-action-hover-preview__image">
+              <ImageWithFallback src={previewUrl} fallbackSrc={originalUrl} alt={alt} loading="lazy" decoding="async" draggable={false} />
             </div> : null}
             <div className="rf-action-fission-action-hover-preview__text">
               {row.selectedActionName ? <strong title={row.selectedActionName}>{row.selectedActionName}</strong> : null}
@@ -206,7 +202,6 @@ function ResultPreview({
   isDownloadBusy,
   onDownload,
   onOpen,
-  preferOriginalImages,
   showStatusOverlay = false,
   launching,
   now,
@@ -217,7 +212,6 @@ function ResultPreview({
   isDownloadBusy: boolean;
   onDownload: () => void;
   onOpen: (image: ViewerImage) => void;
-  preferOriginalImages: boolean;
   showStatusOverlay?: boolean;
   launching: boolean;
   now: number;
@@ -229,11 +223,9 @@ function ResultPreview({
   const originalUrl = taskImage?.assetUrl || row.resultUrl || "";
   const previewUrl = taskImage?.thumbUrl || row.resultThumbUrl || "";
   const resolvedOriginalUrl = originalUrl ? resolveLibraryImageUrl(originalUrl) : "";
-  const previewSourceUrl = canvasPreviewSourceUrl(originalUrl, previewUrl, preferOriginalImages);
+  const previewSourceUrl = canvasPreviewSourceUrl(originalUrl, previewUrl);
   const resolvedPreviewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
-  const resolvedPreviewFallbackUrl = preferOriginalImages
-    ? (previewUrl ? resolveLibraryImageUrl(previewUrl) : resolvedOriginalUrl)
-    : resolvedOriginalUrl;
+  const resolvedPreviewFallbackUrl = resolvedOriginalUrl;
   const alt = t("infiniteCanvas:actionFissionResultPreview");
   const canDownload = Boolean(resolvedOriginalUrl) && !launching && !isRowRunning(task) && toneForRow(row, task, false, runtimeError) !== "error";
   const isPendingDownload = canDownload && row.resultDownloadState !== "downloaded";
@@ -379,8 +371,6 @@ function ActionFissionNodeToolbar({
 
 export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: ActionFissionNodeBodyProps) {
   const { t } = useTranslation();
-  const zoom = useStore((canvas) => canvas.transform[2]);
-  const preferOriginalImages = useCanvasOriginalImagePreference(zoom);
   const actions = useNativeCanvasActions();
   const { settings, updateSettings } = useInfiniteCanvasSettings();
   const viewerSettings = settings.referenceComparisonViewer;
@@ -534,10 +524,12 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
     ));
     if (libraryFailure || !pendingRows.length) return;
     const pendingRowIds = new Set(pendingRows.map(({ row }) => row.id));
-    setSelectionStateSilently({
-      ...state,
-      rows: randomizeActionFissionRows(state.rows, candidatesByRowId, { rowIds: pendingRowIds }),
-    });
+    // A row whose category filter matches no action in the library can never be filled.
+    // Writing node data anyway republishes the canvas on every render, so only patch when
+    // the library actually assigned something.
+    const nextRows = assignPendingActionFissionRows(state.rows, candidatesByRowId, pendingRowIds);
+    if (!nextRows) return;
+    setSelectionStateSilently({ ...state, rows: nextRows });
   }, [candidatesByRowId, libraryFailure, rowData, setSelectionStateSilently, state]);
 
   const refreshRow = (rowId: string) => {
@@ -720,7 +712,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           <div className="rf-action-fission-grid">
             {rowData.map(({ row, tags, categoryGroups }, index) => (
               <article key={row.id} className="rf-action-fission-grid-card" data-index={String(index + 1).padStart(2, "0")}>
-                <ResultPreview row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} showStatusOverlay isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} preferOriginalImages={preferOriginalImages} />
+                <ResultPreview row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} showStatusOverlay isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} />
                 <RowStatus row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} hasReference={referenceCount > 0} hideTransient />
                 <div className="rf-action-fission-action-stack">
                   {hasAdditionalReferences ? (
@@ -730,7 +722,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
                       onCheckedChange={(checked) => setRowAdditionalReferences(row.id, checked)}
                     />
                   ) : null}
-                  <ActionPreview row={row} onOpen={setViewerImage} preferOriginalImages={preferOriginalImages} />
+                  <ActionPreview row={row} onOpen={setViewerImage} />
                 </div>
                 <ActionRowSummary row={row} projects={projects} tags={tags} />
                 <ButtonGroup className="rf-action-fission-row-actions nodrag">
@@ -746,7 +738,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           <div className="rf-action-fission-list">
             {rowData.map(({ row, tags, categoryGroups }, index) => (
               <article key={row.id} className="rf-action-fission-list-card" data-index={String(index + 1).padStart(2, "0")}>
-                <ResultPreview row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} preferOriginalImages={preferOriginalImages} />
+                <ResultPreview row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} />
                 <ActionRowSummary row={row} projects={projects} tags={tags} />
                 <RowStatus row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} hasReference={referenceCount > 0} />
                 {hasAdditionalReferences ? (
@@ -756,7 +748,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
                     onCheckedChange={(checked) => setRowAdditionalReferences(row.id, checked)}
                   />
                 ) : null}
-                <ActionPreview row={row} onOpen={setViewerImage} preferOriginalImages={preferOriginalImages} />
+                <ActionPreview row={row} onOpen={setViewerImage} />
                 <ButtonGroup className="rf-action-fission-row-actions nodrag">
                   <Button type="button" variant="ghost" size="icon-sm" disabled={Boolean(libraryFailure)} aria-label={t("infiniteCanvas:actionFissionRowSettings")} title={t("infiniteCanvas:actionFissionRowSettings")} onClick={() => actions.openActionFissionRowSettings(nodeId, row.id)}><Settings2 aria-hidden="true" /></Button>
                   <Button type="button" variant="ghost" size="icon-sm" disabled={Boolean(libraryFailure) || !hasCategoryCandidates(categoryGroups)} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>

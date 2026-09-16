@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createConfigStore, TUDOU_IMAGE_MODELS } = require('../electron/main/modules/config-store.cjs');
+const { createConfigStore } = require('../electron/main/modules/config-store.cjs');
 const { registerConfigIpc } = require('../electron/main/ipc/config-ipc.cjs');
 const { createLibtvWorkspaceName, normalizeLibtvMachineId } = require('../electron/main/modules/libtv-workspace.cjs');
 
@@ -93,55 +93,6 @@ test('fresh API settings do not install recommended providers', (t) => {
   });
   assert.deepEqual(customOnly.providers.map((provider) => provider.id), ['custom']);
   assert.deepEqual(customOnly.providerOrder, ['custom']);
-
-  const tudou = store.saveApiSettings({
-    providers: [{
-      id: 'tudou-api',
-      name: 'Custom name',
-      baseUrl: 'https://example.invalid/v1',
-      protocol: 'openai',
-      apiKey: 'secret',
-      imageModels: ['model-b'],
-      modelCatalogOrder: { image: ['model-b', 'model-a'] },
-    }],
-    providerOrder: ['tudou-api'],
-  });
-  assert.deepEqual(tudou.providers.map((provider) => ({ id: provider.id, name: provider.name, baseUrl: provider.baseUrl, protocol: provider.protocol })), [{
-    id: 'tudou-api',
-    name: '土豆API',
-    baseUrl: 'https://api.ai-tudou.net/v1',
-    protocol: 'gemini',
-  }]);
-  assert.deepEqual(tudou.providers[0].imageModels, ['model-b']);
-  assert.deepEqual(tudou.providers[0].modelCatalogOrder, {
-    image: ['model-b', 'model-a', ...TUDOU_IMAGE_MODELS],
-  });
-});
-
-test('tudou catalog order keeps user ranking first and appends all official models', (t) => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-api-tudou-catalog-'));
-  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
-  const store = createConfigStore({ app: { isPackaged: false }, rootDir: tempRoot, safeStorage: testSafeStorage() });
-
-  const saved = store.saveApiSettings({
-    providers: [{
-      id: 'tudou-api',
-      apiKey: 'secret',
-      imageModels: ['grok-imagine-image', 'gpt-image-2-1k'],
-      modelCatalogOrder: { image: ['grok-imagine-image', 'custom-image-model', 'gpt-image-2-1k'] },
-    }],
-  });
-  const tudou = saved.providers[0];
-  assert.deepEqual(tudou.imageModels, ['grok-imagine-image', 'gpt-image-2-1k']);
-  assert.deepEqual(
-    tudou.modelCatalogOrder.image.slice(0, 3),
-    ['grok-imagine-image', 'custom-image-model', 'gpt-image-2-1k'],
-  );
-  for (const model of TUDOU_IMAGE_MODELS) {
-    assert.ok(tudou.modelCatalogOrder.image.includes(model), `catalog should include ${model}`);
-  }
-  const reloaded = store.loadApiSettings();
-  assert.deepEqual(reloaded.providers[0].modelCatalogOrder, tudou.modelCatalogOrder);
 });
 
 test('api settings normalization keeps same-host custom providers separate and generates unique ids', (t) => {
@@ -176,20 +127,24 @@ test('api settings normalization keeps same-host custom providers separate and g
   assert.equal(clamped.libtvActionFissionConcurrency, 3);
 });
 
-test('custom providers using recommended hosts are not converted into fixed providers', (t) => {
+test('providers previously reserved for the removed preset stay ordinary editable providers', (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forart-api-duplicate-host-'));
   t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
   const store = createConfigStore({ app: { isPackaged: false }, rootDir: tempRoot, safeStorage: testSafeStorage() });
   const saved = store.saveApiSettings({
     providers: [
-      { id: 'tudou-api', name: '土豆API', baseUrl: 'https://api.ai-tudou.net/v1', apiKey: 'fixed-key', imageModels: ['fixed-model'] },
-      { id: 'relay', name: 'Tudou relay', baseUrl: 'https://api.ai-tudou.net/v1', apiKey: 'relay-key', imageModels: ['relay-model'] },
+      { id: 'tudou-api', name: 'Custom name', baseUrl: 'https://example.invalid/v1', protocol: 'openai', apiKey: 'secret', imageModels: ['model-b'] },
+      { id: 'relay', name: 'Relay', baseUrl: 'https://example.invalid/v1', apiKey: 'relay-key', imageModels: ['relay-model'] },
     ],
     providerOrder: ['tudou-api', 'relay'],
   });
   assert.deepEqual(saved.providers.map((provider) => provider.id), ['tudou-api', 'relay']);
-  assert.deepEqual(saved.providers.map((provider) => provider.imageModels), [['fixed-model'], ['relay-model']]);
-  assert.equal(saved.providers[1].baseUrl, 'https://api.ai-tudou.net/v1');
+  assert.deepEqual(saved.providers.map((provider) => provider.imageModels), [['model-b'], ['relay-model']]);
+  assert.equal(saved.providers[0].name, 'Custom name');
+  assert.equal(saved.providers[0].baseUrl, 'https://example.invalid/v1');
+  assert.equal(saved.providers[0].protocol, 'openai');
+  assert.equal('modelCatalogOrder' in saved.providers[0], false);
+  assert.equal(saved.providers[1].baseUrl, 'https://example.invalid/v1');
 });
 
 test('legacy compatible protocol values migrate to the explicit APIMart protocol', (t) => {

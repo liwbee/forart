@@ -38,38 +38,34 @@ test('fixed provider templates expose documented defaults without schema logic',
   assert.deepEqual(apimart.imageModels, []);
   assert.equal(apimart.hasApiKey, false);
 
-  const tudou = providers.createTudouProvider();
-  assert.equal(tudou.id, 'tudou-api');
-  assert.equal(tudou.name, '土豆API');
-  assert.equal(tudou.baseUrl, providers.TUDOU_BASE_URL);
-  assert.equal(tudou.protocol, 'gemini');
-  assert.deepEqual(tudou.imageModels, []);
-  assert.deepEqual(tudou.modelCatalogOrder.image, [...providers.TUDOU_IMAGE_MODELS]);
-  assert.equal(tudou.hasApiKey, false);
-
   // 归一化规则已收敛到主进程，renderer 模块不再导出这些实现。
   assert.equal(providers.normalizeApiSettings, undefined);
   assert.equal(providers.normalizeApiProvider, undefined);
+
+  // 土豆 API 预设已完全移除，renderer 模块不再导出任何相关实现。
+  assert.equal(providers.TUDOU_PROVIDER_ID, undefined);
+  assert.equal(providers.TUDOU_BASE_URL, undefined);
+  assert.equal(providers.TUDOU_IMAGE_MODELS, undefined);
+  assert.equal(providers.createTudouProvider, undefined);
 });
 
 test('provider ordering helpers drive the settings sidebar and generation pickers', () => {
   const providers = loadApiProviders();
   const apimart = providers.createApimartProvider();
-  const tudou = providers.createTudouProvider();
-  const custom = providers.createApiProvider([apimart, tudou]);
-  const all = [apimart, tudou, custom];
+  const custom = providers.createApiProvider([apimart]);
+  const all = [apimart, custom];
 
   assert.deepEqual(
-    providers.orderedApiProviderItems(all, ['custom-api', 'libtv', 'tudou-api', 'apimart']).map((item) => item.type),
-    ['provider', 'libtv', 'tudou', 'apimart'],
+    providers.orderedApiProviderItems(all, ['custom-api', 'libtv', 'apimart']).map((item) => item.type),
+    ['provider', 'libtv', 'apimart'],
   );
   assert.deepEqual(
-    providers.orderedApiProviders(all, [custom.id, tudou.id]).map((provider) => provider.id),
-    ['custom-api', 'tudou-api', 'apimart'],
+    providers.orderedApiProviders(all, [custom.id]).map((provider) => provider.id),
+    ['custom-api', 'apimart'],
   );
   assert.deepEqual(
     providers.normalizeApiProviderOrder(['custom-api', 'libtv', 'ghost', 'libtv'], all),
-    ['custom-api', 'libtv', 'apimart', 'tudou-api'],
+    ['custom-api', 'libtv', 'apimart'],
   );
 
   assert.equal(providers.isImageProviderConfigured({ ...custom, baseUrl: '', imageModels: ['m'] }), false);

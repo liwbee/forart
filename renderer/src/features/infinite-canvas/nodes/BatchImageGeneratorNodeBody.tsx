@@ -5,7 +5,7 @@ import { Button } from "../../../components/ui/button";
 import { AppScrollArea } from "../../../components/AppScrollArea";
 import { ToggleGroup, ToggleGroupItem } from "../../../components/ui/toggle-group";
 import { useNativeCanvasActions } from "../canvasActions";
-import { NodeToolbar, Position, useEdges, useNodes, useReactFlow, useStore } from "@xyflow/react";
+import { NodeToolbar, Position, useEdges, useNodes, useReactFlow } from "@xyflow/react";
 import { useShallow } from "zustand/react/shallow";
 import type { NativeCanvasNodeData, BatchImageGeneratorItem } from "../nativeCanvas";
 import { BatchNodeProgress } from "../batch/BatchNodeProgress";
@@ -17,10 +17,10 @@ import { useInfiniteCanvasSettings } from "../infiniteCanvasSettings";
 import { generationStatusPresentation, generationStatusTone } from "../generation/generationStatusPresentation";
 import { GenerationStatusDisplay } from "../generation/GenerationStatusDisplay";
 import { useGenerationTaskCache } from "../generation/generationTaskCache";
-import { useCanvasOriginalImagePreference } from "../canvasZoomImagePreference";
 import { GenerationMediaPreview } from "./GenerationMediaPreview";
 import { AssetUploadPlaceholder } from "./AssetUploadPlaceholder";
 import { aggregateBatchItems, downloadBatchItemsSequentially, isBatchGenerationReady, isBatchItemActive, resolveBatchItemResult } from "../batch/batchItemPresentation";
+import { MAX_BATCH_NODE_ITEMS } from "../batch/batchNodeTypes";
 import type { ImageViewerAction, ImageViewerNavigation } from "../../../lib/ImageViewer";
 import type { ImageViewerActivity } from "../../../lib/ImageViewerSurface";
 
@@ -57,8 +57,6 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
   const canvasEdges = useEdges<import("../nativeCanvas").NativeCanvasEdge>();
   const inputRef = useRef<HTMLInputElement>(null);
   const { settings, updateSettings } = useInfiniteCanvasSettings();
-  const zoom = useStore((canvas) => canvas.transform[2]);
-  const preferOriginalImages = useCanvasOriginalImagePreference(zoom);
   const state = data.batchImageGenerator || { items: [], prompt: "", layout: "grid" as const };
   const items = state.items || [];
   const [viewer, setViewer] = useState<BatchImageGeneratorItem | null>(null);
@@ -84,7 +82,7 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
     if (!files) return;
     const selectedFiles = Array.from(files)
       .filter((file) => file.type.startsWith("image/"))
-      .slice(0, Math.max(0, 50 - items.length));
+      .slice(0, Math.max(0, MAX_BATCH_NODE_ITEMS - items.length));
     if (!selectedFiles.length) return;
 
     const uploads = selectedFiles.map((file) => ({
@@ -239,7 +237,7 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
               <div className={`rf-action-fission-result-preview nodrag nopan${itemRunning ? " is-generating" : ""}${showOverlay && tone === "error" ? " has-generation-error" : ""}`}>
                 {sourceLoading
                   ? <AssetUploadPlaceholder className="rf-asset-upload-result-placeholder" label={t("infiniteCanvas:assetLoading")} />
-                  : <GenerationMediaPreview src={result.url} thumbSrc={result.thumbUrl} preferOriginal={preferOriginalImages} alt={t("infiniteCanvas:actionFissionResultPreview")} onClick={openResult} onKeyDown={openResultFromKeyboard} />}
+                  : <GenerationMediaPreview src={result.url} thumbSrc={result.thumbUrl} alt={t("infiniteCanvas:actionFissionResultPreview")} onClick={openResult} onKeyDown={openResultFromKeyboard} />}
                 {canDownload ? <Button className={`rf-action-fission-download${isPendingDownload ? " is-pending" : ""}`} type="button" variant="ghost" size="icon-xs" disabled={downloadBusyItemId === item.id} aria-label={t(isPendingDownload ? "infiniteCanvas:imagePendingDownload" : "infiniteCanvas:imageDownloaded")} title={t(isPendingDownload ? "infiniteCanvas:imagePendingDownload" : "infiniteCanvas:imageDownloaded")} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); downloadItem(); }}><Download aria-hidden="true" /></Button> : null}
                 {!sourceLoading && showOverlay ? <GenerationStatusDisplay presentation={presentation} mode="overlay" /> : null}
                 {!sourceLoading && !showOverlay && state.layout !== "list" ? <GenerationStatusDisplay presentation={presentation} mode="inline" className="rf-generation-status--result" /> : null}

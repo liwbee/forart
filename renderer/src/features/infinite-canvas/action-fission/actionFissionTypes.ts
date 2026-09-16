@@ -1,6 +1,6 @@
-import type { BatchNodeItemBase } from "../batch/batchNodeTypes";
+import { MAX_BATCH_NODE_ITEMS, type BatchNodeItemBase } from "../batch/batchNodeTypes";
 
-export const MAX_ACTION_FISSION_ROWS = 15;
+export const MAX_ACTION_FISSION_ROWS = MAX_BATCH_NODE_ITEMS;
 export const DEFAULT_ACTION_FISSION_ROWS = 4;
 export const MAX_ACTION_FISSION_CATEGORY_GROUPS = 10;
 

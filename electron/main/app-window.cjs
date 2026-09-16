@@ -4,7 +4,6 @@ const path = require('path');
 const OFFICIAL_WEBSITE_URLS = Object.freeze({
   apimart: 'https://apimart.ai/',
   libtv: 'https://www.liblib.tv/',
-  'tudou-api': 'https://api.ai-tudou.net/',
 });
 
 async function createWindow({ rootDir, isDev, BrowserWindow: BrowserWindowAdapter = BrowserWindow }) {
