@@ -66,4 +66,4 @@ function createCanvasAssetThumbnailStore({ assetRoot, assetUrl }) {
   };
 }
 
-module.exports = { VIDEO_EXTENSIONS, createCanvasAssetThumbnailStore };
+module.exports = { VIDEO_EXTENSIONS, canvasAssetThumbPath, createCanvasAssetThumbnailStore };

@@ -130,6 +130,16 @@ function createCanvasCacheStore({ assetStore, canvasStore, generationTaskReposit
           addReference(referenceMap, row.resultUrl, rowReference('actionFission.row.resultUrl'));
           addReference(referenceMap, row.selectedActionAssetUrl, rowReference('actionFission.row.selectedActionAssetUrl'));
         }
+
+        // 批量洗图的上传图和生成结果同样只存在于节点数据里：漏收集会让它们
+        // 被当作“未引用素材”清理掉，节点里的缩略图和结果图会直接失效。
+        const batchImageGenerator = isRecord(data.batchImageGenerator) ? data.batchImageGenerator : node.batchImageGenerator;
+        const batchItems = Array.isArray(batchImageGenerator?.items) ? batchImageGenerator.items : [];
+        for (const item of batchItems) {
+          if (!isRecord(item)) continue;
+          addReference(referenceMap, item.sourceUrl, nodeReference('batchImageGenerator.item.sourceUrl'));
+          addReference(referenceMap, item.resultUrl, nodeReference('batchImageGenerator.item.resultUrl'));
+        }
       }
     }
   }

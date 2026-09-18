@@ -156,3 +156,144 @@ test("a finished batch task is not re-watched on every node change", async ({ pa
   await expect(page.getByText("This page could not be displayed", { exact: true })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+test("creates an asset node from a batch result card", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message.split("\n")[0]));
+
+  const document = {
+    canvasSchemaVersion: 5,
+    id: "canvas-batch-watch",
+    title: "batch watch",
+    projectId: "project_default",
+    canvasType: "forart",
+    createdAt: 1,
+    updatedAt: 1,
+    revision: 1,
+    nodes: [{
+      id: "batchImageGenerator_watch",
+      type: "canvasNode",
+      position: { x: 240, y: 160 },
+      style: { width: 680, height: 816 },
+      data: {
+        kind: "batchImageGenerator",
+        label: "",
+        text: "prompt",
+        imageProviderId: "apimart",
+        imageModel: "gpt-image-2",
+        batchImageGenerator: {
+          prompt: "prompt",
+          layout: "grid",
+          items: [{
+            id: "item-1",
+            sourceUrl: PIXEL,
+            sourceThumbUrl: PIXEL,
+            sourceFileName: "source.png",
+            sourceLoadState: "ready",
+            status: "completed",
+            resultUrl: PIXEL,
+            resultThumbUrl: PIXEL,
+            resultFileName: FINISHED_FILE_NAME,
+            resultWidth: 1,
+            resultHeight: 1,
+          }],
+        },
+      },
+    }],
+    connections: [],
+    groups: [],
+    viewport: { x: 0, y: 0, scale: 0.6 },
+  };
+
+  await page.addInitScript((canvasDocument: Record<string, unknown>) => {
+    window.localStorage.setItem("forart_sidebar_open_v2", "true");
+    window.localStorage.setItem("forart_infinite_canvas_show_home", "false");
+    window.localStorage.setItem("forart_infinite_canvas_last_canvas_id", String(canvasDocument.id));
+    const config = {
+      mode: "local", localLibraryPath: "", serverUrl: "", serverAuthUsername: "", serverAuthToken: "",
+      fileDownloadPath: "", photoshopExecutablePath: "", language: "en-US",
+    };
+    Object.defineProperty(window, "forartWindow", {
+      configurable: true,
+      value: { isMaximized: async () => ({ ok: true, maximized: false }), onMaximizedChanged: () => () => undefined },
+    });
+    Object.defineProperty(window, "forartConfig", {
+      configurable: true,
+      value: {
+        load: async () => config,
+        save: async (nextConfig: unknown) => ({ ok: true, config: nextConfig }),
+        appInfo: async () => ({ name: "Forart", repoUrl: "", updateUrl: "", currentRevision: "test", currentUpdatedAt: "" }),
+        checkUpdate: async () => ({ ok: true, currentRevision: "test", latestRevision: "test", currentUpdatedAt: "", latestUpdatedAt: "", updateAvailable: false, repoUrl: "" }),
+        onUpdateProgress: () => () => undefined,
+        serverSession: async () => ({ ok: false, status: 401 }),
+      },
+    });
+    Object.defineProperty(window, "easyTool", {
+      configurable: true,
+      value: {
+        listCanvases: async () => ({
+          projects: [{ id: "project_default", title: "P", sortOrder: 1, createdAt: 1, updatedAt: 1 }],
+          canvases: [{ id: canvasDocument.id, title: "batch watch", projectId: "project_default", createdAt: 1, updatedAt: 1, revision: 1, nodeCount: 1 }],
+        }),
+        loadCanvas: async () => canvasDocument,
+        saveCanvas: async () => ({ ok: true }),
+        getCanvasClipboardStatus: async () => ({ hasNodes: false, hasImage: false }),
+        ensureCanvasAssetThumbnail: async () => ({ thumbUrl: "" }),
+      },
+    });
+    Object.defineProperty(window, "forartGenerationTasks", {
+      configurable: true,
+      value: {
+        get: async () => null,
+        getMany: async () => [],
+        listForCanvas: async () => [],
+        listPage: async () => ({ tasks: [], total: 0, counts: { all: 0, active: 0, succeeded: 0, exceptional: 0 } }),
+        start: async () => null,
+        startMany: async () => [],
+        stop: async () => ({ ok: true }),
+        onChanged: () => () => undefined,
+      },
+    });
+  }, document);
+
+  await page.goto("http://127.0.0.1:6981/");
+  await page.getByRole("button", { name: "Infinite Canvas" }).click();
+  const node = page.locator('.react-flow__node[data-id="batchImageGenerator_watch"]');
+  await expect(node).toBeVisible();
+
+  // 记录素材落盘相关的调用：创建素材节点只应引用已有结果图，
+  // 不能写出新的素材文件，也不应该重新生成缩略图。
+  await page.evaluate(() => {
+    const calls: string[] = [];
+    (window as unknown as { __forartAssetCalls: string[] }).__forartAssetCalls = calls;
+    const tool = window.easyTool as unknown as Record<string, ((payload: unknown) => Promise<unknown>) | undefined>;
+    (["saveCanvasAsset", "importCanvasAssetFile", "ensureCanvasAssetThumbnail"] as const).forEach((name) => {
+      const original = tool[name];
+      tool[name] = (payload: unknown) => {
+        calls.push(name);
+        return original ? original(payload) : Promise.resolve({});
+      };
+    });
+  });
+
+  const card = node.locator(".rf-action-fission-grid-card").first();
+  const badge = card.locator(".rf-action-fission-card-badge");
+  const index = badge.locator(".rf-action-fission-card-index");
+  const createButton = badge.getByRole("button", { name: "Create asset node" });
+  await expect(index).toHaveText("01");
+  await expect(createButton).toHaveCSS("opacity", "0");
+
+  await card.hover();
+  await expect(index).toHaveCSS("opacity", "0");
+  await expect(createButton).toBeEnabled();
+  await createButton.click();
+
+  const created = page.locator('.react-flow__node[data-id^="assetLoader_"]');
+  await expect(created).toHaveCount(1);
+  await expect(created.locator(".rf-native-node-caption")).toContainText(FINISHED_FILE_NAME.replace(/\.png$/, ""));
+  // 复用同一份结果图：既不写新素材文件，也不重新生成缩略图。
+  await expect(created.locator("img").first()).toHaveAttribute("src", PIXEL);
+  expect(await page.evaluate(() => (window as unknown as { __forartAssetCalls: string[] }).__forartAssetCalls)).toEqual([]);
+  await expect(page.getByText("This page could not be displayed", { exact: true })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

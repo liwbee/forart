@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
 const { createCanvasAssetThumbnailStore } = require('./canvas-asset-thumbnails.cjs');
+const { applyImageAdjustments, imageAdjustmentPlan } = require('./image-adjustments.cjs');
 const { isInside } = require('./path-guard.cjs');
 const { probeVideo } = require('./media/video-probe.cjs');
 
@@ -316,10 +317,6 @@ function createAssetStore({ rootDir, net }) {
       ? payload.filePath
       : resolveAssetUrl(payload.url || '');
     if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error('Source image not found.');
-    const left = Math.max(0, Math.round(Number(payload.x || 0)));
-    const top = Math.max(0, Math.round(Number(payload.y || 0)));
-    const width = Math.max(1, Math.round(Number(payload.width || 0)));
-    const height = Math.max(1, Math.round(Number(payload.height || 0)));
     const { default: sharp } = await import('sharp');
     const normalized = await sharp(sourcePath, { animated: false })
       .rotate()
@@ -327,6 +324,21 @@ function createAssetStore({ rootDir, net }) {
       .toBuffer({ resolveWithObject: true });
     const sourceWidth = Math.max(1, Number(normalized.info.width || 0));
     const sourceHeight = Math.max(1, Number(normalized.info.height || 0));
+    // 选区可以用百分比给（推荐）：只有这里才知道源图的真实尺寸，
+    // 渲染端即便拿着缩略图预览、或者节点没记原图尺寸，裁剪位置也不会错位。
+    const usesPercent = payload.unit === 'percent' || payload.unit === '%';
+    const toPixels = (value, total) => {
+      const ratio = Math.min(100, Math.max(0, Number(value || 0))) / 100;
+      return Math.round(ratio * total);
+    };
+    const left = usesPercent ? toPixels(payload.x, sourceWidth) : Math.max(0, Math.round(Number(payload.x || 0)));
+    const top = usesPercent ? toPixels(payload.y, sourceHeight) : Math.max(0, Math.round(Number(payload.y || 0)));
+    const width = usesPercent
+      ? Math.max(1, toPixels(payload.width, sourceWidth))
+      : Math.max(1, Math.round(Number(payload.width || 0)));
+    const height = usesPercent
+      ? Math.max(1, toPixels(payload.height, sourceHeight))
+      : Math.max(1, Math.round(Number(payload.height || 0)));
     const extractLeft = Math.min(left, sourceWidth - 1);
     const extractTop = Math.min(top, sourceHeight - 1);
     const extractWidth = Math.max(1, Math.min(width, sourceWidth - extractLeft));
@@ -346,6 +358,132 @@ function createAssetStore({ rootDir, net }) {
       width: Number(output.width || extractWidth),
       height: Number(output.height || extractHeight),
     };
+  }
+
+  function resolveImageSourcePath(payload = {}) {
+    const sourcePath = payload.filePath && fs.existsSync(payload.filePath)
+      ? payload.filePath
+      : resolveAssetUrl(payload.url || '');
+    if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error('Source image not found.');
+    return sourcePath;
+  }
+
+  /** 读像素尺寸，EXIF 方向按 rotate() 之后的结果算。 */
+  async function readImageFileDimensions(sourcePath) {
+    const { default: sharp } = await import('sharp');
+    const metadata = await sharp(sourcePath, { animated: false }).metadata();
+    const swap = [5, 6, 7, 8].includes(Number(metadata.orientation || 0));
+    return {
+      width: Math.max(1, Number(swap ? metadata.height : metadata.width) || 0),
+      height: Math.max(1, Number(swap ? metadata.width : metadata.height) || 0),
+      hasAlpha: Boolean(metadata.hasAlpha),
+    };
+  }
+
+  /**
+   * 高斯噪点层。
+   *
+   * libvips 的合成按预乘 alpha 计算，且合成结果一定带 alpha 通道，所以：
+   *   1. overlay 会把底图整个盖住，带透明通道的图要用底图自己的 alpha 做一次
+   *      dest-in 把透明度还回去；
+   *   2. 预乘混合只影响 0 < alpha < 1 的像素，也就是抠图素材的软边那一圈，
+   *      不透明主体不受影响；
+   *   3. 加噪点后输出一定带 alpha 通道，且噪点本身几乎不可压缩，PNG 会明显变大。
+   */
+  async function compositeNoiseLayer(pipeline, { width, height, sigma, alphaSourcePath = '' }) {
+    const { default: sharp } = await import('sharp');
+    const noise = await sharp({
+      create: {
+        width,
+        height,
+        channels: 3,
+        noise: { type: 'gaussian', mean: 128, sigma },
+      },
+    }).png().toBuffer();
+    // 覆盖式混合：中间调最明显，像胶片颗粒（加性杂色不走这里，见 writeWithSpeckle）。
+    const layers = [{ input: noise, blend: 'overlay' }];
+    if (alphaSourcePath) {
+      const mask = await sharp(alphaSourcePath, { animated: false })
+        .rotate()
+        .resize({ width, height, fit: 'fill' })
+        .png()
+        .toBuffer();
+      layers.push({ input: mask, blend: 'dest-in' });
+    }
+    pipeline.composite(layers);
+  }
+
+  /**
+   * 图片调整（亮度/对比度/饱和度/色相/灰度/模糊/噪点）的导出入口。
+   *
+   * 预览走 adjustPreview，两者共用 image-adjustments.cjs 里那套运算，
+   * 所以"预览所见即成片所得"，不是靠两套近似凑出来的。
+   */
+  async function adjustAsset(payload = {}) {
+    const sourcePath = resolveImageSourcePath(payload);
+    const { default: sharp } = await import('sharp');
+    const directory = assetDirectory('output');
+    const filePath = internalAssetFilePath(directory, '.png');
+    const source = await readImageFileDimensions(sourcePath);
+    const plan = imageAdjustmentPlan(payload.adjustments, {
+      longEdge: Math.max(source.width, source.height),
+    });
+    // rotate() 先把 EXIF 方向摆正，之后所有调整都在正向像素上做，和预览一致。
+    const pipeline = applyImageAdjustments(sharp(sourcePath, { animated: false }).rotate(), payload.adjustments, {
+      longEdge: Math.max(source.width, source.height),
+    });
+    if (plan.noiseSigma > 0) {
+      await compositeNoiseLayer(pipeline, {
+        width: source.width,
+        height: source.height,
+        sigma: plan.noiseSigma,
+        alphaSourcePath: source.hasAlpha ? sourcePath : '',
+      });
+    }
+    // 杂色（PS「添加杂色 · 高斯分布」）是"逐通道加一个以 0 为中心的高斯随机数再钳位"，
+    // 有正有负；libvips 的混合模式没有减法，所以这一档不走 composite，直接改原始像素。
+    const output = plan.speckleSigma > 0
+      ? await writeWithSpeckle(pipeline, filePath, {
+        width: source.width,
+        height: source.height,
+        channels: source.hasAlpha ? 4 : 3,
+        sigma: plan.speckleSigma,
+      })
+      : await pipeline.png().toFile(filePath);
+    const thumb = await thumbnailStore.ensureCanvasAssetThumbnail({ filePath, mimeType: 'image/png' });
+    return {
+      url: assetUrl(filePath),
+      ...thumb,
+      fileName: path.basename(filePath),
+      filePath,
+      width: Number(output.width || 0),
+      height: Number(output.height || 0),
+    };
+  }
+
+  /**
+   * Photoshop「添加杂色 · 高斯分布」的等价实现（不勾「单色」那一档）。
+   *
+   * 每个通道各取一个 N(0, σ) 的随机数加到像素上，再钳位到 0-255；alpha 通道不动。
+   * 噪声由 libvips 生成（快），只有加法这一步在 JS 里做，且结果写回同一个缓冲区，
+   * 避免为 5000 万像素的图再多分配一份。
+   */
+  async function writeWithSpeckle(pipeline, filePath, { width, height, channels, sigma }) {
+    const { default: sharp } = await import('sharp');
+    const pixels = await pipeline.raw().toBuffer();
+    const noise = await sharp({
+      create: { width, height, channels: 3, noise: { type: 'gaussian', mean: 128, sigma } },
+    }).raw().toBuffer();
+    const pixelCount = width * height;
+    for (let index = 0; index < pixelCount; index += 1) {
+      const offset = index * channels;
+      const noiseOffset = index * 3;
+      for (let channel = 0; channel < 3; channel += 1) {
+        const value = pixels[offset + channel] + (noise[noiseOffset + channel] - 128);
+        pixels[offset + channel] = value < 0 ? 0 : value > 255 ? 255 : value;
+      }
+    }
+    return sharp(pixels, { raw: { width, height, channels } }).png().toFile(filePath);
   }
 
   async function saveResult(payload = {}, downloadsPath) {
@@ -376,6 +514,7 @@ function createAssetStore({ rootDir, net }) {
     saveAssetThumbnail,
     ensureAssetThumbnail,
     cropAsset,
+    adjustAsset,
     saveResult,
   };
 }

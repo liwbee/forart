@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld('easyTool', {
     });
   },
   cropCanvasAsset: (payload) => ipcRenderer.invoke('canvas:crop-asset', payload),
+  adjustCanvasAsset: (payload) => ipcRenderer.invoke('canvas:adjust-asset', payload),
   scanCanvasCache: () => ipcRenderer.invoke('canvas-cache:scan'),
   deleteCanvasCacheAssets: (payload) => ipcRenderer.invoke('canvas-cache:delete', payload),
   revealCanvasCacheAsset: (payload) => ipcRenderer.invoke('canvas-cache:reveal', payload),
@@ -141,6 +142,11 @@ contextBridge.exposeInMainWorld('forartConfig', {
     return () => ipcRenderer.removeListener('app:update-progress', listener);
   },
   updateConnectivity: () => ipcRenderer.invoke('app:update-connectivity'),
+});
+
+contextBridge.exposeInMainWorld('forartImagePresets', {
+  load: () => ipcRenderer.invoke('image-presets:load'),
+  save: (payload) => ipcRenderer.invoke('image-presets:save', payload),
 });
 
 contextBridge.exposeInMainWorld('forartReview', {

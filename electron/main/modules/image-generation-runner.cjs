@@ -732,6 +732,13 @@ async function submitOpenAiEditTask(context, provider, headers, model, prompt, r
 async function executeImageTask(context, task, payload, signal) {
   const provider = context.resolveProvider?.(payload.providerId || task.providerId)
     || {};
+  // 渲染层只发 providerId，任务里因此没有平台名，"平台-模型-时间戳" 命名和任务中心都会退回到
+  // id（custom-api-3 之类）。这里用刚解析出来的 provider 记录补上用户自定义的名字：命名是在落库
+  // 时从任务仓库读最新记录，所以必须在保存结果之前写入。
+  const providerName = String(provider.name || '').trim();
+  if (providerName && providerName !== String(task.providerName || '').trim()) {
+    context.generationTaskStore.updateTask(task.id, { providerName });
+  }
   const model = String(payload.model || task.model || '').trim();
   const prompt = String(payload.prompt || task.prompt || '').trim();
   const referenceImages = Array.isArray(payload.referenceImages) ? payload.referenceImages.map(String).filter(Boolean) : [];

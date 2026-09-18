@@ -19,6 +19,7 @@ import { GenerationStatusDisplay } from "../generation/GenerationStatusDisplay";
 import { useGenerationTaskCache } from "../generation/generationTaskCache";
 import { GenerationMediaPreview } from "./GenerationMediaPreview";
 import { AssetUploadPlaceholder } from "./AssetUploadPlaceholder";
+import { ResultAssetCreateButton } from "./ResultAssetCreateButton";
 import { aggregateBatchItems, downloadBatchItemsSequentially, isBatchGenerationReady, isBatchItemActive, resolveBatchItemResult } from "../batch/batchItemPresentation";
 import { MAX_BATCH_NODE_ITEMS } from "../batch/batchNodeTypes";
 import type { ImageViewerAction, ImageViewerNavigation } from "../../../lib/ImageViewer";
@@ -199,6 +200,8 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
     <>
       <NodeToolbar nodeId={nodeId} isVisible={paramPanelVisible} position={Position.Top} className="rf-native-node-toolbar">
         <Button type="button" variant="default" size="icon-sm" disabled={!running && !batchReady} aria-label={running ? t("infiniteCanvas:stopRun") : t("infiniteCanvas:run")} title={running ? t("infiniteCanvas:stopRun") : t("infiniteCanvas:run")} onClick={() => void (running ? actions.stopBatchImageGeneration(nodeId) : actions.runBatchImageGeneration(nodeId))}>{running ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}</Button>
+        {/* 运行 | 下载 / 删除 */}
+        <span className="rf-native-toolbar-divider" aria-hidden="true" />
         <Button type="button" variant="ghost" size="icon-sm" disabled={!completed || Boolean(downloadBusyItemId)} aria-label={t("infiniteCanvas:actionFissionDownloadAll")} title={t("infiniteCanvas:actionFissionDownloadAll")} onClick={() => void downloadAll()}><Download aria-hidden="true" /></Button>
         <Button type="button" variant="destructive" size="icon-sm" aria-label={t("common:actions.delete")} title={t("common:actions.delete")} onClick={() => void deleteElements({ nodes: [{ id: nodeId }] })}><Trash2 aria-hidden="true" /></Button>
       </NodeToolbar>
@@ -247,6 +250,20 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
               ? <AssetUploadPlaceholder className="rf-action-fission-action-preview rf-asset-upload-thumbnail-placeholder nodrag nopan" label={t("infiniteCanvas:assetLoading")} />
               : <GenerationMediaPreview className="rf-action-fission-action-preview nodrag nopan" src={item.sourceUrl} thumbSrc={item.sourceThumbUrl} alt={item.sourceFileName || `${t("infiniteCanvas:batchImageItem")} ${index + 1}`} onClick={openSource} onKeyDown={openSourceFromKeyboard} />;
             return <article className={state.layout === "list" ? "rf-action-fission-list-card" : "rf-action-fission-grid-card"} data-index={String(index + 1).padStart(2, "0")} data-source-loading={sourceLoading || undefined} data-source-ready={item.sourceLoadState === "ready" || undefined} key={item.id}>
+              <ResultAssetCreateButton
+                index={index + 1}
+                disabled={actions.readOnly || !canDownload}
+                onCreate={(clientPoint) => actions.createAssetNodeFromResult({
+                  sourceNodeId: nodeId,
+                  sourceKey: item.id,
+                  clientPoint,
+                  url: result.url,
+                  thumbUrl: result.thumbUrl,
+                  fileName: result.fileName,
+                  width: result.width,
+                  height: result.height,
+                })}
+              />
               {resultPreview}
               {state.layout !== "list" ? <div className="rf-action-fission-action-stack">{hasAdditionalReferences ? <AdditionalReferenceToggle checked={Boolean(item.useAdditionalReferences)} disabled={itemRunning} onCheckedChange={(checked) => setItemAdditionalReferences(item.id, checked)} /> : null}{sourcePreview}</div> : <>{hasAdditionalReferences ? <AdditionalReferenceToggle checked={Boolean(item.useAdditionalReferences)} disabled={itemRunning} onCheckedChange={(checked) => setItemAdditionalReferences(item.id, checked)} /> : null}{sourcePreview}</>}
               <div className="rf-action-fission-row-summary"><strong>{item.sourceFileName || `${t("infiniteCanvas:batchImageItem")} ${index + 1}`}</strong></div>

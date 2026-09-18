@@ -14,6 +14,7 @@ export const DERIVED_ASSET_PREFIXES = {
   crop: "Crop",
   matting: "Matting",
   frame: "Frame",
+  adjust: "Adjust",
 } as const;
 
 export type DerivedAssetKind = keyof typeof DERIVED_ASSET_PREFIXES;

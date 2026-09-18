@@ -17,6 +17,8 @@ test('canvas cache protects current canvas assets and SQLite task assets', () =>
     const files = {
       canvas: path.join(outputRoot, 'canvas-result.png'),
       canvasRemoteFallback: path.join(outputRoot, 'canvas-remote-fallback.png'),
+      batchSource: path.join(inputRoot, 'batch-source.png'),
+      batchResult: path.join(outputRoot, 'batch-result.png'),
       taskResult: path.join(outputRoot, 'task-result.png'),
       taskInput: path.join(inputRoot, 'task-input.png'),
       unused: path.join(outputRoot, 'unused.png'),
@@ -25,7 +27,7 @@ test('canvas cache protects current canvas assets and SQLite task assets', () =>
 
     const urlsByPath = new Map(Object.entries(files).map(([name, filePath]) => [
       filePath,
-      `forart-asset://${name.startsWith('taskInput') ? 'input' : 'output'}/${path.basename(filePath)}`,
+      `forart-asset://${/^(taskInput|batchSource)/.test(name) ? 'input' : 'output'}/${path.basename(filePath)}`,
     ]));
     const pathsByUrl = new Map([...urlsByPath].map(([filePath, url]) => [url, filePath]));
     const assetStore = {
@@ -39,15 +41,29 @@ test('canvas cache protects current canvas assets and SQLite task assets', () =>
       readCanvas: () => ({
         id: 'canvas-1',
         title: 'Canvas',
-        nodes: [{
-          id: 'node-1',
-          data: {
-            generatedImages: [{
-              localUrl: urlsByPath.get(files.canvas),
-              url: urlsByPath.get(files.canvasRemoteFallback),
-            }],
+        nodes: [
+          {
+            id: 'node-1',
+            data: {
+              generatedImages: [{
+                localUrl: urlsByPath.get(files.canvas),
+                url: urlsByPath.get(files.canvasRemoteFallback),
+              }],
+            },
           },
-        }],
+          {
+            id: 'node-2',
+            data: {
+              batchImageGenerator: {
+                items: [{
+                  id: 'item-1',
+                  sourceUrl: urlsByPath.get(files.batchSource),
+                  resultUrl: urlsByPath.get(files.batchResult),
+                }],
+              },
+            },
+          },
+        ],
       }),
     };
     const generationTaskRepository = {
@@ -73,6 +89,8 @@ test('canvas cache protects current canvas assets and SQLite task assets', () =>
     const assets = new Map(cache.scan().assets.map((asset) => [asset.fileName, asset]));
     assert.equal(assets.get('canvas-result.png').referenced, true);
     assert.equal(assets.get('canvas-remote-fallback.png').referenced, true);
+    assert.equal(assets.get('batch-source.png').referenced, true);
+    assert.equal(assets.get('batch-result.png').referenced, true);
     assert.equal(assets.get('task-result.png').referenced, true);
     assert.equal(assets.get('task-input.png').referenced, true);
     assert.equal(assets.get('unused.png').referenced, false);

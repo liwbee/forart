@@ -44,6 +44,7 @@ import {
   isCanvasAssetFile,
   readMediaFileDimensions,
   type CanvasImageCropRect,
+  type CanvasResultAssetRequest,
   type CanvasStoredAsset,
   type NativeCanvasActions,
 } from "./canvasActions";
@@ -60,6 +61,7 @@ import {
   createNativeCanvasGroupNode,
   getImageNodeSize,
   getVideoNodeSize,
+  nativeCanvasNodeImages,
   nativeCanvasNodePrimaryImage,
   nativeCanvasNodeTaskId,
   NATIVE_CANVAS_NODE_DEFINITIONS,
@@ -72,6 +74,8 @@ import {
 import { NativeCanvasNode as NativeCanvasNodeComponent } from "./nodes/NativeCanvasNode";
 import { NativeCanvasGroupNode } from "./nodes/NativeCanvasGroupNode";
 import { ActionFissionRowSettingsDialog } from "./nodes/ActionFissionRowSettingsDialog";
+import { ImageAdjustDialog } from "./nodes/ImageAdjustDialog";
+import { type NativeCanvasImageAdjustments } from "./imageAdjustments";
 import { configureActionFissionRow, createDefaultActionFissionState, normalizeActionFissionState } from "./action-fission/actionFissionState";
 import { actionFissionRowTaskId, type ActionFissionRow } from "./action-fission/actionFissionTypes";
 import { emptyCanvasSnapshot, type NativeCanvasSnapshot } from "./canvasWorkspaceTypes";
@@ -93,7 +97,8 @@ import {
 } from "./generation/generationTaskCache";
 import { downloadGenerationResult, saveGenerationImageFile } from "./generation/generationDownload";
 import { actionFissionDownloadTarget } from "./generation/generationDownloadTarget";
-import { derivedAssetName, storedImageDownloadTarget, type DerivedAssetKind } from "./assetNaming";
+import { derivedAssetName, FALLBACK_DOWNLOAD_NAME, storedImageDownloadTarget, type DerivedAssetKind } from "./assetNaming";
+import { ASSET_LOADER_DEFAULT_SIZE } from "./imageNodeSizing";
 import {
   beginInfiniteCanvasHistoryGesture,
   commitInfiniteCanvasHistoryGesture,
@@ -126,6 +131,9 @@ import {
 
 const NODE_TYPES: NodeTypes = { canvasNode: NativeCanvasNodeComponent, groupNode: NativeCanvasGroupNode };
 const MULTI_SELECTION_SCREEN_GAP = 24;
+// 多选工具栏跟着虚框走：虚框已经比节点包围盒外扩了 MULTI_SELECTION_SCREEN_GAP，
+// 工具栏再往上留一段，免得贴着虚线（NodeToolbar 的 offset 是屏幕像素，和虚框的扩边同一套口径）。
+const MULTI_SELECTION_TOOLBAR_SCREEN_OFFSET = MULTI_SELECTION_SCREEN_GAP + 20;
 
 const CONTEXT_CANVAS_NODE_GROUPS: NativeCanvasNodeKind[][] = [
   ["assetLoader", "prompt"],
@@ -151,6 +159,11 @@ interface EdgeToolbarPoint {
 interface ActionFissionSettingsTarget {
   nodeId: string;
   rowId: string;
+}
+
+interface ImageAdjustTarget {
+  nodeId: string;
+  imageIndex: number;
 }
 
 interface PendingGenerationStop {
@@ -193,6 +206,9 @@ interface AltDragCloneGesture extends AltDragCloneGestureState {
 const PASTE_POINTER_RESET_DISTANCE = 8;
 const PASTE_CASCADE_OFFSET = 24;
 const NODE_POINTER_GESTURE_THRESHOLD = 3;
+/** 结果图派生的素材节点：从点击处向右下偏移，同一张卡片连续创建时再逐次错开。 */
+const RESULT_ASSET_OFFSET = 18;
+const RESULT_ASSET_CASCADE = 26;
 
 function isEditingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
@@ -203,6 +219,16 @@ function isEditingTarget(target: EventTarget | null) {
 
 function isNativeCanvasGroupNode(node: NativeCanvasNode) {
   return node.type === "groupNode" || node.data.kind === "group";
+}
+
+/**
+ * 用户新加到画布上的节点统一置顶。
+ *
+ * 画布会把拖动过的节点顶到最前（handleNodeDragStart 给它们递增 zIndex），
+ * 新节点如果不取最高的那一层，就会落在这些节点下面被整块盖住不见。
+ */
+function nextCanvasNodeZIndex(nodes: NativeCanvasNode[]) {
+  return Math.max(0, ...nodes.map((node) => node.zIndex || 0)) + 1;
 }
 
 function parseCanvasClipboard(serialized: string): CanvasClipboardPayload | null {
@@ -472,6 +498,8 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
   const imageThumbnailAttemptsRef = useRef(new Set<string>());
   const imageThumbnailMountedRef = useRef(true);
   const imageMutationVersionRef = useRef(new Map<string, number>());
+  // 同一张卡片连续创建素材节点时按次错开落点，避免新节点完全重叠。
+  const resultAssetCascadeRef = useRef(new Map<string, number>());
   nodesRef.current = nodes;
   edgesRef.current = edges;
 
@@ -497,6 +525,8 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
   const [nodeContextTarget, setNodeContextTarget] = useState<NodeContextTarget | null>(null);
   const [edgeToolbarPoint, setEdgeToolbarPoint] = useState<EdgeToolbarPoint | null>(null);
   const [actionFissionSettingsTarget, setActionFissionSettingsTarget] = useState<ActionFissionSettingsTarget | null>(null);
+  const [imageAdjustTarget, setImageAdjustTarget] = useState<ImageAdjustTarget | null>(null);
+  const [imageAdjustBusy, setImageAdjustBusy] = useState(false);
   const [pendingGenerationStop, setPendingGenerationStop] = useState<PendingGenerationStop | null>(null);
   const [generationStopPending, setGenerationStopPending] = useState(false);
   const [canvasClipboardAvailable, setCanvasClipboardAvailable] = useState(false);
@@ -537,6 +567,27 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     const node = nodes.find((item) => item.id === actionFissionSettingsTarget.nodeId);
     return normalizeActionFissionState(node?.data.actionFission).rows.find((row) => row.id === actionFissionSettingsTarget.rowId) || null;
   }, [actionFissionSettingsTarget, nodes]);
+  // 调整窗口的预览对象：打开时按 nodeId + 图片序号取图，节点或图片消失就关掉窗口。
+  const imageAdjustContext = useMemo(() => {
+    if (!imageAdjustTarget) return null;
+    const node = nodes.find((item) => item.id === imageAdjustTarget.nodeId);
+    if (!node) return null;
+    const images = nativeCanvasNodeImages(node.data);
+    const image = images[imageAdjustTarget.imageIndex] || images[0];
+    const imageUrl = String(image?.localUrl || image?.url || "");
+    if (!image) return null;
+    return {
+      label: String(node.data.label || "").trim() || t("infiniteCanvas:assetNode"),
+      // 预览优先用缩略图（拖动滑块要跟手），导出始终用原图。
+      imageUrl: resolveLibraryImageUrl(imageUrl),
+      previewUrl: image.thumbUrl ? resolveLibraryImageUrl(image.thumbUrl) : resolveLibraryImageUrl(imageUrl),
+      naturalWidth: Math.max(0, Number(image.width || 0)),
+      naturalHeight: Math.max(0, Number(image.height || 0)),
+    };
+  }, [imageAdjustTarget, nodes, t]);
+  useEffect(() => {
+    if (imageAdjustTarget && !imageAdjustContext) setImageAdjustTarget(null);
+  }, [imageAdjustContext, imageAdjustTarget]);
   const contextNode = useMemo(
     () => nodeContextTarget
       ? nodes.find((node) => node.id === nodeContextTarget.node.id) || nodeContextTarget.node
@@ -764,7 +815,7 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     }, nodeData);
     setNodes((current) => [
       ...current.map((item) => item.selected ? { ...item, selected: false } : item),
-      { ...node, selected: true },
+      { ...node, selected: true, zIndex: nextCanvasNodeZIndex(current) },
     ]);
     return node;
   }, [setNodes]);
@@ -972,7 +1023,8 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
   }) => {
     const { kind, label, assetType = "image" } = options;
     const source = getNodes().find((node) => node.id === sourceNodeId);
-    if (!source || source.data.kind !== "assetLoader" || !asset?.url) return;
+    // 图片生成器节点也能派生（裁剪/调整都从它出图），落点用它的实际宽度算。
+    if (!source || (source.data.kind !== "assetLoader" && source.data.kind !== "imageGenerator") || !asset?.url) return;
     const width = Math.max(1, Number(asset.width || 0));
     const height = Math.max(1, Number(asset.height || 0));
     const size = assetType === "video"
@@ -998,11 +1050,80 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     if (source.parentId) nextNode.parentId = source.parentId;
     setNodes((current) => [
       ...current.map((node) => node.selected ? { ...node, selected: false } : node),
-      { ...nextNode, selected: true },
+      { ...nextNode, selected: true, zIndex: nextCanvasNodeZIndex(current) },
     ]);
   }, [getNodes, setNodes]);
 
-  const cropNodeImage = useCallback(async (nodeId: string, crop: CanvasImageCropRect) => {
+  // 批量类节点卡片上的「创建素材节点」按钮走这里：把那一格的结果图复制成
+  // 一个独立素材节点，落点在点击处向右下偏移，不自动连线。
+  const createAssetNodeFromResult = useCallback((request: CanvasResultAssetRequest) => {
+    if (readOnly) return;
+    const imageUrl = String(request.url || "").trim();
+    if (!imageUrl) return;
+    const currentNodes = getNodes();
+    const source = currentNodes.find((node) => node.id === request.sourceNodeId);
+    if (!source) return;
+    // 分组里的子节点用相对坐标存位置，先把整条父链的绝对原点算出来。
+    let origin = { x: 0, y: 0 };
+    const visitedParents = new Set<string>();
+    let parentId = source.parentId;
+    while (parentId && !visitedParents.has(parentId)) {
+      visitedParents.add(parentId);
+      const parent = currentNodes.find((node) => node.id === parentId);
+      if (!parent) break;
+      origin = { x: origin.x + parent.position.x, y: origin.y + parent.position.y };
+      parentId = parent.parentId;
+    }
+    const naturalWidth = Math.max(0, Math.round(Number(request.width || 0)));
+    const naturalHeight = Math.max(0, Math.round(Number(request.height || 0)));
+    const size = naturalWidth > 0 && naturalHeight > 0
+      ? getImageNodeSize(naturalWidth, naturalHeight)
+      : ASSET_LOADER_DEFAULT_SIZE;
+    const sourceWidth = Math.max(1, Number(
+      source.style?.width
+      || source.measured?.width
+      || source.width
+      || NATIVE_CANVAS_NODE_DEFINITIONS[source.data.kind].size.width,
+    ));
+    const anchor = request.clientPoint
+      ? screenToFlowPosition({ x: request.clientPoint.x, y: request.clientPoint.y })
+      // 没有点击坐标时退回源节点右侧，偏移量照旧，仍然落在右下方向。
+      : { x: source.position.x + origin.x + sourceWidth, y: source.position.y + origin.y };
+    const cascadeKey = `${request.sourceNodeId}#${request.sourceKey || ""}`;
+    const cascade = resultAssetCascadeRef.current.get(cascadeKey) || 0;
+    resultAssetCascadeRef.current.set(cascadeKey, cascade + 1);
+    const offset = RESULT_ASSET_OFFSET + cascade * RESULT_ASSET_CASCADE;
+    const fileName = String(request.fileName || "").trim() || FALLBACK_DOWNLOAD_NAME;
+    const nextNode = createNativeCanvasNode("assetLoader", {
+      x: anchor.x - origin.x + offset,
+      y: anchor.y - origin.y + offset,
+    }, {
+      label: fileName.replace(/\.[^./\\]+$/, "") || t("infiniteCanvas:assetNode"),
+      assetUrl: imageUrl,
+      assetFileName: fileName,
+      assetThumbUrl: String(request.thumbUrl || "").trim() || undefined,
+      assetType: "image",
+      assetNaturalWidth: naturalWidth || undefined,
+      assetNaturalHeight: naturalHeight || undefined,
+    });
+    nextNode.style = size;
+    if (source.parentId) nextNode.parentId = source.parentId;
+    setNodes((current) => {
+      // 画布上被拖动过的节点会被顶到最前（见 handleNodeDragStart 的 nextZIndex），
+      // 新节点落在卡片上方时必须跟着取最高的那一层，否则会被整块节点盖住看不见。
+      return [
+        ...current.map((node) => node.selected ? { ...node, selected: false } : node),
+        { ...nextNode, selected: true, zIndex: nextCanvasNodeZIndex(current) },
+      ];
+    });
+  }, [getNodes, readOnly, screenToFlowPosition, setNodes, t]);
+
+  const cropNodeImage = useCallback(async (
+    nodeId: string,
+    crop: CanvasImageCropRect,
+    options: { mode?: "newNode" | "overwrite" } = {},
+  ) => {
+    const { mode = "newNode" } = options;
     const version = (imageMutationVersionRef.current.get(nodeId) || 0) + 1;
     imageMutationVersionRef.current.set(nodeId, version);
     const node = getNodes().find((item) => item.id === nodeId);
@@ -1024,14 +1145,118 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     const result = await window.easyTool.cropCanvasAsset({
       url: localSourceUrl,
       ...crop,
+      // 百分比选区：主进程按源图真实尺寸换算像素（见 cropAsset）。
+      unit: "percent",
       defaultName: node.data.label || "cropped-image.png",
     });
     if (!imageThumbnailMountedRef.current || imageMutationVersionRef.current.get(nodeId) !== version) return;
+    if (mode === "overwrite") {
+      // 覆盖原图：裁剪结果仍然是一张新图，只是把它填回这个节点，
+      // 节点位置、连线和分组都保持不变。
+      setNodeAsset(
+        nodeId,
+        result.url,
+        derivedAssetName("crop", node.data.assetFileName || node.data.label),
+        "image",
+        "image/png",
+        {
+          width: result.width,
+          height: result.height,
+          thumbUrl: result.thumbUrl,
+        },
+      );
+      return;
+    }
     createDerivedAssetNode(nodeId, result, {
       kind: "crop",
       label: `${String(node.data.label || t("infiniteCanvas:assetNode"))}-cropped`,
     });
-  }, [createDerivedAssetNode, getNodes, t]);
+  }, [createDerivedAssetNode, getNodes, setNodeAsset, t]);
+
+  /**
+   * 图片调整：源图先落到本地资产（远程图直接交给画布绘制会被跨域弄脏），
+   * 再交给主进程按同一套公式渲染，最后作为一个派生素材节点落到画布上。
+   */
+  const adjustNodeImage = useCallback(async (
+    nodeId: string,
+    adjustments: NativeCanvasImageAdjustments,
+    options: { imageIndex?: number; localSourceUrl?: string; mode?: "newNode" | "overwrite" } = {},
+  ) => {
+    const { imageIndex = 0, localSourceUrl: preloadedSourceUrl = "", mode = "newNode" } = options;
+    const version = (imageMutationVersionRef.current.get(nodeId) || 0) + 1;
+    imageMutationVersionRef.current.set(nodeId, version);
+    const node = getNodes().find((item) => item.id === nodeId);
+    const nodeImages = node ? nativeCanvasNodeImages(node.data) : [];
+    const image = nodeImages[imageIndex] || nodeImages[0];
+    const sourceUrl = String(image?.localUrl || image?.url || "");
+    if (!node || !sourceUrl) throw new Error(t("infiniteCanvas:imageAdjustSourceMissing"));
+    if (!window.easyTool?.adjustCanvasAsset) throw new Error(t("infiniteCanvas:imageAdjustUnavailable"));
+
+    // 调整窗口里已经落过一次本地素材，这里直接用，避免重复复制文件。
+    let localSourceUrl = /^forart-asset:/i.test(preloadedSourceUrl) ? preloadedSourceUrl : sourceUrl;
+    if (!/^forart-asset:/i.test(localSourceUrl)) {
+      if (!window.easyTool.saveCanvasAsset) throw new Error(t("infiniteCanvas:imageAdjustUnavailable"));
+      const stored = await window.easyTool.saveCanvasAsset({
+        url: resolveLibraryImageUrl(localSourceUrl),
+        defaultName: node.data.label || "canvas-image.png",
+        kind: "input",
+      });
+      localSourceUrl = stored.url;
+    }
+
+    const result = await window.easyTool.adjustCanvasAsset({
+      url: localSourceUrl,
+      adjustments,
+      defaultName: node.data.label || "adjusted-image.png",
+    });
+    if (!imageThumbnailMountedRef.current || imageMutationVersionRef.current.get(nodeId) !== version) return;
+    if (mode === "overwrite") {
+      // 覆盖原图：渲染结果其实还是"一张新图"，只是把它填回这个节点，
+      // 而不是新建一个节点（节点位置、连线、分组都保持不变）。
+      setNodeAsset(
+        nodeId,
+        result.url,
+        derivedAssetName("adjust", node.data.assetFileName || node.data.label),
+        "image",
+        "image/png",
+        {
+          width: result.width,
+          height: result.height,
+          thumbUrl: result.thumbUrl,
+        },
+      );
+      return;
+    }
+    createDerivedAssetNode(nodeId, result, {
+      kind: "adjust",
+      label: `${String(node.data.label || t("infiniteCanvas:assetNode"))}-adjusted`,
+    });
+  }, [createDerivedAssetNode, getNodes, setNodeAsset, t]);
+
+  const applyImageAdjustment = useCallback((
+    adjustments: NativeCanvasImageAdjustments,
+    localSourceUrl: string,
+    mode: "newNode" | "overwrite",
+  ) => {
+    const target = imageAdjustTarget;
+    if (!target) return;
+    setImageAdjustBusy(true);
+    void adjustNodeImage(target.nodeId, adjustments, {
+      imageIndex: target.imageIndex,
+      localSourceUrl,
+      mode,
+    })
+      .then(() => {
+        setImageAdjustTarget(null);
+        toast.success(t("infiniteCanvas:imageAdjustCompleted"));
+      })
+      .catch((error) => {
+        toast.error(t("infiniteCanvas:imageAdjustFailed", {
+          message: String(error instanceof Error ? error.message : error),
+        }));
+      })
+      .finally(() => setImageAdjustBusy(false));
+  }, [adjustNodeImage, imageAdjustTarget, t]);
 
   const patchNodeData = useCallback((nodeId: string, patch: Partial<NativeCanvasNode["data"]>) => {
     setNodes((current) => current.map((node) => node.id === nodeId
@@ -1429,7 +1654,7 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     });
     referenceNode.style = size;
     referenceNode.selected = false;
-    setNodes((current) => [...current, referenceNode]);
+    setNodes((current) => [...current, { ...referenceNode, zIndex: nextCanvasNodeZIndex(current) }]);
     setEdges((current) => addEdge({
       id: `edge_${crypto.randomUUID()}`,
       type: "default",
@@ -1521,6 +1746,12 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     redoCanvasHistory: redoHistory,
     addImageReferenceFiles: (nodeId, files) => canvasActionHandlersRef.current.addImageReferenceFiles(nodeId, files),
     cropNodeImage,
+    adjustNodeImage,
+    openImageAdjustDialog: (nodeId: string, imageIndex = 0) => {
+      if (readOnly) return;
+      setImageAdjustTarget({ nodeId, imageIndex });
+    },
+    createAssetNodeFromResult,
     createDerivedAssetNode,
     downloadActionFissionResult: (nodeId, rowId) => canvasActionHandlersRef.current.downloadActionFissionResult(nodeId, rowId),
     downloadNodeImage: (nodeId, imageIndex) => canvasActionHandlersRef.current.downloadNodeImage(nodeId, imageIndex),
@@ -1561,7 +1792,7 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     stopImageGeneration: (nodeId) => canvasActionHandlersRef.current.stopImageGeneration(nodeId),
     stopActionFission: (nodeId, rowId) => canvasActionHandlersRef.current.stopActionFission(nodeId, rowId),
     stopBatchImageGeneration: (nodeId, itemId) => canvasActionHandlersRef.current.stopBatchImageGeneration(nodeId, itemId),
-  }), [beginHistoryGesture, cropNodeImage, createDerivedAssetNode, endHistoryGesture, patchActionFissionSelectionSilently, patchBatchImageGeneratorItemSilently, patchNodeData, patchNodeDataSilently, readOnly, setEdges, setNodeAsset, t]);
+  }), [adjustNodeImage, beginHistoryGesture, cropNodeImage, createAssetNodeFromResult, createDerivedAssetNode, endHistoryGesture, patchActionFissionSelectionSilently, patchBatchImageGeneratorItemSilently, patchNodeData, patchNodeDataSilently, readOnly, setEdges, setNodeAsset, t]);
 
   const validateConnection = useCallback<IsValidConnection<NativeCanvasEdge>>((connection) => (
     isNativeCanvasConnectionValid(connection, nodesRef.current, edgesRef.current)
@@ -1714,10 +1945,13 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
       });
       return { node: { ...node, style: size, selected: true }, file, dimensions, assetType };
     });
-    setNodes((current) => [
-      ...current.map((node) => node.selected ? { ...node, selected: false } : node),
-      ...imageNodes.map((item) => item.node),
-    ]);
+    setNodes((current) => {
+      const zIndex = nextCanvasNodeZIndex(current);
+      return [
+        ...current.map((node) => node.selected ? { ...node, selected: false } : node),
+        ...imageNodes.map((item) => ({ ...item.node, zIndex })),
+      ];
+    });
 
     // Process each image independently. The first completed image is patched
     // into the canvas immediately instead of waiting for the whole paste/drop
@@ -1851,10 +2085,15 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
         const deltaY = targetCenter.y - (sourceBounds.y + sourceBounds.height / 2);
         const pasted = instantiateCanvasClipboardPayload(payload, { x: deltaX, y: deltaY }, true);
 
-        setNodes((current) => [
-          ...current.map((node) => node.selected ? { ...node, selected: false } : node),
-          ...pasted.nodes,
-        ]);
+        setNodes((current) => {
+          // 粘贴出来的节点整体上移一层：组和它的子节点相对层级保持不变，
+          // 同时整组都落在画布已有节点之上。
+          const zIndex = nextCanvasNodeZIndex(current);
+          return [
+            ...current.map((node) => node.selected ? { ...node, selected: false } : node),
+            ...pasted.nodes.map((node) => ({ ...node, zIndex: (node.zIndex || 0) + zIndex })),
+          ];
+        });
         setEdges((current) => [
           ...current.map((edge) => edge.selected ? { ...edge, selected: false } : edge),
           ...pasted.edges,
@@ -2141,7 +2380,7 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
                   nodeId={selectedNodeIds}
                   isVisible={!multiSelectionDragging && !selectionGestureActive}
                   position={Position.Top}
-                  offset={18}
+                  offset={MULTI_SELECTION_TOOLBAR_SCREEN_OFFSET}
                   className="rf-native-multi-selection-toolbar nodrag nopan nowheel"
                 >
                   <span className="rf-native-multi-selection-count">
@@ -2151,9 +2390,15 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
                     <GroupIcon aria-hidden="true" />
                     <span>{t("infiniteCanvas:groupSelectedNodes")}</span>
                   </Button>
-                  <Button type="button" variant="destructive" size="sm" onClick={deleteSelectedNodes}>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="icon-sm"
+                    aria-label={t("infiniteCanvas:deleteSelectedNodes")}
+                    title={t("infiniteCanvas:deleteSelectedNodes")}
+                    onClick={deleteSelectedNodes}
+                  >
                     <Trash2 aria-hidden="true" />
-                    <span>{t("infiniteCanvas:deleteSelectedNodes")}</span>
                   </Button>
                 </NodeToolbar>
               ) : null}
@@ -2251,6 +2496,20 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
         >
           <LibraryAssetPickerRail onSelect={addLibraryImage} />
         </CanvasFloatingPanel> : null}
+
+        {!readOnly && imageAdjustContext ? <ImageAdjustDialog
+          open
+          label={imageAdjustContext.label}
+          sourceUrl={imageAdjustContext.imageUrl}
+          fallbackUrl={imageAdjustContext.previewUrl}
+          naturalWidth={imageAdjustContext.naturalWidth}
+          naturalHeight={imageAdjustContext.naturalHeight}
+          busy={imageAdjustBusy}
+          onOpenChange={(open) => {
+            if (!open) setImageAdjustTarget(null);
+          }}
+          onApply={applyImageAdjustment}
+        /> : null}
 
         {!readOnly ? <ActionFissionRowSettingsDialog
           open={Boolean(actionFissionSettingsTarget && actionFissionSettingsRow)}

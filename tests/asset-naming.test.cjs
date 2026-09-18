@@ -30,10 +30,11 @@ function loadAssetNaming() {
 test('derived assets are named with their operation prefix', () => {
   const naming = loadAssetNaming();
 
-  assert.deepEqual(naming.DERIVED_ASSET_PREFIXES, { crop: 'Crop', matting: 'Matting', frame: 'Frame' });
+  assert.deepEqual(naming.DERIVED_ASSET_PREFIXES, { crop: 'Crop', matting: 'Matting', frame: 'Frame', adjust: 'Adjust' });
   assert.equal(naming.derivedAssetName('crop', '模特图.jpg'), 'Crop-模特图.png');
   assert.equal(naming.derivedAssetName('matting', '模特图.png'), 'Matting-模特图.png');
   assert.equal(naming.derivedAssetName('frame', '视频.mp4'), 'Frame-视频.png');
+  assert.equal(naming.derivedAssetName('adjust', '模特图.png'), 'Adjust-模特图.png');
 });
 
 test('derived names never stack prefixes and fall back to a readable base', () => {
@@ -41,6 +42,7 @@ test('derived names never stack prefixes and fall back to a readable base', () =
 
   assert.equal(naming.derivedAssetName('crop', 'Crop-模特图.png'), 'Crop-模特图.png');
   assert.equal(naming.derivedAssetName('matting', 'Crop-模特图.png'), 'Matting-模特图.png');
+  assert.equal(naming.derivedAssetName('adjust', 'Crop-模特图.png'), 'Adjust-模特图.png');
   assert.equal(naming.derivedAssetName('crop', ''), 'Crop-image.png');
   assert.equal(naming.derivedAssetName('crop', '   '), 'Crop-image.png');
   assert.equal(naming.derivedAssetName('crop', 'no-extension'), 'Crop-no-extension.png');

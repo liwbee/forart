@@ -1,12 +1,18 @@
 import { Handle, NodeToolbar, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import { ImageAiFillIcon } from "./canvasNodeIcons";
-import { ArrowLeft, Check, ChevronUp, CircleAlert, Copy, Crop, Download, Images, LoaderCircle, Maximize2, Play, Square, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronUp, CircleAlert, Copy, Crop, Download, Images, LoaderCircle, Maximize2, Play, SlidersHorizontal, Square, Trash2, Upload, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AppSelect } from "../../../components/AppSelect";
 import { ImageWithFallback } from "../../../components/ImageWithFallback";
 import { Button } from "../../../components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../../../components/ui/dropdown-menu";
 import { Textarea } from "../../../components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip";
 import { copyText } from "../../../components/ErrorCopyLine";
@@ -137,7 +143,8 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [isCropping, setIsCropping] = useState(false);
-  const [cropAspect, setCropAspect] = useState<ImageCropAspect>("original");
+  // 进入裁剪默认用自由比例：先让用户随便框，需要固定比例时再切换。
+  const [cropAspect, setCropAspect] = useState<ImageCropAspect>("free");
   const [cropSelection, setCropSelection] = useState<CanvasImageCropRect | null>(null);
   const [isCropBusy, setIsCropBusy] = useState(false);
   const [referenceHintsVisible, setReferenceHintsVisible] = useState(false);
@@ -228,10 +235,10 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     setCropSelection(null);
   };
 
-  const confirmCrop = () => {
+  const confirmCrop = (mode: "newNode" | "overwrite") => {
     if (!cropSelection || isCropBusy) return;
     setIsCropBusy(true);
-    void actions.cropNodeImage(id, cropSelection)
+    void actions.cropNodeImage(id, cropSelection, { mode })
       .then(() => {
         setIsCropping(false);
         setCropSelection(null);
@@ -382,6 +389,14 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
     finally { setIsBackgroundRemovalBusy(false); }
   }, [actions, backgroundRemovalEnabled, data, id, t]);
 
+  // 工具栏按功能分组：主操作（运行 / 素材导入） | 图像处理（抠图 / 裁剪 / 图像调节） | 结果（查看 / 下载 / 删除）。
+  // 相邻分组之间画一条竖分割线，避免十来个图标按钮混在一起看不出归属。
+  const hasPrimaryToolbarActions = (data.kind === "assetLoader" || data.kind === "imageGenerator" || data.kind === "smartReverse") && !isCropping;
+  const hasImageEditingToolbarActions = !isCropping && (
+    (data.kind === "assetLoader" && Boolean(primaryImageUrl))
+    || (canUseImageActions && !actions.readOnly)
+  );
+
   return (
     <>
       {!isAnnotationNode ? (
@@ -420,17 +435,29 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 ]}
                 onChange={(value) => setCropAspect(value as ImageCropAspect)}
               />
-              <Button
-                type="button"
-                variant="default"
-                size="icon-sm"
-                disabled={!cropSelection || isCropBusy}
-                aria-label={t("common:actions.confirm")}
-                title={t("common:actions.confirm")}
-                onClick={confirmCrop}
-              >
-                {isCropBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Check aria-hidden="true" />}
-              </Button>
+              {/* 应用裁剪：和图像调节一样，交给用户决定是覆盖原图还是新建节点。 */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="icon-sm"
+                    disabled={!cropSelection || isCropBusy}
+                    aria-label={t("infiniteCanvas:imageCropApply")}
+                    title={t("infiniteCanvas:imageCropApply")}
+                  >
+                    {isCropBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Check aria-hidden="true" />}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" side="top">
+                  <DropdownMenuItem onSelect={() => confirmCrop("overwrite")}>
+                    {t("infiniteCanvas:imageAdjustApplyOverwrite")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => confirmCrop("newNode")}>
+                    {t("infiniteCanvas:imageAdjustApplyNewNode")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button
                 type="button"
                 variant="ghost"
@@ -443,109 +470,135 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                 <X aria-hidden="true" />
               </Button>
             </>
-          ) : data.kind === "assetLoader" ? (
+          ) : (
             <>
-              <Button type="button" variant="ghost" size="icon-sm" aria-label={t("common:actions.uploadAsset")} onClick={() => fileInputRef.current?.click()}>
-                <Upload aria-hidden="true" />
-              </Button>
-              <Button type="button" variant="ghost" size="icon-sm" aria-label={t("infiniteCanvas:importFromLibrary")} onClick={() => actions.openLibraryForNode(id)}>
-                <Images aria-hidden="true" />
+              {/* 主操作：运行 / 素材导入 */}
+              {data.kind === "assetLoader" ? (
+                <>
+                  <Button type="button" variant="ghost" size="icon-sm" aria-label={t("common:actions.uploadAsset")} title={t("common:actions.uploadAsset")} onClick={() => fileInputRef.current?.click()}>
+                    <Upload aria-hidden="true" />
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon-sm" aria-label={t("infiniteCanvas:importFromLibrary")} title={t("infiniteCanvas:importFromLibrary")} onClick={() => actions.openLibraryForNode(id)}>
+                    <Images aria-hidden="true" />
+                  </Button>
+                </>
+              ) : null}
+              {data.kind === "imageGenerator" ? (
+                <Button
+                  type="button"
+                  variant="default"
+                  size="icon-sm"
+                  disabled={isLaunching}
+                  aria-label={t(isImageGenerationTaskRunning ? "infiniteCanvas:stopRun" : "infiniteCanvas:run")}
+                  title={t(isImageGenerationTaskRunning ? "infiniteCanvas:stopRun" : "infiniteCanvas:run")}
+                  onClick={() => void (isImageGenerationTaskRunning
+                    ? actions.stopImageGeneration(id)
+                    : actions.runImageGeneration(id))}
+                >
+                  {isLaunching
+                    ? <LoaderCircle className="animate-spin" aria-hidden="true" />
+                    : isImageGenerationTaskRunning
+                      ? <Square aria-hidden="true" fill="currentColor" />
+                      : <Play aria-hidden="true" fill="currentColor" />}
+                </Button>
+              ) : null}
+              {data.kind === "smartReverse" ? (
+                <Button
+                  type="button"
+                  variant="default"
+                  size="icon-sm"
+                  aria-label={t(smartReverseRunning ? "infiniteCanvas:stopRun" : "infiniteCanvas:run")}
+                  title={t(smartReverseRunning ? "infiniteCanvas:stopRun" : "infiniteCanvas:run")}
+                  onClick={() => smartReverseRunning
+                    ? useSmartReverseRuntimeStore.getState().stop(id)
+                    : useSmartReverseRuntimeStore.getState().run(id)}
+                >
+                  {smartReverseRunning ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}
+                </Button>
+              ) : null}
+
+              {hasPrimaryToolbarActions ? <span className="rf-native-toolbar-divider" aria-hidden="true" /> : null}
+
+              {/* 图像处理：抠图 / 裁剪 / 图像调节 */}
+              {backgroundRemovalEnabled && data.kind === "assetLoader" && primaryImageUrl ? (
+                <Button type="button" variant="ghost" size="icon-sm" disabled={isBackgroundRemovalBusy} aria-label={t("infiniteCanvas:backgroundRemovalAction")} title={t("infiniteCanvas:backgroundRemovalAction")} onClick={() => void removeBackground()}>
+                  {isBackgroundRemovalBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <ImageAiFillIcon aria-hidden="true" />}
+                </Button>
+              ) : null}
+              {data.kind === "assetLoader" && primaryImageUrl ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("infiniteCanvas:cropImage")}
+                  title={t("infiniteCanvas:cropImage")}
+                  onClick={() => {
+                    setCropAspect("free");
+                    setCropSelection(null);
+                    setIsCropping(true);
+                  }}
+                >
+                  <Crop aria-hidden="true" />
+                </Button>
+              ) : null}
+              {canUseImageActions && !actions.readOnly ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("infiniteCanvas:imageAdjustAction")}
+                  title={t("infiniteCanvas:imageAdjustAction")}
+                  onClick={() => actions.openImageAdjustDialog(id, viewerIndex)}
+                >
+                  <SlidersHorizontal aria-hidden="true" />
+                </Button>
+              ) : null}
+
+              {hasImageEditingToolbarActions ? <span className="rf-native-toolbar-divider" aria-hidden="true" /> : null}
+
+              {/* 结果：查看大图 / 下载 / 删除 */}
+              {canUseImageActions ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("infiniteCanvas:viewLargeImage")}
+                  title={t("infiniteCanvas:viewLargeImage")}
+                  onClick={() => {
+                    setViewerIndex(0);
+                    setViewerOpen(true);
+                  }}
+                >
+                  <Maximize2 aria-hidden="true" />
+                </Button>
+              ) : null}
+              {data.kind === "imageGenerator" || canUseImageActions ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={!canUseImageActions || isDownloadBusy}
+                  aria-label={t("infiniteCanvas:downloadImage")}
+                  title={t("infiniteCanvas:downloadImage")}
+                  onClick={downloadImage}
+                >
+                  {isDownloadBusy
+                    ? <LoaderCircle className="animate-spin" aria-hidden="true" />
+                    : <Download aria-hidden="true" />}
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="destructive"
+                size="icon-sm"
+                aria-label={t("common:actions.delete")}
+                title={t("common:actions.delete")}
+                onClick={() => void deleteElements({ nodes: [{ id }] })}
+              >
+                <Trash2 aria-hidden="true" />
               </Button>
             </>
-          ) : null}
-          {data.kind === "imageGenerator" && !isCropping ? (
-            <Button
-              type="button"
-              variant="default"
-              size="icon-sm"
-              disabled={isLaunching}
-              aria-label={t(isImageGenerationTaskRunning ? "infiniteCanvas:stopRun" : "infiniteCanvas:run")}
-              title={t(isImageGenerationTaskRunning ? "infiniteCanvas:stopRun" : "infiniteCanvas:run")}
-              onClick={() => void (isImageGenerationTaskRunning
-                ? actions.stopImageGeneration(id)
-                : actions.runImageGeneration(id))}
-            >
-              {isLaunching
-                ? <LoaderCircle className="animate-spin" aria-hidden="true" />
-                : isImageGenerationTaskRunning
-                  ? <Square aria-hidden="true" fill="currentColor" />
-                  : <Play aria-hidden="true" fill="currentColor" />}
-            </Button>
-          ) : null}
-          {data.kind === "smartReverse" && !isCropping ? (
-            <Button
-              type="button"
-              variant="default"
-              size="icon-sm"
-              aria-label={t(smartReverseRunning ? "infiniteCanvas:stopRun" : "infiniteCanvas:run")}
-              title={t(smartReverseRunning ? "infiniteCanvas:stopRun" : "infiniteCanvas:run")}
-              onClick={() => smartReverseRunning
-                ? useSmartReverseRuntimeStore.getState().stop(id)
-                : useSmartReverseRuntimeStore.getState().run(id)}
-            >
-              {smartReverseRunning ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" fill="currentColor" />}
-            </Button>
-          ) : null}
-          {!isCropping && canUseImageActions ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t("infiniteCanvas:viewLargeImage")}
-              title={t("infiniteCanvas:viewLargeImage")}
-              onClick={() => {
-                setViewerIndex(0);
-                setViewerOpen(true);
-              }}
-            >
-              <Maximize2 aria-hidden="true" />
-            </Button>
-          ) : null}
-          {backgroundRemovalEnabled && data.kind === "assetLoader" && primaryImageUrl && !isCropping ? (
-            <Button type="button" variant="ghost" size="icon-sm" disabled={isBackgroundRemovalBusy} aria-label={t("infiniteCanvas:backgroundRemovalAction")} title={t("infiniteCanvas:backgroundRemovalAction")} onClick={() => void removeBackground()}>
-              {isBackgroundRemovalBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <ImageAiFillIcon aria-hidden="true" />}
-            </Button>
-          ) : null}
-          {data.kind === "assetLoader" && primaryImageUrl && !isCropping ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t("infiniteCanvas:cropImage")}
-              title={t("infiniteCanvas:cropImage")}
-              onClick={() => {
-                setCropAspect("original");
-                setCropSelection(null);
-                setIsCropping(true);
-              }}
-            >
-              <Crop aria-hidden="true" />
-            </Button>
-          ) : null}
-          {data.kind === "imageGenerator" || canUseImageActions ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled={!canUseImageActions || isDownloadBusy}
-              aria-label={t("infiniteCanvas:downloadImage")}
-              title={t("infiniteCanvas:downloadImage")}
-              onClick={downloadImage}
-            >
-              {isDownloadBusy
-                ? <LoaderCircle className="animate-spin" aria-hidden="true" />
-                : <Download aria-hidden="true" />}
-            </Button>
-          ) : null}
-          {!isCropping ? <Button
-              type="button"
-              variant="destructive"
-              size="icon-sm"
-            aria-label={t("common:actions.delete")}
-            onClick={() => void deleteElements({ nodes: [{ id }] })}
-          >
-            <Trash2 aria-hidden="true" />
-          </Button> : null}
+          )}
         </NodeToolbar>
       ) : null}
 

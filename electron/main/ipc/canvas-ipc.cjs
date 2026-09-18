@@ -268,6 +268,7 @@ function registerCanvasIpc({ ipcMain, app, configStore, canvasStore, assetStore,
   ipcMain.handle('canvas:ensure-asset-thumbnail', async (_event, payload) => assetStore.ensureAssetThumbnail(payload));
   ipcMain.handle('canvas:import-asset-file', async (_event, payload) => assetStore.importUserAssetFile(payload));
   ipcMain.handle('canvas:crop-asset', async (_event, payload) => assetStore.cropAsset(payload));
+  ipcMain.handle('canvas:adjust-asset', async (_event, payload) => assetStore.adjustAsset(payload));
 }
 
 module.exports = { registerCanvasIpc, stopMissingGenerationTargets };

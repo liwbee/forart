@@ -18,7 +18,9 @@ export interface ForartAppConfig {
 
 // IPC 边界上的 provider 形状与 features/settings/apiProviders 保持同一份定义；
 // 归一化规则的唯一实现在主进程 config-store.cjs。
+import type { ImagePresetFile } from "../features/infinite-canvas/imagePresets";
 import type { ApiProvider, ApiSettings } from "../features/settings/apiProviders";
+import type { NativeCanvasImageAdjustments } from "../features/infinite-canvas/imageAdjustments";
 export type ForartApiProviderConfig = ApiProvider;
 export type ForartApiSettingsConfig = ApiSettings;
 
@@ -248,6 +250,12 @@ export interface ForartUpdateConnectivityResult {
   results: ForartUpdateConnectivityItem[];
 }
 
+/** 调色预设的读写（整份覆盖）。 */
+export interface ForartImagePresetsApi {
+  load: () => Promise<ImagePresetFile>;
+  save: (payload: ImagePresetFile) => Promise<ImagePresetFile>;
+}
+
 export interface ForartConfigApi {
   load: () => Promise<ForartAppConfig | null>;
   save: (config: ForartAppConfig) => Promise<{ ok: true; config: ForartAppConfig }>;
@@ -410,7 +418,12 @@ export interface EasyToolApi {
     sizeBytes?: number;
     codec?: string;
   }>;
-  cropCanvasAsset: (payload: { url?: string; filePath?: string; x: number; y: number; width: number; height: number; defaultName?: string }) => Promise<{ url: string; thumbUrl?: string; fileName: string; filePath?: string; thumbFilePath?: string; width: number; height: number }>;
+  /**
+   * 裁剪素材。`unit: "percent"` 时 x/y/width/height 是百分比（0-100），
+   * 由主进程按源图真实尺寸换算像素；缺省按像素处理。
+   */
+  cropCanvasAsset: (payload: { url?: string; filePath?: string; unit?: "percent"; x: number; y: number; width: number; height: number; defaultName?: string }) => Promise<{ url: string; thumbUrl?: string; fileName: string; filePath?: string; thumbFilePath?: string; width: number; height: number }>;
+  adjustCanvasAsset: (payload: { url?: string; filePath?: string; adjustments: Partial<NativeCanvasImageAdjustments>; defaultName?: string }) => Promise<{ url: string; thumbUrl?: string; fileName: string; filePath?: string; thumbFilePath?: string; width: number; height: number }>;
   scanCanvasCache: () => Promise<CanvasCacheScanResult>;
   deleteCanvasCacheAssets: (payload: { ids: string[] }) => Promise<CanvasCacheDeleteResult>;
   revealCanvasCacheAsset: (payload: { id?: string; filePath?: string }) => Promise<{ ok: true }>;
@@ -602,6 +615,7 @@ declare global {
   interface Window {
     forartWindow?: ForartWindowApi;
     forartConfig?: ForartConfigApi;
+    forartImagePresets?: ForartImagePresetsApi;
     easyTool?: EasyToolApi;
     forartReview?: ImageReviewApi;
     forartActionImport?: ForartActionImportApi;

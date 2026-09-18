@@ -120,6 +120,19 @@ test.beforeEach(async ({ page }) => {
         serverSession: async () => ({ ok: false, status: 401 }),
       },
     });
+    // 调色预设：内存版，save 直接回显并记录到 dataset，方便断言
+    let imagePresets = { version: 1, order: [] as string[], items: {} as Record<string, unknown> };
+    Object.defineProperty(window, "forartImagePresets", {
+      configurable: true,
+      value: {
+        load: async () => imagePresets,
+        save: async (payload: typeof imagePresets) => {
+          imagePresets = payload;
+          document.documentElement.dataset.imagePresets = JSON.stringify(payload);
+          return payload;
+        },
+      },
+    });
     Object.defineProperty(window, "forartLocalApi", {
       configurable: true,
       value: {
@@ -369,7 +382,18 @@ test.beforeEach(async ({ page }) => {
             { id: "empty-image-generator", type: "canvasNode", position: { x: 320, y: 600 }, style: { width: 420, height: 360 }, data: { kind: "imageGenerator", label: "Empty generator", text: "Generate another test image", imageProviderId: provider.id, imageModel: provider.imageModels[0], generatedImages: [] } },
             { id: "action-fission", type: "canvasNode", position: { x: 620, y: 100 }, style: { width: 700, height: 560 }, data: { kind: "actionFission", label: "Fission", actionFission } },
             { id: "reference", type: "canvasNode", position: { x: 80, y: 600 }, style: { width: 180, height: 120 }, data: cropThumbnailFixture
-              ? { kind: "imageLoader", label: "Reference", imageUrl: "forart-asset://canvas/input/original.png", thumbUrl: cropThumbnail, imageFileName: "uploaded.png", imageNaturalWidth: 4000, imageNaturalHeight: 3000 }
+              // `forart_test_missing_natural_size` 模拟老数据：素材原图尺寸没记录，
+              // 预览又只有缩略图 —— 裁剪坐标一旦按缩略图算，就会裁到左上角。
+              ? {
+                kind: "imageLoader",
+                label: "Reference",
+                imageUrl: "forart-asset://canvas/input/original.png",
+                thumbUrl: cropThumbnail,
+                imageFileName: "uploaded.png",
+                ...(window.localStorage.getItem("forart_test_missing_natural_size") === "true"
+                  ? {}
+                  : { imageNaturalWidth: 4000, imageNaturalHeight: 3000 }),
+              }
               : { kind: "imageLoader", label: "Reference", imageUrl: pixel, imageFileName: "uploaded.jpg" } },
             { id: "image-reverse", type: "canvasNode", position: { x: 760, y: 400 }, style: { width: 340, height: 300 }, data: { kind: "smartReverse", label: "Reverse", text: document.documentElement.dataset.reverseCompleted === "true" ? "反推出的主体与服装 Prompt" : "", smartReverseProviderId: provider.id, smartReverseModel: "test-chat-model", smartReverseReasoning: "none" } },
             ...wrappedReferenceNodes,
@@ -388,12 +412,27 @@ test.beforeEach(async ({ page }) => {
         saveCanvas: async () => ({ ok: true }),
         cropCanvasAsset: async (payload: Record<string, unknown>) => {
           document.documentElement.dataset.lastCropPayload = JSON.stringify(payload);
+          // 和主进程 cropAsset 一样：收到百分比选区，按源图真实尺寸换算像素。
+          const ratio = (value: unknown) => Math.min(100, Math.max(0, Number(value || 0))) / 100;
+          const sourceWidth = 4000;
+          const sourceHeight = 3000;
+          const usesPercent = payload.unit === "percent";
           return {
             url: pixel,
             thumbUrl: pixel,
             fileName: "cropped.png",
-            width: Number(payload.width || 1),
-            height: Number(payload.height || 1),
+            width: usesPercent ? Math.max(1, Math.round(ratio(payload.width) * sourceWidth)) : Number(payload.width || 1),
+            height: usesPercent ? Math.max(1, Math.round(ratio(payload.height) * sourceHeight)) : Number(payload.height || 1),
+          };
+        },
+        adjustCanvasAsset: async (payload: Record<string, unknown>) => {
+          document.documentElement.dataset.lastAdjustPayload = JSON.stringify(payload);
+          return {
+            url: pixel,
+            thumbUrl: pixel,
+            fileName: "adjusted.png",
+            width: 4000,
+            height: 3000,
           };
         },
         getCanvasClipboardStatus: async () => ({ hasNodes: false, hasImage: false }),
@@ -412,6 +451,24 @@ async function selectNode(page: Page, nodeId: string) {
   const toolbar = page.locator(".rf-native-node-toolbar");
   await expect(toolbar).toBeVisible();
   return toolbar;
+}
+
+/** 读画布中心一小块的不透明像素总量：等于 0 就说明预览是空白。 */
+function previewAlphaSum(dialog: ReturnType<Page["getByRole"]>) {
+  return dialog.locator(".rf-image-adjust__canvas").evaluate((element) => {
+    const canvas = element as HTMLCanvasElement;
+    if (canvas.width < 16 || canvas.height < 16) return 0;
+    const probe = document.createElement("canvas");
+    probe.width = 8;
+    probe.height = 8;
+    const context = probe.getContext("2d");
+    if (!context) return 0;
+    context.drawImage(canvas, canvas.width / 2 - 4, canvas.height / 2 - 4, 8, 8, 0, 0, 8, 8);
+    const data = context.getImageData(0, 0, 8, 8).data;
+    let alpha = 0;
+    for (let index = 3; index < data.length; index += 4) alpha += data[index];
+    return alpha;
+  });
 }
 
 test("exposes generation actions in the image generator top toolbar", async ({ page }) => {
@@ -1070,18 +1127,229 @@ test("maps a thumbnail crop selection to original image pixels", async ({ page }
   await page.getByRole("button", { name: "Infinite Canvas" }).click();
 
   const toolbar = await selectNode(page, "reference");
+
+  // 先拖动源节点：它会被顶到最前（zIndex 1），派生节点必须落在它上面。
+  const captionBox = await page.locator('.react-flow__node[data-id="reference"] .rf-native-node-caption').boundingBox();
+  expect(captionBox).not.toBeNull();
+  await page.mouse.move(captionBox!.x + 40, captionBox!.y + captionBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(captionBox!.x + 70, captionBox!.y + captionBox!.height / 2 + 30, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => page.locator('.react-flow__node[data-id="reference"]').evaluate((element) => getComputedStyle(element).zIndex)).toBe("1");
+
+  await toolbar.getByRole("button", { name: "Crop image" }).click();
+  await expect(page.locator(".rf-native-image-crop-editor img")).toHaveJSProperty("naturalWidth", 400);
+  // 裁剪模式下不再显示下载按钮，避免和"应用裁剪"混淆。
+  await expect(toolbar.getByRole("button", { name: "Download image" })).toHaveCount(0);
+  // 默认是自由比例，并且完整文案不能被截断。
+  const aspectSelect = toolbar.getByRole("combobox", { name: "Crop aspect ratio" });
+  await expect(aspectSelect).toContainText("Free ratio");
+  const selectOverflow = await aspectSelect.evaluate((element) => {
+    const value = element.querySelector('[data-slot="select-value"]');
+    return { clientWidth: value?.clientWidth || 0, scrollWidth: value?.scrollWidth || 0 };
+  });
+  expect(selectOverflow.scrollWidth).toBeLessThanOrEqual(selectOverflow.clientWidth);
+  await aspectSelect.click();
+  await page.getByRole("option", { name: "1:1", exact: true }).click();
+  // 应用裁剪也是下拉菜单：覆盖原图 / 新建节点。
+  await toolbar.getByRole("button", { name: "Apply crop" }).click();
+  await page.getByRole("menuitem", { name: "Create new node" }).click();
+
+  await expect.poll(() => page.locator("html").getAttribute("data-last-crop-payload")).not.toBeNull();
+  const payload = JSON.parse(String(await page.locator("html").getAttribute("data-last-crop-payload")));
+  // 选区用百分比提交：主进程按源图真实尺寸换算，缩略图预览不会把坐标带偏。
+  expect(payload).toMatchObject({ unit: "percent", x: 12.5, y: 0, width: 75, height: 100 });
+  await expect(page.locator('.react-flow__node[data-id="reference"]')).toHaveCount(1);
+  const cropped = page.locator('.react-flow__node[data-id^="assetLoader_"]');
+  await expect(cropped).toHaveCount(1);
+  expect(await cropped.evaluate((element) => getComputedStyle(element).zIndex)).toBe("2");
+  await expect(page.locator('.react-flow__node').filter({ hasText: "Reference-cropped" })).toHaveCount(1);
+});
+
+test("overwrites the original image instead of creating a node when cropping", async ({ page }) => {
+  await page.evaluate(() => window.localStorage.setItem("forart_test_crop_thumbnail", "true"));
+  await page.reload();
+  await page.getByRole("button", { name: "Infinite Canvas" }).click();
+
+  const toolbar = await selectNode(page, "reference");
   await toolbar.getByRole("button", { name: "Crop image" }).click();
   await expect(page.locator(".rf-native-image-crop-editor img")).toHaveJSProperty("naturalWidth", 400);
   await toolbar.getByRole("combobox", { name: "Crop aspect ratio" }).click();
   await page.getByRole("option", { name: "1:1", exact: true }).click();
-  await toolbar.getByRole("button", { name: "Confirm" }).click();
+  await toolbar.getByRole("button", { name: "Apply crop" }).click();
+  await page.getByRole("menuitem", { name: "Overwrite original" }).click();
 
   await expect.poll(() => page.locator("html").getAttribute("data-last-crop-payload")).not.toBeNull();
   const payload = JSON.parse(String(await page.locator("html").getAttribute("data-last-crop-payload")));
-  expect(payload).toMatchObject({ x: 500, y: 0, width: 3000, height: 3000 });
+  expect(payload).toMatchObject({ unit: "percent", x: 12.5, y: 0, width: 75, height: 100 });
+  // 覆盖模式只替换这个节点的图，不派生新节点。
+  await expect(page.locator('.react-flow__node[data-id^="assetLoader_"]')).toHaveCount(0);
+  await expect.poll(async () => page.locator('.react-flow__node[data-id="reference"] img').first().getAttribute("src"))
+    .not.toContain("original.png");
+});
+
+test("keeps the crop position when the node has no original size recorded", async ({ page }) => {
+  // 老数据的典型情况：素材没记原图尺寸，预览只有缩略图（400×300）。
+  // 以前坐标按缩略图算，主进程却拿去裁原图，于是永远裁到左上角。
+  await page.evaluate(() => {
+    window.localStorage.setItem("forart_test_crop_thumbnail", "true");
+    window.localStorage.setItem("forart_test_missing_natural_size", "true");
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Infinite Canvas" }).click();
+
+  const toolbar = await selectNode(page, "reference");
+  await toolbar.getByRole("button", { name: "Crop image" }).click();
+  await expect(page.locator(".rf-native-image-crop-editor img")).toHaveJSProperty("naturalWidth", 400);
+  await toolbar.getByRole("combobox", { name: "Crop aspect ratio" }).click();
+  await page.getByRole("option", { name: "1:1", exact: true }).click();
+  await toolbar.getByRole("button", { name: "Apply crop" }).click();
+  await page.getByRole("menuitem", { name: "Create new node" }).click();
+
+  await expect.poll(() => page.locator("html").getAttribute("data-last-crop-payload")).not.toBeNull();
+  const payload = JSON.parse(String(await page.locator("html").getAttribute("data-last-crop-payload")));
+  expect(payload).toMatchObject({ unit: "percent", x: 12.5, y: 0, width: 75, height: 100 });
+  // mock 按主进程的口径换算：4000×3000 的源图切出 3000×3000，而不是缩略图尺寸。
+  const cropped = page.locator('.react-flow__node[data-id^="assetLoader_"]');
+  await expect(cropped).toHaveCount(1);
+  await expect(cropped.locator(".rf-native-image-resolution")).toHaveText("3000 x 3000");
+});
+
+test("adjusts an image node into a derived asset node", async ({ page }) => {
+  await page.evaluate(() => window.localStorage.setItem("forart_test_crop_thumbnail", "true"));
+  await page.reload();
+  await page.getByRole("button", { name: "Infinite Canvas" }).click();
+
+  const toolbar = await selectNode(page, "reference");
+  await toolbar.getByRole("button", { name: "Adjust image" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Image adjustments" });
+  await expect(dialog).toBeVisible();
+  // 默认停在"预设"页，先切到"调节"
+  await expect(dialog.getByRole("tab", { name: "Presets" })).toHaveAttribute("aria-selected", "true");
+  await dialog.getByRole("tab", { name: "Adjust" }).click();
+
+  // 拖动对比度：10 步 × 0.01 = 1.1
+  const contrast = dialog.getByRole("slider", { name: "Contrast" });
+  await contrast.focus();
+  for (let index = 0; index < 10; index += 1) await page.keyboard.press("ArrowRight");
+  // 滑块右侧是可直接输入数值的输入框
+  const contrastInput = dialog.getByRole("textbox", { name: "contrast" });
+  await expect(contrastInput).toHaveValue("110");
+  await contrastInput.fill("150");
+  await contrastInput.press("Enter");
+  await expect(contrast).toHaveAttribute("aria-valuenow", "1.5");
+  // 双击滑条 = 把这一项恢复默认
+  await contrast.dblclick();
+  await expect(contrast).toHaveAttribute("aria-valuenow", "1");
+  // 数值输入框是受控的草稿值：重置后要等它同步回默认值，否则紧接着填同一个
+  // 数字不会触发 onChange（值没变），滑块的数值就会停在上一步。
+  await expect(contrastInput).toHaveValue("100");
+  await contrastInput.fill("150");
+  await contrastInput.press("Enter");
+  await expect(contrast).toHaveAttribute("aria-valuenow", "1.5");
+  await contrastInput.fill("999");
+  await contrastInput.press("Enter");
+  await expect(contrast).toHaveAttribute("aria-valuenow", "2");
+  // 预览区左下角的重置图标：点一下回到默认
+  await dialog.getByRole("button", { name: "Reset" }).click();
+  await expect(contrast).toHaveAttribute("aria-valuenow", "1");
+  await contrastInput.fill("150");
+  await contrastInput.press("Enter");
+  await expect(contrast).toHaveAttribute("aria-valuenow", "1.5");
+
+  // 预览是 WebGL2 画布：纹理挂上之后渲染器才会设置画布尺寸
+  await expect
+    .poll(async () => Number(await dialog.locator(".rf-image-adjust__canvas").getAttribute("width")), { timeout: 20_000 })
+    .toBeGreaterThan(0);
+  const previewCanvas = dialog.locator(".rf-image-adjust__canvas");
+  // 画布必须真的画出东西：只保留绘制缓冲（preserveDrawingBuffer）时，
+  // 第一次打开如果被合成器重绘会变成空白，这里读中心区域的不透明像素来兜住。
+  await expect
+    .poll(() => previewAlphaSum(dialog), { timeout: 20_000 })
+    .toBeGreaterThan(0);
+
+  // 噪点与杂色是两根独立滑块，可以叠加
+  const speckleSlider = dialog.getByRole("slider", { name: "Speckle" });
+  await expect(speckleSlider).toBeVisible();
+  await speckleSlider.focus();
+  for (let index = 0; index < 20; index += 1) await page.keyboard.press("ArrowRight");
+  await expect(speckleSlider).toHaveAttribute("aria-valuenow", "20");
+
+  // 滚轮缩放：预览区滚一下，缩放比例要跟着变，双击回到适应窗口。
+  const zoomLabel = dialog.locator(".rf-image-adjust__zoom");
+  await expect(zoomLabel).toHaveText("100%");
+  await dialog.locator(".rf-image-adjust__preview").hover();
+  await page.mouse.wheel(0, -400);
+  await expect(zoomLabel).not.toHaveText("100%");
+  const zoomedValue = Number((await zoomLabel.textContent())!.replace("%", ""));
+  expect(zoomedValue).toBeGreaterThan(100);
+  // 缩放是着色器里的 uniform，画布本身不该被重新分配尺寸
+  await expect.poll(async () => Number(await previewCanvas.getAttribute("width"))).toBeGreaterThan(0);
+  await dialog.locator(".rf-image-adjust__preview").dblclick();
+  await expect(zoomLabel).toHaveText("100%");
+
+  // 预设标签页
+  await dialog.getByRole("tab", { name: "Presets" }).click();
+  await expect(dialog.locator(".rf-image-adjust__presets-empty")).toBeVisible();
+  // 保存当前参数为预设：自动命名「预设 1」，写到存储里
+  await dialog.getByRole("button", { name: "Save current settings" }).click();
+  await expect(dialog.getByRole("textbox")).toHaveValue("Preset 1");
+  await dialog.getByRole("textbox").fill("我的预设");
+  await dialog.getByRole("textbox").press("Enter");
+  await expect(dialog.getByRole("button", { name: "我的预设" })).toBeVisible();
+  await expect.poll(async () => {
+    const raw = await page.locator("html").getAttribute("data-image-presets");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const preset = parsed.items[parsed.order[0]];
+    return preset ? { name: preset.name, speckle: preset.adjustments.speckle } : null;
+  }).toEqual({ name: "我的预设", speckle: 20 });
+  // 删除
+  await dialog.getByRole("button", { name: "Delete preset" }).click();
+  await expect(dialog.locator(".rf-image-adjust__presets-empty")).toBeVisible();
+  await dialog.getByRole("tab", { name: "Adjust" }).click();
+
+  // 应用 -> 下拉：新建节点
+  await dialog.getByRole("button", { name: "Apply" }).click();
+  await page.getByRole("menuitem", { name: "Create new node" }).click();
+
+  await expect.poll(() => page.locator("html").getAttribute("data-last-adjust-payload")).not.toBeNull();
+  const payload = JSON.parse(String(await page.locator("html").getAttribute("data-last-adjust-payload")));
+  // 素材已经在本地（forart-asset://），不该再走一次 saveCanvasAsset。
+  expect(payload.url).toBe("forart-asset://canvas/input/original.png");
+  expect(payload.adjustments).toMatchObject({ brightness: 1, saturation: 1, grayscale: 0, hue: 0, blur: 0 });
+  // 杂色和噪点一样是 0-100 的强度刻度
+  expect(payload.adjustments.speckle).toBe(20);
+  expect(payload.adjustments.contrast).toBeCloseTo(1.5, 5);
+
+  await expect(dialog).toHaveCount(0);
   await expect(page.locator('.react-flow__node[data-id="reference"]')).toHaveCount(1);
-  await expect(page.locator('.react-flow__node[data-id^="assetLoader_"]')).toHaveCount(1);
-  await expect(page.locator('.react-flow__node').filter({ hasText: "Reference-cropped" })).toHaveCount(1);
+  await expect(page.locator('.react-flow__node').filter({ hasText: "Reference-adjusted" })).toHaveCount(1);
+});
+
+test("keeps the preview visible when the preset store answers late", async ({ page }) => {
+  // 预设存储慢一点返回：这曾经会把刚算好的视口缩放重置成 0，预览整片透明。
+  await page.addInitScript(() => {
+    const api = (window as unknown as { forartImagePresets?: { load: () => Promise<unknown> } }).forartImagePresets;
+    if (!api) return;
+    const original = api.load;
+    api.load = async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+      return original();
+    };
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Infinite Canvas" }).click();
+
+  const toolbar = await selectNode(page, "reference");
+  await toolbar.getByRole("button", { name: "Adjust image" }).click();
+  const dialog = page.getByRole("dialog", { name: "Image adjustments" });
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => previewAlphaSum(dialog), { timeout: 20_000 }).toBeGreaterThan(0);
+  // 过了预设返回的时间点之后依然要有内容
+  await page.waitForTimeout(800);
+  await expect.poll(() => previewAlphaSum(dialog)).toBeGreaterThan(0);
 });
 
 test("hides the empty generator icon as soon as generation starts", async ({ page }) => {
@@ -1118,3 +1386,143 @@ test("exposes run, group download, and random action controls in the action fiss
   await randomize.click();
   await expect(page.locator('.react-flow__node[data-id="action-fission"] .rf-action-fission-row-summary small').first()).toHaveText("Action Two");
 });
+
+test("swaps a result card index for an asset-node button that drops the node next to the card", async ({ page }) => {
+  const node = page.locator('.react-flow__node[data-id="action-fission"]');
+  await expect(node).toBeVisible();
+  const resultCard = node.locator(".rf-action-fission-grid-card").first();
+  const emptyCard = node.locator(".rf-action-fission-grid-card").nth(1);
+  const badge = resultCard.locator(".rf-action-fission-card-badge");
+  const index = badge.locator(".rf-action-fission-card-index");
+  const createButton = badge.getByRole("button", { name: "Create asset node" });
+
+  // 未悬浮时只有一个序号角标，按钮既不可见也不接收点击。
+  await expect(index).toHaveText("01");
+  await expect(index).toHaveCSS("opacity", "1");
+  await expect(createButton).toHaveCSS("opacity", "0");
+  await expect(createButton).toHaveCSS("pointer-events", "none");
+  // 没有结果的卡片沿用下载按钮的可用条件：序号照常显示，禁用按钮不露在外面。
+  const emptyBadge = emptyCard.locator(".rf-action-fission-card-badge");
+  const emptyButton = emptyBadge.getByRole("button", { name: "Create asset node" });
+  await expect(emptyButton).toBeDisabled();
+  await expect(emptyButton).toHaveCSS("opacity", "0");
+  await expect(emptyBadge.locator(".rf-action-fission-card-index")).toHaveCSS("opacity", "1");
+  await emptyCard.hover();
+  await expect(emptyButton).toHaveCSS("opacity", "0.5");
+
+  // 先拖动一次动作裂变节点：画布会把拖动过的节点顶到最前（zIndex 1）。
+  const captionBox = await node.locator(".rf-native-node-caption").first().boundingBox();
+  expect(captionBox).not.toBeNull();
+  await page.mouse.move(captionBox!.x + 40, captionBox!.y + captionBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(captionBox!.x + 70, captionBox!.y + captionBox!.height / 2 + 30, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => node.evaluate((element) => getComputedStyle(element).zIndex)).toBe("1");
+
+  const edgeCountBefore = await page.locator(".react-flow__edge").count();
+  const cardBox = await resultCard.boundingBox();
+  expect(cardBox).not.toBeNull();
+
+  await resultCard.hover();
+  await expect(index).toHaveCSS("opacity", "0");
+  await expect(createButton).toHaveCSS("opacity", "1");
+  await expect(createButton).toBeEnabled();
+  await createButton.click();
+
+  const created = page.locator('.react-flow__node[data-id^="assetLoader_"]');
+  await expect(created).toHaveCount(1);
+  // 新节点沿用结果图在库里的名字作为标题。
+  await expect(created.locator(".rf-native-node-caption")).toContainText("result");
+  // 落点向右下偏移，不自动连线。
+  const createdBox = await created.boundingBox();
+  expect(createdBox).not.toBeNull();
+  expect(createdBox!.x).toBeGreaterThan(cardBox!.x);
+  expect(createdBox!.y).toBeGreaterThan(cardBox!.y);
+  expect(await page.locator(".react-flow__edge").count()).toBe(edgeCountBefore);
+  // 新节点要盖在被拖动过的动作裂变节点上面，否则整块被遮住看不见。
+  const nodeBox = await node.boundingBox();
+  expect(nodeBox).not.toBeNull();
+  const overlapPoint = { x: createdBox!.x + 12, y: createdBox!.y + 12 };
+  expect(overlapPoint.x).toBeGreaterThan(nodeBox!.x);
+  expect(overlapPoint.y).toBeGreaterThan(nodeBox!.y);
+  expect(overlapPoint.x).toBeLessThan(nodeBox!.x + nodeBox!.width);
+  expect(overlapPoint.y).toBeLessThan(nodeBox!.y + nodeBox!.height);
+  expect(await created.evaluate((element) => getComputedStyle(element).zIndex)).toBe("2");
+  const topmostNodeId = await page.evaluate(({ x, y }) => (
+    document.elementFromPoint(x, y)?.closest<HTMLElement>(".react-flow__node")?.dataset.id || ""
+  ), overlapPoint);
+  expect(topmostNodeId).toMatch(/^assetLoader_/);
+});
+
+test("crops the region the user drags, not the top-left corner", async ({ page }) => {
+  await page.evaluate(() => window.localStorage.setItem("forart_test_crop_thumbnail", "true"));
+  await page.reload();
+  await page.getByRole("button", { name: "Infinite Canvas" }).click();
+  const toolbar = await selectNode(page, "reference");
+  await toolbar.getByRole("button", { name: "Crop image" }).click();
+  const image = page.locator(".rf-native-image-crop-editor img");
+  await expect(image).toHaveJSProperty("naturalWidth", 400);
+
+  // 裁剪框必须完整落在节点内部：手柄压在节点边缘时有一半会落到画布上，
+  // 按下去的指针事件会被画布接管，拖动直接失灵（还会把裁剪模式顶掉）。
+  const handleReachable = await page.evaluate(() => Array.from(document.querySelectorAll(".ReactCrop__drag-handle")).map((handle) => {
+    const rect = handle.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    return hit === handle;
+  }));
+  expect(handleReachable.length).toBeGreaterThan(0);
+  expect(handleReachable.every(Boolean)).toBe(true);
+
+  // 拖左上角手柄：选区左边界移到 30%、上边界移到 20%。
+  const box = await image.boundingBox();
+  expect(box).not.toBeNull();
+  const handle = await page.locator(".ReactCrop__drag-handle.ord-nw").boundingBox();
+  expect(handle).not.toBeNull();
+  await page.mouse.move(handle!.x + handle!.width / 2, handle!.y + handle!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width * 0.3, box!.y + box!.height * 0.2, { steps: 8 });
+  await page.mouse.up();
+
+  await toolbar.getByRole("button", { name: "Apply crop" }).click();
+  await page.getByRole("menuitem", { name: "Create new node" }).click();
+  await expect.poll(() => page.locator("html").getAttribute("data-last-crop-payload")).not.toBeNull();
+  const payload = JSON.parse(String(await page.locator("html").getAttribute("data-last-crop-payload")));
+  expect(payload.unit).toBe("percent");
+  expect(payload.x).toBeCloseTo(30, 0);
+  expect(payload.y).toBeCloseTo(20, 0);
+  expect(payload.width).toBeCloseTo(70, 0);
+  expect(payload.height).toBeCloseTo(80, 0);
+  // mock 按 4000×3000 的源图换算：70% × 80% = 2800×2400。
+  await expect(page.locator('.react-flow__node[data-id^="assetLoader_"] .rf-native-image-resolution')).toHaveText("2800 x 2400");
+});
+
+test("draws a fresh crop box anywhere on the image", async ({ page }) => {
+  await page.evaluate(() => window.localStorage.setItem("forart_test_crop_thumbnail", "true"));
+  await page.reload();
+  await page.getByRole("button", { name: "Infinite Canvas" }).click();
+  const toolbar = await selectNode(page, "reference");
+  await toolbar.getByRole("button", { name: "Crop image" }).click();
+  const image = page.locator(".rf-native-image-crop-editor img");
+  await expect(image).toHaveJSProperty("naturalWidth", 400);
+
+  // 默认选区是整张图，此时在图上任意位置拉一下就从零框出一个新选区
+  // （而不是像以前那样"拖动整图大小的选区"，看起来完全没反应）。
+  const box = await image.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width * 0.25, box!.y + box!.height * 0.25);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width * 0.75, box!.y + box!.height * 0.75, { steps: 10 });
+  await page.mouse.up();
+
+  await toolbar.getByRole("button", { name: "Apply crop" }).click();
+  await page.getByRole("menuitem", { name: "Create new node" }).click();
+  await expect.poll(() => page.locator("html").getAttribute("data-last-crop-payload")).not.toBeNull();
+  const payload = JSON.parse(String(await page.locator("html").getAttribute("data-last-crop-payload")));
+  expect(payload.unit).toBe("percent");
+  expect(payload.x).toBeCloseTo(25, 0);
+  expect(payload.y).toBeCloseTo(25, 0);
+  expect(payload.width).toBeCloseTo(50, 0);
+  expect(payload.height).toBeCloseTo(50, 0);
+  await expect(page.locator('.react-flow__node[data-id^="assetLoader_"] .rf-native-image-resolution')).toHaveText("2000 x 1500");
+});
+

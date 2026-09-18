@@ -2,6 +2,7 @@ import { createContext, useContext } from "react";
 import { i18n } from "../../i18n";
 import type { ImageGenerationRunOptions, NativeCanvasAssetType, NativeCanvasNodeData } from "./nativeCanvas";
 import type { DerivedAssetKind } from "./assetNaming";
+import type { NativeCanvasImageAdjustments } from "./imageAdjustments";
 import type {
   ImageGeneratorPromptInput,
   ImageGeneratorReferenceInput,
@@ -14,12 +15,34 @@ export interface NativeCanvasActions {
   undoCanvasHistory: () => void;
   redoCanvasHistory: () => void;
   addImageReferenceFiles: (nodeId: string, files: File[]) => Promise<void>;
-  cropNodeImage: (nodeId: string, crop: CanvasImageCropRect) => Promise<void>;
+  /**
+   * 按选区裁剪出一张新图。
+   * mode 为 "newNode"（默认）时落成派生素材节点，原图不动；
+   * mode 为 "overwrite" 时用裁剪结果替换该节点自己的图。
+   */
+  cropNodeImage: (
+    nodeId: string,
+    crop: CanvasImageCropRect,
+    options?: { mode?: "newNode" | "overwrite" },
+  ) => Promise<void>;
+  /**
+   * 按调整参数渲染一张新图。
+   * mode 为 "newNode"（默认）时落成派生素材节点，原图不动；
+   * mode 为 "overwrite" 时用结果替换该节点自己的图。
+   */
+  adjustNodeImage: (
+    nodeId: string,
+    adjustments: NativeCanvasImageAdjustments,
+    options?: { imageIndex?: number; localSourceUrl?: string; mode?: "newNode" | "overwrite" },
+  ) => Promise<void>;
+  /** 打开图片调整窗口；窗口由画布页面统一托管，节点只负责发起。 */
+  openImageAdjustDialog: (nodeId: string, imageIndex?: number) => void;
   createDerivedAssetNode: (sourceNodeId: string, asset: CanvasStoredAsset, options: {
     kind: DerivedAssetKind;
     label: string;
     assetType?: NativeCanvasAssetType;
   }) => void;
+  createAssetNodeFromResult: (request: CanvasResultAssetRequest) => void;
   downloadActionFissionResult: (nodeId: string, rowId: string) => Promise<void>;
   downloadNodeImage: (nodeId: string, imageIndex: number) => Promise<void>;
   discardActionFissionRow: (nodeId: string, rowId: string) => Promise<void>;
@@ -56,7 +79,31 @@ export interface CanvasStoredAsset {
   sizeBytes?: number;
 }
 
+/**
+ * 把批量类节点某个卡片的结果图复制成一个独立的素材节点。
+ * clientPoint 是按钮点击处的屏幕坐标：新节点落在这个位置向右下偏移一点，
+ * 这样它总是出现在用户刚刚操作的那张卡片旁边。
+ */
+export interface CanvasResultAssetRequest {
+  sourceNodeId: string;
+  /** 结果所属的卡片标识（动作裂变行 id / 批量项 id），用于连续创建时错开位置。 */
+  sourceKey?: string;
+  url: string;
+  thumbUrl?: string;
+  fileName?: string;
+  width?: number;
+  height?: number;
+  clientPoint?: { x: number; y: number };
+}
+
+/**
+ * 裁剪选区。坐标一律是百分比（0-100），由主进程按源图的**真实**尺寸换算成像素。
+ *
+ * 之前传的是像素：渲染端得先知道原图尺寸，可节点里可能根本没记（老数据 / 缩略图预览），
+ * 于是百分比被换算到缩略图的坐标系里，主进程却拿它去裁原图，结果永远裁到左上角。
+ */
 export interface CanvasImageCropRect {
+  unit: "percent";
   x: number;
   y: number;
   width: number;

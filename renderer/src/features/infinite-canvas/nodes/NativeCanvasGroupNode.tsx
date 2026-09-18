@@ -56,7 +56,9 @@ export const NativeCanvasGroupNode = memo(function NativeCanvasGroupNode({ id, d
         <Button
           type="button"
           variant="destructive"
-          size="sm"
+          size="icon-sm"
+          aria-label={t("infiniteCanvas:deleteGroup")}
+          title={t("infiniteCanvas:deleteGroup")}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
@@ -64,7 +66,6 @@ export const NativeCanvasGroupNode = memo(function NativeCanvasGroupNode({ id, d
           }}
         >
           <Trash2 aria-hidden="true" />
-          <span>{t("infiniteCanvas:deleteGroup")}</span>
         </Button>
       </NodeToolbar>
       <div className={`rf-native-group-node${selected ? " is-selected" : ""}`}>

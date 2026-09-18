@@ -609,7 +609,8 @@
 }
 
 .rf-native-image-crop-aspect {
-  width: 116px;
+  /* 「原始比例」「自由比例」这类完整文案要能放下，不能被截断。 */
+  width: 168px;
 }
 
 .rf-native-image-crop-editor {
@@ -620,6 +621,14 @@
   display: grid;
   place-items: center;
   overflow: hidden;
+  /* 留出内边距：四角手柄压在选框角上，贴着节点边缘时有一半落在节点外面，
+     点下去命中的是画布（拖动没反应，还会触发画布框选把裁剪模式顶掉）。 */
+  box-sizing: border-box;
+  padding: 8px;
+  /* 节点的连线端点带 6px 的外扩热区，压在裁剪框的左右手柄上；
+     抬到它们之上，裁剪时整个节点内部都归裁剪框处理（连线在裁剪时也不需要）。 */
+  position: relative;
+  z-index: 3;
   background: var(--background);
 }
 
@@ -627,20 +636,363 @@
   --rc-drag-handle-bg-colour: var(--background);
   --rc-border-color: var(--foreground);
   --rc-focus-color: var(--ring);
+  /* 四角手柄默认 12px 偏大，会盖住图片细节。 */
+  --rc-drag-handle-size: 8px;
+  --rc-drag-handle-mobile-size: 14px;
+  /* 真实尺寸由组件按图片比例算好（正好等于图片显示区域），这里只是兜底。 */
   width: 100%;
   height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   display: block;
 }
 
 .rf-native-image-crop-editor .ReactCrop__child-wrapper {
   width: 100%;
   height: 100%;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 .rf-native-image-crop-editor .ReactCrop__child-wrapper > img {
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+/* 选区还是整图时：选区本体不吃指针事件（四角手柄照常可以拖），
+   于是在图上任意位置按下都能从零拉出一个新选区，而不是"拖动没反应"。 */
+.rf-native-image-crop-editor.is-full-crop .ReactCrop__crop-selection {
+  pointer-events: none;
+}
+
+.rf-native-image-crop-editor.is-full-crop .ReactCrop__crop-selection .ReactCrop__drag-handle {
+  pointer-events: auto;
+}
+
+.rf-image-adjust {
+  gap: 16px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: min(94vh, 1100px);
+}
+
+.rf-image-adjust__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 24px;
+  min-height: 0;
+  /* 高度由预览框决定：滑块内容不够高时不会出现滚动条，不够放时才滚动。 */
+  height: min(70vh, 780px);
+}
+
+.rf-image-adjust__preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-card-muted);
+  /* 棋盘格底纹：透明素材调整时能看清边缘。 */
+  background-image:
+    linear-gradient(45deg, color-mix(in srgb, var(--foreground) 6%, transparent) 25%, transparent 25%),
+    linear-gradient(-45deg, color-mix(in srgb, var(--foreground) 6%, transparent) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--foreground) 6%, transparent) 75%),
+    linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--foreground) 6%, transparent) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+.rf-image-adjust__preview.is-panning {
+  cursor: grabbing;
+}
+
+.rf-image-adjust__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.rf-image-adjust__overlay {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background) 82%, transparent);
+  color: var(--text-secondary);
+}
+
+.rf-image-adjust__split {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: color-mix(in srgb, var(--background) 70%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 35%, transparent);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.rf-image-adjust__split-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+}
+
+.rf-image-adjust__split-grip::before,
+.rf-image-adjust__split-grip::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 1px;
+  height: 10px;
+  transform: translateY(-50%);
+  background: var(--text-secondary);
+}
+
+.rf-image-adjust__split-grip::before { left: calc(50% - 3px); }
+.rf-image-adjust__split-grip::after { left: calc(50% + 3px); }
+
+.rf-image-adjust__zoom {
+  min-width: 42px;
+  padding-left: 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.rf-image-adjust__hint {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  padding: 3px 10px;
+  border: none;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--background) 80%, transparent);
+  cursor: default;
+}
+
+.rf-image-adjust__hint.is-error {
+  cursor: pointer;
+  color: var(--status-danger-text, var(--text-secondary));
+}
+
+.rf-image-adjust__controls {
+  min-width: 0;
+  min-height: 0;
+  /* 滚动条和滑块之间留出间距，同时避免滚动条贴住内容。 */
+  padding-right: 18px;
+}
+
+.rf-image-adjust__controls-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rf-image-adjust__row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rf-image-adjust__control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 62px;
+  align-items: center;
+  gap: 12px;
+}
+
+.rf-image-adjust__slider-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* 初始值刻度：一根压在半透明轨道上的短竖线 */
+.rf-image-adjust__tick {
+  position: absolute;
+  top: 50%;
+  width: 1px;
+  height: 10px;
+  transform: translate(-0.5px, -50%);
+  background: var(--text-secondary);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.rf-image-adjust__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.rf-image-adjust__side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.rf-image-adjust__tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  min-height: 34px;
+  padding: 3px;
+}
+
+.rf-image-adjust__presets-empty {
+  margin: 0;
+  padding: 24px 4px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.rf-image-adjust__presets {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.rf-image-adjust__preset-list {
+  min-height: 0;
+  flex: 1;
+}
+
+.rf-image-adjust__preset-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.rf-image-adjust__preset-row:hover {
+  background: var(--surface-card-muted);
+}
+
+.rf-image-adjust__preset-row.is-dragging {
+  opacity: 0.6;
+}
+
+.rf-image-adjust__preset-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  cursor: grab;
+  touch-action: none;
+}
+
+.rf-image-adjust__preset-grip:active {
+  cursor: grabbing;
+}
+
+.rf-image-adjust__preset-name {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  text-align: left;
+  color: var(--text-primary);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rf-image-adjust__input {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  height: 24px;
+  padding: 0 2px;
+}
+
+.rf-image-adjust__input [data-slot="input-group-control"] {
+  cursor: text;
+}
+
+.rf-image-adjust__input:hover [data-slot="input-group-control"],
+.rf-image-adjust__input:focus-within [data-slot="input-group-control"] {
+  color: var(--text-primary);
+}
+
+.rf-image-adjust__unit {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.rf-image-adjust__reset {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  /* 底纹是棋盘格，纯 ghost 图标看不清，给个底色 */
+  background: color-mix(in srgb, var(--background) 82%, transparent);
+  color: var(--text-secondary);
+}
+
+.rf-image-adjust__reset:hover {
+  color: var(--text-primary);
+}
+
+.rf-image-adjust__row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rf-image-adjust__noise-modes {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.rf-image-adjust__label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.rf-image-adjust__value {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.rf-image-adjust__value.is-neutral {
+  color: var(--text-secondary);
 }
 
 .rf-reference-comparison-viewer-stage .rf-reference-comparison-viewer-layout {
@@ -1068,19 +1420,68 @@
   margin-bottom: 7px;
 }
 
-.rf-action-fission-list-card::before,
-.rf-action-fission-grid-card::before {
-  content: attr(data-index);
+/* 卡片角标：平时显示序号，悬浮或聚焦卡片时序号淡出、换成「创建素材节点」按钮。
+   序号和按钮叠在同一个网格单元里，所以切换时卡片布局不会跳动。 */
+.rf-action-fission-card-badge {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  /* 容器只负责叠放，点击仍然透到下面的结果图；按钮显示时才自己接管指针。 */
+  pointer-events: none;
+}
+
+.rf-action-fission-card-index,
+.rf-action-fission-card-create {
+  grid-area: 1 / 1;
+  transition: opacity 140ms ease;
+}
+
+.rf-action-fission-card-index {
   color: var(--primary-foreground);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
-.rf-action-fission-list-card::before {
-  position: absolute;
+/* 隐藏态的选择器带上了卡片类名：Button 自带的 disabled:opacity-50 工具类
+   优先级更高，只用单个类名会被它抢先命中，禁用按钮就会一直露在外面。 */
+.rf-action-fission-grid-card .rf-action-fission-card-badge > .rf-action-fission-card-create,
+.rf-action-fission-list-card .rf-action-fission-card-badge > .rf-action-fission-card-create {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.rf-action-fission-list-card:hover .rf-action-fission-card-index,
+.rf-action-fission-list-card:focus-within .rf-action-fission-card-index,
+.rf-action-fission-grid-card:hover .rf-action-fission-card-index,
+.rf-action-fission-grid-card:focus-within .rf-action-fission-card-index {
+  opacity: 0;
+}
+
+.rf-action-fission-list-card:hover .rf-action-fission-card-badge > .rf-action-fission-card-create,
+.rf-action-fission-list-card:focus-within .rf-action-fission-card-badge > .rf-action-fission-card-create,
+.rf-action-fission-grid-card:hover .rf-action-fission-card-badge > .rf-action-fission-card-create,
+.rf-action-fission-grid-card:focus-within .rf-action-fission-card-badge > .rf-action-fission-card-create {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 结果图不可用时保持半透明，和结果图上的下载按钮观感一致。 */
+.rf-action-fission-list-card:hover .rf-action-fission-card-badge > .rf-action-fission-card-create:disabled,
+.rf-action-fission-list-card:focus-within .rf-action-fission-card-badge > .rf-action-fission-card-create:disabled,
+.rf-action-fission-grid-card:hover .rf-action-fission-card-badge > .rf-action-fission-card-create:disabled,
+.rf-action-fission-grid-card:focus-within .rf-action-fission-card-badge > .rf-action-fission-card-create:disabled {
+  opacity: 0.5;
+}
+
+/* 列表卡片：序号是卡片左上角外扩出去的圆形徽标。 */
+.rf-action-fission-list-card > .rf-action-fission-card-badge {
   top: 0;
   left: 0;
-  z-index: 3;
+  transform: translate(-50%, -50%);
+}
+
+.rf-action-fission-list-card .rf-action-fission-card-index {
   width: 20px;
   height: 20px;
   display: grid;
@@ -1088,11 +1489,32 @@
   border: 1px solid color-mix(in srgb, var(--primary) 82%, var(--border-subtle));
   border-radius: 50%;
   padding: 0;
-  color: var(--primary-foreground);
   background: var(--primary);
   line-height: 1;
-  pointer-events: none;
-  transform: translate(-50%, -50%);
+}
+
+.rf-action-fission-list-card .rf-action-fission-card-badge > .rf-action-fission-card-create {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+
+/* 触屏没有悬浮态：直接显示按钮，否则这个入口永远点不到。 */
+@media (hover: none) {
+  .rf-action-fission-card-index {
+    opacity: 0;
+  }
+
+  .rf-action-fission-grid-card .rf-action-fission-card-badge > .rf-action-fission-card-create,
+  .rf-action-fission-list-card .rf-action-fission-card-badge > .rf-action-fission-card-create {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .rf-action-fission-grid-card .rf-action-fission-card-badge > .rf-action-fission-card-create:disabled,
+  .rf-action-fission-list-card .rf-action-fission-card-badge > .rf-action-fission-card-create:disabled {
+    opacity: 0.5;
+  }
 }
 
 .rf-action-fission-action-preview,
@@ -1552,16 +1974,24 @@
   font-size: 7px;
 }
 
-.rf-action-fission-grid-card::before {
-  position: absolute;
+/* 网格卡片：序号是卡片内左上角的胶囊角标。 */
+.rf-action-fission-grid-card > .rf-action-fission-card-badge {
   top: 7px;
   left: 7px;
-  z-index: 3;
+}
+
+.rf-action-fission-grid-card .rf-action-fission-card-index {
   border-radius: var(--radius);
   padding: 3px 6px;
   background: var(--primary);
   line-height: 1;
-  pointer-events: none;
+}
+
+.rf-action-fission-grid-card .rf-action-fission-card-badge > .rf-action-fission-card-create {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
 }
 
 .rf-action-fission-grid-card > .rf-generation-status {
@@ -3555,6 +3985,16 @@
   padding: 3px;
   background: var(--surface-card);
   box-shadow: var(--shadow-card);
+}
+
+/* 工具栏内的功能分组竖线：把"运行 / 图像处理 / 结果"三组动作分开。 */
+.rf-native-node-toolbar .rf-native-toolbar-divider {
+  flex: none;
+  align-self: center;
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border-subtle);
 }
 
 .rf-native-controls {

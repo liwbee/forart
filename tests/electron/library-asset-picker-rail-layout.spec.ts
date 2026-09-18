@@ -2,7 +2,20 @@ import { expect, test } from "@playwright/test";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
-test("keeps the third asset column and vertical scrollbar inside the visible rail", async ({ page }) => {
+const LIBRARY_TEST_CANVAS = {
+  id: "canvas-1",
+  title: "Test canvas",
+  projectId: "project-1",
+  createdAt: 1,
+  updatedAt: 1,
+  revision: 1,
+  canvasSchemaVersion: 2,
+  nodes: [],
+  edges: [],
+  viewport: { x: 0, y: 0, zoom: 1 },
+};
+
+async function installLibraryTestEnvironment(page: import("@playwright/test").Page, outfits: number) {
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/outfit-projects/project-1/outfits") {
@@ -10,7 +23,7 @@ test("keeps the third asset column and vertical scrollbar inside the visible rai
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          outfits: Array.from({ length: 30 }, (_, index) => ({
+          outfits: Array.from({ length: outfits }, (_, index) => ({
             id: `outfit-${index}`,
             name: `Outfit ${index}`,
             asset_id: `asset-${index}`,
@@ -38,10 +51,10 @@ test("keeps the third asset column and vertical scrollbar inside the visible rai
     contentType: "image/svg+xml",
     body: '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="#ddd"/></svg>',
   }));
-  await page.addInitScript(() => {
+  await page.addInitScript((canvasDocument: Record<string, unknown>) => {
     window.localStorage.setItem("forart_sidebar_open_v2", "true");
     window.localStorage.setItem("forart_infinite_canvas_show_home", "false");
-    window.localStorage.setItem("forart_infinite_canvas_last_canvas_id", "canvas-1");
+    window.localStorage.setItem("forart_infinite_canvas_last_canvas_id", String(canvasDocument.id));
     const config = {
       mode: "remote",
       localLibraryPath: "",
@@ -64,22 +77,8 @@ test("keeps the third asset column and vertical scrollbar inside the visible rai
       value: {
         load: async () => config,
         save: async (nextConfig: typeof config) => ({ ok: true, config: nextConfig }),
-        appInfo: async () => ({
-          name: "Forart",
-          repoUrl: "",
-          updateUrl: "",
-          currentRevision: "test",
-          currentUpdatedAt: "",
-        }),
-        checkUpdate: async () => ({
-          ok: true,
-          currentRevision: "test",
-          latestRevision: "test",
-          currentUpdatedAt: "",
-          latestUpdatedAt: "",
-          updateAvailable: false,
-          repoUrl: "",
-        }),
+        appInfo: async () => ({ name: "Forart", repoUrl: "", updateUrl: "", currentRevision: "test", currentUpdatedAt: "" }),
+        checkUpdate: async () => ({ ok: true, currentRevision: "test", latestRevision: "test", currentUpdatedAt: "", latestUpdatedAt: "", updateAvailable: false, repoUrl: "" }),
         onUpdateProgress: () => () => undefined,
         serverSession: async () => ({ ok: true, authenticated: true }),
       },
@@ -89,25 +88,55 @@ test("keeps the third asset column and vertical scrollbar inside the visible rai
       value: {
         listCanvases: async () => ({
           projects: [{ id: "project-1", title: "Test project", sortOrder: 1, createdAt: 1, updatedAt: 1 }],
-          canvases: [{ id: "canvas-1", title: "Test canvas", projectId: "project-1", createdAt: 1, updatedAt: 1, revision: 1, nodeCount: 0 }],
+          canvases: [{ id: canvasDocument.id, title: "Test canvas", projectId: "project-1", createdAt: 1, updatedAt: 1, revision: 1, nodeCount: 0 }],
         }),
-        loadCanvas: async () => ({
-          id: "canvas-1",
-          title: "Test canvas",
-          projectId: "project-1",
-          createdAt: 1,
-          updatedAt: 1,
-          revision: 1,
-          canvasSchemaVersion: 2,
-          nodes: [],
-          edges: [],
-          viewport: { x: 0, y: 0, zoom: 1 },
-        }),
+        loadCanvas: async () => canvasDocument,
         saveCanvas: async () => ({ ok: true }),
         getCanvasClipboardStatus: async () => ({ hasNodes: false, hasImage: false }),
       },
     });
-  });
+  }, LIBRARY_TEST_CANVAS);
+}
+
+test("keeps a newly imported library node above nodes that were dragged to the front", async ({ page }) => {
+  await installLibraryTestEnvironment(page, 2);
+  await page.goto("http://127.0.0.1:6981/");
+  await page.getByRole("button", { name: "Infinite Canvas" }).click();
+
+  const picker = page.locator(".rf-native-library");
+  const imported = page.locator('.react-flow__node[data-id^="assetLoader_"]');
+
+  await page.getByRole("button", { name: "Import from library" }).click();
+  await picker.locator(".library-asset-picker__grid button").first().click();
+  await expect(imported).toHaveCount(1);
+  expect(await imported.first().evaluate((element) => getComputedStyle(element).zIndex)).toBe("1");
+
+  // 拖动一次刚导入的节点：画布会把它顶到最前，zIndex 变成 2。
+  const firstBox = await imported.first().boundingBox();
+  expect(firstBox).not.toBeNull();
+  await page.mouse.move(firstBox!.x + firstBox!.width / 2, firstBox!.y + firstBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(firstBox!.x + firstBox!.width / 2 + 60, firstBox!.y + firstBox!.height / 2 + 40, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => imported.first().evaluate((element) => getComputedStyle(element).zIndex)).toBe("2");
+
+  // 再导入一次：面板选完素材后保持打开，直接选下一个即可。
+  // 新节点要落在刚才被拖到最前的那个节点之上。
+  await picker.locator(".library-asset-picker__grid button").nth(1).click();
+  await expect(imported).toHaveCount(2);
+
+  const latest = imported.nth(1);
+  expect(await latest.evaluate((element) => getComputedStyle(element).zIndex)).toBe("3");
+  const latestBox = await latest.boundingBox();
+  expect(latestBox).not.toBeNull();
+  const topmostNodeId = await page.evaluate(({ x, y }) => (
+    document.elementFromPoint(x, y)?.closest<HTMLElement>(".react-flow__node")?.dataset.id || ""
+  ), { x: latestBox!.x + latestBox!.width / 2, y: latestBox!.y + latestBox!.height / 2 });
+  expect(topmostNodeId).toBe(await latest.getAttribute("data-id"));
+});
+
+test("keeps the third asset column and vertical scrollbar inside the visible rail", async ({ page }) => {
+  await installLibraryTestEnvironment(page, 30);
 
   await page.goto("http://127.0.0.1:6981/");
   await page.getByRole("button", { name: "Infinite Canvas" }).click();

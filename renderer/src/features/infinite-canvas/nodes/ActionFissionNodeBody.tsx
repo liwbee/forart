@@ -47,6 +47,7 @@ import {
 } from "../action-fission/actionFissionTypes";
 import { useActionFissionLibraryData } from "../action-fission/useActionFissionLibraryData";
 import { useNativeCanvasActions } from "../canvasActions";
+import { actionFissionResultImage } from "../generation/generationDownloadTarget";
 import { generationStatusPresentation, generationStatusTone, type GenerationStatusTone } from "../generation/generationStatusPresentation";
 import { GenerationStatusDisplay } from "../generation/GenerationStatusDisplay";
 import { isGenerationTaskActive, useGenerationTaskCache } from "../generation/generationTaskCache";
@@ -62,6 +63,7 @@ import { actionFissionLaunchingRowIds, useGenerationRuntimeStore } from "../gene
 import { ReferenceComparisonImageViewer } from "./ReferenceComparisonImageViewer";
 import { useInfiniteCanvasSettings } from "../infiniteCanvasSettings";
 import { BatchNodeProgress } from "../batch/BatchNodeProgress";
+import { ResultAssetCreateButton } from "./ResultAssetCreateButton";
 
 interface ActionFissionNodeBodyProps {
   nodeId: string;
@@ -92,6 +94,19 @@ function toneForRow(row: ActionFissionRow, task: GenerationTaskDto | undefined, 
 
 function isRowRunning(task: GenerationTaskDto | undefined) {
   return isGenerationTaskActive(task);
+}
+
+/** 下载按钮和「创建素材节点」按钮共用同一套可用条件，避免两个入口判定不一致。 */
+function rowResultActionEnabled(
+  row: ActionFissionRow,
+  task: GenerationTaskDto | undefined,
+  runtimeError: string | undefined,
+  launching: boolean,
+) {
+  return Boolean(actionFissionResultImage(row, task).url)
+    && !launching
+    && !isRowRunning(task)
+    && toneForRow(row, task, false, runtimeError) !== "error";
 }
 
 function statusDetails(tone: RowTone, t: ReturnType<typeof useTranslation>["t"]) {
@@ -217,17 +232,17 @@ function ResultPreview({
   now: number;
 }) {
   const { t } = useTranslation();
-  const taskImage = task?.result?.images[0];
   // Prefer the terminal task result while row persistence catches up. This
   // prevents a stale row URL from keeping the old image visible/downloadable.
-  const originalUrl = taskImage?.assetUrl || row.resultUrl || "";
-  const previewUrl = taskImage?.thumbUrl || row.resultThumbUrl || "";
+  const resultImage = actionFissionResultImage(row, task);
+  const originalUrl = resultImage.url;
+  const previewUrl = resultImage.thumbUrl;
   const resolvedOriginalUrl = originalUrl ? resolveLibraryImageUrl(originalUrl) : "";
   const previewSourceUrl = canvasPreviewSourceUrl(originalUrl, previewUrl);
   const resolvedPreviewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
   const resolvedPreviewFallbackUrl = resolvedOriginalUrl;
   const alt = t("infiniteCanvas:actionFissionResultPreview");
-  const canDownload = Boolean(resolvedOriginalUrl) && !launching && !isRowRunning(task) && toneForRow(row, task, false, runtimeError) !== "error";
+  const canDownload = rowResultActionEnabled(row, task, runtimeError, launching);
   const isPendingDownload = canDownload && row.resultDownloadState !== "downloaded";
   const tone = toneForRow(row, task, launching, runtimeError);
   const isActive = tone === "queued" || tone === "running";
@@ -347,6 +362,8 @@ function ActionFissionNodeToolbar({
           ? <Square aria-hidden="true" fill="currentColor" />
           : <Play aria-hidden="true" fill="currentColor" />}
       </Button>
+      {/* 运行 | 整组操作（下载 / 换一批） | 删除 */}
+      <span className="rf-native-toolbar-divider" aria-hidden="true" />
       <ActionFissionBatchActions
         grouped={false}
         canRandomize={canRandomize}
@@ -355,6 +372,7 @@ function ActionFissionNodeToolbar({
         isDownloading={isDownloading}
         onDownload={onDownload}
       />
+      <span className="rf-native-toolbar-divider" aria-hidden="true" />
       <Button
         type="button"
         variant="destructive"
@@ -396,7 +414,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
   const { projects, rowData, isLoading, failure: libraryFailure, retry: retryLibrary } = useActionFissionLibraryData(state);
   const viewerImages = useMemo(() => ({
     result: state.rows.flatMap((row) => {
-      const url = tasksByRowId[row.id]?.result?.images[0]?.assetUrl || row.resultUrl || "";
+      const url = actionFissionResultImage(row, tasksByRowId[row.id]).url;
       return url ? [{
         id: row.id,
         kind: "result" as const,
@@ -712,6 +730,16 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           <div className="rf-action-fission-grid">
             {rowData.map(({ row, tags, categoryGroups }, index) => (
               <article key={row.id} className="rf-action-fission-grid-card" data-index={String(index + 1).padStart(2, "0")}>
+                <ResultAssetCreateButton
+                  index={index + 1}
+                  disabled={actions.readOnly || !rowResultActionEnabled(row, tasksByRowId[row.id], runtimeErrorsByRowId[row.id], launchingRowIds.has(row.id))}
+                  onCreate={(clientPoint) => actions.createAssetNodeFromResult({
+                    sourceNodeId: nodeId,
+                    sourceKey: row.id,
+                    clientPoint,
+                    ...actionFissionResultImage(row, tasksByRowId[row.id]),
+                  })}
+                />
                 <ResultPreview row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} showStatusOverlay isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} />
                 <RowStatus row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} hasReference={referenceCount > 0} hideTransient />
                 <div className="rf-action-fission-action-stack">
@@ -738,6 +766,16 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           <div className="rf-action-fission-list">
             {rowData.map(({ row, tags, categoryGroups }, index) => (
               <article key={row.id} className="rf-action-fission-list-card" data-index={String(index + 1).padStart(2, "0")}>
+                <ResultAssetCreateButton
+                  index={index + 1}
+                  disabled={actions.readOnly || !rowResultActionEnabled(row, tasksByRowId[row.id], runtimeErrorsByRowId[row.id], launchingRowIds.has(row.id))}
+                  onCreate={(clientPoint) => actions.createAssetNodeFromResult({
+                    sourceNodeId: nodeId,
+                    sourceKey: row.id,
+                    clientPoint,
+                    ...actionFissionResultImage(row, tasksByRowId[row.id]),
+                  })}
+                />
                 <ResultPreview row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} />
                 <ActionRowSummary row={row} projects={projects} tags={tags} />
                 <RowStatus row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} hasReference={referenceCount > 0} />

@@ -10,6 +10,7 @@ const { registerCanvasIpc } = require('./ipc/canvas-ipc.cjs');
 const { registerCanvasAgentIpc } = require('./ipc/canvas-agent-ipc.cjs');
 const { registerCanvasTaskIpc } = require('./ipc/canvas-task-ipc.cjs');
 const { registerConfigIpc } = require('./ipc/config-ipc.cjs');
+const { registerImagePresetIpc } = require('./ipc/image-preset-ipc.cjs');
 const { registerGenerationTaskIpc } = require('./ipc/generation-task-ipc.cjs');
 const { registerImageReviewIpc } = require('./ipc/image-review-ipc.cjs');
 const { registerLocalApiIpc } = require('./ipc/local-api-ipc.cjs');
@@ -22,6 +23,7 @@ const { createCanvasCacheStore } = require('./modules/canvas-cache-store.cjs');
 const { createCanvasPackageStore } = require('./modules/canvas-package-store.cjs');
 const { registerCanvasClipboardIpc } = require('./modules/canvas-clipboard.cjs');
 const { createCanvasStore } = require('./modules/canvas-store.cjs');
+const { createPresetStore } = require('./modules/preset-store.cjs');
 const { createConfigStore, DEFAULT_TASK_HISTORY_RETENTION_DAYS } = require('./modules/config-store.cjs');
 const { createCanvasAgentService } = require('./modules/canvas-agent/canvas-agent-service.cjs');
 const { createCanvasAgentRuntime } = require('./modules/canvas-agent/canvas-agent-runtime.cjs');
@@ -62,6 +64,7 @@ protocol.registerSchemesAsPrivileged([
 
 const assetStore = createAssetStore({ rootDir: portableRootDir, net });
 const canvasStore = createCanvasStore({ rootDir: portableRootDir });
+const presetStore = createPresetStore({ rootDir: portableRootDir });
 const generationTaskRepository = createGenerationTaskRepository({ rootDir: portableRootDir });
 const canvasCacheStore = createCanvasCacheStore({ assetStore, canvasStore, generationTaskRepository, shell });
 const configStore = createConfigStore({ app, rootDir: portableRootDir, safeStorage });
@@ -197,6 +200,7 @@ function registerImageReviewProtocol() {
 
 registerCanvasIpc({ ipcMain, app, configStore, canvasStore, assetStore, canvasPackageStore, generationTaskService, net });
 registerCanvasAgentIpc({ ipcMain, canvasAgentRuntime });
+registerImagePresetIpc({ ipcMain, presetStore });
 registerCanvasTaskIpc({ ipcMain, repository: canvasTaskRepository });
 ipcMain.handle('canvas-cache:scan', async () => canvasCacheStore.scan());
 ipcMain.handle('canvas-cache:delete', async (_event, payload) => {
