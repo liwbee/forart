@@ -4,8 +4,6 @@ export const MAX_ACTION_FISSION_ROWS = MAX_BATCH_NODE_ITEMS;
 export const DEFAULT_ACTION_FISSION_ROWS = 4;
 export const MAX_ACTION_FISSION_CATEGORY_GROUPS = 10;
 
-export type ActionFissionLayout = "list" | "grid";
-
 export interface ActionFissionCategoryGroup {
   id: string;
   name?: string;
@@ -37,7 +35,6 @@ export interface ActionFissionRow extends BatchNodeItemBase {
 
 export interface ActionFissionState {
   rows: ActionFissionRow[];
-  layout?: ActionFissionLayout;
   apiType?: "third-party-api" | "libtv-api";
   providerId?: string;
   model?: string;

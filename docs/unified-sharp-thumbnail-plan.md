@@ -17,12 +17,13 @@
 - 缩略图是可再生派生文件，不写入数据库为主数据。
 - 缩略图缺失时按需补建，生成失败静默回退原图。
 - 后续修改缩略图规则时，可以删除缩略图目录触发自然重建。
+- 缩略图只按 mtime 判断新鲜度，不校验尺寸；画布缩略图缓存被删掉后会在请求时按原图就地重建。
 
 ## 统一规则
 
 - 输出格式：`webp`
 - 缩放：原图 50% 分辨率
-- 长边最大：`1280px`
+- 长边最大：`800px`
 - 原图长边低于 `512px`：不生成缩略图，直接回退原图
 - WebP 质量：`0.78`，sharp 参数为 `quality: 78`
 - PNG 透明：保留透明通道
@@ -100,7 +101,7 @@ server/src/shared/image-thumbnail-sharp.mjs
 ```js
 export const IMAGE_THUMBNAIL_RULES = {
   scale: 0.5,
-  maxLongEdge: 1280,
+  maxLongEdge: 800,
   minLongEdge: 512,
   webpQuality: 78,
 };

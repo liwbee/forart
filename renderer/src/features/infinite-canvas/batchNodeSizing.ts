@@ -20,22 +20,23 @@ export function batchNodeWidthForGridColumns(columns: number) {
 export const BATCH_NODE_MIN_WIDTH = batchNodeWidthForGridColumns(BATCH_NODE_MIN_VISIBLE_COLUMNS);
 export const BATCH_NODE_DEFAULT_WIDTH = batchNodeWidthForGridColumns(BATCH_NODE_DEFAULT_VISIBLE_COLUMNS);
 
-export const BATCH_NODE_LIST_ROW_HEIGHT = 86;
-export const BATCH_NODE_LIST_ROW_GAP = 14;
-export const BATCH_NODE_HEIGHT_STEP = BATCH_NODE_LIST_ROW_HEIGHT + BATCH_NODE_LIST_ROW_GAP;
+// Each visible row keeps the 86px slot plus 14px gap the removed list layout
+// used, so existing canvases keep the same frame sizes and height snapping.
+export const BATCH_NODE_ROW_HEIGHT = 86;
+export const BATCH_NODE_ROW_GAP = 14;
+export const BATCH_NODE_HEIGHT_STEP = BATCH_NODE_ROW_HEIGHT + BATCH_NODE_ROW_GAP;
 export const BATCH_NODE_DEFAULT_VISIBLE_ROWS = 4;
 
-// Node border/header and the two nested scroll/list paddings total 92px.
-// Keep the row gaps explicit so this remains tied to the list-card CSS.
+// Node border/header and the two nested scroll paddings total 92px.
 export const BATCH_NODE_HEIGHT_CHROME = 92;
 
-export function batchNodeHeightForListRows(rows: number) {
+export function batchNodeHeightForRows(rows: number) {
   return BATCH_NODE_HEIGHT_CHROME
-    + rows * BATCH_NODE_LIST_ROW_HEIGHT
-    + (rows - 1) * BATCH_NODE_LIST_ROW_GAP;
+    + rows * BATCH_NODE_ROW_HEIGHT
+    + (rows - 1) * BATCH_NODE_ROW_GAP;
 }
 
-export const BATCH_NODE_DEFAULT_HEIGHT = batchNodeHeightForListRows(BATCH_NODE_DEFAULT_VISIBLE_ROWS);
+export const BATCH_NODE_DEFAULT_HEIGHT = batchNodeHeightForRows(BATCH_NODE_DEFAULT_VISIBLE_ROWS);
 
 export const BATCH_NODE_DEFAULT_SIZE = {
   width: BATCH_NODE_DEFAULT_WIDTH,

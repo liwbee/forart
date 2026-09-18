@@ -170,12 +170,14 @@ function normalizeCurrentNodeData(data: Record<string, unknown>, kind: NativeCan
     return normalized;
   }
   if (kind === "batchImageGenerator") {
-    const batch = normalized.batchImageGenerator && typeof normalized.batchImageGenerator === "object" ? normalized.batchImageGenerator : { items: [] };
+    const storedBatch = normalized.batchImageGenerator && typeof normalized.batchImageGenerator === "object" ? normalized.batchImageGenerator : { items: [] };
+    const batch = { ...storedBatch } as typeof storedBatch & { layout?: unknown };
+    // The removed list/grid layout toggle is not carried forward from older canvases.
+    delete batch.layout;
     normalized.batchImageGenerator = {
       ...batch,
       items: Array.isArray(batch.items) ? batch.items.map((item, index) => ({ ...item, id: String(item?.id || `batch_item_${index + 1}`), status: ["pending", "queued", "running", "completed", "failed"].includes(String(item?.status)) ? item.status : "pending" })) : [],
       prompt: String(batch.prompt || ""),
-      layout: batch.layout === "list" ? "list" : "grid",
       taskReferenceOrder: Math.max(0, Math.floor(Number(batch.taskReferenceOrder || 0))),
     };
   }
@@ -292,9 +294,10 @@ function normalizeEdge(input: unknown): NativeCanvasEdge | null {
         || data.inputKind === "referenceImage"
         || data.inputKind === "additionalReferenceImage"
         || data.inputKind === "additionalReferencePrompt"
+        || data.inputKind === "batchTargetImage"
         ? data.inputKind
         : undefined,
-      referenceOrder: data.inputKind === "referenceImage" || data.inputKind === "additionalReferenceImage"
+      referenceOrder: data.inputKind === "referenceImage" || data.inputKind === "additionalReferenceImage" || data.inputKind === "batchTargetImage"
         ? Number(data.referenceOrder || 0) || undefined
         : undefined,
     },

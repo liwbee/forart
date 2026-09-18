@@ -5,7 +5,7 @@ import sharp from "sharp";
 
 export const IMAGE_THUMBNAIL_RULES = {
   scale: 0.5,
-  maxLongEdge: 1280,
+  maxLongEdge: 800,
   minLongEdge: 512,
   webpQuality: 78,
 };

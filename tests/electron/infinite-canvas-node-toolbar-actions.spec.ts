@@ -293,7 +293,6 @@ test.beforeEach(async ({ page }) => {
         resultFileName: "",
         resultDownloadState: "pending",
       }],
-      layout: "grid",
       apiType: "third-party-api",
       resolution: "1K",
       aspectRatio: "3:4",
@@ -350,6 +349,15 @@ test.beforeEach(async ({ page }) => {
         saveResult: async (payload: { defaultName?: string; convertToPng?: boolean }) => {
           document.documentElement.dataset.lastSaveResult = JSON.stringify(payload);
           return { canceled: false, filePath: `C:\\Downloads\\${payload.defaultName || "image"}` };
+        },
+        // 生成结果可能是远程/data URL：裁剪前先落成本地素材，和主进程行为一致。
+        saveCanvasAsset: async (payload: { url?: string; dataUrl?: string; defaultName?: string; kind?: string }) => {
+          document.documentElement.dataset.lastSaveCanvasAsset = JSON.stringify({ url: payload.url || "", kind: payload.kind || "" });
+          return {
+            url: "forart-asset://canvas/input/stored-generated.png",
+            thumbUrl: "forart-asset://canvas/input/thumb/stored-generated.webp",
+            fileName: payload.defaultName || "stored-generated.png",
+          };
         },
         listCanvases: async () => ({
           projects: [{ id: "project-1", title: "Test project", sortOrder: 1, createdAt: 1, updatedAt: 1 }],
@@ -418,8 +426,9 @@ test.beforeEach(async ({ page }) => {
           const sourceHeight = 3000;
           const usesPercent = payload.unit === "percent";
           return {
-            url: pixel,
-            thumbUrl: pixel,
+            // 主进程把裁剪结果存成新的画布素材，这里给出同样形状的本地 URL。
+            url: "forart-asset://canvas/output/cropped.png",
+            thumbUrl: "forart-asset://canvas/output/thumb/cropped.webp",
             fileName: "cropped.png",
             width: usesPercent ? Math.max(1, Math.round(ratio(payload.width) * sourceWidth)) : Number(payload.width || 1),
             height: usesPercent ? Math.max(1, Math.round(ratio(payload.height) * sourceHeight)) : Number(payload.height || 1),
@@ -552,7 +561,7 @@ test("keeps action-fission toolbars attached after a snapped resize", async ({ p
   }).toBe(true);
 });
 
-test("snaps batch-style nodes by one fixed grid card or one spaced list row", async ({ page }) => {
+test("snaps batch-style nodes by one fixed grid card and one row step", async ({ page }) => {
   await selectNode(page, "action-fission");
   const node = page.locator('.react-flow__node[data-id="action-fission"]');
   const resizeHandle = node.locator(".rf-native-node-resize-control");
@@ -590,25 +599,10 @@ test("snaps batch-style nodes by one fixed grid card or one spaced list row", as
   await addRow.click();
   await addRow.click();
   await addRow.click();
-  await node.getByRole("radio", { name: "List layout" }).click();
-
-  const viewport = node.locator(".rf-action-fission-scroll-viewport");
-  const listCards = node.locator(".rf-action-fission-list-card");
-  await expect(listCards).toHaveCount(5);
-  await viewport.evaluate((element) => { element.scrollTop = 0; });
-  const fullyVisibleListRows = async () => {
-    const viewportBox = await viewport.boundingBox();
-    const cardBoxes = await listCards.evaluateAll((elements) => elements.map((element) => {
-      const box = element.getBoundingClientRect();
-      return { top: box.top, bottom: box.bottom };
-    }));
-    if (!viewportBox) return 0;
-    const viewportBottom = viewportBox.y + viewportBox.height;
-    return cardBoxes.filter((box) => box.top >= viewportBox.y - 0.5 && box.bottom <= viewportBottom + 0.5).length;
-  };
-
-  await expect.poll(fullyVisibleListRows).toBe(4);
-  await node.getByRole("radio", { name: "Grid layout" }).click();
+  await expect(node.locator(".rf-action-fission-grid-card")).toHaveCount(5);
+  // The list layout was removed for good: the node always renders the grid.
+  await expect(node.locator(".rf-action-fission-layout-toggle")).toHaveCount(0);
+  await expect(node.locator(".rf-action-fission-list-card")).toHaveCount(0);
 
   // At the fixture's 80% canvas zoom, these pointer deltas cross exactly one
   // 248px width step and one 100px height step in flow coordinates.
@@ -616,10 +610,6 @@ test("snaps batch-style nodes by one fixed grid card or one spaced list row", as
   await expect(node).toHaveCSS("width", "1010px");
   await expect(node).toHaveCSS("height", "578px");
   await expect.poll(gridColumnCount).toBe(4);
-
-  await node.getByRole("radio", { name: "List layout" }).click();
-  await viewport.evaluate((element) => { element.scrollTop = 0; });
-  await expect.poll(fullyVisibleListRows).toBe(5);
 });
 
 test("does not flash an unconfigured-model warning while API settings are loading", async ({ page }) => {
@@ -1215,6 +1205,42 @@ test("keeps the crop position when the node has no original size recorded", asyn
   await expect(cropped.locator(".rf-native-image-resolution")).toHaveText("3000 x 3000");
 });
 
+test("crops a generated image without leaving the image generator node", async ({ page }) => {
+  const toolbar = await selectNode(page, "image-generator");
+  // 生成结果没有本地素材（这里是 data URL）：裁剪会先落成本地素材再交给主进程。
+  await toolbar.getByRole("button", { name: "Crop image" }).click();
+  await expect(page.locator(".rf-native-image-crop-editor")).toHaveCount(1);
+  // 裁剪模式下不显示下载按钮，避免和"应用裁剪"混淆。
+  await expect(toolbar.getByRole("button", { name: "Download image" })).toHaveCount(0);
+
+  await toolbar.getByRole("button", { name: "Apply crop" }).click();
+  await page.getByRole("menuitem", { name: "Overwrite original" }).click();
+
+  await expect.poll(() => page.locator("html").getAttribute("data-last-crop-payload")).not.toBeNull();
+  const payload = JSON.parse(String(await page.locator("html").getAttribute("data-last-crop-payload")));
+  expect(payload).toMatchObject({ unit: "percent", url: "forart-asset://canvas/input/stored-generated.png" });
+  // 覆盖只替换这张生成结果，不派生新节点。
+  await expect(page.locator('.react-flow__node[data-id="image-generator"]')).toHaveCount(1);
+  await expect(page.locator('.react-flow__node[data-id^="assetLoader_"]')).toHaveCount(0);
+  await expect(page.locator(".rf-native-image-crop-editor")).toHaveCount(0);
+  await expect.poll(async () => page.locator('.react-flow__node[data-id="image-generator"] img').first().getAttribute("src"))
+    .toContain("cropped");
+});
+
+test("crops a generated image into a derived asset node", async ({ page }) => {
+  const toolbar = await selectNode(page, "image-generator");
+  await toolbar.getByRole("button", { name: "Crop image" }).click();
+  await toolbar.getByRole("button", { name: "Apply crop" }).click();
+  await page.getByRole("menuitem", { name: "Create new node" }).click();
+
+  await expect(page.locator('.react-flow__node[data-id^="assetLoader_"]')).toHaveCount(1);
+  await expect(page.locator('.react-flow__node').filter({ hasText: "Generator-cropped" })).toHaveCount(1);
+
+  // 没有结果图的生成节点不提供裁剪入口。
+  const emptyToolbar = await selectNode(page, "empty-image-generator");
+  await expect(emptyToolbar.getByRole("button", { name: "Crop image" })).toHaveCount(0);
+});
+
 test("adjusts an image node into a derived asset node", async ({ page }) => {
   await page.evaluate(() => window.localStorage.setItem("forart_test_crop_thumbnail", "true"));
   await page.reload();
@@ -1310,8 +1336,8 @@ test("adjusts an image node into a derived asset node", async ({ page }) => {
   await expect(dialog.locator(".rf-image-adjust__presets-empty")).toBeVisible();
   await dialog.getByRole("tab", { name: "Adjust" }).click();
 
-  // 应用 -> 下拉：新建节点
-  await dialog.getByRole("button", { name: "Apply" }).click();
+  // 保存 -> 下拉：新建节点
+  await dialog.getByRole("button", { name: "Save" }).click();
   await page.getByRole("menuitem", { name: "Create new node" }).click();
 
   await expect.poll(() => page.locator("html").getAttribute("data-last-adjust-payload")).not.toBeNull();

@@ -137,7 +137,6 @@ async function bootBatchAndFissionCanvas(page: Page) {
                 imageModel: "test-image-model",
                 batchImageGenerator: {
                   prompt: "prompt",
-                  layout: "grid",
                   items: [{
                     id: "item-1",
                     sourceUrl: pixel,
@@ -168,7 +167,6 @@ async function bootBatchAndFissionCanvas(page: Page) {
                     }],
                     selectedCategoryGroupId: "group-1",
                   }],
-                  layout: "grid",
                   apiType: "third-party-api",
                   resolution: "1K",
                   aspectRatio: "3:4",
@@ -198,8 +196,12 @@ test("reference handles show their hint while the whole node is hovered", async 
     const node = page.locator(`.react-flow__node[data-id="${nodeId}"]`);
     const mainHandle = page.locator(`.react-flow__node[data-id="${nodeId}"] .react-flow__handle[data-handleid="input"]`);
     const additionalHandle = page.locator(`.react-flow__node[data-id="${nodeId}"] .react-flow__handle[data-handleid="additional-reference"]`);
+    // 「传入目标」只有批量洗图有
+    const importHandle = page.locator(`.react-flow__node[data-id="${nodeId}"] .react-flow__handle[data-handleid="batch-import-target"]`);
+    const isBatchNode = nodeId === "batch-node";
     await expect(mainHandle).toHaveCount(1);
     await expect(additionalHandle).toHaveCount(1);
+    await expect(importHandle).toHaveCount(isBatchNode ? 1 : 0);
     // The native title tooltip would stack on top of the styled one.
     await expect(mainHandle).not.toHaveAttribute("title", /.+/);
     await expect(additionalHandle).not.toHaveAttribute("title", /.+/);
@@ -209,9 +211,10 @@ test("reference handles show their hint while the whole node is hovered", async 
 
     // Hovering the node body, not the dot, is what reveals both hints.
     await node.locator(".rf-native-node-caption").hover();
-    await expect(tooltips).toHaveCount(2);
+    await expect(tooltips).toHaveCount(isBatchNode ? 3 : 2);
     await expect(tooltips.filter({ hasText: "Primary references" })).toHaveCount(1);
     await expect(tooltips.filter({ hasText: "Additional references" })).toHaveCount(1);
+    await expect(tooltips.filter({ hasText: "Import targets" })).toHaveCount(isBatchNode ? 1 : 0);
     await expect(mainHandle).toHaveAttribute("aria-describedby", /.+/);
     await expect(additionalHandle).toHaveAttribute("aria-describedby", /.+/);
 
@@ -220,10 +223,11 @@ test("reference handles show their hint while the whole node is hovered", async 
   }
 });
 
-test("batch and fission nodes expose exactly the two reference handles plus one output", async ({ page }) => {
+test("batch and fission nodes expose their reference handles plus one output", async ({ page }) => {
   await bootBatchAndFissionCanvas(page);
   const fissionHandles = await page.locator('.react-flow__node[data-id="fission-node"] .react-flow__handle').count();
   expect(fissionHandles).toBe(3);
   const batchHandles = await page.locator('.react-flow__node[data-id="batch-node"] .react-flow__handle').count();
-  expect(batchHandles).toBe(3);
+  // 批量洗图多一个「传入目标」端口
+  expect(batchHandles).toBe(4);
 });

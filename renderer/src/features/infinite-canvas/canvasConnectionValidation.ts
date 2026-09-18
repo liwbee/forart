@@ -32,9 +32,14 @@ export function isNativeCanvasConnectionValid(
   const targetDefinition = NATIVE_CANVAS_NODE_DEFINITIONS[target.data.kind];
   if (!sourceDefinition.providesOutput || !targetDefinition.acceptsInput) return false;
 
-  // A pair of nodes represents one logical input relationship, even when the
-  // target exposes multiple handles. Reconnecting the same pair is a duplicate.
-  if (edges.some((edge) => edge.source === source.id && edge.target === target.id)) return false;
+  // 同一个来源可以分别接到目标的不同端口（主参考 / 附加参考 / 传入目标），
+  // 但同一个端口只允许连一次：重复连同一个端口才算重复。
+  const targetHandle = connection.targetHandle || "input";
+  if (edges.some((edge) => (
+    edge.source === source.id
+    && edge.target === target.id
+    && (edge.targetHandle || "input") === targetHandle
+  ))) return false;
 
   const edgeData = edgeDataForConnection(
     source.data.kind,

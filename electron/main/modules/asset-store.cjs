@@ -312,6 +312,10 @@ function createAssetStore({ rootDir, net }) {
     return saveAssetThumbnail(payload);
   }
 
+  async function ensureAssetThumbnailForFile(filePath) {
+    return thumbnailStore.ensureCanvasAssetThumbnailForFile(filePath);
+  }
+
   async function cropAsset(payload = {}) {
     const sourcePath = payload.filePath && fs.existsSync(payload.filePath)
       ? payload.filePath
@@ -513,6 +517,7 @@ function createAssetStore({ rootDir, net }) {
     saveBufferAsset,
     saveAssetThumbnail,
     ensureAssetThumbnail,
+    ensureAssetThumbnailForFile,
     cropAsset,
     adjustAsset,
     saveResult,

@@ -1,4 +1,4 @@
-import { ChevronDown, GripVertical, LoaderCircle, Maximize2, Plus, RotateCcw, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
+import { ChevronDown, GripVertical, Images, LoaderCircle, Maximize2, Plus, RotateCcw, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -10,7 +10,6 @@ import {
   DialogClose,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "../../../components/ui/dialog";
@@ -36,6 +35,7 @@ import {
   type NativeCanvasImageAdjustments,
 } from "../imageAdjustments";
 import { createImageAdjustPreviewRenderer } from "../imageAdjustPreviewRenderer";
+import { isGenerationTaskActive, useGenerationTaskCache } from "../generation/generationTaskCache";
 import {
   nextImagePresetIndex,
   useImagePresetStore,
@@ -178,6 +178,15 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+/** 组图像调节：预览下方轨道里的一项。 */
+export interface ImageAdjustTargetOption {
+  key: string;
+  label: string;
+  thumbnailUrl: string;
+  taskId?: string;
+  isAssetLoading?: boolean;
+}
+
 interface ImageAdjustDialogProps {
   open: boolean;
   label: string;
@@ -194,6 +203,61 @@ interface ImageAdjustDialogProps {
     localSourceUrl: string,
     mode: "newNode" | "overwrite",
   ) => void;
+  /** 组入口：组内所有可调节的图片；不传时面板保持单节点形态。 */
+  targets?: ImageAdjustTargetOption[];
+  activeTargetKey?: string;
+  onSelectTarget?: (key: string) => void;
+  /**
+   * 组入口专用：保存整组。entries 是每张图各自当前的参数（组内每张可以调得不一样）。
+   */
+  onSaveGroup?: (
+    entries: Array<{ key: string; adjustments: NativeCanvasImageAdjustments }>,
+    localSourceUrl: string,
+  ) => void;
+  /** 保存整组的进度，运行期间面板整体禁用。 */
+  groupSaveProgress?: { done: number; total: number } | null;
+}
+
+/** 轨道项自己订阅生成任务，避免整个画布页面跟着任务心跳重渲染。 */
+function ImageAdjustTargetButton({
+  target,
+  index,
+  active,
+  disabled,
+  onSelect,
+}: {
+  target: ImageAdjustTargetOption;
+  index: number;
+  active: boolean;
+  disabled: boolean;
+  onSelect?: (key: string) => void;
+}) {
+  const { t } = useTranslation();
+  const task = useGenerationTaskCache((state) => (target.taskId ? state.tasksById[target.taskId] : undefined));
+  const disabledReason = target.isAssetLoading
+    ? t("infiniteCanvas:imageAdjustTargetLoading")
+    : isGenerationTaskActive(task)
+      ? t("infiniteCanvas:imageAdjustTargetGenerating")
+      : "";
+  return (
+    <div className="rf-image-adjust__target-slot" role="listitem">
+      <button
+        type="button"
+        className={cn("rf-image-adjust__target", active && "is-active")}
+        disabled={disabled || Boolean(disabledReason)}
+        aria-current={active}
+        aria-label={disabledReason ? `${target.label} · ${disabledReason}` : target.label}
+        title={disabledReason || target.label}
+        onClick={() => onSelect?.(target.key)}
+      >
+        {target.thumbnailUrl
+          ? <img src={target.thumbnailUrl} alt="" loading="lazy" decoding="async" draggable={false} />
+          : <Images aria-hidden="true" />}
+        <span className="rf-image-adjust__target-index">{index + 1}</span>
+      </button>
+      <span className="rf-image-adjust__target-label" title={target.label}>{target.label}</span>
+    </div>
+  );
 }
 
 export function ImageAdjustDialog({
@@ -206,8 +270,16 @@ export function ImageAdjustDialog({
   busy,
   onOpenChange,
   onApply,
+  targets,
+  activeTargetKey,
+  onSelectTarget,
+  onSaveGroup,
+  groupSaveProgress = null,
 }: ImageAdjustDialogProps) {
   const { t } = useTranslation();
+  // 组入口固定"覆盖原图"：整组浏览时不再提供派生新节点的分支。
+  const groupMode = Boolean(targets?.length);
+  const savingGroup = Boolean(groupSaveProgress);
   const rendererRef = useRef<ReturnType<typeof createImageAdjustPreviewRenderer> | null>(null);
   const [canvasElement, setCanvasElement] = useState<HTMLCanvasElement | null>(null);
   const [rendererReady, setRendererReady] = useState(false);
@@ -224,6 +296,11 @@ export function ImageAdjustDialog({
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [adjustments, setAdjustments] = useState<NativeCanvasImageAdjustments>(DEFAULT_IMAGE_ADJUSTMENTS);
+  /** 组内每张图各自的参数：切到别的图再切回来时不能丢已经调过的数值。 */
+  const [adjustmentsByTarget, setAdjustmentsByTarget] = useState<Record<string, NativeCanvasImageAdjustments>>({});
+  const adjustmentsByTargetRef = useRef<Record<string, NativeCanvasImageAdjustments>>({});
+  const adjustmentsRef = useRef<NativeCanvasImageAdjustments>(DEFAULT_IMAGE_ADJUSTMENTS);
+  adjustmentsRef.current = adjustments;
   const [comparing, setComparing] = useState(false);
   const [tab, setTab] = useState<"presets" | "adjust">("presets");
   const presets = useImagePresetStore((state) => state.presets);
@@ -268,6 +345,30 @@ export function ImageAdjustDialog({
     void loadPresets();
   }, [loadPresets, open, presetsLoaded]);
 
+  // 组内切换图片：先把上一张的参数存起来，再恢复这张自己的参数（没调过才是默认值）。
+  const activeTargetKeyRef = useRef("");
+  useEffect(() => {
+    if (!open) {
+      activeTargetKeyRef.current = "";
+      adjustmentsByTargetRef.current = {};
+      setAdjustmentsByTarget({});
+      return;
+    }
+    if (!activeTargetKey || activeTargetKeyRef.current === activeTargetKey) return;
+    const previousKey = activeTargetKeyRef.current;
+    if (previousKey) {
+      const withPrevious = { ...adjustmentsByTargetRef.current, [previousKey]: adjustmentsRef.current };
+      adjustmentsByTargetRef.current = withPrevious;
+      setAdjustmentsByTarget(withPrevious);
+    }
+    activeTargetKeyRef.current = activeTargetKey;
+    setAdjustments(adjustmentsByTargetRef.current[activeTargetKey] || DEFAULT_IMAGE_ADJUSTMENTS);
+    setComparing(false);
+    setSplitEnabled(false);
+    setSplitRatio(0.5);
+    setView({ scale: 0, offsetX: 0, offsetY: 0 });
+  }, [activeTargetKey, open]);
+
   // 远程地址和 data URL 先落成画布素材，预览和导出都走它，避免导出时再复制一份。
   useEffect(() => {
     if (!open || !sourceUrl) return;
@@ -282,6 +383,8 @@ export function ImageAdjustDialog({
       // data: / http(s): 这类地址照样能当纹理用。
       return;
     }
+    // 换图时先清掉上一张的本地素材，否则预览会拿旧纹理顶到新图加载完。
+    setLocalSourceUrl("");
     void tool.saveCanvasAsset({ url: sourceUrl, defaultName: label || "canvas-image.png", kind: "input" })
       .then((stored) => {
         if (!canceled) setLocalSourceUrl(stored.url);
@@ -571,6 +674,34 @@ export function ImageAdjustDialog({
   }, [removePreset, t]);
 
   const changed = !isDefaultImageAdjustments(adjustments);
+  /** 组内某张图当前的参数：当前这张取实时值，其它取各自槽位。 */
+  const adjustmentsForTarget = (key: string) => (
+    key === activeTargetKey ? adjustments : adjustmentsByTarget[key] || DEFAULT_IMAGE_ADJUSTMENTS
+  );
+  const groupChanged = Boolean(targets?.length)
+    && (targets || []).some((target) => !isDefaultImageAdjustments(adjustmentsForTarget(target.key)));
+  /** 应用整组：把当前这张的参数复制到组内其它图片（只改参数，不落盘）。 */
+  const applyAdjustmentsToGroup = useCallback(() => {
+    if (!targets?.length) return;
+    const next = { ...adjustmentsByTargetRef.current };
+    targets.forEach((target) => {
+      if (target.key === activeTargetKey) return;
+      next[target.key] = adjustmentsRef.current;
+    });
+    adjustmentsByTargetRef.current = next;
+    setAdjustmentsByTarget(next);
+    toast.success(t("infiniteCanvas:imageAdjustGroupApplied"));
+  }, [activeTargetKey, t, targets]);
+  /** 保存整组：每张图存各自的参数，当前这张用实时值。 */
+  const saveAdjustmentsGroup = useCallback(() => {
+    if (!targets?.length) return;
+    onSaveGroup?.(targets.map((target) => ({
+      key: target.key,
+      adjustments: target.key === activeTargetKey
+        ? adjustmentsRef.current
+        : adjustmentsByTargetRef.current[target.key] || DEFAULT_IMAGE_ADJUSTMENTS,
+    })), localSourceUrl);
+  }, [activeTargetKey, localSourceUrl, onSaveGroup, targets]);
   const resolution = naturalWidth > 0 && naturalHeight > 0 ? `${naturalWidth} × ${naturalHeight}` : "";
   const renderer = rendererRef.current;
   const glUnavailable = renderer ? !renderer.supported : false;
@@ -596,6 +727,7 @@ export function ImageAdjustDialog({
         </DialogHeader>
 
         <div className="rf-image-adjust__body">
+          <div className="rf-image-adjust__stage">
           <div
             ref={setStage}
             className="rf-image-adjust__preview"
@@ -738,6 +870,26 @@ export function ImageAdjustDialog({
             ) : null}
           </div>
 
+          {targets?.length ? (
+            <div
+              className="rf-image-adjust__targets"
+              role="list"
+              aria-label={t("infiniteCanvas:imageAdjustGroupTargets")}
+            >
+              {targets.map((target, index) => (
+                <ImageAdjustTargetButton
+                  key={target.key}
+                  target={target}
+                  index={index}
+                  active={target.key === activeTargetKey}
+                  disabled={busy || savingGroup}
+                  onSelect={onSelectTarget}
+                />
+              ))}
+            </div>
+          ) : null}
+          </div>
+
           <div className="rf-image-adjust__side">
             <NativeTabs
               items={[
@@ -875,28 +1027,71 @@ export function ImageAdjustDialog({
                 </div>
               </AppScrollArea>
             )}
+
+            {/* 按钮跟调节区同属右栏：左栏预览因此能吃满面板高度。 */}
+            <div className="rf-image-adjust__actions">
+              {groupMode ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="default"
+                    disabled={busy || !changed || !localSourceUrl}
+                    onClick={() => onApply(adjustments, localSourceUrl, "overwrite")}
+                  >
+                    {busy && !savingGroup ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : null}
+                    {busy && !savingGroup ? t("infiniteCanvas:imageAdjustApplying") : t("infiniteCanvas:imageAdjustApply")}
+                  </Button>
+                  {/* 组入口固定覆盖原图，不再询问"覆盖 / 新建节点"。 */}
+                  {(targets?.length || 0) > 1 ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy || !localSourceUrl}
+                        title={t("infiniteCanvas:imageAdjustApplyGroupHint")}
+                        onClick={applyAdjustmentsToGroup}
+                      >
+                        {t("infiniteCanvas:imageAdjustApplyGroup")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy || !localSourceUrl || !groupChanged}
+                        onClick={saveAdjustmentsGroup}
+                      >
+                        {savingGroup ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : null}
+                        {groupSaveProgress
+                          ? t("infiniteCanvas:imageAdjustSavingGroup", {
+                            done: groupSaveProgress.done,
+                            total: groupSaveProgress.total,
+                          })
+                          : t("infiniteCanvas:imageAdjustSaveGroup")}
+                      </Button>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button type="button" variant="default" disabled={busy || !changed || !localSourceUrl}>
+                      {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : null}
+                      {busy ? t("infiniteCanvas:imageAdjustApplying") : t("infiniteCanvas:imageAdjustApply")}
+                      <ChevronDown aria-hidden="true" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={() => onApply(adjustments, localSourceUrl, "overwrite")}>
+                      {t("infiniteCanvas:imageAdjustApplyOverwrite")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onApply(adjustments, localSourceUrl, "newNode")}>
+                      {t("infiniteCanvas:imageAdjustApplyNewNode")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
           </div>
         </div>
-
-        <DialogFooter>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" variant="default" disabled={busy || !changed || !localSourceUrl}>
-                {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : null}
-                {busy ? t("infiniteCanvas:imageAdjustApplying") : t("infiniteCanvas:imageAdjustApply")}
-                <ChevronDown aria-hidden="true" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => onApply(adjustments, localSourceUrl, "overwrite")}>
-                {t("infiniteCanvas:imageAdjustApplyOverwrite")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => onApply(adjustments, localSourceUrl, "newNode")}>
-                {t("infiniteCanvas:imageAdjustApplyNewNode")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

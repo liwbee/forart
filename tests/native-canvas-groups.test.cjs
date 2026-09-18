@@ -134,3 +134,36 @@ test('grouping clears the multi-selection and selects only the new group', () =>
   assert.equal(grouped[1].parentId, 'group-1');
   assert.deepEqual(grouped[1].position, { x: 40, y: 60 });
 });
+
+test('empty groups are dropped together with their edges', () => {
+  const { removeEmptyNativeCanvasGroups } = loadGroups();
+  const nodes = [{
+    id: 'group-empty',
+    type: 'groupNode',
+    position: { x: 0, y: 0 },
+    data: { kind: 'group', label: 'Empty' },
+  }, {
+    id: 'group-full',
+    type: 'groupNode',
+    position: { x: 400, y: 0 },
+    data: { kind: 'group', label: 'Full' },
+  }, {
+    id: 'child',
+    type: 'canvasNode',
+    parentId: 'group-full',
+    position: { x: 20, y: 20 },
+    data: { kind: 'prompt', label: 'Prompt' },
+  }];
+  const edges = [
+    { id: 'from-empty-group', source: 'group-empty', target: 'child' },
+    { id: 'between-nodes', source: 'child', target: 'group-full' },
+  ];
+
+  const cleaned = removeEmptyNativeCanvasGroups(nodes, edges);
+
+  assert.deepEqual(cleaned.nodes.map((node) => node.id), ['group-full', 'child']);
+  assert.deepEqual(cleaned.edges.map((edge) => edge.id), ['between-nodes']);
+  // 没有空组时返回 null：调用方不需要动状态
+  assert.equal(removeEmptyNativeCanvasGroups(cleaned.nodes, cleaned.edges), null);
+  assert.equal(removeEmptyNativeCanvasGroups([], []), null);
+});

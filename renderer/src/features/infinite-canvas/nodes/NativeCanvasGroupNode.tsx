@@ -1,12 +1,13 @@
-import { NodeToolbar, Position, useNodes, useReactFlow, type NodeProps } from "@xyflow/react";
-import { FolderKanban, Trash2, Ungroup } from "lucide-react";
-import { memo } from "react";
+import { Handle, NodeToolbar, Position, useNodes, useReactFlow, type NodeProps } from "@xyflow/react";
+import { FolderKanban, SlidersHorizontal, Trash2, Ungroup } from "lucide-react";
+import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { useNativeCanvasActions } from "../canvasActions";
 import { useNativeCanvasInteractionStore } from "../canvasInteractionStore";
 import type { NativeCanvasNode } from "../nativeCanvas";
 import { ungroupNativeCanvasNodes } from "../nativeCanvasGroups";
+import { collectGroupImageAdjustTargets } from "../groupImageAdjustTargets";
 import { NativeNodeCaption } from "./NativeNodeCaption";
 import { NativeNodeResizeControl } from "./NativeNodeResizeControl";
 
@@ -18,6 +19,7 @@ export const NativeCanvasGroupNode = memo(function NativeCanvasGroupNode({ id, d
   const actions = useNativeCanvasActions();
   const toolbarNodeId = useNativeCanvasInteractionStore((state) => state.toolbarNodeId);
   const children = nodes.filter((node) => node.parentId === id);
+  const imageAdjustTargets = useMemo(() => collectGroupImageAdjustTargets(nodes, id), [id, nodes]);
   const minWidth = Math.max(260, ...children.map((node) => (
     node.position.x + Number(node.measured?.width || node.width || node.style?.width || 0) + 28
   )));
@@ -40,6 +42,23 @@ export const NativeCanvasGroupNode = memo(function NativeCanvasGroupNode({ id, d
         offset={44}
         className="rf-native-group-toolbar nodrag nopan nowheel"
       >
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={!imageAdjustTargets.length}
+          title={imageAdjustTargets.length
+            ? t("infiniteCanvas:imageAdjustGroupAction")
+            : t("infiniteCanvas:imageAdjustGroupEmpty")}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            actions.openImageAdjustDialog(id, 0, { scope: "group" });
+          }}
+        >
+          <SlidersHorizontal aria-hidden="true" />
+          <span>{t("infiniteCanvas:imageAdjustGroupAction")}</span>
+        </Button>
         <Button
           type="button"
           variant="ghost"
@@ -78,6 +97,13 @@ export const NativeCanvasGroupNode = memo(function NativeCanvasGroupNode({ id, d
             maxHeight={3000}
           />
         ) : null}
+        {/* 组作为参考图来源：连到图片生成节点后，组内所有图片都会成为它的参考图。 */}
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="output"
+          aria-label={t("infiniteCanvas:groupImagesOutput")}
+        />
       </div>
     </>
   );

@@ -134,7 +134,7 @@ test("keeps resource pages rendered when the configured server is unreachable", 
   await expect(infiniteCanvasLibrary.locator(".library-asset-picker__grid")).toHaveCount(0);
   const actionFission = page.locator(".rf-action-fission--unavailable");
   await expect(actionFission.getByText("Unable to reach the server")).toBeVisible();
-  await expect(actionFission.locator(".rf-action-fission-list-card, .rf-action-fission-grid-card")).toHaveCount(0);
+  await expect(actionFission.locator(".rf-action-fission-grid-card")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Image Review" }).click();
   await expect(page.locator(".image-review-page")).toBeVisible();

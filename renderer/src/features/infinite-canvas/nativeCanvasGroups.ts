@@ -1,4 +1,4 @@
-import type { NativeCanvasNode } from "./nativeCanvas";
+import type { NativeCanvasEdge, NativeCanvasNode } from "./nativeCanvas";
 
 function nodeDimension(node: NativeCanvasNode, dimension: "width" | "height") {
   const style = node.style && typeof node.style === "object"
@@ -57,6 +57,25 @@ export function ungroupNativeCanvasNodes(nodes: NativeCanvasNode[], groupId: str
       : node.selected ? { ...node, selected: false } : node);
 }
 
+/**
+ * 组没有成员就没有存在的意义：返回移除空组及其连线后的节点/边，没有空组时返回 null。
+ * 调用方把它并进"这次节点变化"一起记录，撤销时组才会跟着子节点回来。
+ */
+export function removeEmptyNativeCanvasGroups(
+  nodes: NativeCanvasNode[],
+  edges: NativeCanvasEdge[],
+): { nodes: NativeCanvasNode[]; edges: NativeCanvasEdge[] } | null {
+  const groupIds = nodes.filter(isNativeCanvasGroup).map((node) => node.id);
+  if (!groupIds.length) return null;
+  const parentIds = new Set(nodes.map((node) => node.parentId).filter((parentId): parentId is string => Boolean(parentId)));
+  const emptyGroupIds = new Set(groupIds.filter((groupId) => !parentIds.has(groupId)));
+  if (!emptyGroupIds.size) return null;
+  return {
+    nodes: nodes.filter((node) => !emptyGroupIds.has(node.id)),
+    edges: edges.filter((edge) => !emptyGroupIds.has(edge.source) && !emptyGroupIds.has(edge.target)),
+  };
+}
+
 export function prepareNativeCanvasNodesForClipboard(sourceNodes: NativeCanvasNode[], allNodes: NativeCanvasNode[]) {
   const sourceIds = new Set(sourceNodes.map((node) => node.id));
   const allById = new Map(allNodes.map((node) => [node.id, node]));
@@ -111,7 +130,7 @@ export function expandNativeCanvasGroupSelection(nodes: NativeCanvasNode[]) {
   };
 }
 
-function absoluteNodePosition(node: NativeCanvasNode, byId: ReadonlyMap<string, NativeCanvasNode>) {
+export function absoluteNodePosition(node: NativeCanvasNode, byId: ReadonlyMap<string, NativeCanvasNode>) {
   let x = node.position.x;
   let y = node.position.y;
   let parentId = node.parentId;

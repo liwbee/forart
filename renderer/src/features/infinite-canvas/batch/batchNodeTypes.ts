@@ -25,7 +25,6 @@ export interface BatchNodeItemBase {
 
 export interface BatchNodeStateBase<TItem extends BatchNodeItemBase = BatchNodeItemBase> {
   items: TItem[];
-  layout?: "list" | "grid";
 }
 
 export function batchItemTaskId(item: BatchNodeItemBase | undefined) {

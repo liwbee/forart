@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, Grid2X2, Images, List, Play, Square, Trash2, Upload } from "lucide-react";
+import { ArrowDownToLine, Download, Eraser, Images, Play, Square, Trash2, Upload } from "lucide-react";
 import { Button } from "../../../components/ui/button";
 import { AppScrollArea } from "../../../components/AppScrollArea";
-import { ToggleGroup, ToggleGroupItem } from "../../../components/ui/toggle-group";
 import { useNativeCanvasActions } from "../canvasActions";
 import { NodeToolbar, Position, useEdges, useNodes, useReactFlow } from "@xyflow/react";
 import { useShallow } from "zustand/react/shallow";
@@ -11,7 +10,7 @@ import type { NativeCanvasNodeData, BatchImageGeneratorItem } from "../nativeCan
 import { BatchNodeProgress } from "../batch/BatchNodeProgress";
 import { ImageGeneratorParamPanel } from "./ImageGeneratorParamPanel";
 import { AdditionalReferenceToggle } from "./AdditionalReferenceToggle";
-import { collectAdditionalPromptInputs, collectAdditionalImageReferences, collectImageGeneratorPrompts, collectImageGeneratorReferences } from "../generation/imageGenerationInputs";
+import { collectAdditionalPromptInputs, collectAdditionalImageReferences, collectBatchTargetImages, collectImageGeneratorPrompts, collectImageGeneratorReferences } from "../generation/imageGenerationInputs";
 import { ReferenceComparisonImageViewer } from "./ReferenceComparisonImageViewer";
 import { useInfiniteCanvasSettings } from "../infiniteCanvasSettings";
 import { generationStatusPresentation, generationStatusTone } from "../generation/generationStatusPresentation";
@@ -58,7 +57,7 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
   const canvasEdges = useEdges<import("../nativeCanvas").NativeCanvasEdge>();
   const inputRef = useRef<HTMLInputElement>(null);
   const { settings, updateSettings } = useInfiniteCanvasSettings();
-  const state = data.batchImageGenerator || { items: [], prompt: "", layout: "grid" as const };
+  const state = data.batchImageGenerator || { items: [], prompt: "" };
   const items = state.items || [];
   const [viewer, setViewer] = useState<BatchImageGeneratorItem | null>(null);
   const [viewerMode, setViewerMode] = useState<"source" | "result">("result");
@@ -72,6 +71,12 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
   const additionalPrompts = collectAdditionalPromptInputs(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:additionalReference"));
   const connectedPrompts = collectImageGeneratorPrompts(nodeId, canvasNodes, canvasEdges, t("infiniteCanvas:prompt"));
   const hasAdditionalReferences = additionalReferences.length > 0 || additionalPrompts.length > 0;
+  // 「传入目标」端口连进来的图：只用来一键传成卡片，不参与参考图。
+  // 这个节点生成中每秒都会重渲染，组来源还要遍历子树，所以按节点/边缓存。
+  const importTargets = useMemo(
+    () => collectBatchTargetImages(nodeId, canvasNodes, canvasEdges),
+    [canvasEdges, canvasNodes, nodeId],
+  );
 
   useEffect(() => {
     if (state.prompt && !String(data.text || "").trim()) actions.patchNodeDataSilently(nodeId, { text: state.prompt });
@@ -148,6 +153,38 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
     if (isBatchItemActive(item, task)) void actions.stopBatchImageGeneration(nodeId, item.id);
     patch({ ...state, items: items.filter((candidate) => candidate.id !== item.id) });
   };
+  /** 清除全部卡片：正在跑的任务先停掉，免得卡片没了任务还在后台跑。 */
+  const clearAllItems = () => {
+    if (!items.length) return;
+    items.forEach((item) => {
+      const task = item.latestGenerationTaskId ? tasksById[item.latestGenerationTaskId] : undefined;
+      if (isBatchItemActive(item, task)) void actions.stopBatchImageGeneration(nodeId, item.id);
+    });
+    patch({ ...state, items: [], taskReferenceOrder: 0 });
+  };
+  /**
+   * 传入目标：把「传入目标」端口连进来的图按顺序传成卡片。
+   * 已经在卡片里的（同一个素材地址）默认跳过；超过卡片上限的直接截断。
+   */
+  const importTargetImages = () => {
+    if (!importTargets.length) return;
+    const existingUrls = new Set(items.map((item) => String(item.sourceUrl || "")).filter(Boolean));
+    const pending = importTargets.filter((target) => target.imageUrl && !existingUrls.has(target.imageUrl));
+    const capacity = Math.max(0, MAX_BATCH_NODE_ITEMS - items.length);
+    const accepted = pending.slice(0, capacity);
+    if (!accepted.length) return;
+    patch({
+      ...state,
+      items: [...items, ...accepted.map((target) => ({
+        id: crypto.randomUUID(),
+        sourceFileName: target.fileName || target.title || t("infiniteCanvas:batchImageItem"),
+        sourceUrl: target.imageUrl,
+        sourceThumbUrl: target.previewUrl || undefined,
+        sourceLoadState: "ready" as const,
+        status: "pending" as const,
+      }))],
+    });
+  };
   const openViewer = (item: BatchImageGeneratorItem, mode: "source" | "result") => {
     setViewerMode(mode);
     setViewerReferenceIndex(0);
@@ -168,7 +205,7 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
       order: taskReferenceOrder,
       imageUrl: viewerItem.sourceUrl,
       previewUrl: viewerItem.sourceThumbUrl || "",
-      title: viewerItem.sourceFileName || t("infiniteCanvas:batchImageItem"),
+      title: t("infiniteCanvas:batchTaskTarget"),
     });
     if (viewerItem.useAdditionalReferences) orderedReferences.push(...additionalReferences);
     return orderedReferences
@@ -205,14 +242,37 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
         <Button type="button" variant="ghost" size="icon-sm" disabled={!completed || Boolean(downloadBusyItemId)} aria-label={t("infiniteCanvas:actionFissionDownloadAll")} title={t("infiniteCanvas:actionFissionDownloadAll")} onClick={() => void downloadAll()}><Download aria-hidden="true" /></Button>
         <Button type="button" variant="destructive" size="icon-sm" aria-label={t("common:actions.delete")} title={t("common:actions.delete")} onClick={() => void deleteElements({ nodes: [{ id: nodeId }] })}><Trash2 aria-hidden="true" /></Button>
       </NodeToolbar>
-      <section className="rf-action-fission rf-batch-image-generator" data-layout={state.layout || "grid"} data-generating={running} data-has-additional-references={hasAdditionalReferences || undefined}>
+      <section className="rf-action-fission rf-batch-image-generator" data-generating={running} data-has-additional-references={hasAdditionalReferences || undefined}>
         <header className="rf-action-fission-header">
+          {/* 有「传入目标」的入边时出现，一次把全部目标图传成卡片。 */}
+          {importTargets.length && !actions.readOnly ? (
+            <Button
+              className="nodrag"
+              size="sm"
+              variant="default"
+              disabled={items.length >= MAX_BATCH_NODE_ITEMS}
+              aria-label={t("infiniteCanvas:batchImportTarget")}
+              title={t("infiniteCanvas:batchImportTarget")}
+              onClick={importTargetImages}
+            >
+              <ArrowDownToLine data-icon="inline-start" aria-hidden="true" />
+              {t("infiniteCanvas:batchImportTarget")}
+            </Button>
+          ) : null}
           <BatchNodeProgress completed={completed} total={items.length} tone={batchReady ? aggregate.tone : "idle"} label={aggregate.failed ? `${completed}/${items.length} · ${aggregate.failed}` : `${completed}/${items.length}`} />
           <Button className="nodrag" size="sm" variant="ghost" onClick={() => inputRef.current?.click()}><Upload data-icon="inline-start" />{t("infiniteCanvas:batchUploadImages")}</Button>
-          <ToggleGroup className="rf-action-fission-layout-toggle nodrag" type="single" size="sm" value={state.layout || "grid"} onValueChange={(layout) => { if (layout === "grid" || layout === "list") patch({ ...state, layout }); }}>
-            <ToggleGroupItem value="grid" aria-label={t("infiniteCanvas:actionFissionGridLayout")}><Grid2X2 /></ToggleGroupItem>
-            <ToggleGroupItem value="list" aria-label={t("infiniteCanvas:actionFissionListLayout")}><List /></ToggleGroupItem>
-          </ToggleGroup>
+          <Button
+            className="nodrag"
+            size="sm"
+            variant="ghost"
+            disabled={!items.length}
+            aria-label={t("infiniteCanvas:batchClearAll")}
+            title={t("infiniteCanvas:batchClearAll")}
+            onClick={clearAllItems}
+          >
+            <Eraser data-icon="inline-start" aria-hidden="true" />
+            {t("infiniteCanvas:batchClearAll")}
+          </Button>
           <input ref={inputRef} hidden type="file" accept="image/*" multiple onChange={(e) => { void addFiles(e.target.files); e.currentTarget.value = ""; }} />
         </header>
         <AppScrollArea className="rf-action-fission-scroll nowheel" viewportClassName="rf-action-fission-scroll-viewport" scrollBarClassName="nodrag">
@@ -223,7 +283,7 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
             const tone = batchItemTone(item, task);
             const result = resolveBatchItemResult(item, task);
             const itemRunning = tone === "queued" || tone === "running";
-            const showOverlay = state.layout !== "list" && (itemRunning || tone === "error");
+            const showOverlay = itemRunning || tone === "error";
             const presentation = generationStatusPresentation({ task, failed: item.status === "failed", queued: item.status === "queued", running: item.status === "running", persistedError: item.error, resultAvailable: Boolean(result.url), resultDownloaded: item.resultDownloadState === "downloaded", ready: Boolean(item.sourceUrl) && batchReady }, t, timerNow);
             const canDownload = Boolean(result.url) && !itemRunning && tone !== "error";
             const isPendingDownload = canDownload && item.resultDownloadState !== "downloaded";
@@ -243,13 +303,13 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
                   : <GenerationMediaPreview src={result.url} thumbSrc={result.thumbUrl} alt={t("infiniteCanvas:actionFissionResultPreview")} onClick={openResult} onKeyDown={openResultFromKeyboard} />}
                 {canDownload ? <Button className={`rf-action-fission-download${isPendingDownload ? " is-pending" : ""}`} type="button" variant="ghost" size="icon-xs" disabled={downloadBusyItemId === item.id} aria-label={t(isPendingDownload ? "infiniteCanvas:imagePendingDownload" : "infiniteCanvas:imageDownloaded")} title={t(isPendingDownload ? "infiniteCanvas:imagePendingDownload" : "infiniteCanvas:imageDownloaded")} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); downloadItem(); }}><Download aria-hidden="true" /></Button> : null}
                 {!sourceLoading && showOverlay ? <GenerationStatusDisplay presentation={presentation} mode="overlay" /> : null}
-                {!sourceLoading && !showOverlay && state.layout !== "list" ? <GenerationStatusDisplay presentation={presentation} mode="inline" className="rf-generation-status--result" /> : null}
+                {!sourceLoading && !showOverlay ? <GenerationStatusDisplay presentation={presentation} mode="inline" className="rf-generation-status--result" /> : null}
               </div>
             );
             const sourcePreview = sourceLoading
               ? <AssetUploadPlaceholder className="rf-action-fission-action-preview rf-asset-upload-thumbnail-placeholder nodrag nopan" label={t("infiniteCanvas:assetLoading")} />
               : <GenerationMediaPreview className="rf-action-fission-action-preview nodrag nopan" src={item.sourceUrl} thumbSrc={item.sourceThumbUrl} alt={item.sourceFileName || `${t("infiniteCanvas:batchImageItem")} ${index + 1}`} onClick={openSource} onKeyDown={openSourceFromKeyboard} />;
-            return <article className={state.layout === "list" ? "rf-action-fission-list-card" : "rf-action-fission-grid-card"} data-index={String(index + 1).padStart(2, "0")} data-source-loading={sourceLoading || undefined} data-source-ready={item.sourceLoadState === "ready" || undefined} key={item.id}>
+            return <article className="rf-action-fission-grid-card" data-index={String(index + 1).padStart(2, "0")} data-source-loading={sourceLoading || undefined} data-source-ready={item.sourceLoadState === "ready" || undefined} key={item.id}>
               <ResultAssetCreateButton
                 index={index + 1}
                 disabled={actions.readOnly || !canDownload}
@@ -265,9 +325,8 @@ export function BatchImageGeneratorNodeBody({ nodeId, data, paramPanelVisible }:
                 })}
               />
               {resultPreview}
-              {state.layout !== "list" ? <div className="rf-action-fission-action-stack">{hasAdditionalReferences ? <AdditionalReferenceToggle checked={Boolean(item.useAdditionalReferences)} disabled={itemRunning} onCheckedChange={(checked) => setItemAdditionalReferences(item.id, checked)} /> : null}{sourcePreview}</div> : <>{hasAdditionalReferences ? <AdditionalReferenceToggle checked={Boolean(item.useAdditionalReferences)} disabled={itemRunning} onCheckedChange={(checked) => setItemAdditionalReferences(item.id, checked)} /> : null}{sourcePreview}</>}
+              <div className="rf-action-fission-action-stack">{hasAdditionalReferences ? <AdditionalReferenceToggle checked={Boolean(item.useAdditionalReferences)} disabled={itemRunning} onCheckedChange={(checked) => setItemAdditionalReferences(item.id, checked)} /> : null}{sourcePreview}</div>
               <div className="rf-action-fission-row-summary"><strong>{item.sourceFileName || `${t("infiniteCanvas:batchImageItem")} ${index + 1}`}</strong></div>
-              {state.layout === "list" ? <GenerationStatusDisplay presentation={presentation} mode="inline" /> : null}
               <div className="rf-action-fission-row-actions nodrag"><Button type="button" variant="ghost" size="icon-xs" disabled={!itemRunning && (!batchReady || !item.sourceUrl)} aria-label={itemRunning ? t("infiniteCanvas:stopRun") : t("infiniteCanvas:run")} onClick={() => void (itemRunning ? actions.stopBatchImageGeneration(nodeId, item.id) : actions.runBatchImageGeneration(nodeId, item.id))}>{itemRunning ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" />}</Button><Button type="button" variant="ghost" size="icon-xs" aria-label={t("common:actions.delete")} onClick={() => deleteItem(item)}><Trash2 aria-hidden="true" /></Button></div>
             </article>;
           })}

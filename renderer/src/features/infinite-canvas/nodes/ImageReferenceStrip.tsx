@@ -18,7 +18,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Images, TextCursorInput, X } from "lucide-react";
+import { FolderKanban, Images, TextCursorInput, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -44,18 +44,23 @@ interface ReferenceItemProps {
 
 function SortableReferenceItem({ item, index, invalid, readOnly = false, onRemove, onView }: ReferenceItemProps) {
   const { t } = useTranslation();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.edgeId });
+  // 组内图片展开出来的参考：删除任意一条 = 断开整个组，顺序可以单独调。
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.edgeId, disabled: readOnly });
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition };
   const stopRemovePointer = (event: PointerEvent<HTMLButtonElement>) => event.stopPropagation();
+  const removeLabel = item.fromGroup
+    ? t("infiniteCanvas:removeGroupReference")
+    : t("infiniteCanvas:removeReferenceImage");
 
   return (
     <div
       ref={setNodeRef}
-      className={cn("rf-reference-item", invalid && "is-invalid", isDragging && "is-dragging")}
+      className={cn("rf-reference-item", invalid && "is-invalid", isDragging && "is-dragging", item.fromGroup && "is-from-group")}
       style={style}
       title={item.title}
       {...attributes}
       {...listeners}
+      aria-disabled={readOnly || undefined}
       onDoubleClick={(event) => {
         if (readOnly) return;
         event.preventDefault();
@@ -78,17 +83,23 @@ function SortableReferenceItem({ item, index, invalid, readOnly = false, onRemov
         </HoverCardContent>
       </HoverCard>
       <span className="rf-reference-item__order">{index + 1}</span>
+      {item.fromGroup ? (
+        <span className="rf-reference-item__group" title={t("infiniteCanvas:groupReference")} aria-label={t("infiniteCanvas:groupReference")}>
+          <FolderKanban aria-hidden="true" />
+        </span>
+      ) : null}
       {!readOnly ? <Button
         className="rf-reference-item__remove"
         type="button"
         variant="ghost"
         size="icon-xs"
-        aria-label={t("infiniteCanvas:removeReferenceImage")}
-        title={t("infiniteCanvas:removeReferenceImage")}
+        aria-label={removeLabel}
+        title={removeLabel}
         onPointerDown={stopRemovePointer}
         onClick={(event) => {
           event.stopPropagation();
-          onRemove(item.edgeId);
+          // 一条边贡献多张参考（组 / 多图节点）时，删掉任意一张就是断开这条连线。
+          onRemove(item.sourceEdgeId || item.edgeId);
         }}
       >
         <X aria-hidden="true" />
@@ -142,6 +153,11 @@ function ReferenceOverlay({ item }: { item: ImageGeneratorReferenceInput }) {
   return (
     <div className="rf-reference-item rf-reference-item--overlay" aria-hidden="true">
       {item.previewUrl || item.imageUrl ? <ImageWithFallback src={item.previewUrl} fallbackSrc={item.imageUrl} alt="" loading="lazy" decoding="async" draggable={false} /> : <Images aria-hidden="true" />}
+      {item.fromGroup ? (
+        <span className="rf-reference-item__group">
+          <FolderKanban aria-hidden="true" />
+        </span>
+      ) : null}
     </div>
   );
 }

@@ -672,7 +672,7 @@
 
 .rf-image-adjust {
   gap: 16px;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   max-height: min(94vh, 1100px);
 }
 
@@ -682,7 +682,101 @@
   gap: 24px;
   min-height: 0;
   /* 高度由预览框决定：滑块内容不够高时不会出现滚动条，不够放时才滚动。 */
-  height: min(70vh, 780px);
+  height: min(74vh, 860px);
+}
+
+/* 组图像调节：预览 + 组内图片轨道（轨道只在组入口出现）。 */
+.rf-image-adjust__stage {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.rf-image-adjust__targets {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+}
+
+.rf-image-adjust__target-slot {
+  flex: 0 0 auto;
+  width: 76px;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+}
+
+.rf-image-adjust__target {
+  position: relative;
+  width: 76px;
+  height: 60px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.rf-image-adjust__target.is-active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.rf-image-adjust__target:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.rf-image-adjust__target img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.rf-image-adjust__target > svg {
+  width: 18px;
+  height: 18px;
+}
+
+.rf-image-adjust__target-index {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  min-width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  padding: 0 3px;
+  color: var(--primary-foreground);
+  background: color-mix(in srgb, var(--primary) 88%, transparent);
+  font-size: 9px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.rf-image-adjust__target-label {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rf-image-adjust__target-slot:has(.rf-image-adjust__target.is-active) .rf-image-adjust__target-label {
+  color: var(--text-secondary);
 }
 
 .rf-image-adjust__preview {
@@ -853,6 +947,22 @@
   gap: 12px;
   min-width: 0;
   min-height: 0;
+}
+
+/* 右栏：上方是预设/调节区，底部是操作按钮；中间区域吃掉剩余高度。 */
+.rf-image-adjust__controls,
+.rf-image-adjust__presets {
+  flex: 1;
+}
+
+.rf-image-adjust__actions {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rf-image-adjust__actions > button {
+  width: 100%;
 }
 
 .rf-image-adjust__tabs {
@@ -1308,15 +1418,6 @@
   margin-right: auto;
 }
 
-.rf-action-fission-layout-toggle {
-  flex: 0 0 auto;
-}
-
-.rf-action-fission-layout-toggle [data-slot="toggle-group-item"] {
-  width: 30px;
-  padding: 0;
-}
-
 .rf-action-fission-action-preview img,
 .rf-action-fission-result-preview img {
   width: 100%;
@@ -1340,84 +1441,6 @@
   place-items: center;
   color: var(--text-secondary);
   font-size: 11px;
-}
-
-.rf-action-fission-list {
-  display: grid;
-  gap: 14px;
-  padding: 10px;
-}
-
-.rf-action-fission-list-card {
-  position: relative;
-  min-width: 0;
-  height: 86px;
-  display: grid;
-  grid-template-columns: 64px minmax(0, 1fr) 54px auto;
-  grid-template-rows: auto auto;
-  align-items: center;
-  column-gap: 10px;
-  row-gap: 4px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
-  padding: 0 7px 0 0;
-  background: var(--surface-control);
-}
-
-.rf-action-fission[data-has-additional-references] .rf-action-fission-list-card {
-  grid-template-columns: 64px minmax(0, 1fr) 56px 54px auto;
-}
-
-.rf-action-fission-list-card > .rf-action-fission-action-preview,
-.rf-action-fission-list-card > .rf-action-fission-result-preview,
-.rf-action-fission-list-card > .rf-action-fission-row-actions {
-  grid-row: 1 / 3;
-}
-
-.rf-action-fission-list-card > .rf-action-fission-result-preview {
-  width: 100%;
-  min-width: 0;
-  height: 100%;
-  min-height: 0;
-  align-self: stretch;
-  grid-column: 1;
-  border: 0;
-  border-radius: var(--radius) 0 0 var(--radius);
-}
-
-.rf-action-fission-list-card > .rf-action-fission-action-preview {
-  grid-column: 3;
-}
-
-.rf-action-fission-list-card > .rf-action-fission-row-actions {
-  grid-column: 4;
-}
-
-.rf-action-fission[data-has-additional-references] .rf-action-fission-list-card > .rf-action-fission-additional-toggle {
-  grid-column: 3;
-  grid-row: 1 / 3;
-}
-
-.rf-action-fission[data-has-additional-references] .rf-action-fission-list-card > .rf-action-fission-action-preview {
-  grid-column: 4;
-}
-
-.rf-action-fission[data-has-additional-references] .rf-action-fission-list-card > .rf-action-fission-row-actions {
-  grid-column: 5;
-}
-
-.rf-action-fission-list-card > .rf-action-fission-row-summary {
-  grid-column: 2;
-  grid-row: 1;
-  align-self: end;
-}
-
-.rf-action-fission-list-card > .rf-generation-status {
-  grid-column: 2;
-  grid-row: 2;
-  align-self: start;
-  justify-self: start;
-  margin-bottom: 7px;
 }
 
 /* 卡片角标：平时显示序号，悬浮或聚焦卡片时序号淡出、换成「创建素材节点」按钮。
@@ -1445,21 +1468,16 @@
 
 /* 隐藏态的选择器带上了卡片类名：Button 自带的 disabled:opacity-50 工具类
    优先级更高，只用单个类名会被它抢先命中，禁用按钮就会一直露在外面。 */
-.rf-action-fission-grid-card .rf-action-fission-card-badge > .rf-action-fission-card-create,
-.rf-action-fission-list-card .rf-action-fission-card-badge > .rf-action-fission-card-create {
+.rf-action-fission-grid-card .rf-action-fission-card-badge > .rf-action-fission-card-create {
   opacity: 0;
   pointer-events: none;
 }
 
-.rf-action-fission-list-card:hover .rf-action-fission-card-index,
-.rf-action-fission-list-card:focus-within .rf-action-fission-card-index,
 .rf-action-fission-grid-card:hover .rf-action-fission-card-index,
 .rf-action-fission-grid-card:focus-within .rf-action-fission-card-index {
   opacity: 0;
 }
 
-.rf-action-fission-list-card:hover .rf-action-fission-card-badge > .rf-action-fission-card-create,
-.rf-action-fission-list-card:focus-within .rf-action-fission-card-badge > .rf-action-fission-card-create,
 .rf-action-fission-grid-card:hover .rf-action-fission-card-badge > .rf-action-fission-card-create,
 .rf-action-fission-grid-card:focus-within .rf-action-fission-card-badge > .rf-action-fission-card-create {
   opacity: 1;
@@ -1467,36 +1485,9 @@
 }
 
 /* 结果图不可用时保持半透明，和结果图上的下载按钮观感一致。 */
-.rf-action-fission-list-card:hover .rf-action-fission-card-badge > .rf-action-fission-card-create:disabled,
-.rf-action-fission-list-card:focus-within .rf-action-fission-card-badge > .rf-action-fission-card-create:disabled,
 .rf-action-fission-grid-card:hover .rf-action-fission-card-badge > .rf-action-fission-card-create:disabled,
 .rf-action-fission-grid-card:focus-within .rf-action-fission-card-badge > .rf-action-fission-card-create:disabled {
   opacity: 0.5;
-}
-
-/* 列表卡片：序号是卡片左上角外扩出去的圆形徽标。 */
-.rf-action-fission-list-card > .rf-action-fission-card-badge {
-  top: 0;
-  left: 0;
-  transform: translate(-50%, -50%);
-}
-
-.rf-action-fission-list-card .rf-action-fission-card-index {
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--primary) 82%, var(--border-subtle));
-  border-radius: 50%;
-  padding: 0;
-  background: var(--primary);
-  line-height: 1;
-}
-
-.rf-action-fission-list-card .rf-action-fission-card-badge > .rf-action-fission-card-create {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
 }
 
 /* 触屏没有悬浮态：直接显示按钮，否则这个入口永远点不到。 */
@@ -1505,14 +1496,12 @@
     opacity: 0;
   }
 
-  .rf-action-fission-grid-card .rf-action-fission-card-badge > .rf-action-fission-card-create,
-  .rf-action-fission-list-card .rf-action-fission-card-badge > .rf-action-fission-card-create {
+  .rf-action-fission-grid-card .rf-action-fission-card-badge > .rf-action-fission-card-create {
     opacity: 1;
     pointer-events: auto;
   }
 
-  .rf-action-fission-grid-card .rf-action-fission-card-badge > .rf-action-fission-card-create:disabled,
-  .rf-action-fission-list-card .rf-action-fission-card-badge > .rf-action-fission-card-create:disabled {
+  .rf-action-fission-grid-card .rf-action-fission-card-badge > .rf-action-fission-card-create:disabled {
     opacity: 0.5;
   }
 }
@@ -1563,8 +1552,7 @@
   animation: rf-upload-card-in 220ms ease-out both;
 }
 
-.rf-action-fission-grid-card[data-source-ready] .rf-action-fission-action-preview img,
-.rf-action-fission-list-card[data-source-ready] .rf-action-fission-action-preview img {
+.rf-action-fission-grid-card[data-source-ready] .rf-action-fission-action-preview img {
   animation: rf-upload-asset-in 240ms ease-out both;
 }
 
@@ -1909,14 +1897,6 @@
   min-height: 0;
   align-self: start;
   contain: paint;
-}
-
-.rf-batch-image-generator[data-layout="list"] .rf-action-fission-grid {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.rf-batch-image-generator[data-layout="list"] .rf-action-fission-list-card {
-  width: 100%;
 }
 
 .rf-action-fission-grid-card {
@@ -2906,7 +2886,6 @@
 
   .rf-action-fission-grid-card[data-source-loading],
   .rf-action-fission-grid-card[data-source-ready] .rf-action-fission-action-preview img,
-  .rf-action-fission-list-card[data-source-ready] .rf-action-fission-action-preview img,
   .rf-upload-asset-ready {
     animation: none;
   }
@@ -3657,6 +3636,26 @@
 }
 
 .rf-reference-item__remove svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* 来自组的参考图：左上角标一个组图标，点删除等于断开整组。 */
+.rf-reference-item__group {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--media-overlay-foreground);
+  background: color-mix(in srgb, var(--primary) 78%, var(--media-overlay-bg-strong));
+  pointer-events: none;
+}
+
+.rf-reference-item__group svg {
   width: 11px;
   height: 11px;
 }

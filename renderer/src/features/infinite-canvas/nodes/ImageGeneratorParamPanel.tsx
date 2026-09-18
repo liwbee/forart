@@ -404,8 +404,8 @@ export function ImageGeneratorParamPanel({
       edgeId: BATCH_TASK_REFERENCE_EDGE_ID,
       nodeId,
       order: Number(data.batchImageGenerator?.taskReferenceOrder || 0),
-      title: t("infiniteCanvas:mainReference"),
-      mentionLabel: t("infiniteCanvas:mainReference"),
+      title: t("infiniteCanvas:batchTaskTarget"),
+      mentionLabel: t("infiniteCanvas:batchTaskTarget"),
       imageUrl: BATCH_TASK_REFERENCE_PLACEHOLDER,
       previewUrl: BATCH_TASK_REFERENCE_PLACEHOLDER,
     }]

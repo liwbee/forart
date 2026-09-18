@@ -128,11 +128,15 @@ export type NativeCanvasInputKind =
   | "prompt"
   | "referenceImage"
   | "additionalReferenceImage"
-  | "additionalReferencePrompt";
+  | "additionalReferencePrompt"
+  /** 批量洗图的「传入目标」端口：连进来的图可以一键传成卡片，不参与参考图。 */
+  | "batchTargetImage";
 
 export interface NativeCanvasEdgeData extends Record<string, unknown> {
   inputKind?: NativeCanvasInputKind;
   referenceOrder?: number;
+  /** 一条边贡献多张参考图（多图节点 / 组）时，这些图之间的顺序。 */
+  referenceImageOrder?: string[];
 }
 
 export type NativeCanvasEdge = Edge<NativeCanvasEdgeData, "default">;
@@ -293,7 +297,8 @@ export const NATIVE_CANVAS_NODE_DEFINITIONS: Record<NativeCanvasNodeKind, Native
     labelKey: "group",
     size: { width: 640, height: 420 },
     acceptsInput: false,
-    providesOutput: false,
+    // 组可以把组内全部图片作为下游图片生成节点的参考图。
+    providesOutput: true,
   },
 };
 

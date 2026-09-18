@@ -23,6 +23,28 @@ function createCanvasAssetThumbnailStore({ assetRoot, assetUrl }) {
     return target;
   }
 
+  /**
+   * `thumb/<name>.webp` 反查同目录下的原图。节点数据里已经存了缩略图 URL，
+   * 删掉缩略图缓存后只有能反查回原图，才能用同一个 URL 就地重建。
+   */
+  function canvasAssetSourcePathForThumbnail(filePath) {
+    const target = path.resolve(String(filePath || ''));
+    if (!isInside(assetRoot(), target) || path.basename(path.dirname(target)) !== 'thumb') return '';
+    if (path.extname(target).toLowerCase() !== '.webp') return '';
+    const sourceDirectory = path.dirname(path.dirname(target));
+    const stem = path.parse(target).name;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(sourceDirectory);
+    } catch {
+      return '';
+    }
+    const match = entries.filter((name) => path.parse(name).name === stem).sort()[0];
+    if (!match) return '';
+    const sourcePath = path.join(sourceDirectory, match);
+    return fs.existsSync(sourcePath) ? sourcePath : '';
+  }
+
   async function ensureCanvasAssetThumbnail({ filePath = '', mimeType = '', durationMs = 0 } = {}) {
     const sourcePath = resolveCanvasAssetPath(filePath);
     if (!sourcePath || !fs.existsSync(sourcePath)) return {};
@@ -58,10 +80,20 @@ function createCanvasAssetThumbnailStore({ assetRoot, assetUrl }) {
     };
   }
 
+  /** 缩略图文件缺失时按原图重建，路径与 URL 都保持不变。 */
+  async function ensureCanvasAssetThumbnailForFile(filePath) {
+    const sourcePath = canvasAssetSourcePathForThumbnail(filePath);
+    if (!sourcePath) return {};
+    if (path.resolve(canvasAssetThumbPath(sourcePath)) !== path.resolve(String(filePath))) return {};
+    return ensureCanvasAssetThumbnail({ filePath: sourcePath });
+  }
+
   return {
     canvasAssetKind,
     canvasAssetThumbPath,
+    canvasAssetSourcePathForThumbnail,
     ensureCanvasAssetThumbnail,
+    ensureCanvasAssetThumbnailForFile,
     resolveCanvasAssetPath,
   };
 }

@@ -55,7 +55,7 @@ test('video assets use a larger aspect-preserving canvas surface', () => {
   assert.deepEqual(getVideoNodeSize(0, 0), VIDEO_NODE_DEFAULT_SIZE);
 });
 
-test('generated image dimensions resize the generator and preserve its center', () => {
+test('generated image dimensions resize the generator without moving it', () => {
   const original = generatorNode();
   const expected = getImageNodeSize(1536, 1024);
   const node = applyNativeNodeDataPatch(original, {
@@ -67,8 +67,8 @@ test('generated image dimensions resize the generator and preserve its center', 
   assert.deepEqual(node.style, expected);
   assert.equal(node.data.imageNaturalWidth, 1536);
   assert.equal(node.data.imageNaturalHeight, 1024);
-  assert.equal(node.position.x + expected.width / 2, original.position.x + 140);
-  assert.equal(node.position.y + expected.height / 2, original.position.y + 140);
+  // 尺寸跟着主图比例走，位置永远不动（以前按中心回正会把节点挪走）
+  assert.deepEqual(node.position, original.position);
 });
 
 test('the primary generated image controls a multi-image generator ratio', () => {
@@ -94,4 +94,77 @@ test('original-image dimensions recover a task result that omitted dimensions', 
     imageNaturalHeight: 1536,
   });
   assert.deepEqual(recovered.style, getImageNodeSize(1024, 1536));
+});
+
+test('a generator in the expanded grid keeps its position when results change', () => {
+  // 展开态：style 是临时的放大尺寸，折叠尺寸记在 multiImageCollapsedSize 里。
+  const expanded = generatorNode({
+    position: { x: 100, y: 200 },
+    style: { width: 608, height: 408 },
+    data: {
+      kind: 'imageGenerator',
+      label: '',
+      multiImageExpanded: true,
+      multiImageCollapsedSize: { width: 280, height: 280 },
+      generatedImages: [{ localUrl: 'forart-asset://canvas/output/first.png', width: 900, height: 1200 }],
+    },
+  });
+
+  const patched = applyNativeNodeDataPatch(expanded, {
+    generatedImages: [
+      { localUrl: 'forart-asset://canvas/output/first.png', width: 900, height: 1200 },
+      { localUrl: 'forart-asset://canvas/output/second.png', width: 1200, height: 900 },
+    ],
+  });
+
+  // 展开态下：位置和尺寸都不动（尺寸由展开/折叠布局负责），数据照常更新。
+  assert.deepEqual(patched.position, { x: 100, y: 200 });
+  assert.deepEqual(patched.style, { width: 608, height: 408 });
+  assert.equal(patched.data.multiImageCollapsedSize.width, 280);
+  assert.equal(patched.data.generatedImages.length, 2);
+});
+
+test('a generation write-back resizes the node in place without moving it', () => {
+  const original = generatorNode({
+    position: { x: 100, y: 200 },
+    style: { width: 608, height: 408 },
+    data: {
+      kind: 'imageGenerator',
+      label: '',
+      multiImageExpanded: true,
+      multiImageCollapsedSize: { width: 280, height: 280 },
+      generatedImages: [{ localUrl: 'forart-asset://canvas/output/first.png', width: 900, height: 1200 }],
+    },
+  });
+
+  const patched = applyNativeNodeDataPatch(original, {
+    generatedImages: [{ localUrl: 'forart-asset://canvas/output/second.png', width: 1200, height: 900 }],
+    imageNaturalWidth: 1200,
+    imageNaturalHeight: 900,
+    multiImageExpanded: false,
+  });
+
+  // 生成写回会顺带折叠：尺寸回到主图比例，但位置保持不动。
+  assert.deepEqual(patched.position, { x: 100, y: 200 });
+  assert.deepEqual(patched.style, getImageNodeSize(1200, 900));
+});
+
+test('a manually resized generator is re-fitted in place, never moved', () => {
+  const resized = generatorNode({
+    position: { x: 40, y: 60 },
+    style: { width: 520, height: 300 },
+    data: { kind: 'imageGenerator', label: '' },
+  });
+
+  const patched = applyNativeNodeDataPatch(resized, {
+    generatedImages: [{ localUrl: 'forart-asset://canvas/output/wide.png', width: 1600, height: 900 }],
+    imageNaturalWidth: 1600,
+    imageNaturalHeight: 900,
+  });
+
+  assert.deepEqual(patched.position, { x: 40, y: 60 });
+  assert.deepEqual(patched.style, getImageNodeSize(1600, 900));
+  // 数据本身照常更新
+  assert.equal(patched.data.imageNaturalWidth, 1600);
+  assert.equal(patched.data.generatedImages.length, 1);
 });

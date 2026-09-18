@@ -75,7 +75,7 @@ import { NativeCanvasNode as NativeCanvasNodeComponent } from "./nodes/NativeCan
 import { NativeCanvasGroupNode } from "./nodes/NativeCanvasGroupNode";
 import { ActionFissionRowSettingsDialog } from "./nodes/ActionFissionRowSettingsDialog";
 import { ImageAdjustDialog } from "./nodes/ImageAdjustDialog";
-import { type NativeCanvasImageAdjustments } from "./imageAdjustments";
+import { DEFAULT_IMAGE_ADJUSTMENTS, type NativeCanvasImageAdjustments } from "./imageAdjustments";
 import { configureActionFissionRow, createDefaultActionFissionState, normalizeActionFissionState } from "./action-fission/actionFissionState";
 import { actionFissionRowTaskId, type ActionFissionRow } from "./action-fission/actionFissionTypes";
 import { emptyCanvasSnapshot, type NativeCanvasSnapshot } from "./canvasWorkspaceTypes";
@@ -94,11 +94,14 @@ import {
   loadGenerationTasks,
   partitionGenerationStopTasks,
   requiresGenerationStopConfirmation,
+  useGenerationTaskCache,
 } from "./generation/generationTaskCache";
 import { downloadGenerationResult, saveGenerationImageFile } from "./generation/generationDownload";
 import { actionFissionDownloadTarget } from "./generation/generationDownloadTarget";
 import { derivedAssetName, FALLBACK_DOWNLOAD_NAME, storedImageDownloadTarget, type DerivedAssetKind } from "./assetNaming";
 import { ASSET_LOADER_DEFAULT_SIZE } from "./imageNodeSizing";
+import { collectGroupImageAdjustTargets, groupImageAdjustTargetKey } from "./groupImageAdjustTargets";
+import { removeEmptyNativeCanvasGroups } from "./nativeCanvasGroups";
 import {
   beginInfiniteCanvasHistoryGesture,
   commitInfiniteCanvasHistoryGesture,
@@ -526,6 +529,9 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
   const [edgeToolbarPoint, setEdgeToolbarPoint] = useState<EdgeToolbarPoint | null>(null);
   const [actionFissionSettingsTarget, setActionFissionSettingsTarget] = useState<ActionFissionSettingsTarget | null>(null);
   const [imageAdjustTarget, setImageAdjustTarget] = useState<ImageAdjustTarget | null>(null);
+  /** 组入口的会话：记录这次调节来自哪个组，单节点入口为 null。 */
+  const [imageAdjustSession, setImageAdjustSession] = useState<{ scope: "group"; groupId: string } | null>(null);
+  const [imageAdjustGroupProgress, setImageAdjustGroupProgress] = useState<{ done: number; total: number } | null>(null);
   const [imageAdjustBusy, setImageAdjustBusy] = useState(false);
   const [pendingGenerationStop, setPendingGenerationStop] = useState<PendingGenerationStop | null>(null);
   const [generationStopPending, setGenerationStopPending] = useState(false);
@@ -585,9 +591,31 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
       naturalHeight: Math.max(0, Number(image.height || 0)),
     };
   }, [imageAdjustTarget, nodes, t]);
+  // 组入口：预览下方轨道的候选图片，按画布上的阅读顺序列出（含嵌套子组）。
+  const imageAdjustTargets = useMemo(() => {
+    if (imageAdjustSession?.scope !== "group") return [];
+    return collectGroupImageAdjustTargets(nodes, imageAdjustSession.groupId);
+  }, [imageAdjustSession, nodes]);
+  const imageAdjustTargetOptions = useMemo(() => imageAdjustTargets.map((target) => ({
+      key: target.key,
+      label: target.label || t("infiniteCanvas:assetNode"),
+      thumbnailUrl: target.thumbnailUrl ? resolveLibraryImageUrl(target.thumbnailUrl) : "",
+      taskId: target.taskId,
+      isAssetLoading: target.isAssetLoading,
+  })), [imageAdjustTargets, t]);
+  // 目标节点/图片消失：组入口自动切到组内下一张，单节点入口直接关窗。
   useEffect(() => {
-    if (imageAdjustTarget && !imageAdjustContext) setImageAdjustTarget(null);
-  }, [imageAdjustContext, imageAdjustTarget]);
+    if (!imageAdjustTarget || imageAdjustContext) return;
+    if (imageAdjustSession?.scope === "group") {
+      const activeKey = groupImageAdjustTargetKey(imageAdjustTarget.nodeId, imageAdjustTarget.imageIndex);
+      const next = imageAdjustTargets.find((target) => target.key !== activeKey) || imageAdjustTargets[0];
+      if (next) {
+        setImageAdjustTarget({ nodeId: next.nodeId, imageIndex: next.imageIndex });
+        return;
+      }
+    }
+    setImageAdjustTarget(null);
+  }, [imageAdjustContext, imageAdjustSession, imageAdjustTarget, imageAdjustTargets]);
   const contextNode = useMemo(
     () => nodeContextTarget
       ? nodes.find((node) => node.id === nodeContextTarget.node.id) || nodeContextTarget.node
@@ -698,9 +726,18 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
 
   useEffect(() => {
     if (readOnly) return;
-    recordInfiniteCanvasHistory(nodes, edges);
-    onSnapshotChange?.({ nodes, edges, viewport: viewportRef.current });
-  }, [edges, nodes, onSnapshotChange, readOnly]);
+    // 空组（成员被删光/拖出去）跟着这次节点变化一起消失：并进同一步，
+    // 撤销时组才会和子节点一起回来，而不是先恢复出一个马上又被清掉的空组。
+    const withoutEmptyGroups = removeEmptyNativeCanvasGroups(nodes, edges);
+    const nextNodes = withoutEmptyGroups ? withoutEmptyGroups.nodes : nodes;
+    const nextEdges = withoutEmptyGroups ? withoutEmptyGroups.edges : edges;
+    if (withoutEmptyGroups) {
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+    }
+    recordInfiniteCanvasHistory(nextNodes, nextEdges);
+    onSnapshotChange?.({ nodes: nextNodes, edges: nextEdges, viewport: viewportRef.current });
+  }, [edges, nodes, onSnapshotChange, readOnly, setEdges, setNodes]);
 
   const beginHistoryGesture = useCallback(() => {
     historyGestureDepthRef.current += 1;
@@ -800,7 +837,7 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
         ? { actionFission: createDefaultActionFissionState() }
         : {}),
       ...(kind === "batchImageGenerator" && !data?.batchImageGenerator
-        ? { batchImageGenerator: { items: [], prompt: "", layout: "grid" as const } }
+        ? { batchImageGenerator: { items: [], prompt: "" } }
         : {}),
       ...((rememberedData.libtvImageGeneration || data?.libtvImageGeneration) ? {
         libtvImageGeneration: {
@@ -1118,16 +1155,71 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     });
   }, [getNodes, readOnly, screenToFlowPosition, setNodes, t]);
 
+  /**
+   * 覆盖节点的某一张图：素材节点替换自己的素材；图片生成节点只替换指定序号的结果图。
+   * 生成节点里还有别的结果图时不跟着改节点尺寸，否则多图网格会被裁成单图的比例。
+   */
+  const overwriteNodeImage = useCallback((
+    nodeId: string,
+    imageIndex: number,
+    asset: CanvasStoredAsset,
+    fileName: string,
+  ) => {
+    const node = getNodes().find((item) => item.id === nodeId);
+    if (!node) return;
+    if (node.data.kind !== "imageGenerator") {
+      setNodeAsset(nodeId, asset.url, fileName, "image", "image/png", {
+        width: asset.width,
+        height: asset.height,
+        thumbUrl: asset.thumbUrl,
+      });
+      return;
+    }
+    setNodes((current) => current.map((item) => {
+      if (item.id !== nodeId) return item;
+      const images = [...(item.data.generatedImages || [])];
+      if (!images.length) return item;
+      const targetIndex = imageIndex >= 0 && imageIndex < images.length ? imageIndex : 0;
+      images[targetIndex] = {
+        ...images[targetIndex],
+        localUrl: asset.url,
+        url: undefined,
+        thumbUrl: asset.thumbUrl,
+        fileName,
+        width: asset.width,
+        height: asset.height,
+        downloadState: "pending",
+        downloadedAt: undefined,
+      };
+      return {
+        ...item,
+        data: {
+          ...item.data,
+          generatedImages: images,
+          // 只有写回主图时才更新节点记录的原始尺寸：多图节点里第 2+ 张的尺寸
+          // 不代表节点展示的主图，写进去会让节点上的分辨率文案和主图对不上。
+          ...(targetIndex === 0 ? { imageNaturalWidth: asset.width, imageNaturalHeight: asset.height } : {}),
+        },
+        style: images.length === 1 && asset.width && asset.height
+          ? { ...item.style, ...getImageNodeSize(asset.width, asset.height) }
+          : item.style,
+      };
+    }));
+  }, [getNodes, setNodeAsset, setNodes]);
+
   const cropNodeImage = useCallback(async (
     nodeId: string,
     crop: CanvasImageCropRect,
-    options: { mode?: "newNode" | "overwrite" } = {},
+    options: { mode?: "newNode" | "overwrite"; imageIndex?: number } = {},
   ) => {
-    const { mode = "newNode" } = options;
+    const { mode = "newNode", imageIndex = 0 } = options;
     const version = (imageMutationVersionRef.current.get(nodeId) || 0) + 1;
     imageMutationVersionRef.current.set(nodeId, version);
     const node = getNodes().find((item) => item.id === nodeId);
-    const sourceUrl = node?.data.kind === "assetLoader" ? String(node.data.assetUrl || "") : "";
+    // 素材节点只有一张图，图片生成节点可能有多张：按序号取当前正在看的那张。
+    const nodeImages = node ? nativeCanvasNodeImages(node.data) : [];
+    const image = nodeImages[imageIndex] || nodeImages[0];
+    const sourceUrl = String(image?.localUrl || image?.url || "");
     if (!node || !sourceUrl) throw new Error(t("infiniteCanvas:imageCropSourceMissing"));
     if (!window.easyTool?.cropCanvasAsset) throw new Error(t("infiniteCanvas:imageCropUnavailable"));
 
@@ -1153,25 +1245,14 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     if (mode === "overwrite") {
       // 覆盖原图：裁剪结果仍然是一张新图，只是把它填回这个节点，
       // 节点位置、连线和分组都保持不变。
-      setNodeAsset(
-        nodeId,
-        result.url,
-        derivedAssetName("crop", node.data.assetFileName || node.data.label),
-        "image",
-        "image/png",
-        {
-          width: result.width,
-          height: result.height,
-          thumbUrl: result.thumbUrl,
-        },
-      );
+      overwriteNodeImage(nodeId, imageIndex, result, derivedAssetName("crop", node.data.assetFileName || node.data.label));
       return;
     }
     createDerivedAssetNode(nodeId, result, {
       kind: "crop",
       label: `${String(node.data.label || t("infiniteCanvas:assetNode"))}-cropped`,
     });
-  }, [createDerivedAssetNode, getNodes, setNodeAsset, t]);
+  }, [createDerivedAssetNode, getNodes, overwriteNodeImage, t]);
 
   /**
    * 图片调整：源图先落到本地资产（远程图直接交给画布绘制会被跨域弄脏），
@@ -1213,25 +1294,14 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     if (mode === "overwrite") {
       // 覆盖原图：渲染结果其实还是"一张新图"，只是把它填回这个节点，
       // 而不是新建一个节点（节点位置、连线、分组都保持不变）。
-      setNodeAsset(
-        nodeId,
-        result.url,
-        derivedAssetName("adjust", node.data.assetFileName || node.data.label),
-        "image",
-        "image/png",
-        {
-          width: result.width,
-          height: result.height,
-          thumbUrl: result.thumbUrl,
-        },
-      );
+      overwriteNodeImage(nodeId, imageIndex, result, derivedAssetName("adjust", node.data.assetFileName || node.data.label));
       return;
     }
     createDerivedAssetNode(nodeId, result, {
       kind: "adjust",
       label: `${String(node.data.label || t("infiniteCanvas:assetNode"))}-adjusted`,
     });
-  }, [createDerivedAssetNode, getNodes, setNodeAsset, t]);
+  }, [createDerivedAssetNode, getNodes, overwriteNodeImage, t]);
 
   const applyImageAdjustment = useCallback((
     adjustments: NativeCanvasImageAdjustments,
@@ -1247,7 +1317,9 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
       mode,
     })
       .then(() => {
+        // 保存即完成这次调节：组入口和单节点入口都关窗。
         setImageAdjustTarget(null);
+        setImageAdjustSession(null);
         toast.success(t("infiniteCanvas:imageAdjustCompleted"));
       })
       .catch((error) => {
@@ -1257,6 +1329,63 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
       })
       .finally(() => setImageAdjustBusy(false));
   }, [adjustNodeImage, imageAdjustTarget, t]);
+
+  /**
+   * 保存整组：按每张图各自的参数逐张覆盖原图（组内每张可以调得不一样）。
+   * 串行执行（主进程渲染有并发上限），正在生成的图片跳过。
+   */
+  const saveImageAdjustGroup = useCallback((
+    entries: Array<{ key: string; adjustments: NativeCanvasImageAdjustments }>,
+    localSourceUrl: string,
+  ) => {
+    const activeTarget = imageAdjustTarget;
+    const targets = imageAdjustTargets;
+    if (!activeTarget || !targets.length) return;
+    const activeKey = groupImageAdjustTargetKey(activeTarget.nodeId, activeTarget.imageIndex);
+    const adjustmentsByKey = new Map(entries.map((entry) => [entry.key, entry.adjustments]));
+    const fallbackAdjustments = adjustmentsByKey.get(activeKey)
+      || entries[0]?.adjustments
+      || DEFAULT_IMAGE_ADJUSTMENTS;
+    setImageAdjustGroupProgress({ done: 0, total: targets.length });
+    beginHistoryGesture();
+    void (async () => {
+      let failed = 0;
+      let skipped = 0;
+      let done = 0;
+      try {
+        for (const target of targets) {
+          const task = target.taskId ? useGenerationTaskCache.getState().tasksById[target.taskId] : undefined;
+          if (isGenerationTaskActive(task)) {
+            skipped += 1;
+          } else {
+            try {
+              await adjustNodeImage(target.nodeId, adjustmentsByKey.get(target.key) || fallbackAdjustments, {
+                imageIndex: target.imageIndex,
+                // 当前这张在面板里已经落过本地素材，直接复用，避免重复复制文件。
+                localSourceUrl: target.key === activeKey ? localSourceUrl : undefined,
+                mode: "overwrite",
+              });
+            } catch {
+              failed += 1;
+            }
+          }
+          done += 1;
+          setImageAdjustGroupProgress({ done, total: targets.length });
+        }
+      } finally {
+        endHistoryGesture();
+        setImageAdjustGroupProgress(null);
+      }
+      if (failed || skipped) {
+        toast.error(t("infiniteCanvas:imageAdjustGroupSaveFailed", { failed, skipped }));
+      } else {
+        toast.success(t("infiniteCanvas:imageAdjustGroupSaved", { count: done }));
+      }
+      // 保存整组也是"保存"：完成后和单张保存一样关窗。
+      setImageAdjustTarget(null);
+      setImageAdjustSession(null);
+    })();
+  }, [adjustNodeImage, beginHistoryGesture, endHistoryGesture, imageAdjustTarget, imageAdjustTargets, t]);
 
   const patchNodeData = useCallback((nodeId: string, patch: Partial<NativeCanvasNode["data"]>) => {
     setNodes((current) => current.map((node) => node.id === nodeId
@@ -1747,8 +1876,11 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     addImageReferenceFiles: (nodeId, files) => canvasActionHandlersRef.current.addImageReferenceFiles(nodeId, files),
     cropNodeImage,
     adjustNodeImage,
-    openImageAdjustDialog: (nodeId: string, imageIndex = 0) => {
+    openImageAdjustDialog: (nodeId: string, imageIndex = 0, options: { scope?: "node" | "group" } = {}) => {
       if (readOnly) return;
+      const scope = options.scope === "group" ? "group" : "node";
+      // 组入口先记下是哪个组，活动目标由 context 失效逻辑切到组内第一张图。
+      setImageAdjustSession(scope === "group" ? { scope, groupId: nodeId } : null);
       setImageAdjustTarget({ nodeId, imageIndex });
     },
     createAssetNodeFromResult,
@@ -1777,10 +1909,32 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
     patchBatchImageGeneratorItemSilently,
     removeCanvasEdge: (edgeId: string) => setEdges((current) => current.filter((edge) => edge.id !== edgeId)),
     reorderImageGeneratorReferences: (nodeId: string, orderedEdgeIds: string[]) => {
-      const orderById = new Map(orderedEdgeIds.map((edgeId, index) => [edgeId, index + 1]));
+      // 参考条里的每一项可能来自同一条边的多张图（多图节点、组），
+      // 所以这里同时推导「边之间的顺序」和「边内部多张图的顺序」。
+      const references = collectImageGeneratorReferences(nodeId, nodesRef.current, edgesRef.current);
+      const referenceById = new Map(references.map((reference) => [reference.edgeId, reference]));
+      const orderByEdgeId = new Map<string, number>();
+      const imageOrderByEdgeId = new Map<string, string[]>();
+      orderedEdgeIds.forEach((edgeId) => {
+        const reference = referenceById.get(edgeId);
+        const sourceEdgeId = reference?.sourceEdgeId || edgeId;
+        if (!sourceEdgeId) return;
+        if (!orderByEdgeId.has(sourceEdgeId)) orderByEdgeId.set(sourceEdgeId, orderByEdgeId.size + 1);
+        if (!reference?.sortKey) return;
+        const images = imageOrderByEdgeId.get(sourceEdgeId) || [];
+        if (!images.includes(reference.sortKey)) images.push(reference.sortKey);
+        imageOrderByEdgeId.set(sourceEdgeId, images);
+      });
       setEdges((current) => current.map((edge) => (
-        edge.target === nodeId && orderById.has(edge.id)
-          ? { ...edge, data: { ...edge.data, referenceOrder: orderById.get(edge.id) } }
+        edge.target === nodeId && (orderByEdgeId.has(edge.id) || imageOrderByEdgeId.has(edge.id))
+          ? {
+              ...edge,
+              data: {
+                ...edge.data,
+                ...(orderByEdgeId.has(edge.id) ? { referenceOrder: orderByEdgeId.get(edge.id) } : {}),
+                ...(imageOrderByEdgeId.has(edge.id) ? { referenceImageOrder: imageOrderByEdgeId.get(edge.id) } : {}),
+              },
+            }
           : edge
       )));
     },
@@ -2504,9 +2658,21 @@ function NativeCanvasSurface({ canvasId, fileDownloadPath, initialSnapshot, onIn
           fallbackUrl={imageAdjustContext.previewUrl}
           naturalWidth={imageAdjustContext.naturalWidth}
           naturalHeight={imageAdjustContext.naturalHeight}
-          busy={imageAdjustBusy}
+          busy={imageAdjustBusy || Boolean(imageAdjustGroupProgress)}
+          targets={imageAdjustTargetOptions.length ? imageAdjustTargetOptions : undefined}
+          activeTargetKey={imageAdjustTarget ? groupImageAdjustTargetKey(imageAdjustTarget.nodeId, imageAdjustTarget.imageIndex) : ""}
+          onSelectTarget={(key) => {
+            const target = imageAdjustTargets.find((item) => item.key === key);
+            if (target) setImageAdjustTarget({ nodeId: target.nodeId, imageIndex: target.imageIndex });
+          }}
+          onSaveGroup={imageAdjustSession ? saveImageAdjustGroup : undefined}
+          groupSaveProgress={imageAdjustGroupProgress}
           onOpenChange={(open) => {
-            if (!open) setImageAdjustTarget(null);
+            if (!open) {
+              setImageAdjustTarget(null);
+              setImageAdjustSession(null);
+              setImageAdjustGroupProgress(null);
+            }
           }}
           onApply={applyImageAdjustment}
         /> : null}

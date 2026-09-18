@@ -19,11 +19,12 @@ export interface NativeCanvasActions {
    * 按选区裁剪出一张新图。
    * mode 为 "newNode"（默认）时落成派生素材节点，原图不动；
    * mode 为 "overwrite" 时用裁剪结果替换该节点自己的图。
+   * imageIndex 指定裁剪图片生成节点里的第几张结果图（素材节点只有一张，恒为 0）。
    */
   cropNodeImage: (
     nodeId: string,
     crop: CanvasImageCropRect,
-    options?: { mode?: "newNode" | "overwrite" },
+    options?: { mode?: "newNode" | "overwrite"; imageIndex?: number },
   ) => Promise<void>;
   /**
    * 按调整参数渲染一张新图。
@@ -35,8 +36,15 @@ export interface NativeCanvasActions {
     adjustments: NativeCanvasImageAdjustments,
     options?: { imageIndex?: number; localSourceUrl?: string; mode?: "newNode" | "overwrite" },
   ) => Promise<void>;
-  /** 打开图片调整窗口；窗口由画布页面统一托管，节点只负责发起。 */
-  openImageAdjustDialog: (nodeId: string, imageIndex?: number) => void;
+  /**
+   * 打开图片调整窗口；窗口由画布页面统一托管，节点只负责发起。
+   * scope 为 "group" 时 nodeId 传组节点 id，窗口按组内所有图片打开轨道。
+   */
+  openImageAdjustDialog: (
+    nodeId: string,
+    imageIndex?: number,
+    options?: { scope?: "node" | "group" },
+  ) => void;
   createDerivedAssetNode: (sourceNodeId: string, asset: CanvasStoredAsset, options: {
     kind: DerivedAssetKind;
     label: string;

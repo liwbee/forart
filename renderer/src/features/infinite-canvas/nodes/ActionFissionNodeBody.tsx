@@ -5,9 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import type { GenerationTaskDto } from "../../../app/appConfig";
 import {
   Download,
-  Grid2X2,
   Images,
-  List,
   Play,
   Plus,
   Shuffle,
@@ -22,7 +20,6 @@ import { Button } from "../../../components/ui/button";
 import { ButtonGroup } from "../../../components/ui/button-group";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "../../../components/ui/hover-card";
 import { AdditionalReferenceToggle } from "./AdditionalReferenceToggle";
-import { ToggleGroup, ToggleGroupItem } from "../../../components/ui/toggle-group";
 import { ImageViewer } from "../../../lib/ImageViewer";
 import { cn } from "../../../lib/utils";
 import { resolveLibraryImageUrl } from "../../../lib/libraryImageActions";
@@ -686,7 +683,6 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
       />
       <section
       className={cn("rf-action-fission", libraryFailure && "rf-action-fission--unavailable")}
-      data-layout={state.layout}
       data-generating={isGenerationActive}
       data-has-additional-references={hasAdditionalReferences || undefined}
     >
@@ -696,24 +692,6 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           <Plus data-icon="inline-start" aria-hidden="true" />
           {t("infiniteCanvas:actionFissionAddRow")}
         </Button>
-        <ToggleGroup
-          className="rf-action-fission-layout-toggle nodrag"
-          type="single"
-          variant="outline"
-          size="sm"
-          value={state.layout}
-          aria-label={t("infiniteCanvas:actionFissionLayout")}
-          onValueChange={(layout) => {
-            if (layout === "list" || layout === "grid") setState({ ...state, layout });
-          }}
-        >
-          <ToggleGroupItem value="list" aria-label={t("infiniteCanvas:actionFissionListLayout")} title={t("infiniteCanvas:actionFissionListLayout")}>
-            <List aria-hidden="true" />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="grid" aria-label={t("infiniteCanvas:actionFissionGridLayout")} title={t("infiniteCanvas:actionFissionGridLayout")}>
-            <Grid2X2 aria-hidden="true" />
-          </ToggleGroupItem>
-        </ToggleGroup>
       </header> : null}
 
       <AppScrollArea className="rf-action-fission-scroll nowheel" viewportClassName="rf-action-fission-scroll-viewport" scrollBarClassName="nodrag">
@@ -726,7 +704,7 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
           />
         ) : isLoading ? (
           <div className="rf-action-fission-empty">{t("common:states.loading")}</div>
-        ) : state.layout === "grid" ? (
+        ) : (
           <div className="rf-action-fission-grid">
             {rowData.map(({ row, tags, categoryGroups }, index) => (
               <article key={row.id} className="rf-action-fission-grid-card" data-index={String(index + 1).padStart(2, "0")}>
@@ -758,40 +736,6 @@ export function ActionFissionNodeBody({ nodeId, data, paramPanelVisible }: Actio
                   <Button type="button" variant="ghost" size="icon-xs" disabled={Boolean(libraryFailure) || !hasCategoryCandidates(categoryGroups)} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>
                   <Button type="button" variant="ghost" size="icon-xs" disabled={launchingRowIds.has(row.id) || (!isRowRunning(tasksByRowId[row.id]) && (!row.selectedActionId || referenceCount < 1))} aria-label={t(isRowRunning(tasksByRowId[row.id]) ? "infiniteCanvas:stopRun" : "infiniteCanvas:actionFissionRerunImage")} onClick={() => void (isRowRunning(tasksByRowId[row.id]) ? actions.stopActionFission(nodeId, row.id) : actions.runActionFission(nodeId, row.id))}>{isRowRunning(tasksByRowId[row.id]) ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" />}</Button>
                   <Button type="button" variant="ghost" size="icon-xs" disabled={state.rows.length <= 1} aria-label={t("infiniteCanvas:actionFissionDeleteRow")} onClick={() => deleteRow(row.id)}><Trash2 aria-hidden="true" /></Button>
-                </ButtonGroup>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="rf-action-fission-list">
-            {rowData.map(({ row, tags, categoryGroups }, index) => (
-              <article key={row.id} className="rf-action-fission-list-card" data-index={String(index + 1).padStart(2, "0")}>
-                <ResultAssetCreateButton
-                  index={index + 1}
-                  disabled={actions.readOnly || !rowResultActionEnabled(row, tasksByRowId[row.id], runtimeErrorsByRowId[row.id], launchingRowIds.has(row.id))}
-                  onCreate={(clientPoint) => actions.createAssetNodeFromResult({
-                    sourceNodeId: nodeId,
-                    sourceKey: row.id,
-                    clientPoint,
-                    ...actionFissionResultImage(row, tasksByRowId[row.id]),
-                  })}
-                />
-                <ResultPreview row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} isDownloadBusy={Boolean(downloadBusyRowId)} onDownload={() => downloadRow(row)} onOpen={setViewerImage} />
-                <ActionRowSummary row={row} projects={projects} tags={tags} />
-                <RowStatus row={row} task={tasksByRowId[row.id]} runtimeError={runtimeErrorsByRowId[row.id]} now={timerNow} launching={launchingRowIds.has(row.id)} hasReference={referenceCount > 0} />
-                {hasAdditionalReferences ? (
-                  <AdditionalReferenceToggle
-                    checked={Boolean(row.useAdditionalReferences)}
-                    disabled={launchingRowIds.has(row.id) || isRowRunning(tasksByRowId[row.id])}
-                    onCheckedChange={(checked) => setRowAdditionalReferences(row.id, checked)}
-                  />
-                ) : null}
-                <ActionPreview row={row} onOpen={setViewerImage} />
-                <ButtonGroup className="rf-action-fission-row-actions nodrag">
-                  <Button type="button" variant="ghost" size="icon-sm" disabled={Boolean(libraryFailure)} aria-label={t("infiniteCanvas:actionFissionRowSettings")} title={t("infiniteCanvas:actionFissionRowSettings")} onClick={() => actions.openActionFissionRowSettings(nodeId, row.id)}><Settings2 aria-hidden="true" /></Button>
-                  <Button type="button" variant="ghost" size="icon-sm" disabled={Boolean(libraryFailure) || !hasCategoryCandidates(categoryGroups)} aria-label={t("infiniteCanvas:actionFissionRefreshAction")} onClick={() => refreshRow(row.id)}><Shuffle aria-hidden="true" /></Button>
-                  <Button type="button" variant="ghost" size="icon-sm" disabled={launchingRowIds.has(row.id) || (!isRowRunning(tasksByRowId[row.id]) && (!row.selectedActionId || referenceCount < 1))} aria-label={t(isRowRunning(tasksByRowId[row.id]) ? "infiniteCanvas:stopRun" : "infiniteCanvas:actionFissionRerunImage")} onClick={() => void (isRowRunning(tasksByRowId[row.id]) ? actions.stopActionFission(nodeId, row.id) : actions.runActionFission(nodeId, row.id))}>{isRowRunning(tasksByRowId[row.id]) ? <Square aria-hidden="true" fill="currentColor" /> : <Play aria-hidden="true" />}</Button>
-                  <Button type="button" variant="ghost" size="icon-sm" disabled={state.rows.length <= 1} aria-label={t("infiniteCanvas:actionFissionDeleteRow")} onClick={() => deleteRow(row.id)}><Trash2 aria-hidden="true" /></Button>
                 </ButtonGroup>
               </article>
             ))}

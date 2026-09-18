@@ -6,22 +6,17 @@ function positiveNumber(value: unknown) {
   return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
-function resizeAroundCenter(
+/**
+ * 生成节点按主图比例调整尺寸时只改尺寸，**绝不移动位置**。
+ * 位置由用户掌控：数据补丁（生成结果、下载状态、补写尺寸……）不应该把节点挪走，
+ * 展开态下的临时尺寸也不该被当成中心回正的基准。
+ */
+function resizeKeepingPosition(
   node: NativeCanvasNode,
   data: NativeCanvasNodeData,
   size: { width: number; height: number },
 ): NativeCanvasNode {
-  const currentWidth = positiveNumber(node.style?.width) || positiveNumber(node.measured?.width) || size.width;
-  const currentHeight = positiveNumber(node.style?.height) || positiveNumber(node.measured?.height) || size.height;
-  return {
-    ...node,
-    data,
-    position: {
-      x: node.position.x + (currentWidth - size.width) / 2,
-      y: node.position.y + (currentHeight - size.height) / 2,
-    },
-    style: { ...node.style, ...size },
-  };
+  return { ...node, data, style: { ...node.style, ...size } };
 }
 
 export function applyNativeNodeDataPatch(
@@ -30,6 +25,9 @@ export function applyNativeNodeDataPatch(
 ): NativeCanvasNode {
   const data = { ...node.data, ...patch };
   if (data.kind !== "imageGenerator") return { ...node, data };
+  // 展开态下 style 是网格的临时尺寸：数据补丁不插手尺寸，等折叠时由展开逻辑收回去，
+  // 否则网格会被挤在"折叠尺寸"的框里，看起来就是折叠/展开尺寸对不上。
+  if (data.multiImageExpanded) return { ...node, data };
 
   const primary = data.generatedImages?.find((result) => result.localUrl || result.url);
   const resultChanged = Object.prototype.hasOwnProperty.call(patch, "generatedImages");
@@ -41,7 +39,7 @@ export function applyNativeNodeDataPatch(
     const height = positiveNumber(primary.height) || positiveNumber(data.imageNaturalHeight);
     if (width && height) {
       const nextData = { ...data, imageNaturalWidth: width, imageNaturalHeight: height };
-      return resizeAroundCenter(node, nextData, getImageNodeSize(width, height));
+      return resizeKeepingPosition(node, nextData, getImageNodeSize(width, height));
     }
   }
 
@@ -49,7 +47,7 @@ export function applyNativeNodeDataPatch(
     Object.prototype.hasOwnProperty.call(patch, "imageAspectRatio")
     || Object.prototype.hasOwnProperty.call(patch, "imageCustomSize")
   )) {
-    return resizeAroundCenter(node, data, getImageGeneratorNodeSize(data.imageCustomSize || data.imageAspectRatio));
+    return resizeKeepingPosition(node, data, getImageGeneratorNodeSize(data.imageCustomSize || data.imageAspectRatio));
   }
 
   return { ...node, data };

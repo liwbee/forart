@@ -155,10 +155,20 @@ generationTaskService.subscribe((task) => canvasTaskRepository.mirrorImageTask(t
 
 function registerCanvasAssetProtocol() {
   protocol.handle('forart-asset', async (request) => {
-    const target = assetStore.resolveAssetUrl(request.url)
+    let target = assetStore.resolveAssetUrl(request.url)
       || await localApi?.resolveAssetUrl?.(request.url)
       || await localApi?.resolveAssetThumbnailUrl?.(request.url)
       || actionFolderImportStore.resolvePreviewUrl(request.url);
+    // Canvas nodes keep the thumbnail URL in their saved data, so a deleted
+    // thumbnail cache would otherwise 404 and fall back to the full-size original.
+    if (target && !fs.existsSync(target) && typeof assetStore.ensureAssetThumbnailForFile === 'function') {
+      try {
+        const rebuilt = await assetStore.ensureAssetThumbnailForFile(target);
+        if (rebuilt?.thumbFilePath && fs.existsSync(rebuilt.thumbFilePath)) target = rebuilt.thumbFilePath;
+      } catch (error) {
+        console.warn('Canvas thumbnail rebuild failed:', error instanceof Error ? error.message : error);
+      }
+    }
     if (!target || !fs.existsSync(target)) {
       return new Response('Asset not found', { status: 404 });
     }

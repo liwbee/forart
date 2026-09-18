@@ -169,7 +169,8 @@ export function useNativeBatchImageGeneration({
         .map((item) => item.imageUrl);
       const taskReferenceOrder = Math.max(0, Math.min(primary.length, Math.round(Number(state.taskReferenceOrder || 0))));
       const payloadForItem = (item: BatchImageGeneratorItem) => {
-        const taskReference = { edgeId: BATCH_TASK_REFERENCE_EDGE_ID, nodeId, order: taskReferenceOrder, title: t("infiniteCanvas:mainReference"), mentionLabel: t("infiniteCanvas:mainReference"), imageUrl: item.sourceUrl!, previewUrl: item.sourceThumbUrl || "" };
+        // 上传图是这一轮要处理的目标，和连线端点的主参考区分开，避免 @ 提示词时混淆。
+        const taskReference = { edgeId: BATCH_TASK_REFERENCE_EDGE_ID, nodeId, order: taskReferenceOrder, title: t("infiniteCanvas:batchTaskTarget"), mentionLabel: t("infiniteCanvas:batchTaskTarget"), imageUrl: item.sourceUrl!, previewUrl: item.sourceThumbUrl || "" };
         const orderedReferenceInputs = [...primaryReferences];
         orderedReferenceInputs.splice(taskReferenceOrder, 0, taskReference);
         const promptDocument = node.data.imagePromptDocument || imagePromptDocumentFromReferenceText(basePrompt, orderedReferenceInputs);

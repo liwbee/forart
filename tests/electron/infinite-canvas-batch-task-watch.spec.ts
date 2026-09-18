@@ -45,7 +45,6 @@ test("a finished batch task is not re-watched on every node change", async ({ pa
         imageModel: "gpt-image-2",
         batchImageGenerator: {
           prompt: "prompt",
-          layout: "grid",
           items: [{
             id: "item-1",
             sourceUrl: PIXEL,
@@ -157,6 +156,127 @@ test("a finished batch task is not re-watched on every node change", async ({ pa
   expect(errors).toEqual([]);
 });
 
+/**
+ * 每个任务的上传图是"这轮要处理的目标"，@ 引用时不能叫"主参考"，
+ * 否则和连线端点进来的主参考混在一起分不清。
+ */
+test("labels each task's uploaded image as the target", async ({ page }) => {
+  const document = {
+    canvasSchemaVersion: 5,
+    id: "canvas-batch-target",
+    title: "batch target",
+    projectId: "project_default",
+    canvasType: "forart",
+    createdAt: 1,
+    updatedAt: 1,
+    revision: 1,
+    nodes: [{
+      id: "batchImageGenerator_target",
+      type: "canvasNode",
+      position: { x: 240, y: 160 },
+      style: { width: 680, height: 816 },
+      data: {
+        kind: "batchImageGenerator",
+        label: "Batch",
+        text: "prompt",
+        imageProviderId: "apimart",
+        imageModel: "gpt-image-2",
+        batchImageGenerator: {
+          prompt: "prompt",
+          items: [{
+            id: "item-1",
+            sourceUrl: PIXEL,
+            sourceThumbUrl: PIXEL,
+            sourceFileName: "source.png",
+            sourceLoadState: "ready",
+            status: "pending",
+          }],
+        },
+      },
+    }],
+    connections: [],
+    groups: [],
+    viewport: { x: 0, y: 0, scale: 0.6 },
+  };
+
+  await page.addInitScript((canvasDocument: Record<string, unknown>) => {
+    window.localStorage.setItem("forart_sidebar_open_v2", "true");
+    window.localStorage.setItem("forart_infinite_canvas_show_home", "false");
+    window.localStorage.setItem("forart_infinite_canvas_last_canvas_id", String(canvasDocument.id));
+    const config = {
+      mode: "local", localLibraryPath: "", serverUrl: "", serverAuthUsername: "", serverAuthToken: "",
+      fileDownloadPath: "", photoshopExecutablePath: "", language: "en-US",
+    };
+    Object.defineProperty(window, "forartWindow", {
+      configurable: true,
+      value: { isMaximized: async () => ({ ok: true, maximized: false }), onMaximizedChanged: () => () => undefined },
+    });
+    Object.defineProperty(window, "forartConfig", {
+      configurable: true,
+      value: {
+        load: async () => config,
+        save: async (next: unknown) => ({ ok: true, config: next }),
+        loadApiSettings: async () => ({
+          providers: [{
+            id: "apimart",
+            name: "APImart",
+            baseUrl: "https://example.invalid/v1",
+            apiKey: "test-key",
+            imageModels: ["gpt-image-2"],
+            chatModels: [],
+            videoModels: [],
+            modelAliases: { image: {}, chat: {}, video: {} },
+            modelRules: { image: {} },
+          }],
+          defaultImageProviderId: "apimart",
+          providerOrder: ["apimart"],
+        }),
+        loadInfiniteCanvasSettings: async () => ({
+          connectionsVisible: true,
+          minimapOpen: false,
+          snapToGrid: false,
+          promptEditorsExpanded: false,
+          referenceComparisonViewer: { referenceComparisonEnabled: false, referencePanelPercent: 50 },
+        }),
+        saveInfiniteCanvasSettings: async () => ({ ok: true }),
+        appInfo: async () => ({ name: "Forart", repoUrl: "", updateUrl: "", currentRevision: "test", currentUpdatedAt: "" }),
+        checkUpdate: async () => ({
+          ok: true, currentRevision: "test", latestRevision: "test", currentUpdatedAt: "",
+          latestUpdatedAt: "", updateAvailable: false, repoUrl: "",
+        }),
+        onUpdateProgress: () => () => undefined,
+        serverSession: async () => ({ ok: false, status: 401 }),
+      },
+    });
+    Object.defineProperty(window, "easyTool", {
+      configurable: true,
+      value: {
+        listCanvases: async () => ({
+          projects: [{ id: "project_default", title: "P", sortOrder: 1, createdAt: 1, updatedAt: 1 }],
+          canvases: [{ id: canvasDocument.id, title: "batch target", projectId: "project_default", createdAt: 1, updatedAt: 1, revision: 1, nodeCount: 1 }],
+        }),
+        loadCanvas: async () => canvasDocument,
+        saveCanvas: async () => ({ ok: true }),
+        getCanvasClipboardStatus: async () => ({ hasNodes: false, hasImage: false }),
+        ensureCanvasAssetThumbnail: async () => ({ thumbUrl: "" }),
+        importCanvasAssetFile: async () => ({ url: PIXEL, thumbUrl: PIXEL }),
+      },
+    });
+    Object.defineProperty(window, "forartGenerationTasks", {
+      configurable: true,
+      value: { get: async () => null, list: async () => ({ tasks: [] }), onChanged: () => () => undefined },
+    });
+  }, document);
+
+  await page.goto("http://127.0.0.1:6981/");
+  await page.getByRole("button", { name: "Infinite Canvas" }).click();
+  await page.locator('.react-flow__node[data-id="batchImageGenerator_target"] .rf-native-node-caption').click();
+
+  // 上传图在参考条里标成「目标」（en-US: Target），而不是「主参考」（Primary references）。
+  await expect(page.locator('.rf-reference-item[title="Target"]')).toHaveCount(1);
+  await expect(page.locator('.rf-reference-item[title="Primary references"]')).toHaveCount(0);
+});
+
 test("creates an asset node from a batch result card", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message.split("\n")[0]));
@@ -183,7 +303,6 @@ test("creates an asset node from a batch result card", async ({ page }) => {
         imageModel: "gpt-image-2",
         batchImageGenerator: {
           prompt: "prompt",
-          layout: "grid",
           items: [{
             id: "item-1",
             sourceUrl: PIXEL,
@@ -294,6 +413,11 @@ test("creates an asset node from a batch result card", async ({ page }) => {
   // 复用同一份结果图：既不写新素材文件，也不重新生成缩略图。
   await expect(created.locator("img").first()).toHaveAttribute("src", PIXEL);
   expect(await page.evaluate(() => (window as unknown as { __forartAssetCalls: string[] }).__forartAssetCalls)).toEqual([]);
+  // 清除全部：卡片全部移除，节点回到空状态。
+  const batchNode = page.locator('.react-flow__node[data-id="batchImageGenerator_watch"]');
+  await batchNode.getByRole("button", { name: "Clear all" }).click();
+  await expect(page.locator(".rf-action-fission-grid-card")).toHaveCount(0);
+  await expect(batchNode).toContainText("Please upload images first");
   await expect(page.getByText("This page could not be displayed", { exact: true })).toHaveCount(0);
   expect(errors).toEqual([]);
 });

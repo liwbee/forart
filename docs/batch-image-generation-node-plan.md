@@ -89,7 +89,6 @@ interface BatchImageGeneratorItem {
 interface BatchImageGeneratorState {
   items: BatchImageGeneratorItem[];
   prompt?: string;
-  layout?: "list" | "grid";
   providerId?: string;
   model?: string;
   resolution?: string;
@@ -108,7 +107,7 @@ interface BatchImageGeneratorState {
 ### 顶部工具栏
 
 - 运行/停止全部任务。
-- 列表/网格布局切换。
+- 只保留网格布局（列表布局已移除）。
 - 全部下载。
 - 清空输入。
 - 删除节点。
@@ -224,7 +223,7 @@ interface BatchImageGeneratorState {
 
 ### 阶段二：上传和 UI
 
-实现多图上传、批量项列表/网格、混合图片标签、删除/清空、结果预览和基础状态展示。
+实现多图上传、批量项网格、混合图片标签、删除/清空、结果预览和基础状态展示。
 
 ### 阶段三：连接输入
 
@@ -279,3 +278,23 @@ interface BatchImageGeneratorState {
 - 第一版不需要单独的“主图片连接”句柄，连线图片统一按额外参考图处理。
 
 当前仍为计划阶段，尚未修改功能代码。
+
+## 已实现：传入目标端口
+
+批量洗图节点左侧在主参考上方新增一个输入端口「传入目标」（handle id `batch-import-target`）：
+
+- **只接受图片**：`edgeDataForConnection` 对这个端口只认图片来源（素材节点、图片生成节点、组），
+  文字/提示词来源返回 `undefined`，连接被判定为非法。
+- 允许多条边；组或多图节点会展开成多张。
+- 检测到该端口有图时，节点标题栏最左侧出现「传入目标」按钮；没有入边（或入边没有图）时按钮不出现。
+- 点击一次把**全部**目标图按顺序传成卡片，行为等同于上传图片：
+  - 已在卡片里的图（同一个素材地址）默认跳过；
+  - 超过卡片上限（50）自动截断，不额外提示；
+  - 一次写入 = 一条历史记录，撤销可整体回滚。
+- 这些图**不参与参考图**：`collectBatchTargetImages` 与 `collectReferenceInputs` 完全隔离，
+  所以生成时发给模型的参考图与以前一致，只有每张卡片的目标图变了。
+- 断线或删除上游节点：按钮消失，已经传入的卡片保留（等同于已经上传过）。
+- 同一个图片节点可以**分别**连到主参考、附加参考、传入目标三个端口：以前"同一对节点只能有一条连线"的
+  重复拒绝规则已取消，现在只拒绝"同一个来源重复连同一个端口"。
+
+动作裂变节点不提供这个端口。

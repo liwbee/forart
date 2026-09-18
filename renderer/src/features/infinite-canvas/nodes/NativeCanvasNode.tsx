@@ -143,6 +143,8 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [isCropping, setIsCropping] = useState(false);
+  // 裁剪哪一张：素材节点恒为 0，图片生成节点跟随当前查看的结果图。
+  const [cropImageIndex, setCropImageIndex] = useState(0);
   // 进入裁剪默认用自由比例：先让用户随便框，需要固定比例时再切换。
   const [cropAspect, setCropAspect] = useState<ImageCropAspect>("free");
   const [cropSelection, setCropSelection] = useState<CanvasImageCropRect | null>(null);
@@ -197,6 +199,16 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const previewSourceUrl = canvasPreviewSourceUrl(primaryImageUrl, primaryImage?.thumbUrl);
   const resolvedPreviewUrl = previewSourceUrl ? resolveLibraryImageUrl(previewSourceUrl) : "";
   const resolvedPreviewFallbackUrl = resolvedImageUrl;
+  // 裁剪的取图独立于节点主预览：生成节点可能在裁第二、第三张结果图。
+  const cropImage = data.kind === "imageGenerator"
+    ? generatedImages[cropImageIndex] || generatedImages[0]
+    : primaryImage;
+  const cropImageUrl = String(cropImage?.localUrl || cropImage?.url || "");
+  const cropPreviewSourceUrl = canvasPreviewSourceUrl(cropImageUrl, cropImage?.thumbUrl);
+  const cropPreviewUrl = cropPreviewSourceUrl ? resolveLibraryImageUrl(cropPreviewSourceUrl) : "";
+  const cropPreviewFallbackUrl = cropImageUrl ? resolveLibraryImageUrl(cropImageUrl) : "";
+  const cropSourceWidth = Number(cropImage?.width || 0) || data.assetNaturalWidth || data.imageNaturalWidth;
+  const cropSourceHeight = Number(cropImage?.height || 0) || data.assetNaturalHeight || data.imageNaturalHeight;
   const isAssetLoading = data.kind === "assetLoader" && data.assetLoadState === "processing";
   const assetLoadError = data.kind === "assetLoader" && data.assetLoadState === "error"
     ? String(data.assetLoadError || "")
@@ -238,7 +250,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
   const confirmCrop = (mode: "newNode" | "overwrite") => {
     if (!cropSelection || isCropBusy) return;
     setIsCropBusy(true);
-    void actions.cropNodeImage(id, cropSelection, { mode })
+    void actions.cropNodeImage(id, cropSelection, { mode, imageIndex: cropImageIndex })
       .then(() => {
         setIsCropping(false);
         setCropSelection(null);
@@ -525,7 +537,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                   {isBackgroundRemovalBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <ImageAiFillIcon aria-hidden="true" />}
                 </Button>
               ) : null}
-              {data.kind === "assetLoader" && primaryImageUrl ? (
+              {(data.kind === "assetLoader" && Boolean(primaryImageUrl)) || (data.kind === "imageGenerator" && canUseImageActions) ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -535,6 +547,7 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
                   onClick={() => {
                     setCropAspect("free");
                     setCropSelection(null);
+                    setCropImageIndex(data.kind === "imageGenerator" ? Math.max(0, Math.min(viewerIndex, generatedImages.length - 1)) : 0);
                     setIsCropping(true);
                   }}
                 >
@@ -650,6 +663,23 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
 
       {definition.acceptsInput ? isBatchLikeNode ? (
         <>
+          {/* 批量洗图专用：目标端口，只接受图片；连进来的图可以一键传成卡片。 */}
+          {isBatchImageGeneratorNode ? (
+            <Tooltip open={referenceHintsVisible && !dragging}>
+              <TooltipTrigger asChild>
+                <Handle
+                  type="target"
+                  position={Position.Left}
+                  id="batch-import-target"
+                  style={{ top: "6%" }}
+                  aria-label={t("infiniteCanvas:batchImportTarget")}
+                />
+              </TooltipTrigger>
+              <TooltipContent side="left">
+                {t("infiniteCanvas:batchImportTarget")}
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
           <Tooltip open={referenceHintsVisible && !dragging}>
             <TooltipTrigger asChild>
               <Handle
@@ -770,18 +800,18 @@ export const NativeCanvasNode = memo(function NativeCanvasNode({ id, data, selec
               })}
             />
           ) : primaryImageUrl ? (
-            data.kind === "assetLoader" && isCropping && resolvedPreviewUrl ? (
+            isImageNode && isCropping && cropPreviewUrl ? (
               <ImageNodeCropEditor
-                src={resolvedPreviewUrl}
-                fallbackSrc={resolvedPreviewFallbackUrl}
+                src={cropPreviewUrl}
+                fallbackSrc={cropPreviewFallbackUrl}
                 alt={displayLabel}
                 aspect={cropAspect}
                 // The crop preview may intentionally use a thumbnail at low
                 // canvas zoom.  Convert its percent selection against the
                 // asset's original dimensions, never the rendered thumbnail
                 // dimensions (legacy image fields remain a fallback).
-                sourceWidth={data.assetNaturalWidth || data.imageNaturalWidth}
-                sourceHeight={data.assetNaturalHeight || data.imageNaturalHeight}
+                sourceWidth={cropSourceWidth}
+                sourceHeight={cropSourceHeight}
                 onSelectionChange={setCropSelection}
               />
             ) : isMultiImageExpanded ? (

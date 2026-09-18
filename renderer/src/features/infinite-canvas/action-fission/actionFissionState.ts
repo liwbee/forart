@@ -38,7 +38,6 @@ export function createActionFissionRow(actionProjectId = ""): ActionFissionRow {
 export function createDefaultActionFissionState(): ActionFissionState {
   return {
     rows: Array.from({ length: DEFAULT_ACTION_FISSION_ROWS }, () => createActionFissionRow()),
-    layout: "grid",
     apiType: "third-party-api",
     resolution: "1K",
     aspectRatio: "3:4",
@@ -47,17 +46,18 @@ export function createDefaultActionFissionState(): ActionFissionState {
 
 export function normalizeActionFissionState(state: ActionFissionState | undefined): ActionFissionState {
   const fallback = createDefaultActionFissionState();
-  // Drop the removed per-node Agent optimization flag when loading older
-  // canvases so it is not carried forward by the generic state spread.
-  const storedState = (state || {}) as ActionFissionState & { promptOptimizationEnabled?: unknown };
-  const { promptOptimizationEnabled: _legacyPromptOptimizationEnabled, ...stateWithoutRemovedFeature } = storedState;
+  // Drop removed features when loading older canvases so they are not carried
+  // forward by the generic state spread: the per-node Agent optimization flag
+  // and the list/grid layout toggle (the grid layout is the only one left).
+  const storedState = { ...(state || {}) } as ActionFissionState & { promptOptimizationEnabled?: unknown; layout?: unknown };
+  delete storedState.promptOptimizationEnabled;
+  delete storedState.layout;
   return {
     ...fallback,
-    ...stateWithoutRemovedFeature,
+    ...storedState,
     rows: state?.rows?.length
       ? state.rows.slice(0, MAX_ACTION_FISSION_ROWS).map(normalizeActionFissionRow)
       : fallback.rows,
-    layout: state?.layout === "list" ? "list" : "grid",
     aspectRatio: state?.aspectRatio || "3:4",
   };
 }

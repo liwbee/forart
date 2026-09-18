@@ -156,13 +156,16 @@ function normalizeActionFission(value) {
 }
 
 function normalizeBatchImageGenerator(value) {
-  if (!isRecord(value)) return { items: [], prompt: '', layout: 'grid' };
+  if (!isRecord(value)) return { items: [], prompt: '' };
   const items = Array.isArray(value.items) ? value.items.map((item, index) => ({
     ...(isRecord(item) ? item : {}),
     id: safeString(item?.id) || `batch_item_migrated_${index + 1}`,
     status: ['pending', 'queued', 'running', 'completed', 'failed'].includes(item?.status) ? item.status : 'pending',
   })) : [];
-  return { ...value, items, prompt: safeString(value.prompt), layout: value.layout === 'list' ? 'list' : 'grid', taskReferenceOrder: Math.max(0, Math.floor(Number(value.taskReferenceOrder || 0))) };
+  const next = { ...value };
+  // The list layout was removed; do not persist the stale toggle from older canvases.
+  removeKeys(next, ['layout']);
+  return { ...next, items, prompt: safeString(value.prompt), taskReferenceOrder: Math.max(0, Math.floor(Number(value.taskReferenceOrder || 0))) };
 }
 
 function currentNodeKind(node, data) {
@@ -306,10 +309,10 @@ function normalizeEdge(value, index) {
     targetHandle: typeof value.targetHandle === 'string' ? value.targetHandle : 'input',
     data: {
       ...data,
-      ...(['prompt', 'referenceImage', 'additionalReferenceImage', 'additionalReferencePrompt'].includes(data.inputKind)
+      ...(['prompt', 'referenceImage', 'additionalReferenceImage', 'additionalReferencePrompt', 'batchTargetImage'].includes(data.inputKind)
         ? { inputKind: data.inputKind }
         : {}),
-      ...(['referenceImage', 'additionalReferenceImage'].includes(data.inputKind) && Number(data.referenceOrder) > 0
+      ...(['referenceImage', 'additionalReferenceImage', 'batchTargetImage'].includes(data.inputKind) && Number(data.referenceOrder) > 0
         ? { referenceOrder: Number(data.referenceOrder) }
         : {}),
     },
