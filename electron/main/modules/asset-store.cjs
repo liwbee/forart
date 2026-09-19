@@ -447,12 +447,7 @@ function createAssetStore({ rootDir, net }) {
     // 杂色（PS「添加杂色 · 高斯分布」）是"逐通道加一个以 0 为中心的高斯随机数再钳位"，
     // 有正有负；libvips 的混合模式没有减法，所以这一档不走 composite，直接改原始像素。
     const output = plan.speckleSigma > 0
-      ? await writeWithSpeckle(pipeline, filePath, {
-        width: source.width,
-        height: source.height,
-        channels: source.hasAlpha ? 4 : 3,
-        sigma: plan.speckleSigma,
-      })
+      ? await writeWithSpeckle(pipeline, filePath, { sigma: plan.speckleSigma })
       : await pipeline.png().toFile(filePath);
     const thumb = await thumbnailStore.ensureCanvasAssetThumbnail({ filePath, mimeType: 'image/png' });
     return {
@@ -471,10 +466,16 @@ function createAssetStore({ rootDir, net }) {
    * 每个通道各取一个 N(0, σ) 的随机数加到像素上，再钳位到 0-255；alpha 通道不动。
    * 噪声由 libvips 生成（快），只有加法这一步在 JS 里做，且结果写回同一个缓冲区，
    * 避免为 5000 万像素的图再多分配一份。
+   *
+   * 通道数必须用 raw() 自己汇报的值：前面只要叠过噪点层（composite 的 overlay），
+   * libvips 就会给结果补一个 alpha 通道，此时无透明底的图也是 4 通道。按元数据里的
+   * hasAlpha 去猜，会把 4 通道的缓冲区当 3 通道读，逐行错位、通道轮转，成片就是
+   * "褪成灰白 + 重影"。尺寸同理，以 raw 的实际输出为准。
    */
-  async function writeWithSpeckle(pipeline, filePath, { width, height, channels, sigma }) {
+  async function writeWithSpeckle(pipeline, filePath, { sigma }) {
     const { default: sharp } = await import('sharp');
-    const pixels = await pipeline.raw().toBuffer();
+    const { data: pixels, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
+    const { width, height, channels } = info;
     const noise = await sharp({
       create: { width, height, channels: 3, noise: { type: 'gaussian', mean: 128, sigma } },
     }).raw().toBuffer();
