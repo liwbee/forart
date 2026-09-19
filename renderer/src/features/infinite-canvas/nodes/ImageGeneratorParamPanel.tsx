@@ -112,6 +112,10 @@ interface ImageGeneratorParamPanelProps {
   showImageCount?: boolean;
   runDisabled?: boolean;
   beforeRunControl?: ReactNode;
+  /** 渲染在参数行最前面的内容（动作裂变 Agent 模式的行标识）。 */
+  leadingControl?: ReactNode;
+  /** 渲染在参数行上方的内容（动作裂变 Agent 模式的控制行）。 */
+  aboveParameterRow?: ReactNode;
   taskRunningOverride?: boolean;
   onRun?: () => void | Promise<void>;
   onStop?: () => void | Promise<void>;
@@ -144,6 +148,8 @@ export function ImageGeneratorParamPanel({
   showImageCount = true,
   runDisabled = false,
   beforeRunControl,
+  leadingControl,
+  aboveParameterRow,
   taskRunningOverride,
   onRun,
   onStop,
@@ -1157,7 +1163,9 @@ export function ImageGeneratorParamPanel({
                   ) : null}
                 </FieldGroup>
 
+                {aboveParameterRow}
                 <div ref={setParameterRowElement} className="flex w-max min-w-full max-w-[calc(100vw-4rem-2px)] items-end gap-2">
+                  {leadingControl}
                   <div className="grid min-w-0 gap-1">
                     <span className="pl-2 text-[9px] font-medium leading-none text-muted-foreground">{t("infiniteCanvas:platform")}</span>
                     <AppSelect

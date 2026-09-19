@@ -54,7 +54,8 @@ function createCanvasAgentRuntime({ canvasAgent, canvasStore } = {}) {
 
   const operationFor = (request) => String(request.operation || '') || (
     request.task === 'smart-reverse' ? 'smart_reverse' :
-      'image_prompt_optimize'
+      request.task === 'generate-action-fission-prompts' ? 'action_fission_prompt_generate' :
+        'image_prompt_optimize'
   );
 
   const reverseResultText = (result) => {

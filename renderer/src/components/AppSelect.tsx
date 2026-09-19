@@ -2,7 +2,10 @@ import { useState } from "react";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
@@ -24,6 +27,8 @@ interface AppSelectProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   menuPlacement?: "top" | "bottom";
+  /** 下拉底部的说明文字（不可选择）。 */
+  menuHint?: string;
   size?: "default" | "sm";
   variant?: "default" | "ghost";
   triggerTextSize?: "default" | "sm";
@@ -50,6 +55,7 @@ export function AppSelect({
   open,
   onOpenChange,
   menuPlacement = "top",
+  menuHint,
   size = "default",
   variant = "default",
   triggerTextSize = "default",
@@ -113,6 +119,14 @@ export function AppSelect({
               </SelectItem>
             );
           })}
+          {menuHint ? (
+            <SelectGroup>
+              <SelectSeparator />
+              <SelectLabel className="app-select-hint font-normal text-muted-foreground">
+                {menuHint}
+              </SelectLabel>
+            </SelectGroup>
+          ) : null}
         </SelectContent>
       </Select>
     </div>

@@ -13,18 +13,22 @@ Forart 第一阶段不做画布级聊天侧栏，也不做可以自由规划和�
 
 - 图像反推模型。
 - Image Generator 提示词优化模型。
-- Action Fission 提示词优化模型。
+- Action Fission 提示词生成模型（节点内选择，不走全局 Agent 设置）。
 
 这些配置独立于 Image Generator 实际使用的生图 Provider 和图像模型，后续在设置页增加独立的“Agent 设置”页面。
 
 已取消的能力：
 
-- 取消 Action Fission 自动选择动作。
+- 取消「从动作库自动挑选动作」；改为 Action Fission 的 Agent 模式由 LLM 直接生成提示词，
+  不再经过动作库（见 `docs/action-fission-agent-mode-plan.md`）。
 - 取消通用 LLM 节点。
 - 第一阶段取消画布级 Agent 侧栏。
 - 第一阶段取消通用工具循环、自动规划、自动布局和 MCP。
 
-Action Fission 的智能能力改为：用户先按现有流程选定动作，Forart 再根据动作 Prompt、主参考图、附加参考图和补充 Prompt，在生图前优化最终提示词，使动作能够与帽子、眼镜、服装设计、配饰和场景元素自然互动。
+Action Fission 的智能能力有两种模式：动作库模式下按原流程选定动作并生成；
+Agent 模式下不再选择动作，由节点内选择的 LLM 根据已连接参考图与整组创作要求，
+为每个卡片生成一条差异化提示词，用户确认后再启动生图。
+生图时仍按原有顺序拼接接入的提示词节点。
 
 原 `llm` 节点替换为“图像反推”节点。图像反推节点接收图片输入和用户要求，输出 Prompt，可继续连接到 Image Generator 或 Action Fission。
 

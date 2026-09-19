@@ -164,10 +164,18 @@ test.beforeEach(async ({ page }) => {
       value: {
         start: async (_executorKind: string, payload: { nodeId?: string }) => {
           document.documentElement.dataset.startedNodeId = String(payload.nodeId || "");
-          await new Promise((resolve) => window.setTimeout(resolve, 250));
+          await new Promise((resolve) => window.setTimeout(resolve, document.documentElement.dataset.delayGeneration === "true" ? 1800 : 250));
           return { id: "task-image-1" };
         },
-        get: async () => ({ id: "task-image-1", status: "completed", result: { images: [] } }),
+        // 批量节点（动作裂变）走 startMany；默认行为与单张生图保持一致。
+        startMany: async (_executorKind: string, payloads: Array<{ nodeId?: string }>) => {
+          document.documentElement.dataset.startedNodeId = String(payloads[0]?.nodeId || "");
+          await new Promise((resolve) => window.setTimeout(resolve, document.documentElement.dataset.delayGeneration === "true" ? 1800 : 250));
+          return payloads.map((_payload, index) => ({ id: `task-image-${index + 1}` }));
+        },
+        get: async (taskId: string) => (document.documentElement.dataset.holdGeneration === "true"
+          ? { id: String(taskId || "task-image-1"), status: "running", result: { images: [] } }
+          : { id: "task-image-1", status: "completed", result: { images: [] } }),
         stop: async () => ({ ok: true }),
         list: async () => ({ tasks: [] }),
         onChanged: () => () => undefined,
@@ -179,7 +187,7 @@ test.beforeEach(async ({ page }) => {
     Object.defineProperty(window, "forartCanvasAgent", {
       configurable: true,
       value: {
-        run: async (request: { runId?: string; task?: string; canvasId?: string; nodeId?: string; context?: { prompt?: string }; modelRoute?: { providerId?: string; model?: string }; reasoning?: string }) => {
+        run: async (request: { runId?: string; task?: string; canvasId?: string; nodeId?: string; context?: { prompt?: string; rows?: Array<{ rowId?: string }> }; modelRoute?: { providerId?: string; model?: string }; reasoning?: string }) => {
           const runtimeRun = {
             runId: String(request.runId || ""),
             task: String(request.task || ""),
@@ -211,6 +219,27 @@ test.beforeEach(async ({ page }) => {
               assetUses: [{ nodeId: "reference", use: "主体参考" }],
               outputs: [{ id: "output-1", sourceNodeIds: ["reference"], summary: "主体", detailedPrompt: "反推出的主体与服装 Prompt", compactPrompt: "主体 Prompt", negativePrompt: "", preserved: [], avoid: [], uncertainties: [] }],
               warnings: [],
+            };
+            publishAgentRun({ ...runtimeRun, stage: "completed", status: "completed", result });
+            activeAgentRuns.delete(runtimeRun.runId);
+            return result;
+          }
+          if (request.task === "generate-action-fission-prompts") {
+            document.documentElement.dataset.actionFissionPromptRoute = JSON.stringify(request.modelRoute || {});
+            document.documentElement.dataset.actionFissionPromptReasoning = String(request.reasoning || "");
+            await new Promise((resolve) => window.setTimeout(resolve, document.documentElement.dataset.delayOptimization === "true" ? 1800 : 350));
+            const requestedRows = Array.isArray(request.context?.rows) ? request.context.rows : [];
+            // 用于验证「模型漏返回某一行」时的行内状态提示。
+            const rows = document.documentElement.dataset.dropLastPromptRow === "true"
+              ? requestedRows.slice(0, -1)
+              : requestedRows;
+            const result = {
+              prompts: rows.map((row, index) => ({
+                rowId: String(row?.rowId || ""),
+                prompt: `构图：从头到脚的全身镜头\n动作：模特正面朝向镜头，单手插兜，第 ${index + 1} 张的腿部重心略向后`,
+                label: `单手插兜·全身侧面`,
+                warnings: [],
+              })),
             };
             publishAgentRun({ ...runtimeRun, stage: "completed", status: "completed", result });
             activeAgentRuns.delete(runtimeRun.runId);
@@ -1411,6 +1440,111 @@ test("exposes run, group download, and random action controls in the action fiss
 
   await randomize.click();
   await expect(page.locator('.react-flow__node[data-id="action-fission"] .rf-action-fission-row-summary small').first()).toHaveText("Action Two");
+});
+
+test("switches the action fission node to Agent mode with prompt controls", async ({ page }) => {
+  const node = page.locator('.react-flow__node[data-id="action-fission"]');
+  const toolbar = await selectNode(page, "action-fission");
+  await expect(toolbar.getByRole("button", { name: "Switch group actions" })).toBeVisible();
+
+  const firstCard = node.locator(".rf-action-fission-grid-card").first();
+  // offsetHeight 是布局尺寸，不受画布缩放影响，因此可以在不同缩放下比较。
+  const cardHeight = () => firstCard.evaluate((element) => (element as HTMLElement).offsetHeight);
+  // 动作库模式的卡片高度是基准，Agent 模式与生成骨架都必须一致。
+  const libraryCardHeight = await cardHeight();
+
+  // 模式切换需要确认：切换会清空动作选择与提示词配置。
+  const modeTabs = node.getByRole("tablist", { name: "Generation mode" });
+  await modeTabs.getByRole("tab", { name: "Agent", exact: true }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Confirm" }).click();
+
+  await expect(modeTabs.getByRole("tab", { name: "Agent", exact: true })).toHaveAttribute("aria-selected", "true");
+  expect(await cardHeight()).toBe(libraryCardHeight);
+  // 每个切换按钮是正方形。
+  const agentTabBox = await modeTabs.getByRole("tab", { name: "Agent", exact: true }).boundingBox();
+  expect(agentTabBox).not.toBeNull();
+  expect(Math.abs(agentTabBox!.width - agentTabBox!.height)).toBeLessThanOrEqual(0.5);
+  const measureTabs = async () => ({
+    indicator: await modeTabs.locator(".native-tabs__indicator").evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: Math.round(rect.left), width: Math.round(rect.width), height: Math.round(rect.height) };
+    }),
+    tab: await modeTabs.getByRole("tab", { name: "Agent", exact: true }).evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: Math.round(rect.left), width: Math.round(rect.width), height: Math.round(rect.height) };
+    }),
+  });
+  const expectIndicatorMatchesTab = async () => {
+    const { indicator, tab } = await measureTabs();
+    // 指示器是用局部坐标绘制的，画布缩放不应该让它跟着变大变小。
+    expect(Math.abs(indicator.width - tab.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(indicator.height - tab.height)).toBeLessThanOrEqual(1);
+    expect(Math.abs(indicator.left - tab.left)).toBeLessThanOrEqual(2);
+  };
+  await expectIndicatorMatchesTab();
+  // Agent 模式下隐藏「整组切换动作」。
+  await expect(toolbar.getByRole("button", { name: "Switch group actions" })).toHaveCount(0);
+  // 参数面板第一行：平台 / 模型 / 推理强度 + 生成提示词。
+  // 参数面板是 NodeToolbar 的 portal，不在节点 DOM 内。
+  const agentRow = page.locator(".rf-action-fission-agent-row");
+  await expect(agentRow.getByRole("button", { name: "Generate prompts" })).toBeEnabled();
+  // 两行最左侧各有一个图标，标出「第一步生成提示词 / 第二步生成图片」。
+  await expect(page.getByRole("img", { name: "Step 1: generate prompts" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Step 2: generate images" })).toBeVisible();
+  // 读图能力提示挂在模型下拉里，而不是单独占一行。
+  await agentRow.getByRole("combobox", { name: "Model", exact: true }).click();
+  await expect(page.getByText("Choose a model that accepts image input")).toBeVisible();
+  await page.keyboard.press("Escape");
+  // 提示词摘要显示在卡片图片下方，未生成时是占位文案。
+  await expect(node.locator(".rf-action-fission-row-summary").first()).toContainText("Prompt not generated yet");
+  // 左下角的摘要预览已移除。
+  await expect(node.locator(".rf-action-fission-agent-prompt")).toHaveCount(0);
+
+  // 生成提示词期间，卡片图片下方显示文本骨架；完成后写回摘要。
+  await page.locator("html").evaluate((element) => { element.dataset.delayOptimization = "true"; });
+  await page.getByRole("button", { name: "Zoom out" }).click();
+  await page.getByRole("button", { name: "Zoom out" }).click();
+  // 缩放后滑块尺寸依然跟随按钮，不会跟着画布一起缩小。
+  await expectIndicatorMatchesTab();
+  await agentRow.getByRole("button", { name: "Generate prompts" }).click();
+  await expect(page.locator(".rf-action-fission-row-summary--generating").first()).toBeVisible();
+  // 文本骨架与文本摘要高度一致，卡片不会在生成时跳一下。
+  expect(await cardHeight()).toBe(libraryCardHeight);
+  // 生成提示词期间：生图入口与提示词编辑入口都被禁止。
+  const generateButton = agentRow.locator('button[data-slot="button"]');
+  await expect(generateButton).toHaveAttribute("aria-label", "Stop");
+  await expect(toolbar.getByRole("button", { name: "Run" })).toBeDisabled();
+  await expect(node.locator(".rf-action-fission-grid-card").first().getByRole("button", { name: "Edit prompt" })).toBeDisabled();
+  await expect(page.locator(".rf-action-fission-row-summary--generating")).toHaveCount(0, { timeout: 15_000 });
+  expect(await cardHeight()).toBe(libraryCardHeight);
+  await expect(node.locator(".rf-action-fission-row-summary strong").first()).toHaveText("单手插兜·全身侧面");
+  // 每次都是独立的一次生成，按钮文案不变成「重新生成」。
+  await expect(generateButton).toHaveAttribute("aria-label", "Generate prompts");
+
+  // 反向规则：生图进行中不能生成提示词。
+  await expect(toolbar.getByRole("button", { name: "Run" })).toBeEnabled();
+  await page.locator("html").evaluate((element) => {
+    element.dataset.delayGeneration = "true";
+    // 让任务一直停在 running，便于断言「生图进行中」的互斥状态。
+    element.dataset.holdGeneration = "true";
+  });
+  await toolbar.getByRole("button", { name: "Run" }).click();
+  await expect(generateButton).toBeDisabled();
+  // 按钮禁用即可，不再额外显示互斥原因。
+  await expect(generateButton).toHaveAttribute("aria-label", "Generate prompts");
+  await page.locator("html").evaluate((element) => { element.dataset.holdGeneration = "false"; });
+  await expect(generateButton).toBeEnabled({ timeout: 15_000 });
+
+  // 模型漏返回某一行时，该行右下角显示黄色「未返回提示词」，不弹错误提示。
+  await page.locator("html").evaluate((element) => { element.dataset.dropLastPromptRow = "true"; });
+  await generateButton.click();
+  await expect(page.locator(".rf-action-fission-row-summary--generating")).toHaveCount(0, { timeout: 15_000 });
+  const missingRowStatus = node.locator(".rf-action-fission-grid-card").nth(1).locator(".rf-generation-status");
+  await expect(missingRowStatus).toContainText("No prompt returned");
+  await expect(missingRowStatus).toHaveAttribute("data-tone", "idle");
+  await expect(page.locator(".rf-action-fission-agent-alert")).toHaveCount(0);
 });
 
 test("swaps a result card index for an asset-node button that drops the node next to the card", async ({ page }) => {

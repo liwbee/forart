@@ -1,4 +1,7 @@
-export type CanvasAgentTask = "smart-reverse" | "optimize-image-generator-prompt";
+export type CanvasAgentTask = "smart-reverse" | "optimize-image-generator-prompt" | "generate-action-fission-prompts";
+
+/** 动作裂变的提示词生成任务名，供跨画布取消等场景复用。 */
+export const ACTION_FISSION_PROMPT_TASK: CanvasAgentTask = "generate-action-fission-prompts";
 
 export interface CanvasAgentRunState {
   runId: string;

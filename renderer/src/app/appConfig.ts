@@ -133,10 +133,10 @@ export interface ForartGenerationTasksApi {
 }
 
 export interface ForartCanvasAgentApi {
-  run: (request: { runId: string; task: "smart-reverse" | "optimize-image-generator-prompt"; canvasId?: string; nodeId?: string; context: unknown; language?: "zh-CN" | "en-US"; modelRoute?: { providerId: string; model: string }; reasoning?: ForartReasoningEffort }) => Promise<unknown>;
+  run: (request: { runId: string; task: "smart-reverse" | "optimize-image-generator-prompt" | "generate-action-fission-prompts"; canvasId?: string; nodeId?: string; context: unknown; language?: "zh-CN" | "en-US"; modelRoute?: { providerId: string; model: string }; reasoning?: ForartReasoningEffort }) => Promise<unknown>;
   cancel: (runId: string) => Promise<{ ok: true; canceled: boolean }>;
-  listActive: (canvasId?: string) => Promise<Array<{ runId: string; task: "smart-reverse" | "optimize-image-generator-prompt"; operation?: string; canvasId: string; nodeId: string; sourcePrompt?: string; stage: string; status: "running"; startedAt: number }>>;
-  onProgress: (callback: (progress: { runId: string; task: "smart-reverse" | "optimize-image-generator-prompt"; operation?: string; canvasId: string; nodeId: string; sourcePrompt?: string; stage: string; status: "running" | "completed" | "failed" | "canceled"; startedAt: number; result?: unknown; error?: string }) => void) => () => void;
+  listActive: (canvasId?: string) => Promise<Array<{ runId: string; task: "smart-reverse" | "optimize-image-generator-prompt" | "generate-action-fission-prompts"; operation?: string; canvasId: string; nodeId: string; sourcePrompt?: string; stage: string; status: "running"; startedAt: number }>>;
+  onProgress: (callback: (progress: { runId: string; task: "smart-reverse" | "optimize-image-generator-prompt" | "generate-action-fission-prompts"; operation?: string; canvasId: string; nodeId: string; sourcePrompt?: string; stage: string; status: "running" | "completed" | "failed" | "canceled"; startedAt: number; result?: unknown; error?: string }) => void) => () => void;
 }
 
 export type CanvasTaskCategory = "image" | "video";

@@ -7,9 +7,15 @@ const {
   imagePromptOptimizationSchema,
   removeTechnicalPromptParameters,
 } = require('./tasks/optimize-image-generator-prompt.cjs');
+const {
+  actionFissionPromptGenerationMessages,
+  actionFissionPromptGenerationSchema,
+  formatActionFissionPrompt,
+} = require('./tasks/generate-action-fission-prompts.cjs');
 const SUPPORTED_TASKS = Object.freeze({
   'smart-reverse': true,
   'optimize-image-generator-prompt': true,
+  'generate-action-fission-prompts': true,
 });
 const REASONING_LEVELS = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
@@ -152,12 +158,14 @@ function normalizeRequestLanguage(value) {
 
 function collectContextAssets(task, context) {
   if (task === 'smart-reverse') return Array.isArray(context?.assets) ? context.assets : [];
-  if (task === 'optimize-image-generator-prompt') return Array.isArray(context?.referenceImages) ? context.referenceImages : [];
+  if (task === 'optimize-image-generator-prompt' || task === 'generate-action-fission-prompts') {
+    return Array.isArray(context?.referenceImages) ? context.referenceImages : [];
+  }
   return [];
 }
 
 function reasoningForRequest(settings, task, requestedReasoning) {
-  const value = task === 'smart-reverse'
+  const value = task === 'smart-reverse' || task === 'generate-action-fission-prompts'
     ? requestedReasoning
     : settings?.thinkingMode === true ? settings.reasoningLevel : 'none';
   return REASONING_LEVELS.has(String(value)) ? String(value) : 'none';
@@ -209,6 +217,13 @@ function createCanvasAgentService({ net, assetStore, configStore }) {
         const imageParts = await resolveImageParts({ net, assetStore, sources: collectContextAssets(task, request.context), maxImages: 4 });
         messages = appendImageParts(messages, imageParts);
         schema = imagePromptOptimizationSchema;
+      } else if (task === 'generate-action-fission-prompts') {
+        messages = actionFissionPromptGenerationMessages(request.context, language);
+        progress('resolving-images');
+        // 动作裂变不限制参考图数量，Provider 或模型自身的限制会直接报错。
+        const imageParts = await resolveImageParts({ net, assetStore, sources: collectContextAssets(task, request.context) });
+        messages = appendImageParts(messages, imageParts);
+        schema = actionFissionPromptGenerationSchema;
       }
 
       if (controller.signal.aborted) throw new Error('Agent request canceled.');
@@ -232,6 +247,14 @@ function createCanvasAgentService({ net, assetStore, configStore }) {
         output.optimizedPrompt = formatOptimizedPromptLines(
           removeTechnicalPromptParameters(output.optimizedPrompt),
         );
+      }
+      if (task === 'generate-action-fission-prompts') {
+        // 先清掉技术参数，再按「参考图 / 构图 / 动作 / 风格」的固定段落断行，
+        // 保证卡片与生图看到的是同一份结构化提示词。
+        output.prompts = output.prompts.map((item) => ({
+          ...item,
+          prompt: formatActionFissionPrompt(removeTechnicalPromptParameters(item.prompt)),
+        }));
       }
       progress('completed');
       return output;

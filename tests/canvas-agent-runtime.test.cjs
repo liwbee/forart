@@ -43,6 +43,55 @@ test('Agent runtime does not overwrite a prompt edited while optimization is run
   assert.equal(data.text, '用户已修改');
 });
 
+test('action fission prompt generation keeps its own operation and never commits canvas data', async () => {
+  const nodes = new Map([['fission-a', { kind: 'actionFission', text: '整组创作要求' }]]);
+  let commits = 0;
+  const runtime = createCanvasAgentRuntime({
+    canvasAgent: {
+      run: async () => ({
+        prompts: [{ rowId: 'row-1', prompt: '构图：全身\n动作：单手插兜', label: '单手插兜·全身', warnings: [] }],
+      }),
+      cancel: async () => ({ ok: true, canceled: true }),
+    },
+    canvasStore: { updateGenerationNode() { commits += 1; } },
+  });
+
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const running = createCanvasAgentRuntime({
+    canvasAgent: {
+      run: async () => { await pending; return { prompts: [] }; },
+      cancel: async () => ({ ok: true, canceled: true }),
+    },
+    canvasStore: { updateGenerationNode() {} },
+  });
+  const runPromise = running.run({
+    runId: 'agent-fission-pending',
+    task: 'generate-action-fission-prompts',
+    canvasId: 'canvas-a',
+    nodeId: 'fission-a',
+    // 这个 context 不该被当成 image prompt optimize 的上下文。
+    context: { prompt: '整组创作要求', rows: [{ rowId: 'row-1' }] },
+  });
+  const active = running.listActive('canvas-a');
+  assert.equal(active.length, 1);
+  assert.equal(active[0].sourcePrompt, undefined);
+  release();
+  await runPromise;
+
+  const result = await runtime.run({
+    runId: 'agent-fission',
+    task: 'generate-action-fission-prompts',
+    canvasId: 'canvas-a',
+    nodeId: 'fission-a',
+    context: { rows: [{ rowId: 'row-1' }] },
+  });
+  // 提示词写回由渲染层负责，主进程不能走 image prompt optimize 的提交分支。
+  assert.equal(commits, 0);
+  assert.equal(nodes.get('fission-a').text, '整组创作要求');
+  assert.equal(result.prompts[0].label, '单手插兜·全身');
+});
+
 test('Agent reference prompt documents are created without a task repository', () => {
   const document = promptDocumentFromReferenceText('@图一 的帽子与 @图二 的眼镜', [{ edgeId: 'hat' }, { edgeId: 'glasses' }]);
   assert.deepEqual(document.root.children[0].children.filter((node) => node.type === 'image-reference').map((node) => node.edgeId), ['hat', 'glasses']);

@@ -5,10 +5,15 @@ import {
   type ActionFissionRow,
 } from "../action-fission/actionFissionTypes";
 import {
+  actionFissionImageGenerationBlocked,
   actionFissionPrompt,
+  actionFissionRowLabel,
   actionFissionReferenceImages,
   getActionFissionRunReadiness,
 } from "../action-fission/actionFissionRules";
+import { ACTION_FISSION_AGENT_TASK } from "../action-fission/actionFissionTypes";
+import { actionFissionMode } from "../action-fission/actionFissionState";
+import { useCanvasAgent } from "../../canvas-agent";
 import type { NativeCanvasEdge, NativeCanvasNode } from "../nativeCanvas";
 import {
   collectAdditionalPromptInputs,
@@ -81,6 +86,10 @@ export function useNativeActionFissionGeneration({
   const taskRuntimeRef = useRef<BatchTaskRuntime | null>(null);
   if (!taskRuntimeRef.current) taskRuntimeRef.current = createBatchTaskRuntime();
   const taskRuntime = taskRuntimeRef.current;
+  const agent = useCanvasAgent();
+  // 用 ref 保存最新的 Agent 运行状态，避免回调依赖每次都变化。
+  const agentRunsRef = useRef(agent.runs);
+  agentRunsRef.current = agent.runs;
   const nodeQueueControllersRef = useRef(new Map<string, AbortController>());
   const activeNodeRunsRef = useRef(new Set<string>());
   const thumbnailAttemptsRef = useRef(new Set<string>());
@@ -190,11 +199,12 @@ export function useNativeActionFissionGeneration({
     additionalPrompts: string[],
     signal: AbortSignal,
   ) => {
+    const mode = actionFissionMode(node.data.actionFission);
     const inputs = rows.map((row) => ({
       target: { type: "actionFissionRow", nodeId: node.id, rowId: row.id },
-      prompt: actionFissionPrompt(row, connectedPrompt, additionalPrompts),
+      prompt: actionFissionPrompt(row, connectedPrompt, additionalPrompts, mode),
       referenceImages: actionFissionReferenceImages(row, primaryReferences, additionalReferences),
-      nodeTitle: `${t("infiniteCanvas:actionFission")} - ${row.selectedActionName || row.id}`,
+      nodeTitle: `${t("infiniteCanvas:actionFission")} - ${actionFissionRowLabel(row, mode)}`,
     }));
     await submitBatchTasks({
       items: rows,
@@ -227,16 +237,29 @@ export function useNativeActionFissionGeneration({
     const node = nodes.find((item) => item.id === nodeId && item.data.kind === "actionFission");
     const state = node?.data.actionFission;
     if (!node || !state) return;
+    const mode = actionFissionMode(state);
     const references = collectImageGeneratorReferences(nodeId, nodes, edges, t("infiniteCanvas:referenceImage"));
     const additionalReferences = collectAdditionalImageReferences(nodeId, nodes, edges, t("infiniteCanvas:additionalReference"));
     const additionalPrompts = collectAdditionalPromptInputs(nodeId, nodes, edges, t("infiniteCanvas:additionalReference"));
     const targetRows = rowId ? state.rows.filter((row) => row.id === rowId) : state.rows;
     const runtimeKeys = targetRows.map((row) => actionFissionLaunchKey(canvasId, nodeId, row.id));
-    const readiness = getActionFissionRunReadiness(targetRows, references.length);
+    // 硬性规则：生成提示词进行中时不允许启动生图（整组、单行、查看器都走这里）。
+    const promptGenerationActive = Object.values(agentRunsRef.current).some((run) => (
+      run.nodeId === nodeId
+      && run.task === ACTION_FISSION_AGENT_TASK
+      && run.status === "running"
+    ));
+    if (actionFissionImageGenerationBlocked({ imageGenerationActive: false, promptGenerationActive })) {
+      runtimeKeys.forEach((key) => setGenerationRuntimeError(key, t("infiniteCanvas:actionFissionBlockedByPromptGeneration")));
+      return;
+    }
+    const readiness = getActionFissionRunReadiness(targetRows, references.length, mode);
     if (!readiness.canRun) {
       const message = readiness.missingReference
         ? t("infiniteCanvas:actionFissionConnectReferenceFirst")
-        : t("infiniteCanvas:actionFissionSelectActionFirst");
+        : mode === "agent"
+          ? t("infiniteCanvas:actionFissionGeneratePromptFirst")
+          : t("infiniteCanvas:actionFissionSelectActionFirst");
       runtimeKeys.forEach((key) => setGenerationRuntimeError(key, message));
       return;
     }

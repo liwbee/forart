@@ -23,20 +23,31 @@ function groupQueryKey(group: ActionFissionCategoryGroup) {
   return JSON.stringify(actionLibraryKeys.actions(group.actionProjectId, normalizedTagFilter(group)));
 }
 
-export function useActionFissionLibraryData(state: ActionFissionState) {
+interface UseActionFissionLibraryDataOptions {
+  /** Agent 模式不查询动作库，避免动作库故障影响 Agent 模式。 */
+  enabled?: boolean;
+}
+
+export function useActionFissionLibraryData(
+  state: ActionFissionState,
+  options: UseActionFissionLibraryDataOptions = {},
+) {
+  const enabled = options.enabled !== false;
   const projectsQuery = useQuery({
     queryKey: actionLibraryKeys.projects,
     queryFn: listActionProjects,
+    enabled,
   });
   const groups = useMemo(
-    () => state.rows.flatMap((row) => row.categoryGroups || []),
-    [state.rows],
+    () => enabled ? state.rows.flatMap((row) => (row.categoryGroups || []).filter((group) => Boolean(group.actionProjectId))) : [],
+    [enabled, state.rows],
   );
   const projectIds = useMemo(
     () => Array.from(new Set(groups.map((group) => group.actionProjectId).filter(Boolean))),
     [groups],
   );
   const querySpecs = useMemo(() => {
+    if (!enabled) return [];
     const unique = new Map<string, GroupQuerySpec>();
     groups.forEach((group) => {
       if (!group.actionProjectId) return;
@@ -50,15 +61,15 @@ export function useActionFissionLibraryData(state: ActionFissionState) {
       }
     });
     return [...unique.values()];
-  }, [groups]);
+  }, [enabled, groups]);
   const tagsQueries = useQueries({
-    queries: projectIds.map((projectId) => ({
+    queries: (enabled ? projectIds : []).map((projectId) => ({
       queryKey: actionLibraryKeys.tags(projectId),
       queryFn: () => listActionTags(projectId),
     })),
   });
   const actionsQueries = useQueries({
-    queries: querySpecs.map((spec) => ({
+    queries: (enabled ? querySpecs : []).map((spec) => ({
       queryKey: actionLibraryKeys.actions(spec.projectId, spec.tagFilter),
       queryFn: () => listActions({ projectId: spec.projectId, tagFilter: spec.tagFilter }),
     })),
@@ -81,7 +92,7 @@ export function useActionFissionLibraryData(state: ActionFissionState) {
   }
 
   return {
-    projects: projectsQuery.data?.projects || [],
+    projects: enabled ? projectsQuery.data?.projects || [] : [],
     rowData: state.rows.map((row) => {
       const categoryGroups = (row.categoryGroups || []).map((group) => {
         const key = groupQueryKey(group);
@@ -103,9 +114,9 @@ export function useActionFissionLibraryData(state: ActionFissionState) {
         isLoading: categoryGroups.some((group) => group.isLoading),
       };
     }),
-    isLoading: projectsQuery.isLoading
+    isLoading: enabled && (projectsQuery.isLoading
       || tagsQueries.some((query) => query.isLoading)
-      || actionsQueries.some((query) => query.isLoading),
+      || actionsQueries.some((query) => query.isLoading)),
     failure,
     retry,
   };

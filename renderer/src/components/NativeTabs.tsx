@@ -8,6 +8,9 @@ export interface NativeTabItem<TValue extends string> {
   label: ReactNode;
   icon?: LucideIcon;
   meta?: ReactNode;
+  /** 只显示图标时用它给按钮一个可访问名称。 */
+  ariaLabel?: string;
+  disabled?: boolean;
 }
 
 interface NativeTabsProps<TValue extends string> {
@@ -54,11 +57,17 @@ export function NativeTabs<TValue extends string>({
     function updateIndicator() {
       const rootRect = tabsRoot.getBoundingClientRect();
       const buttonRect = selectedButton.getBoundingClientRect();
+      // getBoundingClientRect 返回的是屏幕坐标：当这个组件被放在画布这类
+      // 带 transform 缩放的容器里时，尺寸已经被放大/缩小过一次。指示器是
+      // 用组件自身的局部坐标绘制的，因此必须用「屏幕宽度 / 布局宽度」的
+      // 比值还原回去，否则滑块会跟着画布缩放一起变大变小。
+      const scale = tabsRoot.offsetWidth > 0 ? rootRect.width / tabsRoot.offsetWidth : 1;
+      const localScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
       setIndicatorStyle({
-        x: buttonRect.left - rootRect.left,
-        y: buttonRect.top - rootRect.top,
-        width: buttonRect.width,
-        height: buttonRect.height,
+        x: (buttonRect.left - rootRect.left) / localScale,
+        y: (buttonRect.top - rootRect.top) / localScale,
+        width: buttonRect.width / localScale,
+        height: buttonRect.height / localScale,
         ready: true,
       });
     }
@@ -103,6 +112,8 @@ export function NativeTabs<TValue extends string>({
             variant="ghost"
             role="tab"
             aria-selected={active}
+            aria-label={item.ariaLabel}
+            disabled={item.disabled}
             tabIndex={active ? 0 : -1}
             className={active ? "active" : ""}
             onClick={() => onChange(item.value)}

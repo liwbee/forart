@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import type { CanvasAgentApi, CanvasAgentRunState, CanvasAgentTask } from "./canvasAgentTypes";
+import { ACTION_FISSION_PROMPT_TASK, type CanvasAgentApi, type CanvasAgentRunState, type CanvasAgentTask } from "./canvasAgentTypes";
 
 const CanvasAgentContext = createContext<CanvasAgentApi | null>(null);
 
@@ -23,6 +23,7 @@ export function CanvasAgentProvider({ children, canvasId = "" }: PropsWithChildr
 
   const taskLabel = useCallback((task: CanvasAgentTask) => {
     if (task === "smart-reverse") return t("infiniteCanvas:smartReverse");
+    if (task === "generate-action-fission-prompts") return t("infiniteCanvas:actionFissionAgentPrompt");
     return t("infiniteCanvas:promptOptimization");
   }, [t]);
 
@@ -73,6 +74,20 @@ export function CanvasAgentProvider({ children, canvasId = "" }: PropsWithChildr
       disconnect?.();
     };
   }, [notifyTerminal]);
+
+  // 画布切换或卸载时，直接取消动作裂变的提示词生成（静默，不提示）。
+  // 只处理这个任务：智能反推等任务需要在切换画布后继续保持运行。
+  useEffect(() => () => {
+    Object.values(allRunsRef.current)
+      .filter((run) => (
+        run.canvasId === canvasId
+        && run.status === "running"
+        && run.task === ACTION_FISSION_PROMPT_TASK
+      ))
+      .forEach((run) => {
+        void window.forartCanvasAgent?.cancel(run.runId);
+      });
+  }, [canvasId]);
 
   const run = useCallback(async ({ task, nodeId, context, modelRoute, reasoning, onRunId }: { task: CanvasAgentTask; nodeId: string; context: unknown; modelRoute?: { providerId: string; model: string }; reasoning?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"; onRunId?: (runId: string) => void }) => {
     const runId = createRunId();
